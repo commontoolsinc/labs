@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  BuiltInLLMMessage,
   Cell,
   cell,
   Default,
@@ -16,91 +15,75 @@ import {
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
 type LLMTestResult = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
+  question: string;
+  response?: string;
 };
 
-const sendMessage = handler<
+const askQuestion = handler<
   { detail: { message: string } },
-  { messages: Cell<Array<BuiltInLLMMessage>> }
->((event, { messages }) => {
-  // reset the conversation every time
-  messages.set([{ role: "user", content: event.detail.message }]);
-});
-
-const clearMessages = handler<
-  never,
-  {
-    messages: Cell<Array<BuiltInLLMMessage>>;
-    llmResponse: {
-      result: Cell<string | undefined>;
-      partial: Cell<string | undefined>;
-    };
+  { question: Cell<string> }
+>((event, { question }) => {
+  const userQuestion = event.detail?.message?.trim();
+  if (userQuestion) {
+    question.set(userQuestion);
   }
->((_event, { messages, llmResponse }) => {
-  messages.set([]);
-  llmResponse.result.set(undefined);
-  llmResponse.partial.set(undefined);
 });
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "LLM Test",
-  ({ title, messages }) => {
-    const llmResponse = llm({
-      system:
-        "You are a helpful assistant. Answer questions clearly and concisely.",
-      messages,
-    });
+export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
+  // It is possible to make inline cells like this, but always consider whether it should just be part of the argument cell.
+  // These cells are effectively 'hidden state' from other recipes
+  const question = cell<string>("");
 
-    return {
-      [NAME]: title,
-      [UI]: (
+  const llmResponse = llm({
+    system:
+      "You are a helpful assistant. Answer questions clearly and concisely.",
+    messages: derive(question, (q) => q ? [{ role: "user", content: q }] : []),
+  });
+
+  return {
+    [NAME]: title,
+    [UI]: (
+      <div>
+        <h2>{title}</h2>
+
         <div>
-          <h2>{title}</h2>
-
-          <ct-vscroll showScrollbar height="320px" fadeEdges snapToBottom>
-            {messages.map((msg) => (
-              <ct-chat-message role={msg.role} content={msg.content} />
-            ))}
-
-            {derive(llmResponse.pending, (pending) =>
-              pending
-                ? (
-                  <ct-chat-message
-                    role="assistant"
-                    content={derive(llmResponse.partial, (p) => p || "...")}
-                  />
-                )
-                : null)}
-          </ct-vscroll>
-
-          <div>
-            <ct-message-input
-              name="Ask"
-              placeholder="Ask the LLM a question..."
-              appearance="rounded"
-              disabled={llmResponse.pending}
-              onct-send={sendMessage({ messages })}
-            />
-
-            <ct-button
-              onClick={clearMessages({
-                messages,
-                llmResponse: {
-                  result: llmResponse.result,
-                  partial: llmResponse.partial,
-                },
-              })}
-            >
-              Clear Chat
-            </ct-button>
-          </div>
+          <ct-message-input
+            name="Ask"
+            placeholder="Ask the LLM a question..."
+            appearance="rounded"
+            onct-send={askQuestion({ question })}
+          />
         </div>
-      ),
-      messages,
-    };
-  },
-);
+
+        {derive(question, (q) =>
+          q
+            ? (
+              <div>
+                <h3>Your Question:</h3>
+                <blockquote>
+                  {q}
+                </blockquote>
+              </div>
+            )
+            : null)}
+
+        {derive(llmResponse.result, (r) =>
+          r
+            ? (
+              <div>
+                <h3>LLM Response:</h3>
+                <pre>
+                {r}
+                </pre>
+              </div>
+            )
+            : null)}
+      </div>
+    ),
+    question,
+    response: llmResponse.result,
+  };
+});
