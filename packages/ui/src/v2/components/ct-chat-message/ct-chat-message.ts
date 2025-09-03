@@ -314,32 +314,32 @@ export class CTChatMessage extends BaseElement {
     return html`
       <div class="tool-attachments">
         ${toolCalls.map(
-        (call) =>
-          html`
-            <div class="tool-item tool-call">
-              <div class="tool-header">
-                <span class="tool-icon">🔧</span>
-                <span>Tool Call: ${call.name}</span>
+          (call) =>
+            html`
+              <div class="tool-item tool-call">
+                <div class="tool-header">
+                  <span class="tool-icon">🔧</span>
+                  <span>Tool Call: ${call.name}</span>
+                </div>
+                <pre class="tool-content">${JSON.stringify(
+                  call.arguments,
+                  null,
+                  2,
+                )}</pre>
               </div>
-              <pre class="tool-content">${JSON.stringify(
-              call.arguments,
-              null,
-              2,
-            )}</pre>
-            </div>
-          `,
-      )} ${toolResults.map(
-        (result) =>
-          html`
-            <div class="tool-item tool-result">
-              <div class="tool-header">
-                <span class="tool-icon">✓</span>
-                <span>Tool Result</span>
+            `,
+        )} ${toolResults.map(
+          (result) =>
+            html`
+              <div class="tool-item tool-result">
+                <div class="tool-header">
+                  <span class="tool-icon">✓</span>
+                  <span>Tool Result</span>
+                </div>
+                <pre class="tool-content">${result.result}</pre>
               </div>
-              <pre class="tool-content">${result.result}</pre>
-            </div>
-          `,
-      )}
+            `,
+        )}
       </div>
     `;
   }

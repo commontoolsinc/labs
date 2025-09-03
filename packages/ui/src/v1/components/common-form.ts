@@ -72,15 +72,15 @@ export class ReferenceFieldElement extends LitElement {
         class="field-input ${this.error ? "has-error" : ""}"
         .value="${this.value}"
         @input="${(e: Event) => {
-        const value = (e.target as HTMLInputElement).value;
-        this.dispatch(value);
-      }}"
+          const value = (e.target as HTMLInputElement).value;
+          this.dispatch(value);
+        }}"
         @blur="${async (e: Event) => {
-        const error = await this.validateReference(
-          (e.target as HTMLInputElement).value,
-        );
-        this.dispatch(this.value, error);
-      }}"
+          const error = await this.validateReference(
+            (e.target as HTMLInputElement).value,
+          );
+          this.dispatch(this.value, error);
+        }}"
       />
       ${this.error
         ? html`
@@ -574,28 +574,28 @@ export class CommonFormElement extends LitElement {
             </label>
             <div class="list-controls">
               ${refs.map(
-            (ref: string, index: number) =>
-              html`
-                <div class="list-item">
-                  <reference-field
-                    .key="${key}"
-                    .value="${ref}"
-                    .error="${this.errors[`${key}.${index}`]}"
-                    @reference-changed="${(e: CustomEvent) =>
-                  this.handleReferenceChange(key, index, e)}"
-                  ></reference-field>
-                  <button
-                    type="button"
-                    class="icon-button"
-                    @click="${() => this.removeArrayItem(key, index)}"
-                  >
-                    ❌
-                  </button>
-                </div>
-              `,
-          )}
+                (ref: string, index: number) =>
+                  html`
+                    <div class="list-item">
+                      <reference-field
+                        .key="${key}"
+                        .value="${ref}"
+                        .error="${this.errors[`${key}.${index}`]}"
+                        @reference-changed="${(e: CustomEvent) =>
+                          this.handleReferenceChange(key, index, e)}"
+                      ></reference-field>
+                      <button
+                        type="button"
+                        class="icon-button"
+                        @click="${() => this.removeArrayItem(key, index)}"
+                      >
+                        ❌
+                      </button>
+                    </div>
+                  `,
+              )}
               <button type="button" class="icon-button" @click="${() =>
-            this.addArrayItem(key)}">
+                this.addArrayItem(key)}">
                 ➕
               </button>
             </div>
@@ -614,7 +614,7 @@ export class CommonFormElement extends LitElement {
               .value="${ref}"
               .error="${this.errors[key]}"
               @reference-changed="${(e: CustomEvent) =>
-            this.handleReferenceChange(key, null, e)}"
+                this.handleReferenceChange(key, null, e)}"
             ></reference-field>
           </div>
         `;
@@ -642,50 +642,52 @@ export class CommonFormElement extends LitElement {
       input = html`
         <div class="list-controls">
           ${items.map(
-          (item: any, index: number) =>
-            html`
-              <div class="list-item">
-                ${isPrimitive
-                ? html`
-                  <input
-                    class="field-input"
-                    .value="${item}"
-                    type="${innerType._def.typeName === "ZodNumber"
-                    ? "number"
-                    : "text"}"
-                    @input="${(e: Event) =>
-                    this.handleArrayUpdate(
-                      key,
-                      index,
-                      new CustomEvent("value-changed", {
-                        detail: { value: (e.target as HTMLInputElement).value },
-                      }),
-                    )}"
-                  />
-                `
-                : html`
-                  <common-form
-                    .schema="${innerType}"
-                    .value="${item}"
-                    field-path="${this.fieldPath
-                    ? `${this.fieldPath}.${key}.${index}`
-                    : `${key}.${index}`}"
-                    @value-changed="${(e: CustomEvent) =>
-                    this.handleArrayUpdate(key, index, e)}"
-                  ></common-form>
-                `}
-                <button
-                  type="button"
-                  class="icon-button"
-                  @click="${() => this.removeArrayItem(key, index)}"
-                >
-                  ❌
-                </button>
-              </div>
-            `,
-        )}
+            (item: any, index: number) =>
+              html`
+                <div class="list-item">
+                  ${isPrimitive
+                    ? html`
+                      <input
+                        class="field-input"
+                        .value="${item}"
+                        type="${innerType._def.typeName === "ZodNumber"
+                          ? "number"
+                          : "text"}"
+                        @input="${(e: Event) =>
+                          this.handleArrayUpdate(
+                            key,
+                            index,
+                            new CustomEvent("value-changed", {
+                              detail: {
+                                value: (e.target as HTMLInputElement).value,
+                              },
+                            }),
+                          )}"
+                      />
+                    `
+                    : html`
+                      <common-form
+                        .schema="${innerType}"
+                        .value="${item}"
+                        field-path="${this.fieldPath
+                          ? `${this.fieldPath}.${key}.${index}`
+                          : `${key}.${index}`}"
+                        @value-changed="${(e: CustomEvent) =>
+                          this.handleArrayUpdate(key, index, e)}"
+                      ></common-form>
+                    `}
+                  <button
+                    type="button"
+                    class="icon-button"
+                    @click="${() => this.removeArrayItem(key, index)}"
+                  >
+                    ❌
+                  </button>
+                </div>
+              `,
+          )}
           <button type="button" class="icon-button" @click="${() =>
-          this.addArrayItem(key)}">
+            this.addArrayItem(key)}">
             ➕
           </button>
         </div>
@@ -716,20 +718,20 @@ export class CommonFormElement extends LitElement {
         input = html`
           <div class="radio-group">
             ${values.map(
-            (v: string) =>
-              html`
-                <label>
-                  <input
-                    type="radio"
-                    name="${key}"
-                    value="${v}"
-                    .checked="${value === v}"
-                    @change="${(e: Event) => this.handleInput(key, e)}"
-                  />
-                  ${v}
-                </label>
-              `,
-          )}
+              (v: string) =>
+                html`
+                  <label>
+                    <input
+                      type="radio"
+                      name="${key}"
+                      value="${v}"
+                      .checked="${value === v}"
+                      @change="${(e: Event) => this.handleInput(key, e)}"
+                    />
+                    ${v}
+                  </label>
+                `,
+            )}
           </div>
         `;
       } else {
@@ -739,11 +741,11 @@ export class CommonFormElement extends LitElement {
             @change="${(e: Event) => this.handleInput(key, e)}"
           >
             ${values.map(
-            (v: string) =>
-              html`
-                <option value="${v}" ?selected="${value === v}">${v}</option>
-              `,
-          )}
+              (v: string) =>
+                html`
+                  <option value="${v}" ?selected="${value === v}">${v}</option>
+                `,
+            )}
           </select>
         `;
       }
@@ -772,10 +774,10 @@ export class CommonFormElement extends LitElement {
           ${key.replace(/([A-Z])/g, " $1").trim()}
         </label>
         ${input} ${error
-        ? html`
-          <div class="field-error">${error}</div>
-        `
-        : null}
+          ? html`
+            <div class="field-error">${error}</div>
+          `
+          : null}
       </div>
     `;
   }
@@ -790,34 +792,36 @@ export class CommonFormElement extends LitElement {
     return html`
       <form @submit="${this.handleSubmit}">
         ${Object.entries(this.schema.shape).map(([key, fieldSchema]) =>
-        this.renderField(key, fieldSchema)
-      )} ${this.fieldPath === ""
-        ? html`
-          <div class="actions">
-            <button type="submit">Submit</button>
-            <button type="button" class="icon-button" @click="${() =>
-            this.generateSampleData()}">
-              🎲
-            </button>
-            <input
-              type="file"
-              id="file-input"
-              accept=".json"
-              class="hidden-input"
-              @change="${this.handleFileImport}"
-            />
-            <button
-              type="button"
-              class="icon-button"
-              @click="${() =>
-            (this.shadowRoot?.querySelector("#file-input") as HTMLInputElement)
-              ?.click()}"
-            >
-              📄
-            </button>
-          </div>
-        `
-        : null}
+          this.renderField(key, fieldSchema)
+        )} ${this.fieldPath === ""
+          ? html`
+            <div class="actions">
+              <button type="submit">Submit</button>
+              <button type="button" class="icon-button" @click="${() =>
+                this.generateSampleData()}">
+                🎲
+              </button>
+              <input
+                type="file"
+                id="file-input"
+                accept=".json"
+                class="hidden-input"
+                @change="${this.handleFileImport}"
+              />
+              <button
+                type="button"
+                class="icon-button"
+                @click="${() =>
+                  (this.shadowRoot?.querySelector(
+                    "#file-input",
+                  ) as HTMLInputElement)
+                    ?.click()}"
+              >
+                📄
+              </button>
+            </div>
+          `
+          : null}
       </form>
     `;
   }

@@ -48,7 +48,7 @@ export class XBodyView extends BaseView {
       <x-space-view
         .rt="${this.rt}"
         .showShellCharmListView="${this
-        .showShellCharmListView}"
+          .showShellCharmListView}"
       ></x-space-view>
     `;
     const view = this.activeCharm ? charmView : spaceView;
