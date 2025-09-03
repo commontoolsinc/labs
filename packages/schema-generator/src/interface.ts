@@ -25,10 +25,6 @@ export interface FormatterContext {
   seenTypes: Set<ts.Type>;
   /** TypeScript type checker */
   typeChecker: ts.TypeChecker;
-  /** Current recursion depth */
-  depth: number;
-  /** Maximum allowed recursion depth */
-  maxDepth: number;
   /** Definitions for cyclic types */
   definitions: Record<string, SchemaDefinition>;
   /** Types currently being processed (for cycle detection) */
