@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "default": "untitled"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "items",
+    "title"
+  ]
+}
+

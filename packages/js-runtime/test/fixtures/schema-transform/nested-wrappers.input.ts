@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, toSchema } from "commontools";
+import { Cell, Stream, Default, toSchema, recipe } from "commontools";
 
 // Test nested wrapper types
 
@@ -59,3 +59,10 @@ export {
   cellOfArraySchema,
   complexNestingSchema
 };
+
+// Add a recipe export for ct dev testing
+export default recipe("Nested Wrappers Test", () => {
+  return {
+    schema: defaultCellSchema,
+  };
+});

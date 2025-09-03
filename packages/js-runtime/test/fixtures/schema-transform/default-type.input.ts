@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { toSchema, Cell, Default } from "commontools";
+import { toSchema, Cell, Default, recipe } from "commontools";
 
 // Test basic Default type transformation
 interface UserSettings {
@@ -61,3 +61,10 @@ interface OptionalWithDefaults {
 }
 
 const optionalDefaultsSchema = toSchema<OptionalWithDefaults>();
+
+// Add a recipe export for ct dev testing
+export default recipe("Default Type Test", () => {
+  return {
+    schema: settingsSchema,
+  };
+});

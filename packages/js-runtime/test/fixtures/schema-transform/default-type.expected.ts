@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, JSONSchema } from "commontools";
+import { Cell, Default, JSONSchema, recipe } from "commontools";
 // Test basic Default type transformation
 interface UserSettings {
     theme: Default<string, "dark">;
@@ -24,6 +24,12 @@ const settingsSchema = {
     },
     required: ["theme", "fontSize", "notifications"]
 } as const satisfies JSONSchema;
+// Add a recipe export for ct dev testing
+export default recipe("Default Type Test", () => {
+    return {
+        schema: settingsSchema,
+    };
+});
 // Test nested Default types
 interface AppConfig {
     user: {
