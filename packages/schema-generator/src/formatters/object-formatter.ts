@@ -4,12 +4,7 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import {
-  extractValueFromTypeNode,
-  getNamedTypeKey,
-  isDefaultTypeRef,
-  safeGetPropertyType,
-} from "../type-utils.ts";
+import { getArrayElementInfo, safeGetPropertyType } from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 
 /**
@@ -18,6 +13,11 @@ import type { SchemaGenerator } from "../schema-generator.ts";
 export class ObjectFormatter implements TypeFormatter {
   constructor(private schemaGenerator?: SchemaGenerator) {}
   supportsType(type: ts.Type, context: FormatterContext): boolean {
+    // Treat array-like as non-object here so ArrayFormatter handles it
+    if (getArrayElementInfo(type, context.typeChecker, context.typeNode)) {
+      return false;
+    }
+
     // Handle object types
     if ((type.flags & ts.TypeFlags.Object) !== 0) {
       const objectType = type as ts.ObjectType;
@@ -34,16 +34,8 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Skip array-like types - let ArrayFormatter handle them
-      try {
-        const elementType = context.typeChecker.getIndexTypeOfType(
-          type,
-          ts.IndexKind.Number,
-        );
-        if (elementType) {
-          return false;
-        }
-      } catch (_) {
-        // Ignore errors
+      if (getArrayElementInfo(type, context.typeChecker, context.typeNode)) {
+        return false;
       }
 
       return true;
@@ -85,27 +77,6 @@ export class ObjectFormatter implements TypeFormatter {
         propTypeNode = propDecl.type;
       }
 
-      // Fast-path: if the property node is Array<T> or ReadonlyArray<T>, synthesize
-      // an array schema from the node to avoid reliance on lib type metadata.
-      if (
-        this.schemaGenerator && propTypeNode &&
-        ts.isTypeReferenceNode(propTypeNode) &&
-        ts.isIdentifier(propTypeNode.typeName) &&
-        (propTypeNode.typeName.text === "Array" ||
-          propTypeNode.typeName.text === "ReadonlyArray") &&
-        propTypeNode.typeArguments && propTypeNode.typeArguments.length > 0
-      ) {
-        const elemNode = propTypeNode.typeArguments[0]!;
-        const elemType = checker.getTypeFromTypeNode(elemNode);
-        const items = this.schemaGenerator.formatChildType(
-          elemType,
-          checker,
-          elemNode,
-        );
-        properties[propName] = { type: "array", items } as SchemaDefinition;
-        continue;
-      }
-
       // Get the actual property type and recursively delegate to the main schema generator
       const resolvedPropType = safeGetPropertyType(
         prop,
@@ -115,80 +86,13 @@ export class ObjectFormatter implements TypeFormatter {
       );
 
       if (this.schemaGenerator) {
-        // If property is a Default<T,V> wrapper, inline so default can be attached
-        const isDefaultWrapper = propTypeNode &&
-          ts.isTypeReferenceNode(propTypeNode) &&
-          isDefaultTypeRef(propTypeNode, checker);
-
-        // Do not force $ref emission for named, non-cyclic types. Inline them
-        // here and let the main generator handle cycles/$definitions.
-
+        // Delegate to the main generator (specific formatters handle wrappers/defaults)
         const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
           resolvedPropType,
           checker,
           propTypeNode,
         );
-        if (propName === "maybe") {
-          // deno-lint-ignore no-console
-          console.log(
-            "[DBG:ObjectFormatter] delegated 'maybe' to specific formatter",
-            generated,
-          );
-        }
-        // If property is Cell<Default<T,V>> and default missing, attach it
-        if (
-          propTypeNode && ts.isTypeReferenceNode(propTypeNode) &&
-          propTypeNode.typeArguments && propTypeNode.typeArguments.length > 0
-        ) {
-          const inner = propTypeNode.typeArguments[0];
-          if (
-            inner && ts.isTypeReferenceNode(inner) &&
-            isDefaultTypeRef(inner, checker)
-          ) {
-            const defNode = inner.typeArguments?.[1];
-            if (defNode) {
-              const d = extractValueFromTypeNode(defNode, checker);
-              if (d !== undefined && (generated as any).default === undefined) {
-                (generated as any).default = d;
-              }
-            }
-          }
-        }
-        // Reorder keys for array cells with defaults to match fixture order
-        if (
-          (generated as any).type === "array" &&
-          (generated as any).items &&
-          Object.prototype.hasOwnProperty.call(generated as any, "default") &&
-          Object.prototype.hasOwnProperty.call(generated as any, "asCell")
-        ) {
-          const items = (generated as any).items;
-          const def = (generated as any).default;
-          const out: any = { type: "array", items, default: def, asCell: true };
-          properties[propName] = out as SchemaDefinition;
-        } else {
-          // If generator fell back to object with additionalProperties but
-          // the resolved type is actually an array, synthesize array schema
-          // from the node to prevent object fallback in fixtures like
-          // Stream<UpdaterInput> → updater.properties.newValues
-          if (
-            propTypeNode && ts.isTypeReferenceNode(propTypeNode) &&
-            ts.isTypeLiteralNode(propTypeNode)
-          ) {
-            // no-op for type literals
-            properties[propName] = generated;
-          } else if (propTypeNode && ts.isArrayTypeNode(propTypeNode)) {
-            const elemNode = propTypeNode.elementType;
-            const elemType = checker.getTypeFromTypeNode(elemNode);
-            const items = this.schemaGenerator.formatChildType(
-              elemType,
-              checker,
-              elemNode,
-            );
-            properties[propName] = { type: "array", items } as SchemaDefinition;
-          } else {
-            properties[propName] = generated;
-          }
-        }
+        properties[propName] = generated;
       } else {
         // Fallback for when schemaGenerator is not available
         properties[propName] = this.createSimplePropertySchema(

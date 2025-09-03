@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "s": {
+      "asStream": true,
+      "type": "string"
+    }
+  },
+  "required": [
+    "s"
+  ],
+  "type": "object"
+}
+

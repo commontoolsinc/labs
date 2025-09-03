@@ -48,17 +48,28 @@ export function getNamedTypeKey(
 /**
  * Helper to extract array element type using multiple detection methods
  */
-export function getArrayElementType(
+export type ArrayElementInfo = {
+  elementType: ts.Type;
+  elementNode?: ts.TypeNode;
+};
+
+/**
+ * Helper to get array element type and, when available, the element node used in the AST.
+ * Prefer node-first detection for stability in reduced lib environments and aliases.
+ */
+export function getArrayElementInfo(
   type: ts.Type,
   checker: ts.TypeChecker,
   typeNode?: ts.TypeNode,
-): ts.Type | undefined {
-  // Node-first detection to handle aliases and missing lib types
+): ArrayElementInfo | undefined {
   if (typeNode) {
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
       try {
-        return checker.getTypeFromTypeNode(typeNode.elementType);
+        return {
+          elementType: checker.getTypeFromTypeNode(typeNode.elementType),
+          elementNode: typeNode.elementType,
+        };
       } catch (_) {
         // fall through
       }
@@ -74,8 +85,12 @@ export function getArrayElementType(
           (id === "Array" || id === "ReadonlyArray") &&
           typeNode.typeArguments && typeNode.typeArguments.length > 0
         ) {
+          const argNode = typeNode.typeArguments[0]!;
           try {
-            return checker.getTypeFromTypeNode(typeNode.typeArguments[0]!);
+            return {
+              elementType: checker.getTypeFromTypeNode(argNode),
+              elementNode: argNode,
+            };
           } catch (_) {
             // fall through
           }
@@ -87,7 +102,10 @@ export function getArrayElementType(
           const aliased = decl.type;
           if (ts.isArrayTypeNode(aliased)) {
             try {
-              return checker.getTypeFromTypeNode(aliased.elementType);
+              return {
+                elementType: checker.getTypeFromTypeNode(aliased.elementType),
+                elementNode: aliased.elementType,
+              };
             } catch (_) {
               // ignore
             }
@@ -99,8 +117,12 @@ export function getArrayElementType(
               (name.text === "Array" || name.text === "ReadonlyArray") &&
               aliased.typeArguments && aliased.typeArguments.length > 0
             ) {
+              const argNode = aliased.typeArguments[0]!;
               try {
-                return checker.getTypeFromTypeNode(aliased.typeArguments[0]!);
+                return {
+                  elementType: checker.getTypeFromTypeNode(argNode),
+                  elementNode: argNode,
+                };
               } catch (_) {
                 // ignore
               }
@@ -126,7 +148,7 @@ export function getArrayElementType(
       symbol && (symbol.name === "Array" || symbol.name === "ReadonlyArray")
     ) {
       const elementType = typeRef.typeArguments?.[0];
-      return elementType;
+      if (elementType) return { elementType };
     }
   }
 
@@ -134,20 +156,32 @@ export function getArrayElementType(
   if (type.symbol?.name === "Array") {
     const typeRef = type as ts.TypeReference;
     const elementType = typeRef.typeArguments?.[0];
-    return elementType;
+    if (elementType) return { elementType };
   }
 
   // Use numeric index type as fallback (for tuples/array-like objects)
   try {
     const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
     if (elementType) {
-      return elementType;
+      return { elementType };
     }
   } catch (_error) {
     // Treat as non-array if checker throws during index type resolution
   }
 
   return undefined;
+}
+
+/**
+ * Backwards-compatible helper that returns only the element type, built on getArrayElementInfo.
+ */
+export function getArrayElementType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  typeNode?: ts.TypeNode,
+): ts.Type | undefined {
+  const info = getArrayElementInfo(type, checker, typeNode);
+  return info?.elementType;
 }
 
 /**

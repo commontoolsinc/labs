@@ -3,8 +3,12 @@
     "maybe": {
       "default": null,
       "oneOf": [
-        { "type": "null" },
-        { "type": "string" }
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
       ]
     }
   },
@@ -13,3 +17,4 @@
   ],
   "type": "object"
 }
+
