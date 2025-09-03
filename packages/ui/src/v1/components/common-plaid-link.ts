@@ -315,63 +315,65 @@ export class CommonPlaidLinkElement extends LitElement {
     return html`
       <div class="plaid-wrapper">
         ${items.length > 0
-        ? html`
-          <div class="connected-accounts">
-            <h3>Connected Bank Accounts</h3>
-            ${items.map((item) =>
-            html`
-              <div class="bank-item">
-                <div class="bank-header">
-                  <h4>${item.institutionName}</h4>
-                  <button
-                    @click="${() => this.handleRemoveAccount(item.itemId)}"
-                    class="remove-button"
-                    ?disabled="${this.isLoading}"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div class="accounts-list">
-                  ${item.accounts.map((account) =>
+          ? html`
+            <div class="connected-accounts">
+              <h3>Connected Bank Accounts</h3>
+              ${items.map((item) =>
                 html`
-                  <div class="account">
-                    <div class="account-info">
-                      <span class="account-name">${account.name}</span>
-                      <span class="account-mask">****${account.mask}</span>
-                      <span class="account-type">${account.subtype ||
-                    account.type}</span>
+                  <div class="bank-item">
+                    <div class="bank-header">
+                      <h4>${item.institutionName}</h4>
+                      <button
+                        @click="${() => this.handleRemoveAccount(item.itemId)}"
+                        class="remove-button"
+                        ?disabled="${this.isLoading}"
+                      >
+                        Remove
+                      </button>
                     </div>
-                    <div class="account-balance">
-                      <span class="balance-label">Available:</span>
-                      <span class="balance-amount">
-                        ${this.formatCurrency(
-                    account.balances.available,
-                    account.balances.isoCurrencyCode,
-                  )}
-                      </span>
-                      <span class="balance-label">Current:</span>
-                      <span class="balance-amount">
-                        ${this.formatCurrency(
-                    account.balances.current,
-                    account.balances.isoCurrencyCode,
-                  )}
+                    <div class="accounts-list">
+                      ${item.accounts.map((account) =>
+                        html`
+                          <div class="account">
+                            <div class="account-info">
+                              <span class="account-name">${account.name}</span>
+                              <span class="account-mask">****${account
+                                .mask}</span>
+                              <span class="account-type">${account.subtype ||
+                                account.type}</span>
+                            </div>
+                            <div class="account-balance">
+                              <span class="balance-label">Available:</span>
+                              <span class="balance-amount">
+                                ${this.formatCurrency(
+                                  account.balances.available,
+                                  account.balances.isoCurrencyCode,
+                                )}
+                              </span>
+                              <span class="balance-label">Current:</span>
+                              <span class="balance-amount">
+                                ${this.formatCurrency(
+                                  account.balances.current,
+                                  account.balances.isoCurrencyCode,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        `
+                      )}
+                    </div>
+                    <div class="bank-footer">
+                      <span class="last-updated">
+                        Last updated: ${new Date(item.lastUpdated)
+                          .toLocaleString()}
                       </span>
                     </div>
                   </div>
                 `
               )}
-                </div>
-                <div class="bank-footer">
-                  <span class="last-updated">
-                    Last updated: ${new Date(item.lastUpdated).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            `
-          )}
-          </div>
-        `
-        : ""}
+            </div>
+          `
+          : ""}
 
         <div class="action-section">
           <button
@@ -380,17 +382,17 @@ export class CommonPlaidLinkElement extends LitElement {
             class="connect-button"
           >
             ${this.isLoading
-        ? "Processing..."
-        : !this.plaidScriptLoaded
-        ? "Loading Plaid..."
-        : "Connect Bank Account"}
+              ? "Processing..."
+              : !this.plaidScriptLoaded
+              ? "Loading Plaid..."
+              : "Connect Bank Account"}
           </button>
 
           ${this.authStatus
-        ? html`
-          <div class="status-message">${this.authStatus}</div>
-        `
-        : ""}
+            ? html`
+              <div class="status-message">${this.authStatus}</div>
+            `
+            : ""}
         </div>
       </div>
     `;

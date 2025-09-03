@@ -32,6 +32,7 @@ describe("counter direct operations test", () => {
           "counter.tsx",
         ),
       ),
+      { start: false },
     );
   });
 

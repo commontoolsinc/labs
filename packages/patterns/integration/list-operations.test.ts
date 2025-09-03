@@ -36,6 +36,7 @@ describe("list-operations simple test", () => {
           "list-operations.tsx",
         ),
       ),
+      { start: false },
     );
   });
 

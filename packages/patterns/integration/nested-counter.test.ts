@@ -32,6 +32,7 @@ describe("nested counter integration test", () => {
           "nested-counter.tsx",
         ),
       ),
+      { start: false },
     );
   });
 

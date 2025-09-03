@@ -39,6 +39,7 @@ describe("LLM pattern test", () => {
             "llm.tsx",
           ),
         ),
+        { start: false },
       );
       charmId = charm.id;
     });

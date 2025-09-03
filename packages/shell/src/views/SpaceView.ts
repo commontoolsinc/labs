@@ -89,7 +89,7 @@ export class XSpaceView extends BaseView {
           <v-box center="${true}">
             <div>Create default recipe?</div>
             <x-button variant="primary" @click="${this
-            .onRequestDefaultRecipe}">Go!</x-button>
+              .onRequestDefaultRecipe}">Go!</x-button>
           </v-box>
         `)
       // TBD if we want to use x-charm or ct-render directly here

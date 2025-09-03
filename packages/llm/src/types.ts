@@ -1,5 +1,6 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
+import type { JSONSchema } from "@commontools/api";
 
 export const DEFAULT_MODEL_NAME: ModelName =
   "anthropic:claude-3-7-sonnet-latest";
@@ -13,6 +14,10 @@ export type LLMResponse = {
   content: string;
   // The trace span ID
   id: string;
+  // Tool calls made during generation
+  toolCalls?: LLMToolCall[];
+  // Results of completed tool calls
+  toolResults?: LLMToolResult[];
 };
 
 export type ModelName = string;
@@ -22,9 +27,30 @@ export interface LLMTypedContent {
   data: string;
 }
 export type LLMContent = string | LLMTypedContent[];
+
+export interface LLMTool {
+  description: string;
+  inputSchema: JSONSchema;
+  handler?: (args: any) => any | Promise<any>; // Client-side only
+}
+
+export interface LLMToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+}
+
+export interface LLMToolResult {
+  toolCallId: string;
+  result: any;
+  error?: string;
+}
+
 export type LLMMessage = {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: LLMContent;
+  toolCalls?: LLMToolCall[];
+  toolCallId?: string; // for tool result messages
 };
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
 export interface LLMRequest {
@@ -37,6 +63,7 @@ export interface LLMRequest {
   stop?: string;
   mode?: "json";
   metadata?: LLMRequestMetadata;
+  tools?: Record<string, LLMTool>;
 }
 
 export interface LLMGenerateObjectRequest {
@@ -84,10 +111,34 @@ export function isLLMContent(input: unknown): input is LLMContent {
     : isArrayOf<LLMTypedContent>(isLLMTypedContent, input);
 }
 
+export function isLLMToolCall(input: unknown): input is LLMToolCall {
+  return isRecord(input) && !Array.isArray(input) &&
+    typeof input.id === "string" &&
+    typeof input.name === "string" &&
+    isRecord(input.arguments);
+}
+
+export function isLLMToolResult(input: unknown): input is LLMToolResult {
+  return isRecord(input) && !Array.isArray(input) &&
+    typeof input.toolCallId === "string" &&
+    (!("error" in input) || typeof input.error === "string");
+}
+
+export function isLLMTool(input: unknown): input is LLMTool {
+  return isRecord(input) && !Array.isArray(input) &&
+    typeof input.description === "string" &&
+    isRecord(input.inputSchema) &&
+    (!("handler" in input) || typeof input.handler === "function");
+}
+
 export function isLLMMessage(input: unknown): input is LLMMessage {
   return isRecord(input) && !Array.isArray(input) &&
-    (input.role === "user" || input.role === "assistant") &&
-    isLLMContent(input.content);
+    (input.role === "user" || input.role === "assistant" ||
+      input.role === "tool") &&
+    isLLMContent(input.content) &&
+    (!("toolCalls" in input) || (Array.isArray(input.toolCalls) &&
+      input.toolCalls.every((tc: unknown) => isLLMToolCall(tc)))) &&
+    (!("toolCallId" in input) || typeof input.toolCallId === "string");
 }
 
 export const isLLMMessages = (isArrayOf<LLMMessage>).bind(null, isLLMMessage);
@@ -101,5 +152,7 @@ export function isLLMRequest(input: unknown): input is LLMRequest {
     (!("stream" in input) || typeof input.stream === "boolean") &&
     (!("stop" in input) || typeof input.stop === "string") &&
     (!("mode" in input) || input.mode === "json") &&
-    (!("metadata" in input) || isLLMRequestMetadata(input.metadata));
+    (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
+    (!("tools" in input) || (isRecord(input.tools) &&
+      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool))));
 }

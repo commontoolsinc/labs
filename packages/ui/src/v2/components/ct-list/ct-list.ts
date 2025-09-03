@@ -456,21 +456,21 @@ export class CTList extends BaseElement {
     return html`
       <div class="list-container">
         ${this.title
-        ? html`
-          <h2 class="list-title">${this.title}</h2>
-        `
-        : ""}
+          ? html`
+            <h2 class="list-title">${this.title}</h2>
+          `
+          : ""}
 
         <div class="list-items">
           ${items.filter((item) => item && item.title).length === 0
-        ? html`
-          <div class="empty-state">No items in this list</div>
-        `
-        : repeat(
-          items.filter((item) => item && item.title),
-          (item, index) => `${index}-${item.title}`,
-          (item, index) => this.renderItem(cell.key(index), index),
-        )}
+            ? html`
+              <div class="empty-state">No items in this list</div>
+            `
+            : repeat(
+              items.filter((item) => item && item.title),
+              (item, index) => `${index}-${item.title}`,
+              (item, index) => this.renderItem(cell.key(index), index),
+            )}
         </div>
 
         ${!this.readonly ? this.renderAddItem() : ""}
@@ -496,20 +496,20 @@ export class CTList extends BaseElement {
               class="edit-input"
               .value="${item.get().title}"
               @input="${(e: Event) => {
-          this._editing = item;
-        }}"
+                this._editing = item;
+              }}"
               @blur="${(e: Event) => {
-          const target = e.target as HTMLInputElement;
-          this.finishEditing(item, target.value);
-        }}"
+                const target = e.target as HTMLInputElement;
+                this.finishEditing(item, target.value);
+              }}"
               @keydown="${(e: KeyboardEvent) => {
-          if (e.key === "Enter") {
-            const target = e.target as HTMLInputElement;
-            this.finishEditing(item, target.value);
-          } else if (e.key === "Escape") {
-            this.cancelEditing();
-          }
-        }}"
+                if (e.key === "Enter") {
+                  const target = e.target as HTMLInputElement;
+                  this.finishEditing(item, target.value);
+                } else if (e.key === "Escape") {
+                  this.cancelEditing();
+                }
+              }}"
               autofocus
             />
           </div>
@@ -529,23 +529,23 @@ export class CTList extends BaseElement {
         <div class="item-bullet"></div>
         <div
           class="item-content ${this.editable && !this.readonly
-        ? "editable"
-        : ""}"
+            ? "editable"
+            : ""}"
           @dblclick="${() => this.startEditing(item)}"
         >
           ${item.get().title}
         </div>
         ${this.editable && !this.readonly
-        ? html`
-          <button
-            class="item-action edit"
-            @click="${() => this.startEditing(item)}"
-            title="Edit item"
-          >
-            ✎
-          </button>
-        `
-        : ""} ${actionButton}
+          ? html`
+            <button
+              class="item-action edit"
+              @click="${() => this.startEditing(item)}"
+              title="Edit item"
+            >
+              ✎
+            </button>
+          `
+          : ""} ${actionButton}
       </div>
     `;
   }

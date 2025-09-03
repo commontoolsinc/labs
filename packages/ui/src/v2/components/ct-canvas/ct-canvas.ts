@@ -53,7 +53,7 @@ export class CtCanvas extends BaseElement {
       <div
         class="canvas-container"
         style="--canvas-width: ${this.width}px; --canvas-height: ${this
-        .height}px"
+          .height}px"
         @click="${this.handleCanvasClick}"
       >
         <slot></slot>

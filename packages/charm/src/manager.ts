@@ -851,11 +851,66 @@ export class CharmManager {
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
+    options?: { start?: boolean },
+  ): Promise<Cell<Charm>> {
+    const start = options?.start ?? true;
+    const charm = await this.setupPersistent(
+      recipe,
+      inputs,
+      cause,
+      llmRequestId,
+    );
+    if (start) {
+      await this.startCharm(charm);
+    }
+    return charm;
+  }
+
+  // Consistently return the `Cell<Charm>` of charm with
+  // id `charmId`, applies the provided `recipe` (which may be
+  // its current recipe -- useful when we are only updating inputs),
+  // and optionally applies `inputs` if provided.
+  async runWithRecipe(
+    recipe: Recipe | Module,
+    charmId: string,
+    inputs?: object,
+    options?: { start?: boolean },
+  ): Promise<Cell<Charm>> {
+    const charm = this.runtime.getCellFromEntityId<Charm>(
+      this.space,
+      {
+        "/": charmId,
+      },
+      [],
+      charmSchema,
+    );
+    await charm.sync();
+    const start = options?.start ?? true;
+    if (start) {
+      await this.runtime.runSynced(charm, recipe, inputs);
+    } else {
+      this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
+    }
+    await this.syncRecipe(charm);
+
+    await this.add([charm]);
+
+    return charm;
+  }
+
+  /**
+   * Prepare a new charm by setting up its process/result cells and recipe
+   * metadata without scheduling the recipe's nodes.
+   */
+  async setupPersistent(
+    recipe: Recipe | Module,
+    inputs?: unknown,
+    cause?: unknown,
+    llmRequestId?: string,
   ): Promise<Cell<Charm>> {
     await this.runtime.idle();
-
     const charm = this.runtime.getCell(this.space, cause, charmSchema);
-    await this.runtime.runSynced(charm, recipe, inputs);
+    this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
     await this.syncRecipe(charm);
     await this.add([charm]);
 
@@ -870,30 +925,25 @@ export class CharmManager {
     return charm;
   }
 
-  // Consistently return the `Cell<Charm>` of charm with
-  // id `charmId`, applies the provided `recipe` (which may be
-  // its current recipe -- useful when we are only updating inputs),
-  // and optionally applies `inputs` if provided.
-  async runWithRecipe(
-    recipe: Recipe | Module,
-    charmId: string,
-    inputs?: object,
-  ): Promise<Cell<Charm>> {
-    const charm = this.runtime.getCellFromEntityId<Charm>(
-      this.space,
-      {
-        "/": charmId,
-      },
-      [],
-      charmSchema,
-    );
-    await charm.sync();
-    await this.runtime.runSynced(charm, recipe, inputs);
-    await this.syncRecipe(charm);
+  /** Start scheduling and running a prepared charm. */
+  async startCharm(charmOrId: string | Cell<Charm>): Promise<void> {
+    const charm = typeof charmOrId === "string"
+      ? await this.get(charmOrId)
+      : charmOrId;
+    if (!charm) throw new Error("Charm not found");
+    this.runtime.start(charm);
+    await this.runtime.idle();
+    await this.synced();
+  }
 
-    await this.add([charm]);
-
-    return charm;
+  /** Stop a running charm (no-op if not running). */
+  async stopCharm(charmOrId: string | Cell<Charm>): Promise<void> {
+    const charm = typeof charmOrId === "string"
+      ? await this.get(charmOrId)
+      : charmOrId;
+    if (!charm) throw new Error("Charm not found");
+    this.runtime.runner.stop(charm);
+    await this.runtime.idle();
   }
 
   // FIXME(JA): this really really really needs to be revisited

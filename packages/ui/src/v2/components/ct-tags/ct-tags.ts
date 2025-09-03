@@ -327,14 +327,14 @@ export class CTTags extends BaseElement {
     return html`
       <div class="tags-container">
         ${this.tags.length === 0 && !this.showingNewInput
-        ? html`
-          <span class="placeholder">No tags</span>
-        `
-        : ""} ${repeat(
-          this.tags,
-          (tag, index) => index,
-          (tag, index) => this.renderTag(tag, index),
-        )} ${!this.readonly ? this.renderAddTag() : ""}
+          ? html`
+            <span class="placeholder">No tags</span>
+          `
+          : ""} ${repeat(
+            this.tags,
+            (tag, index) => index,
+            (tag, index) => this.renderTag(tag, index),
+          )} ${!this.readonly ? this.renderAddTag() : ""}
       </div>
     `;
   }
@@ -348,30 +348,31 @@ export class CTTags extends BaseElement {
         @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
       >
         ${isEditing
-        ? html`
-          <input
-            id="tag-input-${index}"
-            class="tag-input"
-            .value="${tag}"
-            @input="${(e: Event) => this.handleTagInput(index, e)}"
-            @keydown="${(e: KeyboardEvent) => this.handleTagKeyDown(index, e)}"
-            @blur="${() => this.handleTagBlur(index)}"
-          />
-        `
-        : html`
-          <span class="tag-text">${tag}</span>
-          ${!this.readonly
-            ? html`
-              <div
-                class="tag-remove"
-                @click="${(e: MouseEvent) => this.handleTagRemove(index, e)}"
-                title="Remove tag"
-              >
-                ×
-              </div>
-            `
-            : ""}
-        `}
+          ? html`
+            <input
+              id="tag-input-${index}"
+              class="tag-input"
+              .value="${tag}"
+              @input="${(e: Event) => this.handleTagInput(index, e)}"
+              @keydown="${(e: KeyboardEvent) =>
+                this.handleTagKeyDown(index, e)}"
+              @blur="${() => this.handleTagBlur(index)}"
+            />
+          `
+          : html`
+            <span class="tag-text">${tag}</span>
+            ${!this.readonly
+              ? html`
+                <div
+                  class="tag-remove"
+                  @click="${(e: MouseEvent) => this.handleTagRemove(index, e)}"
+                  title="Remove tag"
+                >
+                  ×
+                </div>
+              `
+              : ""}
+          `}
       </div>
     `;
   }
@@ -383,20 +384,20 @@ export class CTTags extends BaseElement {
         @click="${this.handleAddTagClick}"
       >
         ${this.showingNewInput
-        ? html`
-          <input
-            id="new-tag-input"
-            class="add-tag-input"
-            placeholder="New tag"
-            .value="${this.newTagValue}"
-            @input="${this.handleNewTagInput}"
-            @keydown="${this.handleNewTagKeyDown}"
-            @blur="${this.handleNewTagBlur}"
-          />
-        `
-        : html`
-          + Add tag
-        `}
+          ? html`
+            <input
+              id="new-tag-input"
+              class="add-tag-input"
+              placeholder="New tag"
+              .value="${this.newTagValue}"
+              @input="${this.handleNewTagInput}"
+              @keydown="${this.handleNewTagKeyDown}"
+              @blur="${this.handleNewTagBlur}"
+            />
+          `
+          : html`
+            + Add tag
+          `}
       </div>
     `;
   }

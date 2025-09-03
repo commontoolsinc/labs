@@ -32,6 +32,7 @@ describe("instantiate-recipe integration test", () => {
           "instantiate-recipe.tsx",
         ),
       ),
+      { start: false },
     );
     charmId = charm.id;
   });

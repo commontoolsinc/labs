@@ -238,23 +238,23 @@ export class CTScrollArea extends BaseElement {
           </div>
         </div>
         ${showVertical
-        ? html`
-          <div class="scrollbar scrollbar-vertical" part="scrollbar-vertical">
-            <div class="scrollbar-thumb scrollbar-thumb-vertical" part="thumb-vertical">
+          ? html`
+            <div class="scrollbar scrollbar-vertical" part="scrollbar-vertical">
+              <div class="scrollbar-thumb scrollbar-thumb-vertical" part="thumb-vertical">
+              </div>
             </div>
-          </div>
-        `
-        : ""} ${showHorizontal
-        ? html`
-          <div class="scrollbar scrollbar-horizontal" part="scrollbar-horizontal">
-            <div
-              class="scrollbar-thumb scrollbar-thumb-horizontal"
-              part="thumb-horizontal"
-            >
+          `
+          : ""} ${showHorizontal
+          ? html`
+            <div class="scrollbar scrollbar-horizontal" part="scrollbar-horizontal">
+              <div
+                class="scrollbar-thumb scrollbar-thumb-horizontal"
+                part="thumb-horizontal"
+              >
+              </div>
             </div>
-          </div>
-        `
-        : ""}
+          `
+          : ""}
       </div>
     `;
   }

@@ -109,6 +109,7 @@ describe("shell iframe counter tests", () => {
           "iframe-counter-recipe.tsx",
         ),
       ),
+      { start: false },
     );
   });
 

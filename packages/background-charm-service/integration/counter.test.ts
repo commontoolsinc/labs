@@ -35,6 +35,7 @@ describe("background charm counter tests", () => {
           "bgCounter.tsx",
         ),
       ),
+      { start: false },
     );
     charmId = charm.id;
   });

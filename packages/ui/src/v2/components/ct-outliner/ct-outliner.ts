@@ -1867,10 +1867,10 @@ export class CTOutliner extends BaseElement
           tabindex="0"
         >
           ${!hasNodes
-        ? html`
-          <div class="placeholder">Click to start typing...</div>
-        `
-        : this.renderNodes(this.value.key("root").key("children"), 0, [])}
+            ? html`
+              <div class="placeholder">Click to start typing...</div>
+            `
+            : this.renderNodes(this.value.key("root").key("children"), 0, [])}
         </div>
       </div>
     `;
@@ -1944,15 +1944,15 @@ export class CTOutliner extends BaseElement
       <div class="node" style="position: relative;">
         <div
           class="node-content ${isFocused ? "focused" : ""} ${isEditing
-        ? "editing"
-        : ""}"
+            ? "editing"
+            : ""}"
           @click="${nodeClickHandler}"
           @dblclick="${nodeDoubleClickHandler}"
         >
           <div
             class="collapse-icon ${isCollapsed ? "collapsed" : ""} ${hasChildren
-        ? ""
-        : "invisible"}"
+              ? ""
+              : "invisible"}"
             @click="${collapseClickHandler}"
           >
             <svg viewBox="0 0 24 24">
@@ -1964,34 +1964,38 @@ export class CTOutliner extends BaseElement
 
           <div class="content">
             ${isEditing
-        ? html`
-          <textarea
-            id="editor-${nodeIndex}"
-            class="content-editor"
-            .value="${this.editingContent}"
-            @input="${this.handleEditorInput}"
-            @keydown="${this.handleEditorKeyDown}"
-            @blur="${this.handleEditorBlur}"
-            @paste="${this.handleEditorPaste}"
-            rows="1"
-          ></textarea>
-          ${this.showingMentions ? this.renderMentionsDropdown() : ""}
-        `
-        : this.renderMarkdownContent(
-          instance.body,
-          instance,
-          checkboxChangeHandler,
-        )}
+              ? html`
+                <textarea
+                  id="editor-${nodeIndex}"
+                  class="content-editor"
+                  .value="${this.editingContent}"
+                  @input="${this.handleEditorInput}"
+                  @keydown="${this.handleEditorKeyDown}"
+                  @blur="${this.handleEditorBlur}"
+                  @paste="${this.handleEditorPaste}"
+                  rows="1"
+                ></textarea>
+                ${this.showingMentions ? this.renderMentionsDropdown() : ""}
+              `
+              : this.renderMarkdownContent(
+                instance.body,
+                instance,
+                checkboxChangeHandler,
+              )}
           </div>
         </div>
 
         ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
-        ? html`
-          <div class="children">
-            ${this.renderNodes(node.key("children"), level + 1, calculatedPath)}
-          </div>
-        `
-        : ""}
+          ? html`
+            <div class="children">
+              ${this.renderNodes(
+                node.key("children"),
+                level + 1,
+                calculatedPath,
+              )}
+            </div>
+          `
+          : ""}
       </div>
     `;
   }
@@ -2026,21 +2030,21 @@ export class CTOutliner extends BaseElement
     return html`
       <div class="mentions-dropdown" style="${style}">
         ${filteredMentions.map((mention, index) =>
-        html`
-          <div
-            class="mention-item ${index === this.selectedMentionIndex
-            ? "selected"
-            : ""}"
-            @click="${() => this.insertMention(mention)}"
-            @mouseenter="${() => {
-            this.selectedMentionIndex = index;
-            this.requestUpdate();
-          }}"
-          >
-            <div class="mention-name">${mention[NAME]}</div>
-          </div>
-        `
-      )}
+          html`
+            <div
+              class="mention-item ${index === this.selectedMentionIndex
+                ? "selected"
+                : ""}"
+              @click="${() => this.insertMention(mention)}"
+              @mouseenter="${() => {
+                this.selectedMentionIndex = index;
+                this.requestUpdate();
+              }}"
+            >
+              <div class="mention-name">${mention[NAME]}</div>
+            </div>
+          `
+        )}
       </div>
     `;
   }
@@ -2089,16 +2093,16 @@ export class CTOutliner extends BaseElement
               class="node-checkbox"
               ?checked="${isChecked}"
               @change="${checkboxChangeHandler || ((e: Event) => {
-            e.stopPropagation();
-            this.handleCheckboxChange(
-              node,
-              getNodePath(this.tree, node) || [],
-              e,
-            );
-          })}"
+                e.stopPropagation();
+                this.handleCheckboxChange(
+                  node,
+                  getNodePath(this.tree, node) || [],
+                  e,
+                );
+              })}"
             />
             <span class="markdown-content" @click="${this
-            .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
+              .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
           </span>
         `;
       }
@@ -2166,12 +2170,12 @@ export class CTOutliner extends BaseElement
     return html`
       <div class="attachments">
         ${charmCells.map((charmCell: Cell<Charm>) => {
-        return html`
-          <div class="attachment">
-            <ct-render .cell="${charmCell}"></ct-render>
-          </div>
-        `;
-      })}
+          return html`
+            <div class="attachment">
+              <ct-render .cell="${charmCell}"></ct-render>
+            </div>
+          `;
+        })}
       </div>
     `;
   }

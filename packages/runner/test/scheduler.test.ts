@@ -10,6 +10,9 @@ import {
 } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { Entity } from "@commontools/memory/interface";
+import * as Fact from "@commontools/memory/fact";
+import * as Changes from "@commontools/memory/changes";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -723,4 +726,72 @@ describe("event handling", () => {
     expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
   });
+
+  it(
+    "should retry event handler when commit fails, up to retries count",
+    async () => {
+      // Prepare remote memory with existing fact to induce conflict on commit
+      const memory = storageManager.session().mount(space);
+      const entityId = `test:retry-conflict-${Date.now()}` as Entity;
+      const existingFact = Fact.assert({
+        the: "application/json",
+        of: entityId,
+        is: { version: 1 },
+      });
+      await memory.transact({ changes: Changes.from([existingFact]) });
+
+      // Reset local replica so local writes will conflict with remote state
+      const { replica } = storageManager.open(space);
+      (replica as any).reset();
+
+      // Set up an event cell and commit initial state
+      const eventCell = runtime.getCell<number>(
+        space,
+        "should retry event handler on conflict",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      // Event handler that writes a conflicting value to the same entity
+      let attempts = 0;
+      const handler: EventHandler = (tx, _event) => {
+        attempts++;
+        // Force commit failure for the first 5 attempts to exercise retries.
+        if (attempts <= 5) {
+          tx.abort("force-abort-for-retry");
+          return;
+        }
+        // On the final attempt, perform a regular write.
+        tx.write({
+          space,
+          id: entityId,
+          type: "application/json",
+          path: [],
+        }, { version: 2 });
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      // Queue event (uses default retries configured in scheduler)
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+      );
+
+      // First idle may return before the commit callback schedules retries.
+      await runtime.idle();
+      // Wait for any re-queued events to process.
+      await runtime.idle();
+
+      // Should attempt initial + default retries times (DEFAULT_RETRIES=5)
+      expect(attempts).toBe(6);
+
+      // No further assertions needed; this verifies retry behavior only.
+    },
+  );
 });

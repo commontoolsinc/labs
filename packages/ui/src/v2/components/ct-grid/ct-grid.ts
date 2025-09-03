@@ -399,8 +399,8 @@ export class CTGrid extends BaseElement {
         class="${classMap(classes)}"
         part="grid"
         style="${Object.entries(gridStyle).map(([k, v]) => `${k}: ${v}`).join(
-        "; ",
-      )}"
+          "; ",
+        )}"
       >
         <slot></slot>
       </div>

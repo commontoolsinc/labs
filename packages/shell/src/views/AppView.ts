@@ -32,8 +32,11 @@ export class XAppView extends BaseView {
 
     .content-area {
       flex: 1;
+      display: flex;
+      flex-direction: column;
       overflow-y: auto;
       background-color: white;
+      min-height: 0; /* Important for flex children */
     }
   `;
 

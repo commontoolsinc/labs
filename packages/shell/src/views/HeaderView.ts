@@ -170,38 +170,38 @@ export class XHeaderView extends BaseView {
           ${title}
         </div>
         ${this.isLoggedIn
-        ? html`
-          <div class="button-group">
-            <x-button
-              class="emoji-button"
-              size="small"
-              @click="${this.handleToggleClick}"
-              title="${this.showShellCharmListView
-            ? "Show Default Recipe"
-            : "Show All Charms"}"
-            >
-              ${this.showShellCharmListView ? "📋" : "🔍"}
-            </x-button>
-            <x-button
-              class="emoji-button"
-              size="small"
-              @click="${this.handleDebuggerToggleClick}"
-              title="${this.showDebuggerView
-            ? "Hide Debugger"
-            : "Show Debugger"}"
-            >
-              ${this.showDebuggerView ? "🐛" : "🪲"}
-            </x-button>
-            <x-button
-              class="auth-button"
-              size="small"
-              @click="${this.handleAuthClick}"
-            >
-              Logout
-            </x-button>
-          </div>
-        `
-        : null}
+          ? html`
+            <div class="button-group">
+              <x-button
+                class="emoji-button"
+                size="small"
+                @click="${this.handleToggleClick}"
+                title="${this.showShellCharmListView
+                  ? "Show Default Recipe"
+                  : "Show All Charms"}"
+              >
+                ${this.showShellCharmListView ? "📋" : "🔍"}
+              </x-button>
+              <x-button
+                class="emoji-button"
+                size="small"
+                @click="${this.handleDebuggerToggleClick}"
+                title="${this.showDebuggerView
+                  ? "Hide Debugger"
+                  : "Show Debugger"}"
+              >
+                ${this.showDebuggerView ? "🐛" : "🪲"}
+              </x-button>
+              <x-button
+                class="auth-button"
+                size="small"
+                @click="${this.handleAuthClick}"
+              >
+                Logout
+              </x-button>
+            </div>
+          `
+          : null}
       </div>
     `;
   }

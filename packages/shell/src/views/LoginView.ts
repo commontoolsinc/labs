@@ -468,8 +468,8 @@ export class XLoginView extends BaseView {
               <x-button
                 class="delete-button"
                 @click="${() => {
-              this.dispatchAuthEvent("clear-stored-credential");
-            }}"
+                  this.dispatchAuthEvent("clear-stored-credential");
+                }}"
                 title="Remove saved credential"
               >
                 🗑️
@@ -538,14 +538,14 @@ export class XLoginView extends BaseView {
       <h2>${this.flow === "login" ? "Login with" : "Register with"}</h2>
       <div class="method-list">
         ${this.availableMethods.map((method) =>
-        html`
-          <x-button @click="${() => this.handleMethodSelect(method)}">
-            ${method === AUTH_METHOD_PASSKEY
-            ? "🔑 Use Passkey"
-            : "📝 Use Passphrase"}
-          </x-button>
-        `
-      )}
+          html`
+            <x-button @click="${() => this.handleMethodSelect(method)}">
+              ${method === AUTH_METHOD_PASSKEY
+                ? "🔑 Use Passkey"
+                : "📝 Use Passphrase"}
+            </x-button>
+          `
+        )}
       </div>
       <x-button @click="${() => {
         this.flow = null;
@@ -622,7 +622,7 @@ export class XLoginView extends BaseView {
       <div class="mnemonic-display">
         <v-box>
           <textarea rows="7" name="mnemonic-text">${this.mnemonic ||
-        ""}</textarea>
+            ""}</textarea>
           <x-button
             class="copy-button"
             @click="${this.copyToClipboard}"
@@ -638,12 +638,12 @@ export class XLoginView extends BaseView {
         variant="primary"
         test-id="passphrase-continue"
         @click="${() => {
-        // User has saved the mnemonic, now authenticate with it
-        if (this.mnemonic) {
-          this.handleLogin(this.mnemonic);
-        }
-        this.mnemonic = null;
-      }}"
+          // User has saved the mnemonic, now authenticate with it
+          if (this.mnemonic) {
+            this.handleLogin(this.mnemonic);
+          }
+          this.mnemonic = null;
+        }}"
       >
         🔒 I've Saved It - Continue
       </x-button>
@@ -654,15 +654,15 @@ export class XLoginView extends BaseView {
     return html`
       <div class="success">
         <p>✓ ${this.method === AUTH_METHOD_PASSKEY
-        ? "Passkey"
-        : "Passphrase"} successfully registered!</p>
+          ? "Passkey"
+          : "Passphrase"} successfully registered!</p>
       </div>
       <x-button
         variant="primary"
         @click="${() => {
-        this.registrationSuccess = false;
-        this.flow = "login";
-      }}"
+          this.registrationSuccess = false;
+          this.flow = "login";
+        }}"
       >
         🔒 Continue to Login
       </x-button>
@@ -683,34 +683,34 @@ export class XLoginView extends BaseView {
 
         <div class="auth-action-container">
           ${this.error
-        ? html`
-          <div class="error">
-            ${this.error}
-          </div>
-        `
-        : ""} ${this.isProcessing
-        ? html`
-          <div class="loading">
-            <p>Please follow the browser's prompts to continue...</p>
-          </div>
-        `
-        : this.mnemonic
-        ? this.renderMnemonicDisplay()
-        : this.registrationSuccess
-        ? this.renderSuccess()
-        : this.flow === null
-        ? this.renderInitial()
-        : this.method === null
-        ? this.renderMethodSelection()
-        : this.method === AUTH_METHOD_PASSPHRASE
-        ? this.renderPassphraseAuth()
-        : this.method === AUTH_METHOD_PASSKEY
-        ? html`
-          <div class="loading">
-            <p>Please follow the browser's prompts to continue...</p>
-          </div>
-        `
-        : ""}
+            ? html`
+              <div class="error">
+                ${this.error}
+              </div>
+            `
+            : ""} ${this.isProcessing
+            ? html`
+              <div class="loading">
+                <p>Please follow the browser's prompts to continue...</p>
+              </div>
+            `
+            : this.mnemonic
+            ? this.renderMnemonicDisplay()
+            : this.registrationSuccess
+            ? this.renderSuccess()
+            : this.flow === null
+            ? this.renderInitial()
+            : this.method === null
+            ? this.renderMethodSelection()
+            : this.method === AUTH_METHOD_PASSPHRASE
+            ? this.renderPassphraseAuth()
+            : this.method === AUTH_METHOD_PASSKEY
+            ? html`
+              <div class="loading">
+                <p>Please follow the browser's prompts to continue...</p>
+              </div>
+            `
+            : ""}
         </div>
       </div>
     `;

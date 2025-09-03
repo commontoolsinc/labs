@@ -40,6 +40,7 @@ describe("fetch data integration test", () => {
             "fetch-data.tsx",
           ),
         ),
+        { start: false },
       );
     });
 
