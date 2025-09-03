@@ -284,6 +284,12 @@ export interface BuiltInLLMState<T> {
   result?: T;
   partial?: string;
   error: unknown;
+}
+
+export interface BuiltInLLMDialogState {
+  pending: boolean;
+  error: unknown;
+  messages: BuiltInLLMMessage[];
   addMessage: Stream<BuiltInLLMMessage>;
 }
 

@@ -25,12 +25,11 @@ type ListItem = {
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
-  chat: Default<Array<BuiltInLLMMessage>, []>;
   list: Default<Array<ListItem>, []>;
 };
 
 type LLMTestResult = {
-  chat: Default<Array<BuiltInLLMMessage>, []>;
+  messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
 const calculator = handler<
@@ -85,21 +84,21 @@ const sendMessage = handler<
 const clearChat = handler(
   (
     _: never,
-    { chat, llmResponse }: {
-      chat: Cell<Array<BuiltInLLMMessage>>;
+    { llmResponse }: {
       llmResponse: {
+        messages: Cell<Array<BuiltInLLMMessage>>;
         pending: Cell<boolean>;
       };
     },
   ) => {
-    chat.set([]);
+    llmResponse.messages.set([]);
     llmResponse.pending.set(false);
   },
 );
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
-  ({ title, chat, list }) => {
+  ({ title, list }) => {
     const calculatorResult = cell<string>("");
 
     const tools = {
@@ -135,9 +134,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const { addMessage, pending } = llmDialog({
+    const { pending, error, messages, addMessage } = llmDialog({
       system: "You are a helpful assistant with some tools.",
-      messages: chat,
       tools: tools,
     });
 
@@ -163,7 +161,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           <h2>{title}</h2>
 
           <ct-vscroll showScrollbar height="320px" fadeEdges snapToBottom>
-            {chat.map((msg) => {
+            {messages.map((msg) => {
               return (
                 <ct-chat-message
                   role={msg.role}
@@ -195,8 +193,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
             <ct-button
               onClick={clearChat({
-                chat,
-                llmResponse: { pending },
+                llmResponse: {
+                  messages: messages,
+                  pending: pending,
+                },
               })}
             >
               Clear Chat
@@ -208,7 +208,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </div>
         </div>
       ),
-      chat,
+      messages,
     };
   },
 );

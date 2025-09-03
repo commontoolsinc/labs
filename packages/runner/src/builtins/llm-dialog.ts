@@ -54,10 +54,11 @@ export function llmDialog(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
+  let messages: Cell<BuiltInLLMMessage[]>;
+  let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
   let addMessage: Cell<BuiltInLLMMessage | undefined>;
   let isExecutingTools = false;
-  const messagesCell = inputsCell.key("messages");
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -68,6 +69,25 @@ export function llmDialog(
         tx,
       );
       pending.send(false);
+
+      messages = runtime.getCell<BuiltInLLMMessage[] | undefined>(
+        parentCell.space,
+        {
+          llm: { messages: cause },
+        },
+        undefined,
+        tx,
+      );
+      messages.send([]);
+
+      partial = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          llm: { partial: cause },
+        },
+        undefined,
+        tx,
+      );
 
       requestHash = runtime.getCell<string | undefined>(
         parentCell.space,
@@ -94,8 +114,8 @@ export function llmDialog(
         tx: IExtendedStorageTransaction,
         event: BuiltInLLMMessage,
       ) => {
-        messagesCell.withTx(tx).set([
-          ...(messagesCell.get() ?? []),
+        messages.withTx(tx).set([
+          ...(messages.get() ?? []),
           event,
         ]);
       };
@@ -106,6 +126,7 @@ export function llmDialog(
 
       sendResult(tx, {
         pending,
+        messages,
         requestHash,
         addMessage,
       });
@@ -118,7 +139,6 @@ export function llmDialog(
     const { system, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
-    const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
 
     // Strip handlers from tool definitions to send them to the server
@@ -130,9 +150,10 @@ export function llmDialog(
       }),
     );
 
+    console.log("messages", messages.getAsQueryResult([]));
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messages ?? [],
+      messages: messages.getAsQueryResult([]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
       stream: true,
@@ -157,31 +178,26 @@ export function llmDialog(
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
     previousCallHash = hash;
 
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(messages.get()) || messages.get()?.length === 0) {
       pendingWithLog.set(false);
       return;
     }
 
     // If the last message is from the assistant, no LLM request needed
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage = messages.get()[messages.get().length - 1];
     if (lastMessage && lastMessage.role === "assistant") {
       pendingWithLog.set(false);
-      // Set the result to the last assistant message content
-      const content = typeof lastMessage.content === "string"
-        ? lastMessage.content
-        : "";
       requestHashWithLog.set(hash);
+      return;
+    }
+
+    if (pending.get()) {
       return;
     }
 
     // Only clear result/partial when we're about to make a new request
     pendingWithLog.set(true);
-
-    const updatePartial = (text: string) => {
-      // no-op, but we need a callback
-    };
-
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
+    const resultPromise = client.sendRequest(llmParams, () => {});
 
     resultPromise
       .then(async (llmResult) => {
@@ -194,7 +210,7 @@ export function llmDialog(
           isExecutingTools = true;
 
           try {
-            const newTx = messagesCell.runtime.edit();
+            const newTx = messages.runtime.edit();
             const newMessages: BuiltInLLMMessage[] = [];
 
             // Add assistant message with tool calls to conversation
@@ -247,8 +263,8 @@ export function llmDialog(
             newMessages.push(assistantMessage);
 
             // Update messages in cell with new messages AFTER all tools complete
-            messagesCell.withTx(newTx).set([
-              ...(messagesCell.get() ?? []),
+            messages.withTx(newTx).set([
+              ...(messages.get() ?? []),
               ...newMessages,
             ]);
             await newTx.commit();
@@ -258,13 +274,13 @@ export function llmDialog(
           }
         } else {
           // No tool calls, just add the assistant message
-          const newTx = messagesCell.runtime.edit();
+          const newTx = messages.runtime.edit();
           const assistantMessage: BuiltInLLMMessage = {
             role: "assistant",
             content: llmResult.content,
           };
-          messagesCell.withTx(newTx).set([
-            ...(messagesCell.get() ?? []),
+          messages.withTx(newTx).set([
+            ...(messages.get() ?? []),
             assistantMessage,
           ]);
           await newTx.commit();
