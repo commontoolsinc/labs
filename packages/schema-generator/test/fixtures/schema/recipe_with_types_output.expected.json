@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "items_count": {
+      "type": "number"
+    },
+    "title": {
+      "type": "string",
+      "default": "untitled"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "items",
+    "items_count",
+    "title"
+  ]
+}
+

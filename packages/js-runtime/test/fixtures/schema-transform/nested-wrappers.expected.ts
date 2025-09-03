@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, JSONSchema } from "commontools";
+import { Cell, Stream, Default, JSONSchema, recipe } from "commontools";
 // Test nested wrapper types
 // Default wrapping Cell - these don't work because Default<T, V> requires V extends T
 // and a literal value doesn't extend Cell<T>
@@ -114,3 +114,9 @@ const complexNestingSchema = {
     required: ["cellOfDefault", "defaultArray"]
 } as const satisfies JSONSchema;
 export { defaultCellSchema, cellOfDefaultSchema, streamOfDefaultSchema, arrayOfCellsSchema, cellOfArraySchema, complexNestingSchema };
+// Add a recipe export for ct dev testing
+export default recipe("Nested Wrappers Test", () => {
+    return {
+        schema: defaultCellSchema,
+    };
+});

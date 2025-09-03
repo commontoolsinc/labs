@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, toSchema } from "commontools";
+import { Cell, Stream, Default, toSchema, recipe } from "commontools";
 
 // Type aliases for Cell
 type MyCell<T> = Cell<T>;
@@ -45,3 +45,10 @@ interface TypeAliasTest {
 const schema = toSchema<TypeAliasTest>();
 
 export { schema };
+
+// Add a recipe export for ct dev testing
+export default recipe("Type Aliases Test", () => {
+  return {
+    schema,
+  };
+});

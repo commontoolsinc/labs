@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, JSONSchema } from "commontools";
+import { Cell, Stream, Default, JSONSchema, recipe } from "commontools";
 // Type aliases for Cell
 type MyCell<T> = Cell<T>;
 type StringCell = Cell<string>;
@@ -112,3 +112,9 @@ const schema = {
     required: ["genericCell", "specificCell", "numberCell", "cellArray", "stringCells", "genericStream", "eventStream", "withDefault", "cellOfArray", "streamOfCells", "nestedAlias"]
 } as const satisfies JSONSchema;
 export { schema };
+// Add a recipe export for ct dev testing
+export default recipe("Type Aliases Test", () => {
+    return {
+        schema,
+    };
+});
