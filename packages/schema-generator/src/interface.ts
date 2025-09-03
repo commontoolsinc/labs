@@ -19,10 +19,6 @@ export interface SchemaDefinition {
  * Context passed to formatters during schema generation
  */
 export interface FormatterContext {
-  /** The root schema being generated */
-  rootSchema: SchemaDefinition;
-  /** Types that have been seen to detect cycles */
-  seenTypes: Set<ts.Type>;
   /** TypeScript type checker */
   typeChecker: ts.TypeChecker;
   /** Definitions for cyclic types */

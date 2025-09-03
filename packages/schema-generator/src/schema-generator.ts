@@ -21,7 +21,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     definitions: Record<string, SchemaDefinition>;
     cyclicTypes: Set<ts.Type>;
     cyclicNames: Set<string>;
-    seenTypes: Set<ts.Type>;
     inProgressNames: Set<string>;
     emittedRefs: Set<string>;
     definitionStack: Set<ts.Type>;
@@ -53,7 +52,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         definitions: {},
         cyclicTypes: this.getCycles(type, checker).types,
         cyclicNames: this.getCycles(type, checker).names,
-        seenTypes: new Set<ts.Type>(),
         inProgressNames: new Set<string>(),
         emittedRefs: new Set<string>(),
         definitionStack: new Set<ts.Type>(),
@@ -66,7 +64,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       definitions,
       cyclicTypes,
       cyclicNames,
-      seenTypes,
       inProgressNames,
       emittedRefs,
       definitionStack,
@@ -75,8 +72,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     } = this.activeContext!;
 
     const context: FormatterContext = {
-      rootSchema: {} as SchemaDefinition,
-      seenTypes,
       typeChecker: checker,
       definitions,
       definitionStack,
@@ -88,7 +83,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       type,
       context,
       typeNode,
-      seenTypes,
       cyclicTypes,
       cyclicNames,
       definitions,
@@ -171,7 +165,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       definitions,
       cyclicTypes,
       cyclicNames,
-      seenTypes,
       inProgressNames,
       emittedRefs,
       definitionStack,
@@ -180,8 +173,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     return this.formatType(
       type,
       {
-        rootSchema: {} as SchemaDefinition,
-        seenTypes,
         typeChecker: checker,
         definitions,
         definitionStack,
@@ -190,7 +181,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         typeNode: typeNode!,
       },
       typeNode,
-      seenTypes,
       cyclicTypes,
       cyclicNames,
       definitions,
@@ -208,7 +198,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: FormatterContext,
     typeNode?: ts.TypeNode,
-    seenTypes: Set<ts.Type> = new Set(),
     cyclicTypes?: Set<ts.Type>,
     cyclicNames?: Set<string>,
     definitions?: Record<string, SchemaDefinition>,

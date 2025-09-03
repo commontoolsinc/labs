@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, JSONSchema, recipe } from "commontools";
+import { Cell, Stream, Default, recipe, JSONSchema } from "commontools";
 // Type aliases for Cell
 type MyCell<T> = Cell<T>;
 type StringCell = Cell<string>;

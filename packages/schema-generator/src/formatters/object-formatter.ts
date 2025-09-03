@@ -72,10 +72,13 @@ export class ObjectFormatter implements TypeFormatter {
       if (!isOptional) required.push(propName);
 
       let propTypeNode: ts.TypeNode | undefined;
-      const propDecl = prop.valueDeclaration;
-      if (propDecl && ts.isPropertySignature(propDecl) && propDecl.type) {
-        propTypeNode = propDecl.type;
+      const propDecl = (prop.valueDeclaration ?? (prop.declarations?.[0] as any));
+      if (propDecl) {
+        if (ts.isPropertySignature(propDecl) || ts.isPropertyDeclaration(propDecl)) {
+          if (propDecl.type) propTypeNode = propDecl.type as ts.TypeNode;
+        }
       }
+      
 
       // Get the actual property type and recursively delegate to the main schema generator
       const resolvedPropType = safeGetPropertyType(

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Stream, Default, JSONSchema, recipe } from "commontools";
+import { Cell, Stream, Default, recipe, JSONSchema } from "commontools";
 // Test nested wrapper types
 // Default wrapping Cell - these don't work because Default<T, V> requires V extends T
 // and a literal value doesn't extend Cell<T>
