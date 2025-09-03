@@ -134,11 +134,11 @@ describe("Chat pattern test", () => {
       });
       assert(chatHistory, "Should find chat history container");
 
-      // Wait for user message to appear (messages show as paragraph elements)
-      const userMessage = await page.waitForSelector("p", {
+      // Wait for user message to appear as ct-chat-message element
+      const userMessage = await page.waitForSelector("ct-chat-message", {
         strategy: "pierce",
       });
-      assert(userMessage, "Should find user message paragraph");
+      assert(userMessage, "Should find user message element");
 
       const messageText = await userMessage.evaluate((el: HTMLElement) =>
         el.textContent
@@ -164,18 +164,18 @@ describe("Chat pattern test", () => {
       });
       assert(chatHistory, "Should find chat history container");
 
-      // Wait for assistant response (second paragraph)
+      // Wait for assistant response (second ct-chat-message)
       await waitFor(async () => {
-        const paragraphs = await page.$$("p", { strategy: "pierce" });
-        return paragraphs.length >= 2;
+        const messages = await page.$$("ct-chat-message", { strategy: "pierce" });
+        return messages.length >= 2;
       }, { timeout: 30000 });
 
-      // Get all paragraphs using pierce strategy  
-      const allParagraphs = await page.$$("p", { strategy: "pierce" });
-      assert(allParagraphs.length >= 2, "Should have at least 2 message paragraphs");
+      // Get all chat messages using pierce strategy  
+      const allMessages = await page.$$("ct-chat-message", { strategy: "pierce" });
+      assert(allMessages.length >= 2, "Should have at least 2 chat messages");
 
-      // Get the assistant message (second paragraph)
-      const assistantText = await allParagraphs[1].evaluate((el: HTMLElement) => 
+      // Get the assistant message (second message)
+      const assistantText = await allMessages[1].evaluate((el: HTMLElement) => 
         el.textContent || ""
       );
       
@@ -241,14 +241,14 @@ describe("Chat pattern test", () => {
       });
 
       await waitFor(async () => {
-        const paragraphs = await page.$$("p", { strategy: "pierce" });
-        return paragraphs.length >= 4;
+        const messages = await page.$$("ct-chat-message", { strategy: "pierce" });
+        return messages.length >= 4;
       }, { timeout: 60000 });
 
-      // Get all paragraph messages to verify sequence
-      const allParagraphs = await page.$$("p", { strategy: "pierce" });
+      // Get all chat messages to verify sequence
+      const allMessages = await page.$$("ct-chat-message", { strategy: "pierce" });
       const messages = await Promise.all(
-        allParagraphs.map(async (p) => await p.evaluate((el: HTMLElement) => el.textContent || ""))
+        allMessages.map(async (msg) => await msg.evaluate((el: HTMLElement) => el.textContent || ""))
       );
 
       // Should have at least 4 messages (user1, assistant1, user2, assistant2)
