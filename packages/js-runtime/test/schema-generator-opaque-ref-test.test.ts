@@ -35,7 +35,6 @@ describe("Schema Generator OpaqueRef Test", () => {
       required: ["title", "done"],
     };
 
-    console.log("TodoItem schema result:", JSON.stringify(result, null, 2));
     expect(result).toEqual(expected);
   });
 
@@ -71,7 +70,6 @@ describe("Schema Generator OpaqueRef Test", () => {
       },
     };
 
-    console.log("TodoItem[] schema result:", JSON.stringify(result, null, 2));
     expect(result).toEqual(expected);
   });
 
@@ -115,10 +113,6 @@ describe("Schema Generator OpaqueRef Test", () => {
       required: ["items"],
     };
 
-    console.log(
-      "Root object with TodoItem[] schema result:",
-      JSON.stringify(result, null, 2),
-    );
     expect(result).toEqual(expected);
   });
 
@@ -137,11 +131,6 @@ describe("Schema Generator OpaqueRef Test", () => {
     const generator = createSchemaTransformerV2();
 
     const result = generator(type, checker, typeNode);
-
-    console.log(
-      "Complete fixture schema result:",
-      JSON.stringify(result, null, 2),
-    );
 
     // Should be an object with items array
     expect(result.type).toBe("object");

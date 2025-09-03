@@ -89,9 +89,6 @@ describe("Schema Generator V2 Integration", () => {
     const newTransformer = createSchemaTransformerV2();
     const newResult = newTransformer(type, checker, typeNode);
 
-    console.log("Old system output:", JSON.stringify(oldResult, null, 2));
-    console.log("New system output:", JSON.stringify(newResult, null, 2));
-
     // For now, we expect them to be compatible, not necessarily identical
     // This will help us identify what needs to be fixed
     expect(newResult.type).toBe(oldResult.type);
@@ -151,8 +148,6 @@ describe("Schema Generator V2 Integration", () => {
     // Test new system with typeNode
     const newTransformer = createSchemaTransformerV2();
     const newResult = newTransformer(type, checker, typeNode);
-
-    console.log("Array test - newResult:", JSON.stringify(newResult, null, 2));
 
     // Since we have the typeNode, this should be detected as an array
     expect(newResult.type).toBe("array");

@@ -31,7 +31,6 @@ describe("Schema Generator Fixture Test", () => {
       required: ["increment"],
     };
 
-    console.log("CounterEvent schema result:", JSON.stringify(result, null, 2));
     expect(result).toEqual(expected);
   });
 
@@ -58,7 +57,6 @@ describe("Schema Generator Fixture Test", () => {
       required: ["value"],
     };
 
-    console.log("CounterState schema result:", JSON.stringify(result, null, 2));
     expect(result).toEqual(expected);
   });
 
@@ -87,9 +85,6 @@ describe("Schema Generator Fixture Test", () => {
 
     const eventSchema = generator(eventType.type, eventType.checker);
     const stateSchema = generator(stateType.type, stateType.checker);
-
-    console.log("Event schema:", JSON.stringify(eventSchema, null, 2));
-    console.log("State schema:", JSON.stringify(stateSchema, null, 2));
 
     // Both should be valid object schemas
     expect(eventSchema.type).toBe("object");
