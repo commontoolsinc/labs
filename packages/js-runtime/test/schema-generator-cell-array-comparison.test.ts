@@ -35,20 +35,12 @@ describe("Schema Generator Cell Array Comparison", () => {
     // Test new system
     const newResult = generator(type, checker);
 
-    console.log("=== OLD SYSTEM OUTPUT ===");
-    console.log(JSON.stringify(oldResult, null, 2));
-    console.log("\n=== NEW SYSTEM OUTPUT ===");
-    console.log(JSON.stringify(newResult, null, 2));
-
     // Let's see what the old system actually produces
     // This will tell us what our new system should be producing
     expect(oldResult).toBeDefined();
     expect(newResult).toBeDefined();
 
-    // For now, just log the differences to understand what's happening
-    console.log("\n=== ANALYSIS ===");
-    console.log("Old system users property:", oldResult.properties?.users);
-    console.log("New system users property:", newResult.properties?.users);
+    // TODO(gideon): write assertions here
   });
 
   it("should compare old vs new system for simple Cell<string>", () => {
@@ -72,10 +64,6 @@ describe("Schema Generator Cell Array Comparison", () => {
 
     // Test new system
     const newResult = generator(type, checker);
-
-    console.log("=== SIMPLE CELL COMPARISON ===");
-    console.log("Old system name property:", oldResult.properties?.name);
-    console.log("New system name property:", newResult.properties?.name);
 
     // This should work since we fixed basic Cell<T> types
     expect(newResult.properties?.name?.asCell).toBe(true);

@@ -25,8 +25,6 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     const result = generator(type, checker);
 
-    console.log("UserEvent schema result:", JSON.stringify(result, null, 2));
-
     // Should be an object with user and action properties
     expect(result.type).toBe("object");
     expect(result.properties).toBeDefined();
@@ -47,7 +45,7 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     // Action should be a union type (we'll discover we need a UnionFormatter)
     const actionProp = result.properties?.action;
-    // TODO: This will fail and show us we need a UnionFormatter
+    // TODO(gideon): This will fail and show us we need a UnionFormatter
     // expect(actionProp?.type).toBe("string");
     // expect(actionProp?.enum).toEqual(["create", "update", "delete"]);
   });
@@ -118,11 +116,6 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     const result = generator(type, checker);
 
-    console.log(
-      "NestedGeneric schema result:",
-      JSON.stringify(result, null, 2),
-    );
-
     // Should handle nested Cell<Array<object>> correctly
     const dataProp = result.properties?.data;
     expect(dataProp?.asCell).toBe(true);
@@ -148,7 +141,7 @@ describe("Schema Generator Complex Nested Types Test", () => {
     console.log("UnionTest schema result:", JSON.stringify(result, null, 2));
 
     // This will fail and show us we need a UnionFormatter
-    // TODO: Implement UnionFormatter to handle these cases
+    // TODO(gideon): Implement UnionFormatter to handle these cases
     const statusProp = result.properties?.status;
     const priorityProp = result.properties?.priority;
 
