@@ -38,6 +38,7 @@ testComponents.forEach(({ name, file }) => {
             file,
           ),
         ),
+        { start: false },
       );
       charmId = charm.id;
     });

@@ -37,6 +37,7 @@ describe("Compile all recipes", () => {
             name,
           ),
         ),
+        { start: false },
       );
       assert(charm.id, `Received charm ID ${charm.id} for ${name}.`);
     });

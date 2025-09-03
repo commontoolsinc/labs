@@ -32,6 +32,7 @@ describe("ct-tags integration test", () => {
           "ct-tags.tsx",
         ),
       ),
+      { start: false },
     );
     charmId = charm.id;
   });
