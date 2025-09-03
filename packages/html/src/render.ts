@@ -126,12 +126,10 @@ const bindChildren = (
     const cancel = effect(child, (childValue) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
       if (isVNode(childValue)) {
-        console.log("renderChild is VNode", key);
         const [childElement, childCancel] = renderNode(childValue);
         newRendered = {
           node: childElement ?? document.createTextNode(""),
           cancel: () => {
-            console.log("Cancel", key);
             childCancel?.();
           },
         };

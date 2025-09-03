@@ -89,6 +89,8 @@ export class Scheduler implements IScheduler {
   private dependencies = new Map<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  // Track actions that were unsubscribed and not resubscribed while running the order loop
+  private unsubscribed = new Set<Action>();
 
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
@@ -148,16 +150,18 @@ export class Scheduler implements IScheduler {
     log: ReactivityLog,
     scheduleImmediately: boolean = false,
   ): Cancel {
-    console.log(
-      "called subscribe",
-    );
     if (isDebugAction(action)) {
       console.log(
-        "called schedule",
+        "called subscribe",
         (action as any).link.path,
         (action as any).id,
+        this.dependencies.has(action),
+        this.dependencies.size,
       );
     }
+    // If we were marked to prevent resubscribing, clear that
+    this.unsubscribed.delete(action);
+
     const reads = this.setDependencies(action, log);
 
     logger.debug(
@@ -208,7 +212,12 @@ export class Scheduler implements IScheduler {
     }
 
     return () => {
-      console.log("Calling unsubscribe from subscribe's cancel");
+      if (isDebugAction(action)) {
+        console.log(
+          "Calling unsubscribe from subscribe's cancel",
+          (action as any).id,
+        );
+      }
       this.unsubscribe(action);
     };
   }
@@ -217,7 +226,17 @@ export class Scheduler implements IScheduler {
     this.cancels.get(action)?.();
     this.cancels.delete(action);
     const deleted = this.dependencies.delete(action);
-    //console.log("unscheduled", deleted, this.dependencies.size);
+    // Mark this as a subscription that should not be automatically resubscribed
+    // after executing the action
+    this.unsubscribed.add(action);
+    if (isDebugAction(action)) {
+      console.log(
+        "unsubscribe",
+        (action as any).id,
+        deleted,
+        this.dependencies.size,
+      );
+    }
     this.pending.delete(action);
   }
 
@@ -257,9 +276,24 @@ export class Scheduler implements IScheduler {
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
           ]);
-          // TODO: maybe hook up this cancel --
-          // we clean up the triggers in execute, but need a proper unschedule
-          const cancel = this.subscribe(action, log);
+          if (isDebugAction(action)) {
+            console.log(
+              "resubscribe",
+              !this.unsubscribed.has(action),
+              (action as any).id,
+            );
+          }
+          // If we didn't unsubscribe
+          if (!this.unsubscribed.has(action)) {
+            // we clean up the triggers in execute, but need a proper unschedule
+            this.subscribe(action, log);
+          } else if ((action as any).link.path[0] === "internal") {
+            // TODO(@ubk2): hack while I track down why we're losing this sub
+            console.log("Forcing resubscribe for", (action as any).id);
+            this.subscribe(action, log);
+          } else {
+            console.log("Skipping resubscribe for", (action as any).id);
+          }
           resolve(result);
         }
       };
@@ -491,7 +525,7 @@ export class Scheduler implements IScheduler {
       }
     }
 
-    const order = topologicalSort(this.pending, this.dependencies);
+    const order = [...topologicalSort(this.pending, this.dependencies)];
     const debugActionIds = this.dependencies.keys().filter((action) =>
       isDebugAction(action)
     ).map((action) => (action as any).id);
@@ -512,6 +546,9 @@ export class Scheduler implements IScheduler {
       this.unsubscribe(fn);
     }
 
+    // Clear our recently unsubscribed set - we want a fresh run every time
+    this.unsubscribed.clear();
+
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
     console.log("order.length", order.length);
@@ -525,6 +562,9 @@ export class Scheduler implements IScheduler {
           fn,
         );
       } else {
+        if (isDebugAction(fn)) {
+          console.log("Running action", (fn as any).id);
+        }
         // we will run, which will call finalizeAction, which will re-establish the subscriptions
         await this.run(fn);
       }
@@ -680,5 +720,5 @@ function getCharmMetadataFromFrame(): {
 }
 
 function isDebugAction(action: Action): boolean {
-  return ("link" in action) && isDebugLink(action.link as NormalizedLink);
+  return ("link" in action); // && isDebugLink(action.link as NormalizedLink);
 }

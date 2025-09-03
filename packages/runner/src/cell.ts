@@ -818,12 +818,6 @@ function subscribeToReferencedDocs<T>(
   let cleanup: Cancel | undefined = callback(value);
 
   tx.commit();
-  if (isDebugLink(link)) {
-    console.log("In subscribeToReferencedDocs subscribe", link.path);
-    if (arrayEqual(link.path, ["0", "children", "0"])) {
-      console.trace();
-    }
-  }
   const action = (tx: any) => {
     if (isCancel(cleanup)) cleanup();
 
@@ -847,11 +841,17 @@ function subscribeToReferencedDocs<T>(
   };
   action.link = link;
   action.id = crypto.randomUUID();
+  if (isDebugLink(link)) {
+    console.log("In subscribeToReferencedDocs subscribe", link.path, action.id);
+    // if (arrayEqual(link.path, ["0", "children", "0"])) {
+    //   console.trace();
+    // }
+  }
   const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
     if (isDebugLink(link)) {
-      console.log("In subscribeToReferencedDocs cleanup", link.path);
+      console.log("In subscribeToReferencedDocs cleanup", link.path, action.id);
     }
     cancel();
     if (isCancel(cleanup)) cleanup();
