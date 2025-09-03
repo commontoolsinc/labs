@@ -87,14 +87,12 @@ const clearChat = handler(
     { chat, llmResponse }: {
       chat: Cell<Array<BuiltInLLMMessage>>;
       llmResponse: {
-        result: Cell<string | undefined>;
-        partial: Cell<string | undefined>;
+        pending: Cell<boolean>;
       };
     },
   ) => {
     chat.set([]);
-    llmResponse.partial.set(undefined);
-    llmResponse.result.set(undefined);
+    llmResponse.pending.set(false);
   },
 );
 
@@ -136,7 +134,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const llmResponse = llmDialog({
+    const { addMessage, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools as any,
@@ -176,14 +174,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
               );
             })}
             {ifElse(
-              llmResponse.pending,
+              pending,
               <ct-chat-message
                 role="assistant"
-                content={ifElse(
-                  llmResponse.partial,
-                  llmResponse.partial,
-                  "...",
-                )}
+                content="..."
               />,
               null,
             )}
@@ -194,19 +188,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
               name="Ask"
               placeholder="Ask the LLM a question..."
               appearance="rounded"
-              disabled={llmResponse.pending}
-              onct-send={sendMessage({
-                addMessage: llmResponse.addMessage,
-              })}
+              disabled={pending}
+              onct-send={sendMessage({ addMessage })}
             />
 
             <ct-button
               onClick={clearChat({
                 chat,
-                llmResponse: {
-                  result: llmResponse.result,
-                  partial: llmResponse.partial,
-                },
+                llmResponse: { pending },
               })}
             >
               Clear Chat

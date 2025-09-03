@@ -69,24 +69,6 @@ export function llmDialog(
       );
       pending.send(false);
 
-      result = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { result: cause },
-        },
-        undefined,
-        tx,
-      );
-
-      partial = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { partial: cause },
-        },
-        undefined,
-        tx,
-      );
-
       requestHash = runtime.getCell<string | undefined>(
         parentCell.space,
         {
@@ -96,6 +78,7 @@ export function llmDialog(
         tx,
       );
 
+      // Declare `addMessage` handler and register
       addMessage = runtime.getCell<BuiltInLLMMessage | undefined>(
         parentCell.space,
         {
@@ -123,8 +106,6 @@ export function llmDialog(
 
       sendResult(tx, {
         pending,
-        result,
-        partial,
         requestHash,
         addMessage,
       });
