@@ -123,6 +123,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             />
 
             <ct-button
+              id="clear-chat-button"
               onClick={clearChat({
                 chat,
                 llmResponse: { pending },

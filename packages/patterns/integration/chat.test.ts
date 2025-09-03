@@ -1,4 +1,4 @@
-import { env } from "@commontools/integration";
+import { env, waitFor } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
@@ -85,7 +85,7 @@ describe("Chat pattern test", () => {
       assert(clearButton, "Should find clear chat button");
 
       // Check for empty chat history (ul should exist but be empty initially)
-      const chatHistory = await page.waitForSelector("ul", {
+      const chatHistory = await page.waitForSelector("ct-vscroll", {
         strategy: "pierce",
       });
       assert(chatHistory, "Should find chat history container");
@@ -129,25 +129,26 @@ describe("Chat pattern test", () => {
       await sendButton.click();
 
       // Wait for the message to appear in chat history
-      const chatHistory = await page.waitForSelector("ul", {
+      const chatHistory = await page.waitForSelector("ct-vscroll", {
         strategy: "pierce",
       });
       assert(chatHistory, "Should find chat history container");
 
-      // Check that the user message appears in the chat history
-      const userMessage = await page.waitForSelector("li", {
+      // Wait for user message to appear (messages show as paragraph elements)
+      const userMessage = await page.waitForSelector("p", {
         strategy: "pierce",
       });
-      assert(userMessage, "Should find user message in chat history");
+      assert(userMessage, "Should find user message paragraph");
 
       const messageText = await userMessage.evaluate((el: HTMLElement) =>
         el.textContent
       );
+      
+      assert(messageText, "Should find user message text");
       assert(
-        messageText?.includes(testMessage),
-        "Should contain the user message",
+        messageText.includes(testMessage),
+        `Should contain the user message "${testMessage}", got: "${messageText}"`,
       );
-      assert(messageText?.includes("user:"), "Should show user role prefix");
     },
   });
 
@@ -158,28 +159,33 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Wait for LLM response to appear (this may take some time)
-      // The response appears as a list item with "assistant:" prefix
-      // We'll wait for a second li element since the first one is the user message
-      const messages = await page.waitForSelector("li + li", {
+      const chatHistory = await page.waitForSelector("ct-vscroll", {
         strategy: "pierce",
-        timeout: 30000, // 30 second timeout for LLM response
       });
-      assert(messages, "Should find LLM response in chat history");
+      assert(chatHistory, "Should find chat history container");
 
-      const responseText = await messages.evaluate((el: HTMLElement) =>
-        el.textContent
+      // Wait for assistant response (second paragraph)
+      await waitFor(async () => {
+        const paragraphs = await page.$$("p", { strategy: "pierce" });
+        return paragraphs.length >= 2;
+      }, { timeout: 30000 });
+
+      // Get all paragraphs using pierce strategy  
+      const allParagraphs = await page.$$("p", { strategy: "pierce" });
+      assert(allParagraphs.length >= 2, "Should have at least 2 message paragraphs");
+
+      // Get the assistant message (second paragraph)
+      const assistantText = await allParagraphs[1].evaluate((el: HTMLElement) => 
+        el.textContent || ""
       );
-      assert(responseText, "Should have response text");
+      
+      assert(assistantText, "Should have response text");
       assert(
-        responseText.includes("assistant:"),
-        "Should show assistant role prefix",
-      );
-      assert(
-        responseText.trim().length > "assistant:".length,
+        assistantText.trim().length > 0,
         "Response should not be empty",
       );
 
-      console.log("LLM Response:", responseText);
+      console.log("LLM Response:", assistantText);
     },
   });
 
@@ -224,25 +230,26 @@ describe("Chat pattern test", () => {
       await sleep(200);
 
       // Check that we now have multiple messages in the chat history
-      const allMessages = await page.waitForSelector("li", {
+      const allMessages = await page.waitForSelector("ct-chat-message", {
         strategy: "pierce",
       });
       assert(allMessages, "Should have messages in chat history");
 
-      // Wait for new assistant response - look for at least 4 li elements total
-      await page.waitForSelector("li + li + li + li", {
+      // Wait for new assistant response - at least 4 messages total
+      const chatHistory = await page.waitForSelector("ct-vscroll", {
         strategy: "pierce",
-        timeout: 60000, // 60 second timeout for LLM response
       });
 
-      // Get all chat messages to verify sequence
-      const chatHistory = await page.waitForSelector("ul", {
-        strategy: "pierce",
-      });
-      const messages = await chatHistory.evaluate((ul: HTMLElement) => {
-        const listItems = ul.querySelectorAll("li");
-        return Array.from(listItems).map((li) => li.textContent?.trim() || "");
-      });
+      await waitFor(async () => {
+        const paragraphs = await page.$$("p", { strategy: "pierce" });
+        return paragraphs.length >= 4;
+      }, { timeout: 60000 });
+
+      // Get all paragraph messages to verify sequence
+      const allParagraphs = await page.$$("p", { strategy: "pierce" });
+      const messages = await Promise.all(
+        allParagraphs.map(async (p) => await p.evaluate((el: HTMLElement) => el.textContent || ""))
+      );
 
       // Should have at least 4 messages (user1, assistant1, user2, assistant2)
       assert(
@@ -252,7 +259,7 @@ describe("Chat pattern test", () => {
 
       // Verify the second user message is present
       const hasSecondUserMessage = messages.some((msg) =>
-        msg.includes("user:") && msg.includes(secondMessage)
+        msg.includes(secondMessage)
       );
       assert(
         hasSecondUserMessage,
@@ -270,37 +277,26 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Verify we have messages before clearing
-      const chatHistoryBefore = await page.waitForSelector("ul", {
-        strategy: "pierce",
-      });
-      const messagesBefore = await chatHistoryBefore.evaluate(
-        (ul: HTMLElement) => {
-          return ul.querySelectorAll("li").length;
-        },
-      );
-      assert(messagesBefore > 0, "Should have messages before clearing");
+      const messagesBefore = await page.$$("p", { strategy: "pierce" });
+      assert(messagesBefore.length > 0, "Should have messages before clearing");
 
-      // Find and click the clear chat button
-      const clearButton = await page.waitForSelector("ct-button", {
+      // Find and click the clear chat button by its unique ID
+      const clearButton = await page.waitForSelector("#clear-chat-button", {
         strategy: "pierce",
       });
       assert(clearButton, "Should find clear chat button");
       await clearButton.click();
 
-      // Wait for UI to update
-      await sleep(200);
+      // Wait for chat to clear
+      await waitFor(async () => {
+        const messages = await page.$$("p", { strategy: "pierce" });
+        return messages.length === 0;
+      });
 
       // Verify chat history is now empty
-      const chatHistoryAfter = await page.waitForSelector("ul", {
-        strategy: "pierce",
-      });
-      const messagesAfter = await chatHistoryAfter.evaluate(
-        (ul: HTMLElement) => {
-          return ul.querySelectorAll("li").length;
-        },
-      );
+      const messagesAfter = await page.$$("p", { strategy: "pierce" });
       assertEquals(
-        messagesAfter,
+        messagesAfter.length,
         0,
         "Chat history should be empty after clearing",
       );
