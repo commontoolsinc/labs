@@ -238,8 +238,7 @@ export type RenderFunction = <T>(fn: () => T) => OpaqueRef<T>;
 export type StrFunction = (strings: TemplateStringsArray, ...values: any[]) => OpaqueRef<string>;
 export type IfElseFunction = <T = any, U = any, V = any>(condition: Opaque<T>, ifTrue: Opaque<U>, ifFalse: Opaque<V>) => OpaqueRef<U | V>;
 export type LLMFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
-export type LLMDialogFunction = <T = string>(params: Opaque<BuiltInLLMParams>, // TODO(bf): maybe need to drop `messages` from this type
-) => OpaqueRef<BuiltInLLMState<T>>;
+export type LLMDialogFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
 export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMState<T>>;
 export type FetchDataFunction = <T>(params: Opaque<{
     url: string;
