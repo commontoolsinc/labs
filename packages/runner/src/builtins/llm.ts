@@ -107,10 +107,7 @@ export function llm(
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: (messages ?? []).map((content: string, index: number) => ({
-        role: index % 2 ? "assistant" : "user",
-        content,
-      })),
+      messages: messages ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,

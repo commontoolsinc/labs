@@ -9,6 +9,7 @@ import { compileAndRun } from "./compile-and-run.ts";
 import { navigateTo } from "./navigate-to.ts";
 import type { Cell } from "../cell.ts";
 import type { BuiltInGenerateObjectParams } from "@commontools/api";
+import { llmDialog } from "./llm-dialog.ts";
 
 /**
  * Register all built-in modules with a runtime's module registry
@@ -20,6 +21,7 @@ export function registerBuiltins(runtime: IRuntime) {
   moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm));
+  moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
   moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
   moduleRegistry.addModuleByRef(
