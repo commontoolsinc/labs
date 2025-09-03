@@ -189,11 +189,11 @@ If the requested space lists a different provider in its service endpoints, the 
 
 ```bash
 # Request to incorrect provider
-curl -i "https://old-provider.com/did:web:example.space"
+curl -i "https://old-provider.com/did:web:old-provider.com:meal-planner"
 
 # Response
 HTTP/1.1 301 Moved Permanently
-Location: https://new-provider.com/did:web:example.space
+Location: https://new-provider.com/did:web:new-provider.com:food-planner
 ```
 
 ## Implementation Patterns
@@ -246,13 +246,13 @@ When migrating between providers, the space registry enables seamless transition
 Petnames provide a decentralized contact book:
 
 ```json
-// well-known:///family/mom/did.json
+// well-known:///mom/did.json
 {"alsoKnownAs": ["did:key:z6MkMom..."]}
 
-// well-known:///work/boss/did.json
+// well-known:///boss/did.json
 {"alsoKnownAs": ["did:key:z6MkBoss..."]}
 
-// well-known:///services/backup/did.json
+// well-known:///backup/did.json
 {"alsoKnownAs": ["did:web:backup.example.com"]}
 ```
 
@@ -261,10 +261,10 @@ Petnames provide a decentralized contact book:
 Organizations can maintain registries of authorized applications:
 
 ```json
-// well-known:///apps/editor/did.json
+// well-known:///editor/did.json
 {"alsoKnownAs": ["did:key:z6MkEditor..."]}
 
-// well-known:///apps/calendar/did.json
+// well-known:///calendar/did.json
 {"alsoKnownAs": ["did:key:z6MkCalendar..."]}
 ```
 
