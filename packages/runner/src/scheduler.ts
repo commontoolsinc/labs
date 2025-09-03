@@ -493,15 +493,16 @@ export class Scheduler implements IScheduler {
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
 
-    // Cancel all listeners for docs on already scheduled actions.
-    this.pending.clear();
-    for (const fn of order) {
-      this.unsubscribe(fn);
-    }
-
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
     for (const fn of order) {
+      // Maybe it was unsubscribed since it was added to the order.
+      if (!this.pending.has(fn)) continue;
+
+      // Take off pending list and unsubscribe, run will resubscribe.
+      this.pending.delete(fn);
+      this.unsubscribe(fn);
+
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
         this.handleError(
