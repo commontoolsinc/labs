@@ -147,14 +147,13 @@ const bindChildren = (
       }
 
       if (currentNode) {
-        // Call the old cancel
-        keyedChildren.get(key)?.cancel();
         // Replace the previous DOM node, if any
         currentNode.replaceWith(newRendered.node);
         // Update the mapping entry to capture any newly-rendered node.
+        // We'll retain the existing cancel (likely from renderChild)
         keyedChildren.set(key, {
           ...keyedChildren.get(key)!,
-          ...newRendered,
+          node: newRendered.node,
         });
       }
 
