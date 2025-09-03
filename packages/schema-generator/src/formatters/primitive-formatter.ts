@@ -4,45 +4,53 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
+import { TypeWithInternals } from "../type-utils.ts";
 
 /**
  * Formatter for primitive TypeScript types
  */
 export class PrimitiveFormatter implements TypeFormatter {
   supportsType(type: ts.Type, context: FormatterContext): boolean {
-    // Handle primitive types (safely check for methods that might not exist on mock types)
-    try {
-      if ((type as any).isStringLiteral && (type as any).isStringLiteral()) {
-        return true;
-      }
-      if ((type as any).isNumberLiteral && (type as any).isNumberLiteral()) {
-        return true;
-      }
-    } catch (_) {
-      // Ignore errors from mock types
-    }
-
-    if (type.flags & ts.TypeFlags.BooleanLiteral) {
-      return true;
-    }
-
-    // Handle primitive type references
     const flags = type.flags;
-    const supports = (flags & ts.TypeFlags.String) !== 0 ||
+
+    return (flags & ts.TypeFlags.String) !== 0 ||
       (flags & ts.TypeFlags.Number) !== 0 ||
       (flags & ts.TypeFlags.Boolean) !== 0 ||
+      (flags & ts.TypeFlags.BooleanLiteral) !== 0 ||
+      (flags & ts.TypeFlags.StringLiteral) !== 0 ||
+      (flags & ts.TypeFlags.NumberLiteral) !== 0 ||
       (flags & ts.TypeFlags.Null) !== 0 ||
       (flags & ts.TypeFlags.Undefined) !== 0 ||
       (flags & ts.TypeFlags.Void) !== 0 ||
       (flags & ts.TypeFlags.Never) !== 0 ||
       (flags & ts.TypeFlags.Unknown) !== 0 ||
       (flags & ts.TypeFlags.Any) !== 0;
-    return supports;
   }
 
   formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
     const flags = type.flags;
 
+    // Handle literal types first (more specific)
+    if (flags & ts.TypeFlags.StringLiteral) {
+      return {
+        type: "string",
+        enum: [(type as ts.StringLiteralType).value],
+      };
+    }
+    if (flags & ts.TypeFlags.NumberLiteral) {
+      return {
+        type: "number",
+        enum: [(type as ts.NumberLiteralType).value],
+      };
+    }
+    if (flags & ts.TypeFlags.BooleanLiteral) {
+      return {
+        type: "boolean",
+        enum: [(type as TypeWithInternals).intrinsicName === "true"],
+      };
+    }
+
+    // Handle general primitive types
     if (flags & ts.TypeFlags.String) {
       return { type: "string" };
     }
@@ -66,23 +74,6 @@ export class PrimitiveFormatter implements TypeFormatter {
     }
     if ((flags & ts.TypeFlags.Unknown) || (flags & ts.TypeFlags.Any)) {
       return { type: "object", additionalProperties: true };
-    }
-
-    // Handle literal types (safely check for methods that might not exist on mock types)
-    try {
-      if ((type as any).isStringLiteral && (type as any).isStringLiteral()) {
-        return { type: "string", enum: [(type as any).value] };
-      }
-      if ((type as any).isNumberLiteral && (type as any).isNumberLiteral()) {
-        return { type: "number", enum: [(type as any).value] };
-      }
-    } catch (_) {
-      // Ignore errors from mock types
-    }
-    if (type.flags & ts.TypeFlags.BooleanLiteral) {
-      // For boolean literals, we need to check if it's true or false
-      // This is a simplified approach - in practice we'd need more context
-      return { type: "boolean" };
     }
 
     // Fallback
