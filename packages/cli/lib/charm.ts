@@ -163,7 +163,7 @@ export async function newCharm(
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
   const program = await getProgramFromFile(manager, entry);
-  const charm = await charms.create(program, undefined, options);
+  const charm = await charms.create(program, options);
   return charm.id;
 }
 

@@ -32,6 +32,7 @@ describe("ct-list integration test", () => {
           "ct-list.tsx",
         ),
       ),
+      { start: false },
     );
     charmId = charm.id;
   });

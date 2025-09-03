@@ -36,6 +36,7 @@ describe("shell charm tests", () => {
           "counter.tsx",
         ),
       ),
+      { start: false },
     );
     charmId = charm.id;
   });
