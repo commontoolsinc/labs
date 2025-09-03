@@ -28,8 +28,7 @@ export class PrimitiveFormatter implements TypeFormatter {
 
     // Handle primitive type references
     const flags = type.flags;
-    return (
-      (flags & ts.TypeFlags.String) !== 0 ||
+    const supports = (flags & ts.TypeFlags.String) !== 0 ||
       (flags & ts.TypeFlags.Number) !== 0 ||
       (flags & ts.TypeFlags.Boolean) !== 0 ||
       (flags & ts.TypeFlags.Null) !== 0 ||
@@ -37,8 +36,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.Void) !== 0 ||
       (flags & ts.TypeFlags.Never) !== 0 ||
       (flags & ts.TypeFlags.Unknown) !== 0 ||
-      (flags & ts.TypeFlags.Any) !== 0
-    );
+      (flags & ts.TypeFlags.Any) !== 0;
+    return supports;
   }
 
   formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
