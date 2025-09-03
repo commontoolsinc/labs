@@ -7,7 +7,6 @@ import {
   type WorkerOptions,
 } from "./worker-controller.ts";
 import { type BGCharmEntry } from "./schema.ts";
-import { continuedIndent } from "npm:@codemirror/language@^6.10.8";
 
 export interface CharmSchedulerOptions extends WorkerOptions {
   pollingIntervalMs?: number;
@@ -95,11 +94,7 @@ export class SpaceManager {
 
     for (const entry of entries) {
       const raw = entry.get();
-      if (this.watchedCharms.has(raw.charmId)) {
-        continue;
-      }
-      this.watchedCharms.add(raw.charmId);
-      //addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
+      addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
 
       if (!raw.disabledAt) {
         desired.add(raw.charmId);

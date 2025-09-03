@@ -129,9 +129,7 @@ const bindChildren = (
         const [childElement, childCancel] = renderNode(childValue);
         newRendered = {
           node: childElement ?? document.createTextNode(""),
-          cancel: () => {
-            childCancel?.();
-          },
+          cancel: childCancel ?? (() => {}),
         };
       } else {
         if (childValue === null || childValue === undefined) {

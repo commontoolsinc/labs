@@ -839,20 +839,9 @@ function subscribeToReferencedDocs<T>(
     // on changes already.
     extraTx.commit();
   };
-  action.link = link;
-  action.id = crypto.randomUUID();
-  if (isDebugLink(link)) {
-    console.log("In subscribeToReferencedDocs subscribe", link.path, action.id);
-    // if (arrayEqual(link.path, ["0", "children", "0"])) {
-    //   console.trace();
-    // }
-  }
   const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
-    if (isDebugLink(link)) {
-      console.log("In subscribeToReferencedDocs cleanup", link.path, action.id);
-    }
     cancel();
     if (isCancel(cleanup)) cleanup();
   };
@@ -925,30 +914,4 @@ export function isCell(value: any): value is Cell<any> {
  */
 export function isStream(value: any): value is Stream<any> {
   return value instanceof StreamCell;
-}
-
-const debugLinks = [
-  {
-    id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
-    path: ["0", "children", "0", "children", "0"],
-  },
-  // {
-  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
-  //   path: ["0", "children", "0"],
-  // },
-  // {
-  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
-  //   path: ["0", "children", "0", "props", "style"],
-  // },
-  // {
-  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
-  //   path: ["0", "children", "0", "children"],
-  // },
-];
-export function isDebugLink(
-  { id, path }: { id?: string; path: readonly MemoryAddressPathComponent[] },
-) {
-  return debugLinks.some((value) =>
-    value.id === id && arrayEqual(value.path, path)
-  );
 }

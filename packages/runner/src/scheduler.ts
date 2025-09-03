@@ -18,7 +18,6 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
-  NormalizedLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -35,7 +34,6 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
-import { isDebugLink } from "./cell.ts";
 
 const logger = getLogger("scheduler", {
   enabled: false,
@@ -87,7 +85,7 @@ export class Scheduler implements IScheduler {
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
   private pending = new Set<Action>();
-  private dependencies = new Map<Action, ReactivityLog>();
+  private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
   // Track actions that were unsubscribed and not resubscribed while running the order loop
@@ -151,15 +149,6 @@ export class Scheduler implements IScheduler {
     log: ReactivityLog,
     scheduleImmediately: boolean = false,
   ): Cancel {
-    if (isDebugAction(action)) {
-      console.log(
-        "called subscribe",
-        (action as any).link.path,
-        (action as any).id,
-        this.dependencies.has(action),
-        this.dependencies.size,
-      );
-    }
     // If we were marked to prevent resubscribing, clear that
     this.unsubscribed.delete(action);
 
@@ -174,6 +163,7 @@ export class Scheduler implements IScheduler {
       this.pending.add(action);
     } else {
       const pathsByEntity = addressesToPathByEntity(reads);
+
       logger.debug(() => [
         `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
         `Entities: ${pathsByEntity.size}`,
@@ -213,12 +203,6 @@ export class Scheduler implements IScheduler {
     }
 
     return () => {
-      if (isDebugAction(action)) {
-        console.log(
-          "Calling unsubscribe from subscribe's cancel",
-          (action as any).id,
-        );
-      }
       this.unsubscribe(action);
     };
   }
@@ -226,18 +210,10 @@ export class Scheduler implements IScheduler {
   unsubscribe(action: Action): void {
     this.cancels.get(action)?.();
     this.cancels.delete(action);
-    const deleted = this.dependencies.delete(action);
+    this.dependencies.delete(action);
     // Mark this as a subscription that should not be automatically resubscribed
     // after executing the action
     this.unsubscribed.add(action);
-    if (isDebugAction(action)) {
-      console.log(
-        "unsubscribe",
-        (action as any).id,
-        deleted,
-        this.dependencies.size,
-      );
-    }
     this.pending.delete(action);
   }
 
@@ -277,23 +253,10 @@ export class Scheduler implements IScheduler {
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
           ]);
-          if (isDebugAction(action)) {
-            console.log(
-              "resubscribe",
-              !this.unsubscribed.has(action),
-              (action as any).id,
-            );
-          }
           // If we didn't unsubscribe
           if (!this.unsubscribed.has(action)) {
             // we clean up the triggers in execute, but need a proper unschedule
             this.subscribe(action, log);
-          } else if ((action as any).link.path[0] === "internal") {
-            // TODO(@ubk2): hack while I track down why we're losing this sub
-            console.log("Forcing resubscribe for", (action as any).id);
-            this.subscribe(action, log);
-          } else {
-            console.log("Skipping resubscribe for", (action as any).id);
           }
           resolve(result);
         }
@@ -462,13 +425,7 @@ export class Scheduler implements IScheduler {
   ): IMemorySpaceAddress[] {
     const reads = sortAndCompactPaths(log.reads);
     const writes = sortAndCompactPaths(log.writes);
-    const size = this.dependencies.size;
     this.dependencies.set(action, { reads, writes });
-    // console.log(
-    //   "scheduled",
-    //   size != this.dependencies.size,
-    //   this.dependencies.size,
-    // );
     return reads;
   }
 
@@ -544,18 +501,9 @@ export class Scheduler implements IScheduler {
       }
     }
 
-    const order = [...topologicalSort(this.pending, this.dependencies)];
-    const debugActionIds = this.dependencies.keys().filter((action) =>
-      isDebugAction(action)
-    ).map((action) => (action as any).id);
-    console.log("debugActionIds", [...debugActionIds]);
-    /// DEBUG
-    console.log(
-      "Dependencies",
-      this.dependencies,
-    );
+    const order = topologicalSort(this.pending, this.dependencies);
 
-    logger.info(() => [
+    logger.debug(() => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
 
@@ -570,7 +518,6 @@ export class Scheduler implements IScheduler {
 
     // Now run all functions. This will resubscribe actions with their new
     // dependencies.
-    console.log("order.length", order.length);
     for (const fn of order) {
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
@@ -581,9 +528,6 @@ export class Scheduler implements IScheduler {
           fn,
         );
       } else {
-        if (isDebugAction(fn)) {
-          console.log("Running action", (fn as any).id);
-        }
         // we will run, which will call finalizeAction, which will re-establish the subscriptions
         await this.run(fn);
       }
@@ -736,8 +680,4 @@ function getCharmMetadataFromFrame(): {
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
-}
-
-function isDebugAction(action: Action): boolean {
-  return ("link" in action); // && isDebugLink(action.link as NormalizedLink);
 }
