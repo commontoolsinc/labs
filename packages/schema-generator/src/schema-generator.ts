@@ -11,7 +11,12 @@ import { ArrayFormatter } from "./formatters/array-formatter.ts";
 import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
-import { getNamedTypeKey, isDefaultTypeRef } from "./type-utils.ts";
+import { 
+  getNamedTypeKey, 
+  isDefaultTypeRef, 
+  safeGetTypeOfSymbolAtLocation, 
+  safeGetIndexTypeOfType 
+} from "./type-utils.ts";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -406,23 +411,13 @@ export class SchemaGenerator implements ISchemaGenerator {
           // Traverse properties
           if (checker) {
             for (const prop of checker.getPropertiesOfType(t)) {
-              try {
-                const pt = checker.getTypeOfSymbolAtLocation(
-                  prop,
-                  prop.valueDeclaration ?? (prop.declarations?.[0] as any),
-                );
-                if (pt) visit(pt);
-              } catch (_) {
-                // ignore
-              }
+              const location = prop.valueDeclaration ?? (prop.declarations?.[0] as any);
+              const pt = safeGetTypeOfSymbolAtLocation(checker, prop, location, "cycle detection property");
+              if (pt) visit(pt);
             }
             // Traverse numeric index (arrays/tuples)
-            try {
-              const idx = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
-              if (idx) visit(idx);
-            } catch (_) {
-              // ignore
-            }
+            const idx = safeGetIndexTypeOfType(checker, t, ts.IndexKind.Number, "cycle detection numeric index");
+            if (idx) visit(idx);
           }
         }
       } finally {

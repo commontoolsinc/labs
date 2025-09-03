@@ -1,18 +1,74 @@
 import ts from "typescript";
 
 /**
- * Get a stable, human-readable type name for definitions
+ * Safe wrapper for TypeScript checker APIs that may throw in reduced environments
  */
-export function getStableTypeName(
-  type: ts.Type,
-  definitions?: Record<string, any>,
-): string {
-  const symbolName = type.symbol?.name;
-  if (symbolName && symbolName !== "__type") return symbolName;
-  if (definitions) {
-    return `Type${Object.keys(definitions).length}`;
+export function safeGetTypeFromTypeNode(
+  checker: ts.TypeChecker,
+  node: ts.TypeNode,
+  context?: string,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeFromTypeNode(node);
+  } catch (error) {
+    console.warn(
+      `Failed to get type from node${context ? ` in ${context}` : ""}:`,
+      error,
+    );
+    return undefined;
   }
-  return "Type0";
+}
+
+/**
+ * Safe wrapper for getting type of symbol at location
+ */
+export function safeGetTypeOfSymbolAtLocation(
+  checker: ts.TypeChecker,
+  symbol: ts.Symbol,
+  location: ts.Node,
+  context?: string,
+): ts.Type | undefined {
+  try {
+    return checker.getTypeOfSymbolAtLocation(symbol, location);
+  } catch (error) {
+    console.warn(
+      `Failed to get type of symbol at location${
+        context ? ` in ${context}` : ""
+      }:`,
+      error,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Safe wrapper for getting index type
+ */
+export function safeGetIndexTypeOfType(
+  checker: ts.TypeChecker,
+  type: ts.Type,
+  kind: ts.IndexKind,
+  context?: string,
+): ts.Type | undefined {
+  try {
+    return checker.getIndexTypeOfType(type, kind);
+  } catch (error) {
+    console.warn(
+      `Failed to get index type${context ? ` in ${context}` : ""}:`,
+      error,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * TypeScript internal API type extensions for safer casting
+ */
+export interface TypeWithInternals extends ts.Type {
+  aliasSymbol?: ts.Symbol;
+  aliasTypeArguments?: readonly ts.Type[];
+  resolvedTypeArguments?: readonly ts.Type[];
+  intrinsicName?: string;
 }
 
 /**
@@ -32,7 +88,7 @@ export function getNamedTypeKey(
   }
   // Fall back to alias symbol when present (type aliases)
   if (!name) {
-    const aliasName = (type as any).aliasSymbol?.name as string | undefined;
+    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (aliasName) name = aliasName;
   }
   if (!name || name === "__type") return undefined;
@@ -65,13 +121,16 @@ export function getArrayElementInfo(
   if (typeNode) {
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
-      try {
+      const elementType = safeGetTypeFromTypeNode(
+        checker,
+        typeNode.elementType,
+        "array element type",
+      );
+      if (elementType) {
         return {
-          elementType: checker.getTypeFromTypeNode(typeNode.elementType),
+          elementType,
           elementNode: typeNode.elementType,
         };
-      } catch (_) {
-        // fall through
       }
     }
 
@@ -86,13 +145,16 @@ export function getArrayElementInfo(
           typeNode.typeArguments && typeNode.typeArguments.length > 0
         ) {
           const argNode = typeNode.typeArguments[0]!;
-          try {
+          const elementType = safeGetTypeFromTypeNode(
+            checker,
+            argNode,
+            "Array<T> type argument",
+          );
+          if (elementType) {
             return {
-              elementType: checker.getTypeFromTypeNode(argNode),
+              elementType,
               elementNode: argNode,
             };
-          } catch (_) {
-            // fall through
           }
         }
         // Resolve alias: if this is a type alias referring to Array<T> or T[]
@@ -101,13 +163,16 @@ export function getArrayElementInfo(
         if (decl && ts.isTypeAliasDeclaration(decl)) {
           const aliased = decl.type;
           if (ts.isArrayTypeNode(aliased)) {
-            try {
+            const elementType = safeGetTypeFromTypeNode(
+              checker,
+              aliased.elementType,
+              "aliased array element type",
+            );
+            if (elementType) {
               return {
-                elementType: checker.getTypeFromTypeNode(aliased.elementType),
+                elementType,
                 elementNode: aliased.elementType,
               };
-            } catch (_) {
-              // ignore
             }
           }
           if (ts.isTypeReferenceNode(aliased)) {
@@ -118,13 +183,16 @@ export function getArrayElementInfo(
               aliased.typeArguments && aliased.typeArguments.length > 0
             ) {
               const argNode = aliased.typeArguments[0]!;
-              try {
+              const elementType = safeGetTypeFromTypeNode(
+                checker,
+                argNode,
+                "aliased Array<T> type argument",
+              );
+              if (elementType) {
                 return {
-                  elementType: checker.getTypeFromTypeNode(argNode),
+                  elementType,
                   elementNode: argNode,
                 };
-              } catch (_) {
-                // ignore
               }
             }
           }
@@ -160,28 +228,17 @@ export function getArrayElementInfo(
   }
 
   // Use numeric index type as fallback (for tuples/array-like objects)
-  try {
-    const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    if (elementType) {
-      return { elementType };
-    }
-  } catch (_error) {
-    // Treat as non-array if checker throws during index type resolution
+  const elementType = safeGetIndexTypeOfType(
+    checker,
+    type,
+    ts.IndexKind.Number,
+    "array numeric index",
+  );
+  if (elementType) {
+    return { elementType };
   }
 
   return undefined;
-}
-
-/**
- * Backwards-compatible helper that returns only the element type, built on getArrayElementInfo.
- */
-export function getArrayElementType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-  typeNode?: ts.TypeNode,
-): ts.Type | undefined {
-  const info = getArrayElementInfo(type, checker, typeNode);
-  return info?.elementType;
 }
 
 /**
@@ -196,26 +253,34 @@ export function safeGetPropertyType(
   // Prefer declared type node when available
   const decl = prop.valueDeclaration;
   if (decl && ts.isPropertySignature(decl) && decl.type) {
-    try {
-      return checker.getTypeFromTypeNode(decl.type);
-    } catch (_) {
-      // fallthrough
-    }
+    const typeFromNode = safeGetTypeFromTypeNode(
+      checker,
+      decl.type,
+      "property signature",
+    );
+    if (typeFromNode) return typeFromNode;
   }
+
   if (fallbackNode) {
-    try {
-      return checker.getTypeFromTypeNode(fallbackNode);
-    } catch (_) {
-      // fallthrough
-    }
+    const typeFromFallback = safeGetTypeFromTypeNode(
+      checker,
+      fallbackNode,
+      "property fallback node",
+    );
+    if (typeFromFallback) return typeFromFallback;
   }
+
   // Last resort: use symbol location
-  try {
-    return checker.getTypeOfSymbolAtLocation(prop, prop.valueDeclaration!);
-  } catch (_) {
-    // If all else fails, return any
-    return checker.getAnyType();
-  }
+  const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
+    checker,
+    prop,
+    prop.valueDeclaration!,
+    "property symbol location",
+  );
+  if (typeFromSymbol) return typeFromSymbol;
+
+  // If all else fails, return any
+  return checker.getAnyType();
 }
 
 /**

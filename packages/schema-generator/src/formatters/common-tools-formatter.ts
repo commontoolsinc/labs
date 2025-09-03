@@ -8,6 +8,8 @@ import {
   extractValueFromTypeNode,
   getArrayElementInfo,
   isDefaultTypeRef,
+  safeGetTypeFromTypeNode,
+  TypeWithInternals,
 } from "../type-utils.ts";
 
 /**
@@ -17,7 +19,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   constructor(private schemaGenerator?: any) {}
   supportsType(type: ts.Type, context: FormatterContext): boolean {
     // Prefer node-driven detection to handle aliases where Default<T,V> erases to T
-    const n = (context as any).typeNode as ts.TypeNode | undefined;
+    const n = context.typeNode;
     if (n && ts.isTypeReferenceNode(n)) {
       const tn = n.typeName;
       if (ts.isIdentifier(tn)) {
@@ -48,7 +50,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     const symbol = typeRef.target?.symbol;
     // If node indicates Default<T,V> (even if type erases to Array/etc.),
     // delegate to Default handler. Node takes precedence for Default alias.
-    const n = (context as any).typeNode as ts.TypeNode | undefined;
+    const n = context.typeNode;
 
     if (n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
       return this.formatDefaultType(typeRef, checker, context);
@@ -354,10 +356,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: FormatterContext,
   ): SchemaDefinition {
-    const typeArguments = (typeRef as any).aliasTypeArguments as
-      | ts.Type[]
-      | undefined ??
-      (typeRef as any).resolvedTypeArguments as ts.Type[] | undefined ??
+    const typeArguments = (typeRef as TypeWithInternals).aliasTypeArguments ??
+      (typeRef as TypeWithInternals).resolvedTypeArguments ??
       typeRef.typeArguments;
 
     // Attempt to recover erased type arguments from the node when Default<T,V>
@@ -382,16 +382,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       defaultType = typeArguments[1]!;
     } else if (valueTypeNode && defaultTypeNode) {
       // Erased alias path: derive types from nodes
-      try {
-        valueType = checker.getTypeFromTypeNode(valueTypeNode);
-      } catch (_) {
-        valueType = undefined;
-      }
-      try {
-        defaultType = checker.getTypeFromTypeNode(defaultTypeNode);
-      } catch (_) {
-        defaultType = undefined;
-      }
+      valueType = safeGetTypeFromTypeNode(checker, valueTypeNode, "Default<T,V> value type");
+      defaultType = safeGetTypeFromTypeNode(checker, defaultTypeNode, "Default<T,V> default type");
     }
     if (!valueType || !defaultType) {
       return { type: "object", additionalProperties: true };
@@ -450,8 +442,9 @@ export class CommonToolsFormatter implements TypeFormatter {
               const inlined = inlineIfRef(raw);
               // If we got a generic fallback, keep it - tests will tell us if we need something better
               valueSchema = inlined;
-            } catch (_) {
+            } catch (error) {
               // Fallback to generic schema if generation fails
+              console.warn("Failed to generate schema for Default<T,V> value type:", error);
               valueSchema = { type: "object", additionalProperties: true };
             }
           } else {
@@ -555,10 +548,8 @@ export class CommonToolsFormatter implements TypeFormatter {
   private getTypeArgument(type: ts.Type, index: number): ts.Type | undefined {
     const typeRef = type as ts.TypeReference;
 
-    const aliasArgs = (type as any).aliasTypeArguments as ts.Type[] | undefined;
-    const resolvedArgs = (type as any).resolvedTypeArguments as
-      | ts.Type[]
-      | undefined;
+    const aliasArgs = (type as TypeWithInternals).aliasTypeArguments;
+    const resolvedArgs = (type as TypeWithInternals).resolvedTypeArguments;
     const directArgs = typeRef.typeArguments as ts.Type[] | undefined;
 
     let chosen: ts.Type | undefined = undefined;
@@ -635,7 +626,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       return (type as ts.NumberLiteralType).value;
     }
     if (type.flags & ts.TypeFlags.BooleanLiteral) {
-      return (type as any).intrinsicName === "true";
+      return (type as TypeWithInternals).intrinsicName === "true";
     }
 
     // Default fallback
