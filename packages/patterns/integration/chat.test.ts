@@ -39,6 +39,7 @@ describe("Chat pattern test", () => {
             "chat.tsx",
           ),
         ),
+        { start: false },
       );
       charmId = charm.id;
     });
