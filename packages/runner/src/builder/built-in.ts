@@ -1,3 +1,4 @@
+import { BuiltInLLMDialogState } from "@commontools/api";
 import { createNodeFactory, lift } from "./module.ts";
 import type {
   Cell,
@@ -32,9 +33,9 @@ export const llm = createNodeFactory({
 export const llmDialog = createNodeFactory({
   type: "ref",
   implementation: "llmDialog",
-}) as <T = string>(
+}) as (
   params: Opaque<BuiltInLLMParams>, // TODO(bf): maybe need to drop `messages` from this type
-) => OpaqueRef<BuiltInLLMState<T>>;
+) => OpaqueRef<BuiltInLLMDialogState>;
 
 export const generateObject = createNodeFactory({
   type: "ref",

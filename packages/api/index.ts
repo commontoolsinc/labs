@@ -287,6 +287,12 @@ export interface BuiltInLLMState<T> {
   addMessage: Stream<BuiltInLLMMessage>;
 }
 
+export interface BuiltInLLMDialogState {
+  pending: boolean;
+  error: unknown;
+  addMessage: Stream<BuiltInLLMMessage>;
+}
+
 export interface BuiltInGenerateObjectParams {
   model?: string;
   prompt?: string;
@@ -437,9 +443,9 @@ export type LLMFunction = <T = string>(
   params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState<T>>;
 
-export type LLMDialogFunction = <T = string>(
-  params: Opaque<BuiltInLLMParams>, // TODO(bf): maybe need to drop `messages` from this type
-) => OpaqueRef<BuiltInLLMState<T>>;
+export type LLMDialogFunction = (
+  params: Opaque<BuiltInLLMParams>,
+) => OpaqueRef<BuiltInLLMDialogState>;
 
 export type GenerateObjectFunction = <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,

@@ -8,9 +8,9 @@ import {
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
+  BuiltInLLMDialogState,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  BuiltInLLMState,
   BuiltInLLMTool,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
