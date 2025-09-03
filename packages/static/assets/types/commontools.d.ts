@@ -171,11 +171,16 @@ export interface BuiltInLLMParams {
     }>;
 }
 export interface BuiltInLLMState<T> {
-    pending: boolean;
-    result?: T;
-    partial?: string;
-    error: unknown;
-    addMessage: Stream<BuiltInLLMMessage>;
+  pending: boolean;
+  result?: T;
+  partial?: string;
+  error: unknown;
+}
+export interface BuiltInLLMDialogState {
+  pending: boolean;
+  error: unknown;
+  messages: BuiltInLLMMessage[];
+  addMessage: Stream<BuiltInLLMMessage>;
 }
 export interface BuiltInLLMDialogState {
     pending: boolean;

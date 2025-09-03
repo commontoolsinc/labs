@@ -12,6 +12,7 @@ import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
   BuiltInGenerateObjectParams,
+  BuiltInLLMDialogState,
   BuiltInLLMParams,
   BuiltInLLMState,
 } from "commontools";
