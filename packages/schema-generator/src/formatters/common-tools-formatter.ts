@@ -4,7 +4,11 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import { extractValueFromTypeNode, getArrayElementInfo, isDefaultTypeRef, synthesizeSchemaFromTypeNode } from "../type-utils.ts";
+import {
+  extractValueFromTypeNode,
+  getArrayElementInfo,
+  isDefaultTypeRef,
+} from "../type-utils.ts";
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
@@ -29,7 +33,9 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
         const typeRef = objectType as ts.TypeReference;
         const name = typeRef.target?.symbol?.name;
-        if (name === "Cell" || name === "Stream" || name === "Default") return true;
+        if (name === "Cell" || name === "Stream" || name === "Default") {
+          return true;
+        }
       }
     }
     return false;
@@ -43,7 +49,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // If node indicates Default<T,V> (even if type erases to Array/etc.),
     // delegate to Default handler. Node takes precedence for Default alias.
     const n = (context as any).typeNode as ts.TypeNode | undefined;
-    
+
     if (n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
       return this.formatDefaultType(typeRef, checker, context);
     }
@@ -76,8 +82,13 @@ export class CommonToolsFormatter implements TypeFormatter {
         (((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0) &&
         ((t as ts.TypeReference).target?.symbol?.name === name));
 
-    const getContainerArg = (ref: ts.TypeReference, idx = 0): ts.Type | undefined =>
-      (ref.typeArguments && ref.typeArguments.length > idx) ? ref.typeArguments[idx] : undefined;
+    const getContainerArg = (
+      ref: ts.TypeReference,
+      idx = 0,
+    ): ts.Type | undefined =>
+      (ref.typeArguments && ref.typeArguments.length > idx)
+        ? ref.typeArguments[idx]
+        : undefined;
     // Helper: if the context node is an alias like type CellArray<T> = Cell<T[]>,
     // detect and return the element node substituted with the actual argument.
     const getAliasArrayElementFromCell = (
@@ -155,7 +166,10 @@ export class CommonToolsFormatter implements TypeFormatter {
         innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
         isDefaultTypeRef(innerTypeNode, checker)
       );
-      if (containerArg && !innerLooksLikeDefault && !isNamedTypeRef(containerArg, "Default")) {
+      if (
+        containerArg && !innerLooksLikeDefault &&
+        !isNamedTypeRef(containerArg, "Default")
+      ) {
         const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
         if (info) {
           const items = this.schemaGenerator.formatChildType(
@@ -206,8 +220,13 @@ export class CommonToolsFormatter implements TypeFormatter {
         (((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0) &&
         ((t as ts.TypeReference).target?.symbol?.name === name));
 
-    const getContainerArg = (ref: ts.TypeReference, idx = 0): ts.Type | undefined =>
-      (ref.typeArguments && ref.typeArguments.length > idx) ? ref.typeArguments[idx] : undefined;
+    const getContainerArg = (
+      ref: ts.TypeReference,
+      idx = 0,
+    ): ts.Type | undefined =>
+      (ref.typeArguments && ref.typeArguments.length > idx)
+        ? ref.typeArguments[idx]
+        : undefined;
     // Mirror Cell<T> robustness: resolve via alias/resolved arguments and carry node
     let innerTypeNode: ts.TypeNode | undefined;
     if (
@@ -221,14 +240,18 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Do not unwrap Array<T> here; let downstream logic inspect array-ness
     const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
 
-      if (this.schemaGenerator) {
+    if (this.schemaGenerator) {
       const containerArg = getContainerArg(typeRef, 0);
-      const containerArgIsCell = !!(containerArg && isNamedTypeRef(containerArg, "Cell"));
+      const containerArgIsCell =
+        !!(containerArg && isNamedTypeRef(containerArg, "Cell"));
       const innerLooksLikeDefault = !!(
         innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
         isDefaultTypeRef(innerTypeNode, checker)
       );
-      if (containerArg && !innerLooksLikeDefault && !isNamedTypeRef(containerArg, "Default")) {
+      if (
+        containerArg && !innerLooksLikeDefault &&
+        !isNamedTypeRef(containerArg, "Default")
+      ) {
         const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
         if (info) {
           const items = this.schemaGenerator.formatChildType(
@@ -242,37 +265,37 @@ export class CommonToolsFormatter implements TypeFormatter {
       // If Stream<Default<T,V>> is encountered, Default handles default/union. Just add flags.
       if (innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
         // If Stream< Cell<T> >, ensure both flags where fixtures expect it
-          if (
-            ts.isTypeReferenceNode(innerTypeNode) &&
-            innerTypeNode.typeName && ts.isIdentifier(innerTypeNode.typeName) &&
-            innerTypeNode.typeName.text === "Cell"
-          ) {
-            return {
-              ...(this.schemaGenerator.formatChildType(
-                innerType,
-                context.typeChecker,
-                innerTypeNode,
-              ) as any),
-              asCell: true,
-              asStream: true,
-            } as SchemaDefinition;
-          }
-          // Also detect alias-resolved Cell via type or container argument
-          if (
-            containerArgIsCell ||
-            (innerType && (innerType.flags & ts.TypeFlags.Object) !== 0 &&
-              ((innerType as ts.TypeReference).target?.symbol?.name === "Cell"))
-          ) {
-            return {
-              ...(this.schemaGenerator.formatChildType(
-                innerType,
-                context.typeChecker,
-                innerTypeNode,
-              ) as any),
-              asCell: true,
-              asStream: true,
-            } as SchemaDefinition;
-          }
+        if (
+          ts.isTypeReferenceNode(innerTypeNode) &&
+          innerTypeNode.typeName && ts.isIdentifier(innerTypeNode.typeName) &&
+          innerTypeNode.typeName.text === "Cell"
+        ) {
+          return {
+            ...(this.schemaGenerator.formatChildType(
+              innerType,
+              context.typeChecker,
+              innerTypeNode,
+            ) as any),
+            asCell: true,
+            asStream: true,
+          } as SchemaDefinition;
+        }
+        // Also detect alias-resolved Cell via type or container argument
+        if (
+          containerArgIsCell ||
+          (innerType && (innerType.flags & ts.TypeFlags.Object) !== 0 &&
+            ((innerType as ts.TypeReference).target?.symbol?.name === "Cell"))
+        ) {
+          return {
+            ...(this.schemaGenerator.formatChildType(
+              innerType,
+              context.typeChecker,
+              innerTypeNode,
+            ) as any),
+            asCell: true,
+            asStream: true,
+          } as SchemaDefinition;
+        }
         return {
           ...(this.schemaGenerator.formatChildType(
             innerType,
@@ -390,7 +413,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (valueTypeNode && ts.isArrayTypeNode(valueTypeNode)) {
         const elemNode = valueTypeNode.elementType;
         const elemType = context.typeChecker.getTypeFromTypeNode(elemNode);
-        const itemsRaw = this.schemaGenerator.generateSchema(
+        const itemsRaw = this.schemaGenerator.formatChildType(
           elemType,
           context.typeChecker,
           elemNode,
@@ -404,7 +427,7 @@ export class CommonToolsFormatter implements TypeFormatter {
           valueTypeNode,
         );
         if (elemInfo) {
-          const itemsRaw = this.schemaGenerator.generateSchema(
+          const itemsRaw = this.schemaGenerator.formatChildType(
             elemInfo.elementType,
             context.typeChecker,
             elemInfo.elementNode,
@@ -416,27 +439,23 @@ export class CommonToolsFormatter implements TypeFormatter {
           // mirror old-system behavior under alias erasure.
           if (valueTypeNode) {
             try {
-              const nodeType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
-              const raw = this.schemaGenerator.generateSchema(
+              const nodeType = context.typeChecker.getTypeFromTypeNode(
+                valueTypeNode,
+              );
+              const raw = this.schemaGenerator.formatChildType(
                 nodeType,
                 context.typeChecker,
                 valueTypeNode,
               );
               const inlined = inlineIfRef(raw);
-              if (
-                inlined && typeof inlined === "object" &&
-                (inlined as any).type === "object" &&
-                (inlined as any).additionalProperties === true
-              ) {
-                valueSchema = synthesizeSchemaFromTypeNode(valueTypeNode) as any;
-              } else {
-                valueSchema = inlined;
-              }
+              // If we got a generic fallback, keep it - tests will tell us if we need something better
+              valueSchema = inlined;
             } catch (_) {
-              valueSchema = synthesizeSchemaFromTypeNode(valueTypeNode) as any;
+              // Fallback to generic schema if generation fails
+              valueSchema = { type: "object", additionalProperties: true };
             }
           } else {
-            const raw = this.schemaGenerator.generateSchema(
+            const raw = this.schemaGenerator.formatChildType(
               valueType,
               context.typeChecker,
               valueTypeNode,
@@ -464,11 +483,14 @@ export class CommonToolsFormatter implements TypeFormatter {
     // If the value type is a union with null, produce oneOf form consistently.
     // Prefer syntax-driven detection first (valueTypeNode) to handle cases where
     // the checker folds away `null` in minimal program environments.
-    if (this.schemaGenerator && valueTypeNode && ts.isUnionTypeNode(valueTypeNode)) {
+    if (
+      this.schemaGenerator && valueTypeNode && ts.isUnionTypeNode(valueTypeNode)
+    ) {
       const parts = valueTypeNode.types ?? [] as ts.TypeNode[];
       const isNullNode = (p: ts.TypeNode) =>
         p.kind === ts.SyntaxKind.NullKeyword ||
-        (ts.isLiteralTypeNode(p) && p.literal.kind === ts.SyntaxKind.NullKeyword);
+        (ts.isLiteralTypeNode(p) &&
+          p.literal.kind === ts.SyntaxKind.NullKeyword);
       const hasNullNode = parts.some(isNullNode);
       const nonNullNodes = parts.filter((p) => !isNullNode(p));
       if (hasNullNode && nonNullNodes.length === 1) {
@@ -480,7 +502,9 @@ export class CommonToolsFormatter implements TypeFormatter {
           nn,
         );
         const out: any = { oneOf: [{ type: "null" }, nnSchema] };
-        if ((valueSchema as any).default !== undefined) out.default = (valueSchema as any).default;
+        if ((valueSchema as any).default !== undefined) {
+          out.default = (valueSchema as any).default;
+        }
         return out as SchemaDefinition;
       }
     }
