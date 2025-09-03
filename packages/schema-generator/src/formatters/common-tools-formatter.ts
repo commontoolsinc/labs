@@ -5,7 +5,6 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import {
-  extractValueFromTypeNode,
   getArrayElementInfo,
   isDefaultTypeRef,
   safeGetTypeFromTypeNode,
@@ -382,8 +381,16 @@ export class CommonToolsFormatter implements TypeFormatter {
       defaultType = typeArguments[1]!;
     } else if (valueTypeNode && defaultTypeNode) {
       // Erased alias path: derive types from nodes
-      valueType = safeGetTypeFromTypeNode(checker, valueTypeNode, "Default<T,V> value type");
-      defaultType = safeGetTypeFromTypeNode(checker, defaultTypeNode, "Default<T,V> default type");
+      valueType = safeGetTypeFromTypeNode(
+        checker,
+        valueTypeNode,
+        "Default<T,V> value type",
+      );
+      defaultType = safeGetTypeFromTypeNode(
+        checker,
+        defaultTypeNode,
+        "Default<T,V> default type",
+      );
     }
     if (!valueType || !defaultType) {
       return { type: "object", additionalProperties: true };
@@ -444,7 +451,10 @@ export class CommonToolsFormatter implements TypeFormatter {
               valueSchema = inlined;
             } catch (error) {
               // Fallback to generic schema if generation fails
-              console.warn("Failed to generate schema for Default<T,V> value type:", error);
+              console.warn(
+                "Failed to generate schema for Default<T,V> value type:",
+                error,
+              );
               valueSchema = { type: "object", additionalProperties: true };
             }
           } else {
@@ -464,10 +474,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Prefer extracting default from the node to support arrays/tuples/objects
     let extracted: any = undefined;
     if (defaultTypeNode) {
-      extracted = extractValueFromTypeNode(defaultTypeNode, checker);
+      extracted = this.extractComplexDefaultValue(defaultTypeNode, checker);
     }
     if (extracted === undefined) {
-      extracted = this.extractValueFromType(defaultType, checker);
+      extracted = this.extractLiteralDefaultValue(defaultType, checker);
     }
     if (extracted !== undefined) {
       (valueSchema as any).default = extracted;
@@ -592,33 +602,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     return { type: "object", additionalProperties: true };
   }
 
-  private createSimpleInnerSchemaFromNode(
-    node: ts.TypeNode,
-    checker: ts.TypeChecker,
-  ): SchemaDefinition {
-    // Simple fallback for inner types from TypeNode
-    // In the full implementation, this would delegate to the main generator
-    if (ts.isLiteralTypeNode(node)) {
-      if (ts.isStringLiteral(node.literal)) {
-        return { type: "string" };
-      }
-      if (ts.isNumericLiteral(node.literal)) {
-        return { type: "number" };
-      }
-      if (
-        node.literal.kind === ts.SyntaxKind.TrueKeyword ||
-        node.literal.kind === ts.SyntaxKind.FalseKeyword
-      ) {
-        return { type: "boolean" };
-      }
-    }
-
-    // Default fallback
-    return { type: "object", additionalProperties: true };
-  }
-
-  private extractValueFromType(type: ts.Type, checker: ts.TypeChecker): any {
-    // Simple extraction of literal values from types
+  private extractLiteralDefaultValue(type: ts.Type, checker: ts.TypeChecker): any {
+    // Simple extraction of literal values (string, number, boolean) from types as fallback
     if (type.flags & ts.TypeFlags.StringLiteral) {
       return (type as ts.StringLiteralType).value;
     }
@@ -630,6 +615,61 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Default fallback
+    return undefined;
+  }
+
+  /**
+   * Extract complex default values (objects, arrays, tuples) from AST syntax for Default<T,V> processing
+   */
+  private extractComplexDefaultValue(
+    node: ts.TypeNode,
+    checker: ts.TypeChecker,
+  ): any {
+    if (ts.isLiteralTypeNode(node)) {
+      const lit = node.literal;
+      if (ts.isStringLiteral(lit)) return lit.text;
+      if (ts.isNumericLiteral(lit)) return Number(lit.text);
+      if (lit.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (lit.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (lit.kind === ts.SyntaxKind.NullKeyword) return null;
+      if (lit.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+      return undefined;
+    }
+
+    if (ts.isTypeLiteralNode(node)) {
+      const obj: any = {};
+      for (const member of node.members) {
+        if (
+          ts.isPropertySignature(member) && member.name &&
+          ts.isIdentifier(member.name)
+        ) {
+          const propName = member.name.text;
+          if (member.type) {
+            obj[propName] = this.extractComplexDefaultValue(member.type, checker);
+          }
+        }
+      }
+      return obj;
+    }
+
+    if (ts.isTupleTypeNode(node)) {
+      return node.elements.map((element: ts.TypeNode) =>
+        this.extractComplexDefaultValue(element, checker)
+      );
+    }
+
+    // For union defaults like null or undefined (Default<T|null, null>)
+    if (ts.isUnionTypeNode(node)) {
+      const nullType = node.types.find((t) =>
+        t.kind === ts.SyntaxKind.NullKeyword
+      );
+      const undefType = node.types.find((t) =>
+        t.kind === ts.SyntaxKind.UndefinedKeyword
+      );
+      if (nullType) return null;
+      if (undefType) return undefined;
+    }
+
     return undefined;
   }
 }

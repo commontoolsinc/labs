@@ -62,6 +62,48 @@ export function safeGetIndexTypeOfType(
 }
 
 /**
+ * Safely resolve a property's type, preferring AST nodes to avoid deep checker recursion
+ */
+export function safeGetPropertyType(
+  prop: ts.Symbol,
+  parentType: ts.Type,
+  checker: ts.TypeChecker,
+  fallbackNode?: ts.TypeNode,
+): ts.Type {
+  // Prefer declared type node when available
+  const decl = prop.valueDeclaration;
+  if (decl && ts.isPropertySignature(decl) && decl.type) {
+    const typeFromNode = safeGetTypeFromTypeNode(
+      checker,
+      decl.type,
+      "property signature",
+    );
+    if (typeFromNode) return typeFromNode;
+  }
+
+  if (fallbackNode) {
+    const typeFromFallback = safeGetTypeFromTypeNode(
+      checker,
+      fallbackNode,
+      "property fallback node",
+    );
+    if (typeFromFallback) return typeFromFallback;
+  }
+
+  // Last resort: use symbol location
+  const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
+    checker,
+    prop,
+    prop.valueDeclaration!,
+    "property symbol location",
+  );
+  if (typeFromSymbol) return typeFromSymbol;
+
+  // If all else fails, return any
+  return checker.getAnyType();
+}
+
+/**
  * TypeScript internal API type extensions for safer casting
  */
 export interface TypeWithInternals extends ts.Type {
@@ -242,48 +284,6 @@ export function getArrayElementInfo(
 }
 
 /**
- * Safely resolve a property's type, preferring AST nodes to avoid deep checker recursion
- */
-export function safeGetPropertyType(
-  prop: ts.Symbol,
-  parentType: ts.Type,
-  checker: ts.TypeChecker,
-  fallbackNode?: ts.TypeNode,
-): ts.Type {
-  // Prefer declared type node when available
-  const decl = prop.valueDeclaration;
-  if (decl && ts.isPropertySignature(decl) && decl.type) {
-    const typeFromNode = safeGetTypeFromTypeNode(
-      checker,
-      decl.type,
-      "property signature",
-    );
-    if (typeFromNode) return typeFromNode;
-  }
-
-  if (fallbackNode) {
-    const typeFromFallback = safeGetTypeFromTypeNode(
-      checker,
-      fallbackNode,
-      "property fallback node",
-    );
-    if (typeFromFallback) return typeFromFallback;
-  }
-
-  // Last resort: use symbol location
-  const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
-    checker,
-    prop,
-    prop.valueDeclaration!,
-    "property symbol location",
-  );
-  if (typeFromSymbol) return typeFromSymbol;
-
-  // If all else fails, return any
-  return checker.getAnyType();
-}
-
-/**
  * Check if a type reference node represents Default<T,V>
  */
 export function isDefaultTypeRef(
@@ -314,59 +314,4 @@ export function isDefaultTypeRef(
     }
   }
   return false;
-}
-
-/**
- * Extract compile-time default value from a type node
- */
-export function extractValueFromTypeNode(
-  node: ts.TypeNode,
-  checker: ts.TypeChecker,
-): any {
-  if (ts.isLiteralTypeNode(node)) {
-    const lit = node.literal;
-    if (ts.isStringLiteral(lit)) return lit.text;
-    if (ts.isNumericLiteral(lit)) return Number(lit.text);
-    if (lit.kind === ts.SyntaxKind.TrueKeyword) return true;
-    if (lit.kind === ts.SyntaxKind.FalseKeyword) return false;
-    if (lit.kind === ts.SyntaxKind.NullKeyword) return null;
-    if (lit.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
-    return undefined;
-  }
-
-  if (ts.isTypeLiteralNode(node)) {
-    const obj: any = {};
-    for (const member of node.members) {
-      if (
-        ts.isPropertySignature(member) && member.name &&
-        ts.isIdentifier(member.name)
-      ) {
-        const propName = member.name.text;
-        if (member.type) {
-          obj[propName] = extractValueFromTypeNode(member.type, checker);
-        }
-      }
-    }
-    return obj;
-  }
-
-  if (ts.isTupleTypeNode(node)) {
-    return node.elements.map((element: ts.TypeNode) =>
-      extractValueFromTypeNode(element, checker)
-    );
-  }
-
-  // For union defaults like null or undefined (Default<T|null, null>)
-  if (ts.isUnionTypeNode(node)) {
-    const nullType = node.types.find((t) =>
-      t.kind === ts.SyntaxKind.NullKeyword
-    );
-    const undefType = node.types.find((t) =>
-      t.kind === ts.SyntaxKind.UndefinedKeyword
-    );
-    if (nullType) return null;
-    if (undefType) return undefined;
-  }
-
-  return undefined;
 }
