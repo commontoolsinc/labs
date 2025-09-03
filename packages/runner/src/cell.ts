@@ -43,11 +43,9 @@ import {
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
-  MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
 import { getEntityId } from "./doc-map.ts";
-import { arrayEqual } from "./path-utils.ts";
 
 /**
  * This is the regular Cell interface.

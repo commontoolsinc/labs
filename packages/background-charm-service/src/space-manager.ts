@@ -31,7 +31,6 @@ export class SpaceManager {
   private pendingTasks: Task[] = [];
   private failureTracking = new Map<string, number>();
   private workerOptions: WorkerOptions;
-  private watchedCharms = new Set<string>();
 
   constructor(options: CharmSchedulerOptions) {
     this.did = options.did;

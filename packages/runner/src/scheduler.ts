@@ -202,9 +202,7 @@ export class Scheduler implements IScheduler {
       });
     }
 
-    return () => {
-      this.unsubscribe(action);
-    };
+    return () => this.unsubscribe(action);
   }
 
   unsubscribe(action: Action): void {
@@ -236,7 +234,6 @@ export class Scheduler implements IScheduler {
       const finalizeAction = (error?: unknown) => {
         try {
           if (error) {
-            console.error(error);
             logger.error(() => [
               `[RUN] Action failed: ${action.name || "anonymous"}`,
               `Error: ${error}`,
