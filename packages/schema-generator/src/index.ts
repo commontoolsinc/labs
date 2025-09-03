@@ -13,8 +13,7 @@ export type {
 // Utility exports
 export {
   extractValueFromTypeNode,
-  getArrayElementType,
-  getStableTypeName,
+  getArrayElementInfo,
   isDefaultTypeRef,
   safeGetPropertyType,
 } from "./type-utils.ts";

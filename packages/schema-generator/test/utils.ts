@@ -56,7 +56,9 @@ export function getTypeFromCode(
   });
 
   if (!foundType) throw new Error(`Type ${typeName} not found in code`);
-  return { type: foundType, checker, typeNode: foundTypeNode };
+  return foundTypeNode 
+    ? { type: foundType, checker, typeNode: foundTypeNode }
+    : { type: foundType, checker };
 }
 
 export function normalizeSchema<T extends Record<string, unknown>>(

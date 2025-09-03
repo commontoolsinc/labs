@@ -67,7 +67,9 @@ function getTypeFromCode(
     throw new Error(`Type ${typeName} not found in code`);
   }
 
-  return { type: foundType, checker, typeNode: foundTypeNode };
+  return foundTypeNode 
+    ? { type: foundType, checker, typeNode: foundTypeNode }
+    : { type: foundType, checker };
 }
 
 describe("Fixture Compatibility", () => {

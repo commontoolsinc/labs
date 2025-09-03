@@ -4,6 +4,7 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
+import { TypeWithInternals } from "../type-utils.ts";
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator?: { generateSchema: Function }) {}
@@ -52,7 +53,7 @@ export class UnionFormatter implements TypeFormatter {
           return (m as ts.NumberLiteralType).value;
         }
         if (m.flags & ts.TypeFlags.BooleanLiteral) {
-          return (m as any).intrinsicName === "true";
+          return (m as TypeWithInternals).intrinsicName === "true";
         }
         return undefined;
       }).filter((v) => v !== undefined);

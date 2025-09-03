@@ -75,11 +75,7 @@ describe("PrimitiveFormatter", () => {
 
   // Mock context for testing
   const mockContext: FormatterContext = {
-    rootSchema: {},
-    seenTypes: new Set(),
     typeChecker: {} as ts.TypeChecker,
-    depth: 0,
-    maxDepth: 200,
     definitions: {},
     definitionStack: new Set(),
     inProgressNames: new Set(),
