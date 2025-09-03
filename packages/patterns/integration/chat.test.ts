@@ -140,8 +140,8 @@ describe("Chat pattern test", () => {
       });
       assert(userMessage, "Should find user message element");
 
-      const messageText = await userMessage.evaluate((el: HTMLElement) =>
-        el.textContent
+      const messageText = await userMessage.evaluate((el: any) =>
+        el.content
       );
       
       assert(messageText, "Should find user message text");
@@ -175,8 +175,8 @@ describe("Chat pattern test", () => {
       assert(allMessages.length >= 2, "Should have at least 2 chat messages");
 
       // Get the assistant message (second message)
-      const assistantText = await allMessages[1].evaluate((el: HTMLElement) => 
-        el.textContent || ""
+      const assistantText = await allMessages[1].evaluate((el: any) => 
+        el.content || ""
       );
       
       assert(assistantText, "Should have response text");
@@ -229,26 +229,16 @@ describe("Chat pattern test", () => {
       // Wait for UI to update
       await sleep(200);
 
-      // Check that we now have multiple messages in the chat history
-      const allMessages = await page.waitForSelector("ct-chat-message", {
-        strategy: "pierce",
-      });
-      assert(allMessages, "Should have messages in chat history");
-
       // Wait for new assistant response - at least 4 messages total
-      const chatHistory = await page.waitForSelector("ct-vscroll", {
-        strategy: "pierce",
-      });
-
       await waitFor(async () => {
         const messages = await page.$$("ct-chat-message", { strategy: "pierce" });
         return messages.length >= 4;
       }, { timeout: 60000 });
 
       // Get all chat messages to verify sequence
-      const allMessages = await page.$$("ct-chat-message", { strategy: "pierce" });
+      const chatMessages = await page.$$("ct-chat-message", { strategy: "pierce" });
       const messages = await Promise.all(
-        allMessages.map(async (msg) => await msg.evaluate((el: HTMLElement) => el.textContent || ""))
+        chatMessages.map(async (msg) => await msg.evaluate((el: any) => el.content || ""))
       );
 
       // Should have at least 4 messages (user1, assistant1, user2, assistant2)
@@ -258,7 +248,7 @@ describe("Chat pattern test", () => {
       );
 
       // Verify the second user message is present
-      const hasSecondUserMessage = messages.some((msg) =>
+      const hasSecondUserMessage = messages.some((msg: string) =>
         msg.includes(secondMessage)
       );
       assert(
@@ -277,7 +267,7 @@ describe("Chat pattern test", () => {
       const page = shell.page();
 
       // Verify we have messages before clearing
-      const messagesBefore = await page.$$("p", { strategy: "pierce" });
+      const messagesBefore = await page.$$("ct-chat-message", { strategy: "pierce" });
       assert(messagesBefore.length > 0, "Should have messages before clearing");
 
       // Find and click the clear chat button by its unique ID
@@ -289,12 +279,12 @@ describe("Chat pattern test", () => {
 
       // Wait for chat to clear
       await waitFor(async () => {
-        const messages = await page.$$("p", { strategy: "pierce" });
+        const messages = await page.$$("ct-chat-message", { strategy: "pierce" });
         return messages.length === 0;
       });
 
       // Verify chat history is now empty
-      const messagesAfter = await page.$$("p", { strategy: "pierce" });
+      const messagesAfter = await page.$$("ct-chat-message", { strategy: "pierce" });
       assertEquals(
         messagesAfter.length,
         0,
