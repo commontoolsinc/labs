@@ -4,7 +4,7 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import { extractValueFromTypeNode, getArrayElementInfo, isDefaultTypeRef } from "../type-utils.ts";
+import { extractValueFromTypeNode, getArrayElementInfo, isDefaultTypeRef, synthesizeSchemaFromTypeNode } from "../type-utils.ts";
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
@@ -40,9 +40,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     const objectType = type as ts.ObjectType;
     const typeRef = objectType as ts.TypeReference;
     const symbol = typeRef.target?.symbol;
-    // If type erases but node indicates Default<T,V>, delegate to formatDefaultType
+    // If node indicates Default<T,V> (even if type erases to Array/etc.),
+    // delegate to Default handler. Node takes precedence for Default alias.
     const n = (context as any).typeNode as ts.TypeNode | undefined;
-    if (!symbol && n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
+    
+    if (n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
       return this.formatDefaultType(typeRef, checker, context);
     }
 
@@ -145,7 +147,15 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
       // Alias-aware array detection on the actual container argument
       const containerArg = getContainerArg(typeRef, 0);
-      if (containerArg && !isNamedTypeRef(containerArg, "Default")) {
+      // If the inner node syntactically refers to Default<...>, do NOT
+      // short-circuit via array detection on the erased type. Let Default
+      // formatting handle defaults and then array wrapping will be discovered
+      // when formatting the inner value type.
+      const innerLooksLikeDefault = !!(
+        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
+        isDefaultTypeRef(innerTypeNode, checker)
+      );
+      if (containerArg && !innerLooksLikeDefault && !isNamedTypeRef(containerArg, "Default")) {
         const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
         if (info) {
           const items = this.schemaGenerator.formatChildType(
@@ -158,9 +168,14 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
       // Default<T,V> is handled by its own formatter; delegate and add asCell at the end
 
-      // Handle Cell<Array<T>> and Cell<T[]> using the shared helper
-      const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
-      if (arr) return { ...arr, asCell: true } as SchemaDefinition;
+      // Handle Cell<Array<T>> and Cell<T[]> using the shared helper, unless
+      // the inner syntactically looks like Default<...>, in which case we must
+      // preserve Default handling (including defaults) and allow array to be
+      // detected within Default formatting.
+      if (!innerLooksLikeDefault) {
+        const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
+        if (arr) return { ...arr, asCell: true } as SchemaDefinition;
+      }
 
       const nodeDrivenType = innerTypeNode
         ? context.typeChecker.getTypeFromTypeNode(innerTypeNode)
@@ -209,7 +224,11 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (this.schemaGenerator) {
       const containerArg = getContainerArg(typeRef, 0);
       const containerArgIsCell = !!(containerArg && isNamedTypeRef(containerArg, "Cell"));
-      if (containerArg && !isNamedTypeRef(containerArg, "Default")) {
+      const innerLooksLikeDefault = !!(
+        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
+        isDefaultTypeRef(innerTypeNode, checker)
+      );
+      if (containerArg && !innerLooksLikeDefault && !isNamedTypeRef(containerArg, "Default")) {
         const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
         if (info) {
           const items = this.schemaGenerator.formatChildType(
@@ -317,11 +336,11 @@ export class CommonToolsFormatter implements TypeFormatter {
       | undefined ??
       (typeRef as any).resolvedTypeArguments as ts.Type[] | undefined ??
       typeRef.typeArguments;
-    if (!typeArguments || typeArguments.length < 2) {
-      return { type: "object", additionalProperties: true };
-    }
-    const valueType = typeArguments[0]!;
-    const defaultType = typeArguments[1]!;
+
+    // Attempt to recover erased type arguments from the node when Default<T,V>
+    // is declared as a type alias to T in the environment (js-runtime).
+    let valueType: ts.Type | undefined;
+    let defaultType: ts.Type | undefined;
 
     // Attempt node-based extraction for defaults when possible
     let valueTypeNode: ts.TypeNode | undefined;
@@ -333,6 +352,26 @@ export class CommonToolsFormatter implements TypeFormatter {
     ) {
       valueTypeNode = context.typeNode.typeArguments[0];
       defaultTypeNode = context.typeNode.typeArguments[1];
+    }
+
+    if (typeArguments && typeArguments.length >= 2) {
+      valueType = typeArguments[0]!;
+      defaultType = typeArguments[1]!;
+    } else if (valueTypeNode && defaultTypeNode) {
+      // Erased alias path: derive types from nodes
+      try {
+        valueType = checker.getTypeFromTypeNode(valueTypeNode);
+      } catch (_) {
+        valueType = undefined;
+      }
+      try {
+        defaultType = checker.getTypeFromTypeNode(defaultTypeNode);
+      } catch (_) {
+        defaultType = undefined;
+      }
+    }
+    if (!valueType || !defaultType) {
+      return { type: "object", additionalProperties: true };
     }
 
     const inlineIfRef = (schema: SchemaDefinition): SchemaDefinition => {
@@ -372,16 +411,38 @@ export class CommonToolsFormatter implements TypeFormatter {
           );
           valueSchema = { type: "array", items: inlineIfRef(itemsRaw) };
         } else {
-          const nodeDrivenType = valueTypeNode
-            ? context.typeChecker.getTypeFromTypeNode(valueTypeNode)
-            : undefined;
-          const effectiveType = nodeDrivenType ?? valueType;
-          const raw = this.schemaGenerator.generateSchema(
-            effectiveType,
-            context.typeChecker,
-            valueTypeNode,
-          );
-          valueSchema = inlineIfRef(raw);
+          // Try to use node-driven type first; if that still results in a
+          // generic object fallback, synthesize directly from the node to
+          // mirror old-system behavior under alias erasure.
+          if (valueTypeNode) {
+            try {
+              const nodeType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+              const raw = this.schemaGenerator.generateSchema(
+                nodeType,
+                context.typeChecker,
+                valueTypeNode,
+              );
+              const inlined = inlineIfRef(raw);
+              if (
+                inlined && typeof inlined === "object" &&
+                (inlined as any).type === "object" &&
+                (inlined as any).additionalProperties === true
+              ) {
+                valueSchema = synthesizeSchemaFromTypeNode(valueTypeNode) as any;
+              } else {
+                valueSchema = inlined;
+              }
+            } catch (_) {
+              valueSchema = synthesizeSchemaFromTypeNode(valueTypeNode) as any;
+            }
+          } else {
+            const raw = this.schemaGenerator.generateSchema(
+              valueType,
+              context.typeChecker,
+              valueTypeNode,
+            );
+            valueSchema = inlineIfRef(raw);
+          }
         }
       }
     } else {

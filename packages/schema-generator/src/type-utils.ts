@@ -226,6 +226,8 @@ export function isDefaultTypeRef(
   checker: ts.TypeChecker,
 ): boolean {
   if (!node.typeName || !ts.isIdentifier(node.typeName)) return false;
+  // Fast path: identifier text says "Default" even if symbol is missing
+  if (node.typeName.text === "Default") return true;
 
   const symbol = checker.getSymbolAtLocation(node.typeName);
   if (!symbol) return false;
@@ -297,4 +299,96 @@ export function extractValueFromTypeNode(
   }
 
   return undefined;
+}
+
+/**
+ * Synthesize a minimal JSON Schema from a TypeNode without relying on the
+ * checker to resolve erased aliases. This is used as a last-resort when
+ * Default<T,V> erases to T in the type system and we still want a precise
+ * schema for T from syntax alone.
+ */
+export function synthesizeSchemaFromTypeNode(
+  node: ts.TypeNode,
+): any /* SchemaDefinition */ {
+  // Handle primitive keyword types
+  switch (node.kind) {
+    case ts.SyntaxKind.StringKeyword:
+      return { type: "string" };
+    case ts.SyntaxKind.NumberKeyword:
+      return { type: "number" };
+    case ts.SyntaxKind.BooleanKeyword:
+      return { type: "boolean" };
+    case ts.SyntaxKind.NullKeyword:
+      return { type: "null" };
+    case ts.SyntaxKind.UndefinedKeyword:
+      return { type: "string", enum: ["undefined"] };
+  }
+
+  // Parenthesized types: unwrap
+  if (ts.isParenthesizedTypeNode(node)) {
+    return synthesizeSchemaFromTypeNode(node.type);
+  }
+
+  // Array types: T[]
+  if (ts.isArrayTypeNode(node)) {
+    const items = synthesizeSchemaFromTypeNode(node.elementType);
+    return { type: "array", items };
+  }
+
+  // Tuple types: [A,B,...]
+  if (ts.isTupleTypeNode(node)) {
+    // For now, expose tuple as array with a union of element shapes
+    // (old system typically emitted items for tuples positionally; keeping minimal)
+    const items = node.elements.map((e) => synthesizeSchemaFromTypeNode(e));
+    // If items are homogenous primitive schemas, collapse to that; otherwise leave first
+    // For sustainability, we expose as array of first synthesized item shape
+    return { type: "array", items: items[0] ?? { type: "object", additionalProperties: true } };
+  }
+
+  // Type literals: { a: T; b?: U }
+  if (ts.isTypeLiteralNode(node)) {
+    const properties: Record<string, any> = {};
+    const required: string[] = [];
+    for (const m of node.members) {
+      if (ts.isPropertySignature(m) && m.name && ts.isIdentifier(m.name)) {
+        const name = m.name.text;
+        if (!m.questionToken) required.push(name);
+        const propSchema = m.type
+          ? synthesizeSchemaFromTypeNode(m.type)
+          : { type: "object", additionalProperties: true };
+        properties[name] = propSchema;
+      }
+    }
+    const out: any = { type: "object", properties };
+    if (required.length) out.required = required;
+    return out;
+  }
+
+  // Union types: special-case null union (T | null)
+  if (ts.isUnionTypeNode(node)) {
+    const parts = node.types;
+    const isNull = (t: ts.TypeNode) => t.kind === ts.SyntaxKind.NullKeyword;
+    const hasNull = parts.some(isNull);
+    const nonNull = parts.filter((t) => !isNull(t));
+    if (hasNull && nonNull.length === 1) {
+      const nn = synthesizeSchemaFromTypeNode(nonNull[0]!);
+      return { oneOf: [{ type: "null" }, nn] };
+    }
+  }
+
+  // Reference Array<T> or ReadonlyArray<T>: attempt shallow syntax handling
+  if (ts.isTypeReferenceNode(node)) {
+    const tn = node.typeName;
+    if (
+      ts.isIdentifier(tn) &&
+      (tn.text === "Array" || tn.text === "ReadonlyArray") &&
+      node.typeArguments && node.typeArguments.length > 0
+    ) {
+      const items = synthesizeSchemaFromTypeNode(node.typeArguments[0]!);
+      return { type: "array", items };
+    }
+  }
+
+  // Fallback generic object
+  return { type: "object", additionalProperties: true };
 }
