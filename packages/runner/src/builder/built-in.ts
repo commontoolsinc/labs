@@ -29,6 +29,13 @@ export const llm = createNodeFactory({
   params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState<T>>;
 
+export const llmDialog = createNodeFactory({
+  type: "ref",
+  implementation: "llmDialog",
+}) as <T = string>(
+  params: Opaque<BuiltInLLMParams>, // TODO(bf): maybe need to drop `messages` from this type
+) => OpaqueRef<BuiltInLLMState<T>>;
+
 export const generateObject = createNodeFactory({
   type: "ref",
   implementation: "generateObject",

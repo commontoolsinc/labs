@@ -10,6 +10,7 @@ import {
   ifElse,
   lift,
   llm,
+  llmDialog,
   NAME,
   recipe,
   str,
@@ -137,7 +138,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const llmResponse = llm({
+    const llmResponse = llmDialog({
       system: "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools as any,

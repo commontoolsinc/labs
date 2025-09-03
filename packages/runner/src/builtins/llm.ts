@@ -4,27 +4,19 @@ import {
   LLMClient,
   LLMGenerateObjectRequest,
   LLMRequest,
-  LLMToolCall,
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
-  BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMState,
-  BuiltInLLMTool,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { parseLink } from "../link-utils.ts";
 
 const client = new LLMClient();
-
-// Default token limits
-const DEFAULT_LLM_MAX_TOKENS = 4096;
-const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
@@ -51,7 +43,7 @@ const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
 export function llm(
   inputsCell: Cell<BuiltInLLMParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  addCancel: (cancel: () => void) => void,
+  _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
@@ -63,9 +55,6 @@ export function llm(
   let result: Cell<string | undefined>;
   let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
-  let addMessage: Cell<BuiltInLLMMessage | undefined>;
-  let isExecutingTools = false;
-  const messagesCell = inputsCell.key("messages");
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -104,40 +93,7 @@ export function llm(
         tx,
       );
 
-      addMessage = runtime.getCell<BuiltInLLMMessage | undefined>(
-        parentCell.space,
-        {
-          llm: { addMessage: cause },
-        },
-        undefined,
-        tx,
-      );
-      addMessage.setRaw({ $stream: true });
-
-      const addMessageStreamLink = parseLink(addMessage);
-      const handler = (
-        tx: IExtendedStorageTransaction,
-        event: BuiltInLLMMessage,
-      ) => {
-        messagesCell.withTx(tx).set([
-          ...(messagesCell.get() ?? []),
-          event,
-        ]);
-      };
-
-      // parentCell.key("addMessage").withTx(tx).set({ $stream: true });
-
-      addCancel(
-        runtime.scheduler.addEventHandler(handler, addMessageStreamLink),
-      );
-
-      sendResult(tx, {
-        pending,
-        result,
-        partial,
-        requestHash,
-        addMessage,
-      });
+      sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;
@@ -146,26 +102,14 @@ export function llm(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, stop, maxTokens, model } =
+    const { system, messages, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
-
-    const messages = messagesCell.getAsQueryResult([], tx) ?? [];
-    const toolsCell = inputsCell.key("tools");
-
-    // Strip handlers from tool definitions to send them to the server
-    // We keep the handlers locally and execute them here
-    const toolsWithoutHandlers = Object.fromEntries(
-      Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
-        const { handler, ...toolWithoutHandler } = tool;
-        return [name, toolWithoutHandler];
-      }),
-    );
 
     const llmParams: LLMRequest = {
       system: system ?? "",
       messages: messages ?? [],
       stop: stop ?? "",
-      maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
+      maxTokens: maxTokens ?? 4096,
       stream: true,
       model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
@@ -174,11 +118,7 @@ export function llm(
         context: "charm",
       },
       cache: true,
-      tools: toolsWithoutHandlers, // Pass through tools if provided
     };
-
-    // Prevent re-entry while tools are executing to avoid race condition
-    if (isExecutingTools) return;
 
     const hash = refer(llmParams).toString();
 
@@ -188,30 +128,13 @@ export function llm(
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
     previousCallHash = hash;
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      pendingWithLog.set(false);
-      resultWithLog.set(undefined);
-      partialWithLog.set(undefined);
-      return;
-    }
-
-    // If the last message is from the assistant, no LLM request needed
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage && lastMessage.role === "assistant") {
-      pendingWithLog.set(false);
-      // Set the result to the last assistant message content
-      const content = typeof lastMessage.content === "string"
-        ? lastMessage.content
-        : "";
-      resultWithLog.set(content);
-      partialWithLog.set(content);
-      requestHashWithLog.set(hash);
-      return;
-    }
-
-    // Only clear result/partial when we're about to make a new request
     resultWithLog.set(undefined);
     partialWithLog.set(undefined);
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      pendingWithLog.set(false);
+      return;
+    }
     pendingWithLog.set(true);
 
     const updatePartial = (text: string) => {
@@ -227,91 +150,10 @@ export function llm(
 
     resultPromise
       .then(async (llmResult) => {
+        const text = llmResult.content;
         if (thisRun !== currentRun) return;
 
-        const text = llmResult.content;
-
-        // If there are tool calls, prevent re-entry and execute them atomically
-        if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
-          isExecutingTools = true;
-
-          try {
-            const newTx = messagesCell.runtime.edit();
-            const newMessages: BuiltInLLMMessage[] = [];
-
-            // Add assistant message with tool calls to conversation
-            const assistantMessage: BuiltInLLMMessage = {
-              role: "assistant",
-              content: llmResult.content,
-              toolCalls: llmResult.toolCalls,
-            };
-
-            // Execute each tool call and collect results
-            const toolResults: any[] = [];
-            for (const toolCall of llmResult.toolCalls) {
-              const toolDef = toolsCell.key(toolCall.name) as Cell<
-                BuiltInLLMTool
-              >;
-
-              try {
-                const result = runtime.getCell<any>(
-                  parentCell.space,
-                  {
-                    toolResult: { [toolCall.id]: cause },
-                  },
-                  undefined,
-                  newTx,
-                );
-
-                const handlerTx = runtime.edit();
-                const handlerCell = toolDef.key("handler");
-                handlerCell.withTx(handlerTx).send({
-                  ...toolCall.arguments,
-                  result,
-                } as any); // TODO(bf): why any needed?
-                await handlerTx.commit();
-
-                toolResults.push({
-                  id: toolCall.id,
-                  result,
-                });
-              } catch (error) {
-                console.error(`Tool ${toolCall.name} failed:`, error);
-                toolResults.push({
-                  id: toolCall.id,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-            }
-
-            // Update the assistant message to include tool results
-            assistantMessage.toolResults = toolResults;
-            newMessages.push(assistantMessage);
-
-            // Update messages in cell with new messages AFTER all tools complete
-            messagesCell.withTx(newTx).set([
-              ...(messagesCell.get() ?? []),
-              ...newMessages,
-            ]);
-            await newTx.commit();
-          } finally {
-            // Always clear the flag, even if tool execution fails
-            isExecutingTools = false;
-          }
-        } else {
-          // No tool calls, just add the assistant message
-          const newTx = messagesCell.runtime.edit();
-          const assistantMessage: BuiltInLLMMessage = {
-            role: "assistant",
-            content: llmResult.content,
-          };
-          messagesCell.withTx(newTx).set([
-            ...(messagesCell.get() ?? []),
-            assistantMessage,
-          ]);
-          await newTx.commit();
-        }
-
+        //normalizeToCells(text, undefined, log);
         await runtime.idle();
 
         // All this code runside outside the original action, and the
@@ -329,9 +171,6 @@ export function llm(
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
-
-        // Ensure flag is cleared even on error
-        isExecutingTools = false;
 
         console.error("Error generating data", error);
 
@@ -453,7 +292,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
     const generateObjectParams: LLMGenerateObjectRequest = {
       prompt,
-      maxTokens: maxTokens ?? DEFAULT_GENERATE_OBJECT_MAX_TOKENS,
+      maxTokens: maxTokens ?? 8192,
       schema: JSON.parse(JSON.stringify(schema)),
       model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
       metadata: {
