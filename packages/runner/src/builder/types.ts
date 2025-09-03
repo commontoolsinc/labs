@@ -18,6 +18,7 @@ import type {
   JSONValue,
   LiftFunction,
   LLMFunction,
+  LLMDialogFunction,
   Module,
   NavigateToFunction,
   Opaque,
@@ -276,6 +277,7 @@ export interface BuilderFunctionsAndConstants {
   str: StrFunction;
   ifElse: IfElseFunction;
   llm: LLMFunction;
+  llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
   fetchData: FetchDataFunction;
   streamData: StreamDataFunction;
