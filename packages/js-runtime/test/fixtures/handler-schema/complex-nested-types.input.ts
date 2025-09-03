@@ -1,6 +1,8 @@
 /// <cts-enable />
 import { handler, Cell, recipe } from "commontools";
 
+// Updated 2025-09-03: String literal unions now generate correct JSON Schema
+// (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {
   user: {
     name: string;

@@ -43,11 +43,9 @@ describe("Schema Generator Complex Nested Types Test", () => {
     expect(userProp?.required).toContain("email");
     expect(userProp?.required).not.toContain("age");
 
-    // Action should be a union type (we'll discover we need a UnionFormatter)
+    // Action should be a union type handled by UnionFormatter
     const actionProp = result.properties?.action;
-    // TODO(gideon): This will fail and show us we need a UnionFormatter
-    // expect(actionProp?.type).toBe("string");
-    // expect(actionProp?.enum).toEqual(["create", "update", "delete"]);
+    expect(actionProp?.enum).toEqual(["create", "update", "delete"]);
   });
 
   it("should generate correct schema for UserState interface", () => {
@@ -69,7 +67,7 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     const result = generator(type, checker);
 
-    console.log("UserState schema result:", JSON.stringify(result, null, 2));
+    // Remove debug logging since tests should be clean
 
     // Should be an object with lastAction, count properties
     expect(result.type).toBe("object");
@@ -138,17 +136,15 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     const result = generator(type, checker);
 
-    console.log("UnionTest schema result:", JSON.stringify(result, null, 2));
-
-    // This will fail and show us we need a UnionFormatter
-    // TODO(gideon): Implement UnionFormatter to handle these cases
+    // Union types should be handled correctly by UnionFormatter
     const statusProp = result.properties?.status;
     const priorityProp = result.properties?.priority;
 
-    // For now, we expect these to fall back to basic types
-    // This will help us identify exactly what UnionFormatter needs to handle
-    console.log("Status property type:", statusProp?.type);
-    console.log("Priority property type:", priorityProp?.type);
+    // Status should be a string enum
+    expect(statusProp?.enum).toEqual(["active", "inactive", "pending"]);
+    
+    // Priority should be a number enum
+    expect(priorityProp?.enum).toEqual([1, 2, 3]);
   });
 });
 
