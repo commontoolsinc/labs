@@ -78,8 +78,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       rootSchema: {} as SchemaDefinition,
       seenTypes,
       typeChecker: checker,
-      depth: 0,
-      maxDepth: 200,
       definitions,
       definitionStack,
       inProgressNames,
@@ -90,7 +88,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       type,
       context,
       typeNode,
-      0,
       seenTypes,
       cyclicTypes,
       cyclicNames,
@@ -186,8 +183,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         rootSchema: {} as SchemaDefinition,
         seenTypes,
         typeChecker: checker,
-        depth: 0,
-        maxDepth: 200,
         definitions,
         definitionStack,
         inProgressNames,
@@ -195,7 +190,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         typeNode: typeNode!,
       },
       typeNode,
-      0,
       seenTypes,
       cyclicTypes,
       cyclicNames,
@@ -214,7 +208,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: FormatterContext,
     typeNode?: ts.TypeNode,
-    depth: number = 0,
     seenTypes: Set<ts.Type> = new Set(),
     cyclicTypes?: Set<ts.Type>,
     cyclicNames?: Set<string>,
@@ -253,17 +246,6 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Push current type onto the stack
     definitionStack.add(type);
-    if (depth > 200) {
-      const nk = definitions ? getNamedTypeKey(type) : undefined;
-      if (nk && definitions) {
-        if (!definitions[nk]) {
-          definitions[nk] = { type: "object", properties: {} };
-        }
-        emittedRefs.add(nk);
-        return { "$ref": `#/definitions/${nk}` };
-      }
-      return { type: "object", additionalProperties: true };
-    }
 
     // Defer array handling to ArrayFormatter with node-aware context
 
@@ -317,7 +299,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const cycles = new Set<ts.Type>();
     const cycleNames = new Set<string>();
 
-    const visit = (t: ts.Type, depth: number) => {
+    const visit = (t: ts.Type) => {
       if (visiting.has(t)) {
         // Mark all nodes from the first occurrence of t on the stack to the end
         const idx = stack.lastIndexOf(t);
@@ -343,7 +325,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         if (flags & ts.TypeFlags.Union) {
           const ut = t as ts.UnionType;
           for (const mt of ut.types) {
-            visit(mt, depth + 1);
+            visit(mt);
           }
         } else if (flags & ts.TypeFlags.Object) {
           const obj = t as ts.ObjectType;
@@ -355,7 +337,7 @@ export class SchemaGenerator implements ISchemaGenerator {
                   prop,
                   prop.valueDeclaration ?? (prop.declarations?.[0] as any),
                 );
-                if (pt) visit(pt, depth + 1);
+                if (pt) visit(pt);
               } catch (_) {
                 // ignore
               }
@@ -363,7 +345,7 @@ export class SchemaGenerator implements ISchemaGenerator {
             // Traverse numeric index (arrays/tuples)
             try {
               const idx = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
-              if (idx) visit(idx, depth + 1);
+              if (idx) visit(idx);
             } catch (_) {
               // ignore
             }
@@ -375,7 +357,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       }
     };
 
-    if (checker) visit(type, 0);
+    if (checker) visit(type);
     return { types: cycles, names: cycleNames };
   }
 }
