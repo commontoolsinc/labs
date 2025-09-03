@@ -3,6 +3,7 @@ import {
   BuiltInLLMMessage,
   Cell,
   cell,
+  JSONSchema,
   Default,
   derive,
   h,
@@ -115,7 +116,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             },
           },
           required: ["expression"],
-        },
+        } as JSONSchema,
         handler: calculator({ result: calculatorResult }),
       },
       addListItem: {
@@ -129,7 +130,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             },
           },
           required: ["item"],
-        },
+        } as JSONSchema,
         handler: addListItem({ list }),
       },
     };
@@ -137,7 +138,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const { addMessage, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
       messages: chat,
-      tools: tools as any,
+      tools: tools,
     });
 
     // Debug logging
