@@ -30,21 +30,15 @@ const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
 // fetchData with streaming support
 
 /**
- * Generate data via an LLM.
+ * Run a (tool using) dialog with an LLM.
  *
- * Returns the complete result as `result` and the incremental result as
- * `partial`. `pending` is true while a request is pending.
- *
- * @param messages - list of messages to send to the LLM. - alternating user and assistant messages.
- *  - if you end with an assistant message, the LLM will continue from there.
- *  - if both prompt and messages are empty, no LLM call will be made,
- *    result and partial will be undefined.
+ * @param messages - list of messages representing the conversation. This is mutated by the internal process.
  * @param model - A doc to store the model to use.
  * @param system - A doc to store the system message.
  * @param stop - A doc to store (optional) stop sequence.
  * @param maxTokens - A doc to store the maximum number of tokens to generate.
  *
- * @returns { pending: boolean, result?: string, partial?: string } - As individual
+ * @returns { pending: boolean, addMessage: (message: BuiltInLLMMessage) => void } - As individual
  *   docs, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
