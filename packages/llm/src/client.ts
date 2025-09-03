@@ -94,7 +94,6 @@ export class LLMClient {
       return {
         content: data.content as string,
         id,
-        // TODO(bf): Extract tool calls from cached response if present
       };
     }
     return await this.stream(response.body, id, callback);

@@ -300,14 +300,8 @@ export function llmDialog(
         const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
-        resultWithLog.withTx(asyncTx).set(undefined);
-        partialWithLog.withTx(asyncTx).set(undefined);
 
         if (asyncTx !== tx) asyncTx.commit();
-
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
       });
   };
 }
