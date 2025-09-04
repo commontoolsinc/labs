@@ -22,12 +22,78 @@ import { parseLink } from "../link-utils.ts";
 
 const client = new LLMClient();
 
+/**
+ * Performs a mutation on the storage if the pending flag is active.
+ * This ensures the pending flag has final say over whether the LLM continues generating.
+ *
+ * @param runtime - The runtime instance
+ * @param pending - Cell containing the pending state
+ * @param action - The mutation action to perform if pending is true
+ * @returns true if the action was performed, false otherwise
+ */
+function perform(
+  runtime: IRuntime,
+  pending: Cell<boolean>,
+  action: (tx: IExtendedStorageTransaction) => void,
+) {
+  const tx = runtime.edit();
+  if (pending.withTx(tx).get()) {
+    action(tx);
+    // TODO(bf): [CT-859] when we support continuations, call mainLogc() again here
+    tx.commit();
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Executes a tool call by invoking its handler function and returning the result.
+ * Creates a new transaction, sends the tool call arguments to the handler, and waits
+ * for the result to be available before returning it.
+ *
+ * @param runtime - The runtime instance for creating transactions and cells
+ * @param parentCell - The parent cell context for the tool execution
+ * @param toolDef - Cell containing the tool definition with handler
+ * @param toolCall - The LLM tool call containing id, name, and arguments
+ * @returns Promise that resolves to the tool execution result
+ */
+async function invokeHandlerAsToolCall(
+  runtime: IRuntime,
+  parentCell: Cell<any>,
+  toolDef: Cell<BuiltInLLMTool>,
+  toolCall: LLMToolCall,
+) {
+  const handlerTx = runtime.edit();
+  const result = runtime.getCell<any>(
+    parentCell.space,
+    toolCall.id,
+    undefined,
+    handlerTx,
+  );
+
+  const { resolve, promise } = Promise.withResolvers<any>();
+
+  const handlerCell = toolDef.key("handler");
+  handlerCell.withTx(handlerTx).send({
+    ...toolCall.arguments,
+    result,
+  } as any); // TODO(bf): why any needed?
+
+  // wait until we know we have the result of the tool call
+  // not just that the transaction has been comitted
+  const cancel = result.sink((r) => {
+    r !== undefined && resolve(r);
+  });
+  handlerTx.commit();
+  const resultValue = await promise;
+  cancel();
+
+  return resultValue;
+}
+
 // Default token limits
 const DEFAULT_LLM_MAX_TOKENS = 4096;
-const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
-
-// TODO(ja): investigate if generateText should be replaced by
-// fetchData with streaming support
 
 /**
  * Run a (tool using) dialog with an LLM.
@@ -50,16 +116,13 @@ export function llmDialog(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  let currentRun = 0;
-  let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
-  let requestHash: Cell<string | undefined>;
   let addMessage: Cell<BuiltInLLMMessage | undefined>;
-  let isExecutingTools = false;
   const messagesCell = inputsCell.key("messages");
 
   return (tx: IExtendedStorageTransaction) => {
+    // SETUP CODE
     if (!cellsInitialized) {
       pending = runtime.getCell(
         parentCell.space,
@@ -68,15 +131,6 @@ export function llmDialog(
         tx,
       );
       pending.send(false);
-
-      requestHash = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { requestHash: cause },
-        },
-        undefined,
-        tx,
-      );
 
       // Declare `addMessage` handler and register
       addMessage = runtime.getCell<BuiltInLLMMessage | undefined>(
@@ -94,10 +148,18 @@ export function llmDialog(
         tx: IExtendedStorageTransaction,
         event: BuiltInLLMMessage,
       ) => {
+        if (pending.withTx(tx).get()) {
+          // ignore
+          return;
+        }
+
+        pending.withTx(tx).set(true);
         messagesCell.withTx(tx).set([
           ...(messagesCell.get() ?? []),
           event,
         ]);
+
+        mainLogic(tx, runtime, parentCell, inputsCell, pending);
       };
 
       addCancel(
@@ -106,202 +168,138 @@ export function llmDialog(
 
       sendResult(tx, {
         pending,
-        requestHash,
         addMessage,
       });
       cellsInitialized = true;
     }
-    const thisRun = ++currentRun;
-    const pendingWithLog = pending.withTx(tx);
-    const requestHashWithLog = requestHash.withTx(tx);
+  };
+}
 
-    const { system, stop, maxTokens, model } =
-      inputsCell.getAsQueryResult([], tx) ?? {};
+function mainLogic(
+  tx: IExtendedStorageTransaction,
+  runtime: IRuntime,
+  parentCell: Cell<any>,
+  inputsCell: Cell<BuiltInLLMParams>,
+  pending: Cell<boolean>,
+) {
+  const { system, stop, maxTokens, model } =
+    inputsCell.getAsQueryResult([], tx) ??
+      {};
 
-    const messages = messagesCell.getAsQueryResult([], tx) ?? [];
-    const toolsCell = inputsCell.key("tools");
+  const messagesCell = inputsCell.key("messages");
+  const toolsCell = inputsCell.key("tools");
 
-    // Strip handlers from tool definitions to send them to the server
-    // We keep the handlers locally and execute them here
-    const toolsWithoutHandlers = Object.fromEntries(
-      Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
-        const { handler, ...toolWithoutHandler } = tool;
-        return [name, toolWithoutHandler];
-      }),
-    );
+  // Strip handlers from tool definitions to send them to the server
+  // We keep the handlers locally and execute them here
+  const toolsWithoutHandlers = Object.fromEntries(
+    Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
+      const { handler, ...toolWithoutHandler } = tool;
+      return [name, toolWithoutHandler];
+    }),
+  );
 
-    const llmParams: LLMRequest = {
-      system: system ?? "",
-      messages: messages ?? [],
-      stop: stop ?? "",
-      maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
-      stream: true,
-      model: model ?? DEFAULT_MODEL_NAME,
-      metadata: {
-        // FIXME(ja): how do we get the context of space/charm id here
-        // bf: I also do not know... this one is tricky
-        context: "charm",
-      },
-      cache: true,
-      tools: toolsWithoutHandlers, // Pass through tools if provided
-    };
+  const llmParams: LLMRequest = {
+    system: system ?? "",
+    messages: messagesCell.getAsQueryResult([], tx) ?? [],
+    stop: stop ?? "",
+    maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
+    stream: true,
+    model: model ?? DEFAULT_MODEL_NAME,
+    metadata: {
+      // FIXME(ja): how do we get the context of space/charm id here
+      // bf: I also do not know... this one is tricky
+      context: "charm",
+    },
+    cache: true,
+    tools: toolsWithoutHandlers, // Pass through tools if provided
+  };
 
-    // Prevent re-entry while tools are executing to avoid race condition
-    if (isExecutingTools) return;
+  // TODO(bf): sendRequest must be given a callback, even if it does nothing
+  const resultPromise = client.sendRequest(llmParams, () => {});
 
-    const hash = refer(llmParams).toString();
+  resultPromise
+    .then(async (llmResult) => {
+      if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
+        try {
+          const newMessages: BuiltInLLMMessage[] = [];
 
-    // Return if the same request is being made again, either concurrently (same
-    // as previousCallHash) or when rehydrated from storage (same as the
-    // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
-    previousCallHash = hash;
-
-    if (!Array.isArray(messages) || messages.length === 0) {
-      pendingWithLog.set(false);
-      return;
-    }
-
-    // If the last message is from the assistant, no LLM request needed
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage && lastMessage.role === "assistant") {
-      pendingWithLog.set(false);
-      // Set the result to the last assistant message content
-      const content = typeof lastMessage.content === "string"
-        ? lastMessage.content
-        : "";
-      requestHashWithLog.set(hash);
-      return;
-    }
-
-    // Only clear result/partial when we're about to make a new request
-    pendingWithLog.set(true);
-
-    const updatePartial = (text: string) => {
-      // no-op, but we need a callback
-    };
-
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
-
-    resultPromise
-      .then(async (llmResult) => {
-        if (thisRun !== currentRun) return;
-
-        const text = llmResult.content;
-
-        // If there are tool calls, prevent re-entry and execute them atomically
-        if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
-          isExecutingTools = true;
-
-          try {
-            const newTx = messagesCell.runtime.edit();
-            const newMessages: BuiltInLLMMessage[] = [];
-
-            // Add assistant message with tool calls to conversation
-            const assistantMessage: BuiltInLLMMessage = {
-              role: "assistant",
-              content: llmResult.content,
-              toolCalls: llmResult.toolCalls,
-            };
-
-            // Execute each tool call and collect results
-            const toolResults: any[] = [];
-            for (const toolCall of llmResult.toolCalls) {
-              const toolDef = toolsCell.key(toolCall.name) as Cell<
-                BuiltInLLMTool
-              >;
-
-              try {
-                const result = runtime.getCell<any>(
-                  parentCell.space,
-                  {
-                    toolResult: { [toolCall.id]: cause },
-                  },
-                  undefined,
-                  newTx,
-                );
-
-                const handlerTx = runtime.edit();
-                const handlerCell = toolDef.key("handler");
-                handlerCell.withTx(handlerTx).send({
-                  ...toolCall.arguments,
-                  result,
-                } as any); // TODO(bf): why any needed?
-                await handlerTx.commit();
-
-                toolResults.push({
-                  id: toolCall.id,
-                  result,
-                });
-              } catch (error) {
-                console.error(`Tool ${toolCall.name} failed:`, error);
-                toolResults.push({
-                  id: toolCall.id,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-            }
-
-            // Update the assistant message to include tool results
-            assistantMessage.toolResults = toolResults;
-            newMessages.push(assistantMessage);
-
-            // Update messages in cell with new messages AFTER all tools complete
-            messagesCell.withTx(newTx).set([
-              ...(messagesCell.get() ?? []),
-              ...newMessages,
-            ]);
-            await newTx.commit();
-          } finally {
-            // Always clear the flag, even if tool execution fails
-            isExecutingTools = false;
-          }
-        } else {
-          // No tool calls, just add the assistant message
-          const newTx = messagesCell.runtime.edit();
+          // Add assistant message with tool calls to conversation
+          // This structure will change in CT-859
           const assistantMessage: BuiltInLLMMessage = {
             role: "assistant",
             content: llmResult.content,
+            toolCalls: llmResult.toolCalls,
           };
-          messagesCell.withTx(newTx).set([
-            ...(messagesCell.get() ?? []),
-            assistantMessage,
-          ]);
-          await newTx.commit();
+
+          // Execute each tool call and collect results
+          const toolResults: any[] = [];
+          for (const toolCall of llmResult.toolCalls) {
+            const toolDef = toolsCell.key(toolCall.name) as Cell<
+              BuiltInLLMTool
+            >;
+
+            try {
+              const resultValue = await invokeHandlerAsToolCall(
+                runtime,
+                parentCell,
+                toolDef,
+                toolCall,
+              );
+              // this is probably a proxy, so it may still update in the conversation history reactively later
+              // but we intend this to be a static / snapshot at this stage
+              toolResults.push({
+                id: toolCall.id,
+                result: resultValue,
+              });
+            } catch (error) {
+              console.error(`Tool ${toolCall.name} failed:`, error);
+              toolResults.push({
+                id: toolCall.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          // Update the assistant message to include tool results
+          assistantMessage.toolResults = toolResults;
+          newMessages.push(assistantMessage);
+
+          const success = perform(runtime, pending, (tx) => {
+            messagesCell.withTx(tx).set([
+              ...(messagesCell.get() ?? []),
+              ...newMessages,
+            ]);
+            pending.withTx(tx).set(false);
+          });
+
+          if (success) {
+            // TODO(bf): [CT-859] when we support continuations, call mainLogic() again here
+          } else {
+            console.info("Did not write to conversation due to pending=false");
+          }
+        } catch (error: unknown) {
+          console.error(error);
         }
+      } else {
+        // No tool calls, just add the assistant message
+        const assistantMessage: BuiltInLLMMessage = {
+          role: "assistant",
+          content: llmResult.content,
+        };
 
-        await runtime.idle();
-
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to set the result.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-
-        pendingWithLog.withTx(asyncTx).set(false);
-        requestHashWithLog.withTx(asyncTx).set(hash);
-
-        if (asyncTx !== tx) asyncTx.commit();
-      })
-      .catch(async (error) => {
-        if (thisRun !== currentRun) return;
-
-        // Ensure flag is cleared even on error
-        isExecutingTools = false;
-
-        console.error("Error generating data", error);
-
-        await runtime.idle();
-
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to set the result.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-
-        pendingWithLog.withTx(asyncTx).set(false);
-
-        if (asyncTx !== tx) asyncTx.commit();
-      });
-  };
+        const tx = runtime.edit();
+        messagesCell.withTx(tx).set([
+          ...(messagesCell.get() ?? []),
+          assistantMessage,
+        ]);
+        pending.withTx(tx).set(false);
+        tx.commit();
+      }
+    })
+    .catch((error: unknown) => {
+      console.error("Error generating data", error);
+      const tx = runtime.edit();
+      pending.withTx(tx).set(false);
+      tx.commit();
+    });
 }
