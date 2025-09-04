@@ -4,21 +4,24 @@ import { BaseElement } from "../../core/base-element.ts";
 
 /**
  * CTAutoLayout - Responsive multi-panel layout component
- * 
+ *
  * Automatically arranges children:
- * - Desktop: Side-by-side columns 
+ * - Desktop: Side-by-side columns
  * - Mobile: Tabbed interface
  *
  * @element ct-autolayout
  *
  * @example
- * <ct-autolayout>
- *   <div data-label="Chat">Messages</div>
- *   <div data-label="Tools">Calculator results</div>
- *   <div data-label="Lists">Todo items</div>
+ * <ct-autolayout tabNames={["Chat", "Tools", "Lists"]}>
+ *   <div>Messages</div>
+ *   <div>Calculator results</div>
+ *   <div>Todo items</div>
  * </ct-autolayout>
  */
 export class CTAutoLayout extends BaseElement {
+  static override properties = {
+    tabNames: { type: Array, attribute: false },
+  };
   static override styles = css`
     :host {
       display: flex;
@@ -29,8 +32,9 @@ export class CTAutoLayout extends BaseElement {
 
     .tabs {
       display: none; /* Hidden by default (desktop) */
-      border-bottom: 1px solid #e0e0e0;
+      border-top: 1px solid #e0e0e0;
       flex: none;
+      order: 2; /* Move tabs to bottom */
     }
 
     .tab {
@@ -54,6 +58,7 @@ export class CTAutoLayout extends BaseElement {
     .content {
       flex: 1;
       overflow: hidden;
+      order: 1; /* Content comes first, tabs at bottom */
     }
 
     /* Desktop: Grid layout */
@@ -87,7 +92,9 @@ export class CTAutoLayout extends BaseElement {
 
       /* Show only the active child */
       ::slotted(.active-tab) {
-        display: block !important;
+        display: flex !important;
+        width: 100%;
+        flex-direction: column;
       }
     }
   `;
@@ -95,8 +102,11 @@ export class CTAutoLayout extends BaseElement {
   private _activeTab = 0;
   private _children: Element[] = [];
 
+  declare tabNames: string[];
+
   constructor() {
     super();
+    this.tabNames = [];
   }
 
   override connectedCallback() {
@@ -120,7 +130,7 @@ export class CTAutoLayout extends BaseElement {
     this._children.forEach(child => {
       child.classList.remove('active-tab');
     });
-    
+
     // Add active-tab class to the current active child
     if (this._children[this._activeTab]) {
       this._children[this._activeTab].classList.add('active-tab');
@@ -129,23 +139,22 @@ export class CTAutoLayout extends BaseElement {
 
   override render() {
     this._updateChildren();
-    
+
     return html`
       <!-- Tabs (only visible on mobile) -->
       <div class="tabs">
-        ${this._children.map((child, index) => {
-          const label = child.getAttribute('data-label') || `Tab ${index + 1}`;
+        ${this.tabNames.map((name, index) => {
           return html`
-            <button 
+            <button
               class="${classMap({ tab: true, active: index === this._activeTab })}"
               @click=${() => this._handleTabClick(index)}
             >
-              ${label}
+              ${name}
             </button>
           `;
         })}
       </div>
-      
+
       <!-- Content area -->
       <div class="content">
         <slot></slot>

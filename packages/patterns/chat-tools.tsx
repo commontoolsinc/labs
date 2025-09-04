@@ -162,8 +162,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
         <ct-screen>
           <h2 slot="header" style={{ margin: 0, padding: "1rem" }}>{title}</h2>
 
-          <ct-autolayout>
-            <ct-screen data-label="Chat" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <ct-autolayout tabNames={["Chat", "Tools"]}>
+            <ct-screen>
               <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
                 {chat.map((msg) => {
                   return (
@@ -206,7 +206,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               </div>
             </ct-screen>
 
-            <div data-label="Tools">
+            <ct-vstack data-label="Tools">
               <div style={{ padding: "1rem" }}>
                 <h3>Calculator</h3>
                 <pre>{calculatorResult}</pre>
@@ -216,7 +216,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 <h3>Items</h3>
                 <ct-list $value={list} />
               </div>
-            </div>
+            </ct-vstack>
           </ct-autolayout>
         </ct-screen>
       ),
