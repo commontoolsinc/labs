@@ -129,7 +129,7 @@ export class Scheduler implements IScheduler {
     }
 
     // Subscribe to storage notifications
-    this.runtime.storage.subscribe(this.createStorageSubscription());
+    this.runtime.storageManager.subscribe(this.createStorageSubscription());
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {

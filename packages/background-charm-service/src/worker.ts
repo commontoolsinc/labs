@@ -130,7 +130,7 @@ async function cleanup(): Promise<void> {
 
   // Ensure storage is synced before cleanup
   if (runtime) {
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
     await runtime.dispose();
     runtime = null;
   }

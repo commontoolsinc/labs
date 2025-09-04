@@ -84,7 +84,7 @@ async function test() {
   await testAddressesCell.sync();
   await testEmployeeCell.sync();
 
-  await runtime1.storage.synced();
+  await runtime1.storageManager.synced();
   await runtime1.dispose();
 
   const addressesArrayCell1 = testAddressesCell.key("addresses");
@@ -112,7 +112,7 @@ async function test() {
   addressesArrayCell2.getAsNormalizedFullLink().rootSchema =
     employeAddressesSchema;
   const newCell = await addressesArrayCell2.sync();
-  await runtime2.storage.synced();
+  await runtime2.storageManager.synced();
 
   // At this point, we should have the employee's cell in our heap.
   // I don't want to use the sync system, since that will autoload,

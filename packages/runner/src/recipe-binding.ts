@@ -1,13 +1,11 @@
 import { isRecord } from "@commontools/utils/types";
 import {
-  isShadowRef,
   type JSONValue,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
 } from "./builder/types.ts";
 import { isLegacyAlias, isLink } from "./link-utils.ts";
-import { isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -105,8 +103,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         alias.cell = cell.entityId;
       }
       return { $alias: alias };
-    } else if (isDoc(binding)) {
-      return binding; // Don't enter docs
     } else if (Array.isArray(binding)) {
       return binding.map((value) => convert(value));
     } else if (isRecord(binding)) {

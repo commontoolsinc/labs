@@ -26,7 +26,7 @@ describe("runRecipe", () => {
   });
 
   afterEach(async () => {
-    await runtime?.storage.synced();
+    await runtime?.storageManager.synced();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -753,7 +753,7 @@ describe("setup/start", () => {
   });
 
   afterEach(async () => {
-    await runtime?.storage.synced();
+    await runtime?.storageManager.synced();
     await runtime?.dispose();
     await storageManager?.close();
   });

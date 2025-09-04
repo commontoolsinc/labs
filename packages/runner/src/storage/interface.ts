@@ -1,4 +1,4 @@
-import type { EntityId } from "../doc-map.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
   Assertion,
@@ -11,6 +11,7 @@ import type {
   MemorySpace,
   QueryError as IQueryError,
   Result,
+  SchemaContext,
   SchemaPathSelector,
   Signer,
   State,
@@ -21,6 +22,7 @@ import type {
   Variant,
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
+import { Cell } from "../cell.ts";
 
 export type {
   Assertion,
@@ -66,9 +68,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
   /**
-   * @deprecated
+   * Open a new connection to the storage provider associated with the given
+   * space.
    */
   open(space: MemorySpace): IStorageProviderWithReplica;
+
+  /**
+   * Close all storage providers
+   */
+  close(): Promise<void>;
 
   /**
    * Creates a storage transaction that can be used to read / write data into
@@ -83,6 +91,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+
+  /**
+   * Load cell from storage. Will also subscribe to new changes.
+   */
+  syncCell<T = any>(
+    cell: Cell<T>,
+    schemaContext?: SchemaContext,
+  ): Promise<Cell<T>>;
 }
 
 export interface IRemoteStorageProviderSettings {

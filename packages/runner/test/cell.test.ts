@@ -2368,12 +2368,12 @@ describe("getAsWriteRedirectLink method", () => {
   });
 
   it("should omit space when baseSpace matches", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsWriteRedirectLink-baseSpace-test",
+    const cell = runtime.getCell(
       space,
+      "getAsWriteRedirectLink-baseSpace-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell();
 
     // Get alias with same base space
     const alias = cell.getAsWriteRedirectLink({ baseSpace: space });

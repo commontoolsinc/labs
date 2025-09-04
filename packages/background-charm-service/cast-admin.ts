@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, Runtime } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
@@ -79,7 +79,7 @@ async function castRecipe() {
 
     // Ensure the cell is synced
     await targetCell.sync();
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     console.log("Getting cell...");
 
@@ -109,15 +109,15 @@ async function castRecipe() {
     });
 
     console.log("Recipe cast successfully!");
-    console.log("Result charm ID:", getEntityId(charm));
+    console.log("Result charm ID:", charm.entityId);
 
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
     console.log("Storage synced, exiting");
     Deno.exit(0);
   } catch (error) {
     console.error("Error casting recipe:", error);
     if (quit) {
-      await runtime.storage.synced();
+      await runtime.storageManager.synced();
       Deno.exit(1);
     }
   }

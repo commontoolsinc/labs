@@ -13,7 +13,6 @@ import {
   TYPE,
 } from "./builder/types.ts";
 import { toOpaqueRef } from "./back-to-cell.ts";
-import type { DeepKeyLookup } from "./doc.ts";
 import {
   createQueryResultProxy,
   getCellOrThrow,
@@ -45,7 +44,6 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
-import { getEntityId } from "./doc-map.ts";
 
 /**
  * This is the regular Cell interface.
@@ -611,7 +609,7 @@ export class RegularCell<T> implements Cell<T> {
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
     if (this.link.id.startsWith("data:")) return this;
-    return this.runtime.storage.syncCell(this);
+    return this.runtime.storageManager.syncCell(this) as Promise<Cell<T>>;
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -745,7 +743,8 @@ export class RegularCell<T> implements Cell<T> {
     }
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
-      getEntityId(sourceLink.id),
+      // TODO: Transition source links to sigil links?
+      { "/": fromURI(sourceLink.id) },
     );
   }
 
@@ -913,3 +912,11 @@ export function isCell(value: any): value is Cell<any> {
 export function isStream(value: any): value is Stream<any> {
   return value instanceof StreamCell;
 }
+
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+  : Path extends [infer First, ...infer Rest]
+    ? First extends keyof T
+      ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
+      : any
+    : any
+  : any;

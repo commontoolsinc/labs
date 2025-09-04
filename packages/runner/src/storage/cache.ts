@@ -59,6 +59,7 @@ import type {
   StorageValue,
   URI,
 } from "./interface.ts";
+import { type Cell, isCell } from "../cell.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
@@ -1981,6 +1982,35 @@ export class StorageManager implements IStorageManager {
       this.#providers.values().map((provider) => provider.synced()),
     ).finally(() => setTimeout(() => resolve(), 0));
     return promise;
+  }
+
+  async syncCell<T = any>(
+    cell: Cell<T>,
+    schemaContext?: Consumer.SchemaContext,
+  ): Promise<Cell<T>> {
+    // If we aren't overriding the schema context, and we have a schema in the cell, use that
+    if (
+      schemaContext === undefined && isCell(cell) &&
+      cell.schema !== undefined
+    ) {
+      schemaContext = {
+        schema: cell.schema,
+        rootSchema: (cell.rootSchema !== undefined)
+          ? cell.rootSchema
+          : cell.schema,
+      };
+    }
+    const selector = schemaContext === undefined ? undefined : {
+      path: cell.path.map((p) => p.toString()),
+      schemaContext,
+    };
+
+    const { space, id } = cell.getAsNormalizedFullLink();
+    if (!space) throw new Error("No space set");
+    const storageProvider = this.open(space);
+
+    await storageProvider.sync(id, selector);
+    return cell;
   }
 }
 

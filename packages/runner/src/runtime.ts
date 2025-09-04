@@ -18,8 +18,7 @@ import type {
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
-import type { DocImpl } from "./doc.ts";
-import { DocumentMap, type EntityId } from "./doc-map.ts";
+import { createRef, type EntityId } from "./create-ref.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   type Action,
@@ -38,11 +37,12 @@ import {
   type NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { Storage } from "./storage.ts";
 import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { toURI } from "./uri-utils.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -88,10 +88,8 @@ export interface RuntimeOptions {
 export interface IRuntime {
   readonly id: string;
   readonly scheduler: IScheduler;
-  readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
-  readonly documentMap: IDocumentMap;
   readonly harness: Engine;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
@@ -210,19 +208,6 @@ export interface IScheduler {
   runningPromise: Promise<unknown> | undefined;
 }
 
-export interface IStorage extends IStorageSubscriptionCapability {
-  readonly runtime: IRuntime;
-  edit(): IExtendedStorageTransaction;
-
-  syncCell<T = any>(
-    cell: Cell<any>,
-    expectedInStorage?: boolean,
-    schemaContext?: any,
-  ): Promise<Cell<T>> | Cell<T>;
-  synced(): Promise<void>;
-  cancelAll(): Promise<void>;
-}
-
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
@@ -257,25 +242,6 @@ export interface IModuleRegistry {
   addModuleByRef(ref: string, module: Module): void;
   getModule(ref: string): Module;
   clear(): void;
-}
-
-export interface IDocumentMap {
-  readonly runtime: IRuntime;
-  getDocByEntityId<T = any>(
-    space: MemorySpace,
-    entityId: EntityId | string,
-    createIfNotFound?: true,
-    sourceIfCreated?: DocImpl<any>,
-  ): DocImpl<T>;
-  getDocByEntityId<T = any>(
-    space: MemorySpace,
-    entityId: EntityId | string,
-    createIfNotFound: false,
-    sourceIfCreated?: DocImpl<any>,
-  ): DocImpl<T> | undefined;
-  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;
-  getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T>;
-  cleanup(): void;
 }
 
 export interface IRunner {
@@ -340,10 +306,8 @@ export interface IRunner {
 export class Runtime implements IRuntime {
   readonly id: string;
   readonly scheduler: IScheduler;
-  readonly storage: IStorage;
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
-  readonly documentMap: IDocumentMap;
   readonly harness: Engine;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
@@ -370,13 +334,6 @@ export class Runtime implements IRuntime {
     }
 
     this.storageManager = options.storageManager;
-
-    this.storage = new Storage(
-      this,
-      options.storageManager,
-    );
-
-    this.documentMap = new DocumentMap(this);
     this.moduleRegistry = new ModuleRegistry(this);
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
@@ -413,10 +370,9 @@ export class Runtime implements IRuntime {
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
-        storage: !!this.storage,
+        storageManager: !!this.storageManager,
         recipeManager: !!this.recipeManager,
         moduleRegistry: !!this.moduleRegistry,
-        documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
         telemetry: !!this.telemetry,
@@ -438,14 +394,11 @@ export class Runtime implements IRuntime {
     // Stop all running docs
     this.runner.stopAll();
 
-    // Clean up document map
-    this.documentMap.cleanup();
-
     // Clear module registry
     this.moduleRegistry.clear();
 
     // Cancel all storage operations
-    await this.storage.cancelAll();
+    await this.storageManager.close();
 
     // Wait for any pending operations
     await this.scheduler.idle();
@@ -460,7 +413,7 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    return this.storage.edit();
+    return new ExtendedStorageTransaction(this.storageManager.edit());
   }
 
   /**
@@ -490,11 +443,17 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    const doc = this.documentMap.getDoc<any>(undefined as any, cause, space);
-    // Use doc.asCell method to avoid circular dependency
-    return doc.asCell([], schema, undefined, tx);
+    return this.getCellFromLink(
+      {
+        id: toURI(createRef({}, cause)),
+        path: [],
+        space,
+        type: "application/json",
+      },
+      schema,
+      tx,
+    );
   }
-
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId | string,
@@ -516,10 +475,17 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    const doc = this.documentMap.getDocByEntityId(space, entityId, true)!;
-    return doc.asCell(path, schema, undefined, tx);
+    return this.getCellFromLink(
+      {
+        id: toURI(entityId),
+        path: path?.map(String) ?? [],
+        space,
+        type: "application/json",
+      },
+      schema,
+      tx,
+    );
   }
-
   getCellFromLink<T>(
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,

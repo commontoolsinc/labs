@@ -42,7 +42,7 @@ async function test() {
   cell1.withTx(tx).set({ message: "Hello World", count: 42 });
   tx.commit();
 
-  await runtime1.storage.synced();
+  await runtime1.storageManager.synced();
   const cell1Contents = JSON.parse(JSON.stringify(cell1.get()));
 
   await runtime1.dispose();
@@ -58,7 +58,7 @@ async function test() {
 
   const cell2 = runtime2.getCell(identity.did(), cause, schema);
   await cell2.sync();
-  await runtime2.storage.synced();
+  await runtime2.storageManager.synced();
 
   const cell2Contents = JSON.parse(JSON.stringify(cell2.get()));
 
