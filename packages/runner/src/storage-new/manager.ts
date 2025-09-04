@@ -44,13 +44,12 @@ export class NewStorageManager implements IStorageManager {
     });
     // Bridge storage client change events to runner notifications
     this.#client.onChange((e) => {
-      // Coarse integrate notification on any doc change
-      const uri = uriFromDocId(e.docId) ?? (`doc:${e.docId}` as any);
+      // Emit commit notifications for scheduler consumption
+      const uri = uriFromDocId(e.docId) ?? ("doc:" + e.docId as any);
       this.#subscription.next({
-        type: "integrate",
+        type: "commit",
         space: e.space as MemorySpace,
         changes: {
-          // Implement Iterable<IMemoryChange> minimal stub
           [Symbol.iterator](): Iterator<
             import("../storage/interface.ts").IMemoryChange
           > {

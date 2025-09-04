@@ -17,7 +17,8 @@ import type {
   WriterError,
 } from "../storage/interface.ts";
 import { StorageClient } from "../../../storage/src/client/index.ts";
-import { docIdFromUri, pathFromAddress } from "./address.ts";
+import { docIdFromUri, pathFromAddress, uriFromDocId } from "./address.ts";
+import type { ITransactionJournal } from "../storage/interface.ts";
 
 function getAtPathValue(root: unknown, path: string[]): unknown {
   if (!path || path.length === 0) return root;
@@ -63,8 +64,44 @@ export class NewStorageTransaction implements IStorageTransaction {
     } as any;
   }
 
-  get journal() {
-    return this.delegate.journal;
+  get journal(): ITransactionJournal {
+    const delegateJournal = this.delegate.journal;
+    return {
+      activity(): Iterable<import("../storage/interface.ts").Activity> {
+        const base = Array.from(delegateJournal.activity?.() ?? []);
+        // Append client write operations as lightweight activities for scheduler
+        // conversion. We ignore reads here and rely on delegate for them.
+        const extras: Array<import("../storage/interface.ts").Activity> = [];
+        try {
+          for (
+            const entry
+              of ((this as unknown as NewStorageTransaction).#clientTx as any)
+                .log ?? []
+          ) {
+            if (entry && entry.op === "write") {
+              const uri = uriFromDocId(entry.docId) ?? entry.docId;
+              extras.push({
+                write: {
+                  space: entry.space as MemorySpace,
+                  id: uri as any,
+                  type: "application/json" as const,
+                  path: ["value", ...(entry.path ?? [])],
+                },
+              } as any);
+            }
+          }
+        } catch {
+          // ignore log aggregation failures
+        }
+        return [...base, ...extras];
+      },
+      novelty(space: MemorySpace) {
+        return delegateJournal.novelty?.(space) as any;
+      },
+      history(space: MemorySpace) {
+        return delegateJournal.history?.(space) as any;
+      },
+    } as ITransactionJournal;
   }
 
   status(): StorageTransactionStatus {

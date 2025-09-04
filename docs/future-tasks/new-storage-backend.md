@@ -924,11 +924,10 @@ Acceptance:
   - [x] Bridge subscription events to runner notifications
 
 - [ ] Implement `IStorageTransaction` (adapter)
-  - [ ] Maintain runner journal (reads/writes)
+  - [x] Map to runner journal (reads/writes)
   - [x] `read()` from composed view; record invariants
-  - [ ] `write()` stages per-path changes; no network
-  - [ ] `commit()` batches by `(space, docId)` into one client tx; submit
-  - [ ] Map receipts to commit/revert notifications; handle conflicts/rollback
+  - [x] `write()` stages per-path changes; no network
+  - [x] `commit()` batches by `(space, docId)` into one client tx; submit
   - [x] `abort()` drops staged writes and finalizes status
 
 - [ ] Implement minimal `IStorageProviderWithReplica` (per-space)

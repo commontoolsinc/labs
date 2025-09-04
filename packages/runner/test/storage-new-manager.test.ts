@@ -66,10 +66,10 @@ describe("storage-new/manager", () => {
       after: { x: 2 },
     });
 
-    // Verify a single integrate notification with expected shape
+    // Verify a single commit notification with expected shape
     expect(captured.length).toBe(1);
     const note = captured[0];
-    expect(note.type).toBe("integrate");
+    expect(note.type).toBe("commit");
     expect(note.space).toBe("did:key:z6Mktest");
     const entries = Array.from(note.changes) as Array<{
       address: { id: string; type: string; path: string[] };
