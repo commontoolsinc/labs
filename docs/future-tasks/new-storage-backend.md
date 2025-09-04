@@ -932,9 +932,9 @@ Acceptance:
   - [x] `abort()` drops staged writes and finalizes status
 
 - [ ] Implement minimal `IStorageProviderWithReplica` (per-space)
-  - [ ] `replica.did()` returns space DID
-  - [ ] `replica.get(entry)` returns current `{ the, of, is }` via adapter cache
-  - [ ] `sync(uri, selector)`, `synced()`, `destroy()` lifecycle
+  - [x] `replica.did()` returns space DID
+  - [x] `replica.get(entry)` returns current `{ the, of, is }` via adapter cache
+  - [x] `sync(uri, selector)`, `synced()`, `destroy()` lifecycle
   - [x] Do not implement `IStorageProvider.send`, `.sink`, or `.get` (unused)
   - [x] `sync`/`synced` delegate to client; `destroy` disconnects space
 
@@ -956,6 +956,6 @@ Acceptance:
   - [ ] Mirror connection/push/pull/subscription state to `RuntimeTelemetry`
 
 - [ ] Testing
-  - [ ] Unit: address mapping and transaction batching
+  - [x] Unit: address mapping and transaction batching
   - [ ] Integration: run existing runner tests with `ENABLE_NEW_STORAGE=1`
   - [ ] Reconnection parity (subscribe/get/ack) with storage client

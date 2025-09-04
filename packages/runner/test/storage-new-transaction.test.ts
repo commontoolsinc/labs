@@ -61,13 +61,12 @@ describe("storage-new/transaction", () => {
         IAttestation,
         any
       >),
-      write:
-        () => ({
-          ok: { address: addr(), value: undefined } as IAttestation,
-        } as Result<
-          IAttestation,
-          any
-        >),
+      write: () => ({
+        ok: { address: addr(), value: undefined } as IAttestation,
+      } as Result<
+        IAttestation,
+        any
+      >),
       abort: () => ({ ok: {} as Unit } as Result<Unit, any>),
       commit: async () => ({ ok: {} as Unit } as Result<Unit, any>),
     };
@@ -116,13 +115,12 @@ describe("storage-new/transaction", () => {
         IAttestation,
         any
       >),
-      write:
-        () => ({
-          ok: { address: addr(), value: undefined } as IAttestation,
-        } as Result<
-          IAttestation,
-          any
-        >),
+      write: () => ({
+        ok: { address: addr(), value: undefined } as IAttestation,
+      } as Result<
+        IAttestation,
+        any
+      >),
       abort: () => ({ ok: {} as Unit } as Result<Unit, any>),
       commit: async () => ({ ok: {} as Unit } as Result<Unit, any>),
     };

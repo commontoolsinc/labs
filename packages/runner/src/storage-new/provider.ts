@@ -1,12 +1,15 @@
 import type {
   IRemoteStorageProviderSettings,
+  ISpaceReplica,
   IStorageProviderWithReplica,
   Result,
   SchemaPathSelector,
+  State,
   StorageValue,
   Unit,
   URI,
 } from "../storage/interface.ts";
+import type { BaseMemoryAddress } from "../traverse.ts";
 import type { MemorySpace } from "../storage.ts";
 import { StorageClient } from "../../../storage/src/client/index.ts";
 import { docIdFromUri } from "./address.ts";
@@ -20,6 +23,7 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
   #space: MemorySpace;
   #consumerId: string;
   #delegate: IStorageProviderWithReplica;
+  #replica: ISpaceReplica;
 
   constructor(
     client: StorageClient,
@@ -31,11 +35,26 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
     this.#space = space;
     this.#delegate = delegate;
     this.#consumerId = crypto.randomUUID();
+    // Minimal replica backed by the StorageClient composed view
+    this.#replica = {
+      did: () => this.#space,
+      get: (entry: BaseMemoryAddress): State | undefined => {
+        try {
+          const docId = docIdFromUri(entry.id as any);
+          const view = this.#client.readView(String(this.#space), docId).json;
+          return view === undefined
+            ? undefined
+            : { the: entry.type, of: entry.id, is: view as unknown } as State;
+        } catch {
+          return undefined;
+        }
+      },
+    } as ISpaceReplica;
   }
 
   // Replica passthrough for scaffolding
   get replica() {
-    return this.#delegate.replica;
+    return this.#replica;
   }
 
   async send(

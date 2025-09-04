@@ -837,15 +837,15 @@ export class CTKanban extends BaseElement {
     return html`
       <div class="kanban-container">
         ${this.title
-        ? html`
-          <h2 class="kanban-title">${this.title}</h2>
-        `
-        : ""}
+          ? html`
+            <h2 class="kanban-title">${this.title}</h2>
+          `
+          : ""}
 
         <div class="kanban-board">
           ${this.getAllColumns().map((column) =>
-        this.renderColumn(column, charmCells)
-      )}
+            this.renderColumn(column, charmCells)
+          )}
         </div>
       </div>
     `;
@@ -865,11 +865,12 @@ export class CTKanban extends BaseElement {
         <div class="column-header">
           <div class="column-title">
             ${column.icon
-        ? html`
-          <span class="column-icon" style="background-color: ${column.color ||
-            "#94a3b8"}"></span>
-        `
-        : ""} ${column.title}
+              ? html`
+                <span class="column-icon" style="background-color: ${column
+                  .color ||
+                  "#94a3b8"}"></span>
+              `
+              : ""} ${column.title}
           </div>
           <div class="column-count">
             ${columnItems.length}${column.maxItems ? `/${column.maxItems}` : ""}
@@ -878,27 +879,27 @@ export class CTKanban extends BaseElement {
 
         <div class="column-items">
           ${columnItems.length === 0
-        ? html`
-          <div class="empty-state">
-            ${isDragOver ? "Drop item here" : "No items"}
-          </div>
-        `
-        : repeat(
-          columnItems,
-          (charmCell) => {
-            const charm = charmCell.get();
-            return `${
-              charm.title || charmId(charmCell) || "item"
-            }-${charm.status}`;
-          }, // Use title + status as key
-          (charmCell) => this.renderItem(charmCell),
-        )} ${this.dragState.isDragging && !isDragOver
-        ? html`
-          <div class="column-drop-zone ${isDragOver ? "active" : ""}">
-            Drop here
-          </div>
-        `
-        : ""}
+            ? html`
+              <div class="empty-state">
+                ${isDragOver ? "Drop item here" : "No items"}
+              </div>
+            `
+            : repeat(
+              columnItems,
+              (charmCell) => {
+                const charm = charmCell.get();
+                return `${
+                  charm.title || charmId(charmCell) || "item"
+                }-${charm.status}`;
+              }, // Use title + status as key
+              (charmCell) => this.renderItem(charmCell),
+            )} ${this.dragState.isDragging && !isDragOver
+            ? html`
+              <div class="column-drop-zone ${isDragOver ? "active" : ""}">
+                Drop here
+              </div>
+            `
+            : ""}
         </div>
       </div>
     `;
@@ -918,18 +919,19 @@ export class CTKanban extends BaseElement {
           </div>
 
           ${!this.readonly && this.itemAction
-        ? html`
-          <div class="item-actions">
-            <button
-              class="item-action ${this.itemAction.type}"
-              @click="${(e: MouseEvent) => this.handleItemAction(charmCell, e)}"
-              title="${this.getItemActionTitle(this.itemAction.type)}"
-            >
-              ${this.getItemActionIcon(this.itemAction.type)}
-            </button>
-          </div>
-        `
-        : ""}
+            ? html`
+              <div class="item-actions">
+                <button
+                  class="item-action ${this.itemAction.type}"
+                  @click="${(e: MouseEvent) =>
+                    this.handleItemAction(charmCell, e)}"
+                  title="${this.getItemActionTitle(this.itemAction.type)}"
+                >
+                  ${this.getItemActionIcon(this.itemAction.type)}
+                </button>
+              </div>
+            `
+            : ""}
         </div>
 
         ${this.renderItemMetadata(charmCell)}
@@ -948,8 +950,8 @@ export class CTKanban extends BaseElement {
     return html`
       <div class="item-metadata">
         ${hasStatusBadge ? this.renderStatusBadge(charmCell) : ""} ${hasSubtasks
-        ? this.renderSubtaskBadge(charmCell)
-        : ""}
+          ? this.renderSubtaskBadge(charmCell)
+          : ""}
       </div>
     `;
   }
@@ -966,10 +968,10 @@ export class CTKanban extends BaseElement {
     return html`
       <span class="status-badge ${cssClass}">
         ${badge.icon
-        ? html`
-          <span>${badge.icon}</span>
-        `
-        : ""} ${badge.text}
+          ? html`
+            <span>${badge.icon}</span>
+          `
+          : ""} ${badge.text}
       </span>
     `;
   }

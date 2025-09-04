@@ -96,32 +96,32 @@ export class CTInputOTP extends BaseElement {
     return html`
       <div class="otp-container" part="container">
         ${repeat(
-        digits,
-        (i) => i,
-        (i) =>
-          html`
-            <input
-              type="text"
-              inputmode="numeric"
-              pattern="[0-9]"
-              maxlength="1"
-              class="${classMap({
-              "otp-input": true,
-              "filled": !!this.value[i],
-            })}"
-              part="input"
-              .value="${this.value[i] || ""}"
-              ?disabled="${this.disabled}"
-              placeholder="${this.placeholder}"
-              autocomplete="${this.autoComplete ? "one-time-code" : "off"}"
-              @input="${(e: Event) => this._handleInput(e, i)}"
-              @keydown="${(e: KeyboardEvent) => this._handleKeyDown(e, i)}"
-              @paste="${(e: ClipboardEvent) => this._handlePaste(e, i)}"
-              @focus="${(e: FocusEvent) => this._handleFocus(e, i)}"
-              aria-label="${`Digit ${i + 1} of ${this.length}`}"
-            />
-          `,
-      )}
+          digits,
+          (i) => i,
+          (i) =>
+            html`
+              <input
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]"
+                maxlength="1"
+                class="${classMap({
+                  "otp-input": true,
+                  "filled": !!this.value[i],
+                })}"
+                part="input"
+                .value="${this.value[i] || ""}"
+                ?disabled="${this.disabled}"
+                placeholder="${this.placeholder}"
+                autocomplete="${this.autoComplete ? "one-time-code" : "off"}"
+                @input="${(e: Event) => this._handleInput(e, i)}"
+                @keydown="${(e: KeyboardEvent) => this._handleKeyDown(e, i)}"
+                @paste="${(e: ClipboardEvent) => this._handlePaste(e, i)}"
+                @focus="${(e: FocusEvent) => this._handleFocus(e, i)}"
+                aria-label="${`Digit ${i + 1} of ${this.length}`}"
+              />
+            `,
+        )}
       </div>
       ${this.name
         ? html`

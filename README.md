@@ -130,4 +130,8 @@ Always use the workspace test runner:
 
 - deno task test
 
-This aggregates per-package test commands and avoids mirrored paths under .conductor that are not wired to the import map. Running plain deno test -A from the repo root may fail due to those mirrored files. If you need to run a specific package's tests, use its package-level task (see that package’s deno.json).
+This aggregates per-package test commands and avoids mirrored paths under
+.conductor that are not wired to the import map. Running plain deno test -A from
+the repo root may fail due to those mirrored files. If you need to run a
+specific package's tests, use its package-level task (see that package’s
+deno.json).
