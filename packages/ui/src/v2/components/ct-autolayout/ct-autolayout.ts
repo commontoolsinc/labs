@@ -127,13 +127,13 @@ export class CTAutoLayout extends BaseElement {
 
   private _updateActiveTab() {
     // Remove active-tab class from all children
-    this._children.forEach(child => {
-      child.classList.remove('active-tab');
+    this._children.forEach((child) => {
+      child.classList.remove("active-tab");
     });
 
     // Add active-tab class to the current active child
     if (this._children[this._activeTab]) {
-      this._children[this._activeTab].classList.add('active-tab');
+      this._children[this._activeTab].classList.add("active-tab");
     }
   }
 
@@ -146,8 +146,11 @@ export class CTAutoLayout extends BaseElement {
         ${this.tabNames.map((name, index) => {
           return html`
             <button
-              class="${classMap({ tab: true, active: index === this._activeTab })}"
-              @click=${() => this._handleTabClick(index)}
+              class="${classMap({
+                tab: true,
+                active: index === this._activeTab,
+              })}"
+              @click="${() => this._handleTabClick(index)}"
             >
               ${name}
             </button>

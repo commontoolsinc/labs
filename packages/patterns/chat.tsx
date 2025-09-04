@@ -111,7 +111,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
             )}
           </ct-vscroll>
 
-          <div slot="footer" style={{ borderTop: "1px solid #e0e0e0", padding: "1rem" }}>
+          <div
+            slot="footer"
+            style={{ borderTop: "1px solid #e0e0e0", padding: "1rem" }}
+          >
             <ct-message-input
               name="Ask"
               placeholder="Ask the LLM a question..."
