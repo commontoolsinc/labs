@@ -1,23 +1,99 @@
 import ts from "typescript";
+import { StaticCache } from "@commontools/static";
 
-export function createTestProgram(
+// Cache for TypeScript library definitions
+let typeLibsCache: Record<string, string> | undefined;
+
+/**
+ * Load TypeScript environment types (es2023, dom, jsx)
+ * Same functionality as js-runtime but implemented independently
+ */
+async function getTypeScriptEnvironmentTypes(): Promise<Record<string, string>> {
+  if (typeLibsCache) {
+    return typeLibsCache;
+  }
+  
+  const cache = new StaticCache();
+  const es2023 = await cache.getText("types/es2023.d.ts");
+  const jsx = await cache.getText("types/jsx.d.ts");
+  const dom = await cache.getText("types/dom.d.ts");
+
+  typeLibsCache = {
+    es2023,
+    dom,
+    jsx,
+  };
+  return typeLibsCache;
+}
+
+export async function createTestProgram(
   code: string,
-): { program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile } {
+): Promise<{ program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }> {
   const fileName = "test.ts";
   const sourceFile = ts.createSourceFile(
     fileName,
     code,
-    ts.ScriptTarget.Latest,
+    ts.ScriptTarget.ES2023,
     true,
   );
 
+  // Load TypeScript library definitions
+  const typeLibs = await getTypeScriptEnvironmentTypes();
+
   const compilerHost: ts.CompilerHost = {
-    getSourceFile: (name) => name === fileName ? sourceFile : undefined,
+    getSourceFile: (name) => {
+      if (name === fileName) {
+        return sourceFile;
+      }
+      
+      // Map lib.d.ts requests to es2023 definitions (same as js-runtime)
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return ts.createSourceFile(
+          name,
+          typeLibs.es2023 || "",
+          ts.ScriptTarget.ES2023,
+          true,
+        );
+      }
+      
+      // Handle other library files (map case-insensitive)
+      const libName = name.toLowerCase().replace('.d.ts', '');
+      if (typeLibs[libName]) {
+        return ts.createSourceFile(
+          name,
+          typeLibs[libName],
+          ts.ScriptTarget.ES2023,
+          true,
+        );
+      }
+      
+      return undefined;
+    },
     writeFile: () => {},
     getCurrentDirectory: () => "",
     getDirectories: () => [],
-    fileExists: () => true,
-    readFile: () => "",
+    fileExists: (name) => {
+      if (name === fileName) return true;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
+      
+      // Check library files (case-insensitive)
+      const libName = name.toLowerCase().replace('.d.ts', '');
+      if (typeLibs[libName]) return true;
+      
+      return false;
+    },
+    readFile: (name) => {
+      if (name === fileName) return code;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return typeLibs.es2023;
+      }
+      
+      // Handle library files (case-insensitive)
+      const libName = name.toLowerCase().replace('.d.ts', '');
+      if (typeLibs[libName]) return typeLibs[libName];
+      
+      return undefined;
+    },
     getCanonicalFileName: (f) => f,
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
@@ -25,8 +101,12 @@ export function createTestProgram(
   };
 
   const program = ts.createProgram([fileName], {
-    target: ts.ScriptTarget.Latest,
+    target: ts.ScriptTarget.ES2023,
     module: ts.ModuleKind.ESNext,
+    // Add proper lib configuration (key difference from broken version)
+    lib: ["ES2023", "DOM", "JSX"],
+    strict: true,
+    strictNullChecks: true,
   }, compilerHost);
 
   return {
@@ -36,11 +116,11 @@ export function createTestProgram(
   };
 }
 
-export function getTypeFromCode(
+export async function getTypeFromCode(
   code: string,
   typeName: string,
-): { type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode } {
-  const { program, checker, sourceFile } = createTestProgram(code);
+): Promise<{ type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode }> {
+  const { program, checker, sourceFile } = await createTestProgram(code);
 
   let foundType: ts.Type | undefined;
   let foundTypeNode: ts.TypeNode | undefined;

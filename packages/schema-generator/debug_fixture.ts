@@ -10,7 +10,7 @@ try {
   const expected = await Deno.readTextFile(`./test/fixtures/schema/${fixtureName}.expected.json`);
 
   const gen = createSchemaTransformerV2();
-  const { type, checker, typeNode } = getTypeFromCode(code, "SchemaRoot");
+  const { type, checker, typeNode } = await getTypeFromCode(code, "SchemaRoot");
   const obj1 = normalizeSchema(gen(type, checker, typeNode));
   
   // Exact test harness logic

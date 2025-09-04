@@ -77,7 +77,7 @@ for (const cfg of configs) {
         const typeName = "SchemaRoot"; // Convention: root type is named 'SchemaRoot'
 
         const gen = createSchemaTransformerV2();
-        const { type, checker, typeNode } = getTypeFromCode(code, typeName);
+        const { type, checker, typeNode } = await getTypeFromCode(code, typeName);
         const obj1 = normalizeSchema(gen(type, checker, typeNode));
         const obj2 = normalizeSchema(gen(type, checker, typeNode));
         const s1 = JSON.stringify(obj1, null, 2) + "\n";

@@ -198,15 +198,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       containerArg && !innerLooksLikeDefault &&
       !this.isNamedTypeRef(containerArg, "Default")
     ) {
-      const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
-      if (info) {
-        const items = this.schemaGenerator.formatChildType(
-          info.elementType,
-          checker,
-          info.elementNode,
-        );
-        return { type: "array", items, asCell: true } as SchemaDefinition;
-      }
+      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, checker);
+      if (arr) return { ...arr, asCell: true } as SchemaDefinition;
     }
     // Default<T,V> is handled by its own formatter; delegate and add asCell at the end
 
@@ -253,15 +246,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       containerArg && !innerLooksLikeDefault &&
       !this.isNamedTypeRef(containerArg, "Default")
     ) {
-      const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
-      if (info) {
-        const items = this.schemaGenerator.formatChildType(
-          info.elementType,
-          checker,
-          info.elementNode,
-        );
-        return { type: "array", items, asStream: true };
-      }
+      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, checker);
+      if (arr) return { ...arr, asStream: true };
     }
     // If Stream<Default<T,V>> is encountered, Default handles default/union. Just add flags.
     if (innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {

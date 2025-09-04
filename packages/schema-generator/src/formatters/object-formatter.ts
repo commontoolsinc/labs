@@ -25,9 +25,12 @@ export class ObjectFormatter implements TypeFormatter {
     if (type.symbol?.name === "Date" && type.symbol?.valueDeclaration) {
       // Check if this is the built-in Date type (not a user-defined type named "Date")
       const sourceFile = type.symbol.valueDeclaration.getSourceFile();
+      
       if (
         sourceFile.fileName.includes("lib.") ||
-        sourceFile.fileName.includes("typescript/lib")
+        sourceFile.fileName.includes("typescript/lib") ||
+        sourceFile.fileName.includes("ES2023.d.ts") ||
+        sourceFile.fileName.includes("DOM.d.ts")
       ) {
         return { type: "string", format: "date-time" };
       }

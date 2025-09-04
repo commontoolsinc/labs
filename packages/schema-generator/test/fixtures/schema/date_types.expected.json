@@ -1,0 +1,103 @@
+{
+  "properties": {
+    "document": {
+      "properties": {
+        "archivedAt": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "format": "date-time",
+              "type": "string"
+            }
+          ]
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "publishedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "title"
+      ],
+      "type": "object"
+    },
+    "eventLog": {
+      "properties": {
+        "eventType": {
+          "type": "string"
+        },
+        "timestamp": {
+          "default": "2023-01-01T00:00:00.000Z",
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "eventType",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "userProfile": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "lastLogin": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "format": "date-time",
+              "type": "string"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "preferences": {
+          "properties": {
+            "timezone": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "timezone",
+            "updatedAt"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "createdAt",
+        "lastLogin",
+        "name",
+        "preferences"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "document",
+    "eventLog",
+    "userProfile"
+  ],
+  "type": "object"
+}
