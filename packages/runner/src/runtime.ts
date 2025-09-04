@@ -47,6 +47,8 @@ import { toURI } from "./uri-utils.ts";
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
 
+export const DEFAULT_MAX_RETRIES = 5;
+
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
 export type ErrorWithContext = Error & {
@@ -104,6 +106,10 @@ export interface IRuntime {
 
   // Storage transaction method
   edit(): IExtendedStorageTransaction;
+  editWithRetry(
+    fn: (tx: IExtendedStorageTransaction) => void,
+    maxRetries?: number,
+  ): Promise<boolean>;
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
@@ -414,6 +420,34 @@ export class Runtime implements IRuntime {
    */
   edit(): IExtendedStorageTransaction {
     return new ExtendedStorageTransaction(this.storageManager.edit());
+  }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   *
+   * If the transaction fails, it will be retried up to maxRetries times.
+   *
+   * @param fn - Function to execute with the transaction.
+   * @param maxRetries - Maximum number of retries.
+   * @returns Promise that resolves when the transaction is committed.
+   */
+  editWithRetry(
+    fn: (tx: IExtendedStorageTransaction) => void,
+    maxRetries: number = DEFAULT_MAX_RETRIES,
+  ): Promise<boolean> {
+    const tx = this.edit();
+    fn(tx);
+    return tx.commit().then(({ error }) => {
+      if (error) {
+        if (maxRetries > 0) {
+          return this.editWithRetry(fn, maxRetries - 1);
+        }
+        return false;
+      }
+      return true;
+    });
   }
 
   /**
