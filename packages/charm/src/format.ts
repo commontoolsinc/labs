@@ -1,6 +1,6 @@
 import { Module, NAME, Recipe } from "@commontools/runner";
-import { Charm, CharmManager, charmSchema } from "./index.ts";
-import { Cell, getEntityId, isCell, isStream } from "@commontools/runner";
+import { CharmManager, charmSchema } from "./index.ts";
+import { Cell } from "@commontools/runner";
 
 /**
  * Converts a string of multiple words into camelCase format

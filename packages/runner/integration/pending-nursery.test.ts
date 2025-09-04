@@ -40,12 +40,12 @@ async function test() {
 
   const cause = "test-object-" + Date.now();
   const cell1 = runtime1.getCell(identity.did(), cause, schema);
-  await runtime1.storage.syncCell(cell1);
+  await runtime1.storageManager.syncCell(cell1);
   const tx = runtime1.edit();
   cell1.withTx(tx).set({ message: "Hello World", count: 42 });
   tx.commit();
 
-  await runtime1.storage.synced();
+  await runtime1.storageManager.synced();
 
   const uri = toURI(cell1.entityId);
   console.log("subscribing to changes for", uri);
@@ -78,8 +78,8 @@ async function test() {
   );
 
   const cell2 = runtime2.getCell(identity.did(), cause, schema);
-  await runtime2.storage.syncCell(cell2);
-  await runtime2.storage.synced();
+  await runtime2.storageManager.syncCell(cell2);
+  await runtime2.storageManager.synced();
 
   // reset our subscribe callback counters
   s1Count = 0;
@@ -115,8 +115,8 @@ async function test() {
   const synced = await Promise.race([deferred.promise, timeoutPromise]);
   assert(synced, "Timed out before runtime2 received updated values");
 
-  await runtime1.storage.synced();
-  await runtime2.storage.synced();
+  await runtime1.storageManager.synced();
+  await runtime2.storageManager.synced();
 
   // We should have gotten no updates on runner1 and up to three updates on runner2
   assertEquals(s1Count, 0, "Got subscribe response on runtime1 for pending");
@@ -132,8 +132,8 @@ async function test() {
   cell2.withTx(tx2a).set({ message: "Hello World", count: 46 });
   tx2a.commit();
 
-  await runtime1.storage.synced();
-  await runtime2.storage.synced();
+  await runtime1.storageManager.synced();
+  await runtime2.storageManager.synced();
 
   // We should have gotten one update on runner1 and no updates on runner2
   assertEquals(s1Count, 1);

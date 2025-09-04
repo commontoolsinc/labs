@@ -8,7 +8,7 @@ import {
 } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
-import { createRef } from "./doc-map.ts";
+import { createRef } from "./create-ref.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 

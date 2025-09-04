@@ -98,7 +98,7 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
         // Emit greppable line immediately so scripts can capture without waiting
         console.log(`navigateTo new charm id ${id}`);
         // Best-effort: ensure charm is present in list
-        runtime.storage.synced().then(async () => {
+        runtime.storageManager.synced().then(async () => {
           try {
             const mgr = charmManagerRef.current!;
             const list = mgr.getCharms().get();

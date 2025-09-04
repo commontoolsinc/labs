@@ -46,7 +46,7 @@ export class BackgroundCharmService {
       runtime: this.runtime,
     });
     await this.charmsCell.sync();
-    await this.runtime.storage.synced();
+    await this.runtime.storageManager.synced();
 
     if (this.isRunning) {
       console.log("Service is already running");

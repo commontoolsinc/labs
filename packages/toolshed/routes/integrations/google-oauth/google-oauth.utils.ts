@@ -156,7 +156,7 @@ export async function getAuthCell(docLink: string) {
 
     // make sure the cell is live!
     await authCell.sync();
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return authCell;
   } catch (error) {
@@ -191,7 +191,7 @@ export async function persistTokens(
     tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     // Ensure the cell is synced
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return tokenData;
   } catch (error) {
@@ -307,7 +307,7 @@ export async function clearAuthData(authCellDocLink: string) {
     tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     // Ensure the cell is synced
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return emptyAuthData;
   } catch (error) {

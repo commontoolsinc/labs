@@ -190,7 +190,7 @@ This plan should be entirely incremental and can be rolled out step by step.
       reads. CT-451
 - [x] On conflicts add data that changed unless it was already sent to the
       client by a query. CT-452
-- [ ] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
+- [x] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
 - [x] Memory layer with pending changes after a conflicted write: rollback to
       heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320

@@ -10,14 +10,15 @@ export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-utils.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
-export type { EntityId } from "./doc-map.ts";
-export { createRef, getEntityId } from "./doc-map.ts";
+export { createRef, type EntityId, getEntityId } from "./create-ref.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { StorageTelemetry } from "./storage/telemetry.ts";
-export type { IExtendedStorageTransaction } from "./storage/interface.ts";
-export { isDoc } from "./doc.ts";
+export type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "./storage/interface.ts";
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,
@@ -26,7 +27,6 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { type MemorySpace } from "./storage.ts";
 export {
   Console,
   type ConsoleEvent,

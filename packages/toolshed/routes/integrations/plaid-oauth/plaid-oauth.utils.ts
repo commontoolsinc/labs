@@ -128,7 +128,7 @@ export async function getAuthCell(docLink: SigilLink | string) {
     const authCell = runtime.getCellFromLink(parsedDocLink);
 
     await authCell.sync();
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return authCell;
   } catch (error) {
@@ -173,7 +173,7 @@ export async function saveAuthData(
 
     authCell.set(authData);
 
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return authData;
   } catch (error) {

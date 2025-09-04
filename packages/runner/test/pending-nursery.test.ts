@@ -35,15 +35,15 @@ describe("Provider Subscriptions", () => {
 
       // Initial sync to establish subscriptions for both users
       const cell1 = runtime.getCell(space, "test-cell", schema);
-      await runtime.storage.syncCell(cell1);
-      await runtime.storage.synced();
+      await runtime.storageManager.syncCell(cell1);
+      await runtime.storageManager.synced();
 
       const uri = cell1.getAsNormalizedFullLink().id;
 
       const tx = runtime.edit();
       cell1.withTx(tx).set(1);
       await tx.commit();
-      await runtime.storage.synced();
+      await runtime.storageManager.synced();
 
       expect(provider.get(uri)).toEqual({ value: 1 });
 
@@ -68,7 +68,7 @@ describe("Provider Subscriptions", () => {
       cell1.withTx(tx1c).set(45);
       tx1c.commit();
 
-      await runtime.storage.synced();
+      await runtime.storageManager.synced();
 
       // We should have gotten no updates, since these were all
       // our own pending messages

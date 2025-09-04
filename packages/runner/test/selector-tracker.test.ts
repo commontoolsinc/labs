@@ -30,7 +30,6 @@ describe("SelectorTracker", () => {
   });
 
   afterEach(async () => {
-    await runtime?.storage.cancelAll();
     await storageManager?.close();
     // _processCurrentBatch leaves sleep behind that makes deno error
     await new Promise((wake) => setTimeout(wake, 1));

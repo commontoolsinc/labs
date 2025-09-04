@@ -3,8 +3,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import { ID } from "../src/builder/types.ts";
-import { type IStorage, Runtime } from "../src/runtime.ts";
+import { Cell, ID } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import { isAnyCellLink } from "../src/link-utils.ts";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
@@ -19,7 +19,6 @@ describe.skip("Push conflict", () => {
   let runtime: Runtime;
   let session: Memory.Memory.Memory;
   let memory: Provider;
-  let storage: IStorage;
   let provider: Memory.Provider.Provider<Memory.Protocol>;
   let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
   const storageManager: IStorageManager = {
@@ -39,6 +38,12 @@ describe.skip("Push conflict", () => {
     synced() {
       return Promise.resolve();
     },
+    syncCell<T>(cell: Cell<T>) {
+      return Promise.resolve(cell);
+    },
+    close() {
+      return Promise.resolve();
+    },
   };
 
   beforeEach(() => {
@@ -56,7 +61,6 @@ describe.skip("Push conflict", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    storage = runtime.storage;
   });
 
   afterEach(async () => {
@@ -100,7 +104,7 @@ describe.skip("Push conflict", () => {
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(list.get()).toEqual([4]);
 
-    await storage.synced();
+    await runtime.storageManager.synced();
 
     // We successfully replayed the change on top of the db:
     // FIXME(@ubik2) retry currently disabled
@@ -158,7 +162,7 @@ describe.skip("Push conflict", () => {
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([4]);
 
-    await storage.synced();
+    await runtime.storageManager.synced();
 
     // We successfully replayed the change on top of the db:
     expect(name.get()).toEqual("foo");
@@ -219,7 +223,7 @@ describe.skip("Push conflict", () => {
     expect(list.get()).toEqual([{ n: 4 }]);
     expect(isAnyCellLink(list.getRaw()?.[0])).toBe(true);
 
-    await storage.synced();
+    await runtime.storageManager.synced();
 
     // We successfully replayed the change on top of the db:
     expect(name.get()).toEqual("foo");

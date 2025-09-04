@@ -27,7 +27,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
  * @returns The charm ID string, or undefined if no ID is found
  */
 export function charmId(charm: Cell<Charm>): string | undefined {
-  const id = getEntityId(charm);
+  const id = charm.entityId;
   if (!id) return undefined;
   const idValue = id["/"];
   return typeof idValue === "string" ? idValue : undefined;
@@ -166,7 +166,7 @@ export class CharmManager {
 
   async synced(): Promise<void> {
     await this.ready;
-    return await this.runtime.storage.synced();
+    return await this.runtime.storageManager.synced();
   }
 
   async pin(charm: Cell<Charm>) {
@@ -445,7 +445,7 @@ export class CharmManager {
         if (depth > maxDepth) return undefined; // Prevent infinite recursion
 
         try {
-          const docId = getEntityId(cell);
+          const docId = cell.entityId;
           if (!docId || !docId["/"]) return undefined;
 
           const docIdStr = typeof docId["/"] === "string"
