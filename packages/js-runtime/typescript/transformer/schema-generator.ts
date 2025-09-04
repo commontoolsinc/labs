@@ -7,6 +7,94 @@ const logger = getLogger("schema-transformer", {
   level: "info",
 });
 
+// Maximum recursion depth to prevent stack overflow in cyclic type analysis
+const MAX_RECURSION_DEPTH = 200;
+
+/**
+ * Extract plain-text JSDoc from a symbol. Filters out tag lines starting with '@'.
+ */
+function getSymbolDoc(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): string | undefined {
+  if (!symbol) return undefined;
+  let text = "";
+  try {
+    const parts = symbol.getDocumentationComment(checker);
+    // @ts-ignore - displayPartsToString is available on ts
+    text = ts.displayPartsToString(parts) || "";
+  } catch (_e) {
+    try {
+      logger.debug(() => "Failed to extract symbol documentation; skipping");
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
+  }
+  if (!text) return undefined;
+  const lines = text.split(/\r?\n/).filter((l) => !l.trim().startsWith("@"));
+  const cleaned = lines.join("\n").trim();
+  return cleaned || undefined;
+}
+
+/**
+ * Extract JSDoc comments from a declaration node if available.
+ */
+function getDeclDocs(decl: ts.Declaration): string[] {
+  const docs: string[] = [];
+  // TODO(@gideon): stronger typing when TS compiler API exposes JSDoc types properly
+  const jsDocs = (decl as any).jsDoc as Array<ts.JSDoc> | undefined;
+  if (jsDocs && jsDocs.length > 0) {
+    for (const d of jsDocs) {
+      // TODO(@gideon): stronger typing when TS compiler API exposes JSDoc comment types properly
+      const comment = (d as any).comment;
+      let text = "";
+      if (typeof comment === "string") text = comment;
+      else if (Array.isArray(comment)) {
+        text = comment.map((
+          c,
+        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join(""); // TODO(@gideon): stronger typing for JSDoc text nodes
+      }
+      if (text) {
+        const lines = String(text).split(/\r?\n/).filter((l) =>
+          !l.trim().startsWith("@")
+        );
+        const cleaned = lines.join("\n").trim();
+        if (cleaned) docs.push(cleaned);
+      }
+    }
+  }
+  return docs;
+}
+
+/**
+ * Extract merged doc from declarations and symbol.
+ */
+function extractDocFromSymbolAndDecls(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): { text?: string; all: string[] } {
+  const all: string[] = [];
+  if (symbol) {
+    const decls = symbol.declarations ?? [];
+    for (const decl of decls) {
+      const sf = decl.getSourceFile();
+      // Only consider docs from non-declaration files (user/project code)
+      if (!sf.isDeclarationFile) {
+        for (const s of getDeclDocs(decl)) if (!all.includes(s)) all.push(s);
+      }
+    }
+  }
+  // Only include symbol-level docs if symbol has any non-declaration-file declarations
+  const hasUserDecl = (symbol?.declarations ?? []).some((d) =>
+    !d.getSourceFile().isDeclarationFile
+  );
+  if (hasUserDecl) {
+    const symText = getSymbolDoc(symbol, checker);
+    if (symText && !all.includes(symText)) all.push(symText);
+  }
+  return { text: all[0], all };
+}
+
 /**
  * Get a stable, human-readable type name for definitions
  */
@@ -189,7 +277,7 @@ function buildObjectSchema(
   inProgressNames: Set<string>,
   emittedRefs: Set<string>,
 ): any {
-  if (depth > 200) {
+  if (depth > MAX_RECURSION_DEPTH) {
     // If we hit an extreme depth, prefer a $ref if possible, else a permissive object
     const namedKey = definitions ? getNamedTypeKey(type) : undefined;
     if (namedKey && definitions) {
@@ -238,10 +326,89 @@ function buildObjectSchema(
       emittedRefs,
     );
 
+    // Attach property description from JSDoc
+    try {
+      const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+      if (text) {
+        // If there are multiple distinct docs, append a consolidation note
+        if (all.filter((s) => s && s !== text).length > 0) {
+          propSchema.description =
+            `${text} (Consolidated from intersection constituents)`;
+          try {
+            logger.warn(() =>
+              `Consolidated docs for property '${propName}' from multiple declarations.`
+            );
+          } catch (_e) {
+            // Swallow logging issues to remain safe
+          }
+        } else {
+          propSchema.description = text;
+        }
+      }
+    } catch (_e) {
+      try {
+        logger.debug(() =>
+          "Failed to extract property documentation; skipping"
+        );
+      } catch (_) {
+        // Swallow logging issues to remain safe
+      }
+    }
+
     properties[propName] = propSchema;
   }
 
   const schema: any = { type: "object", properties };
+
+  // Handle index signatures → additionalProperties with description
+  try {
+    const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
+    if (stringIndex) {
+      const apSchema = typeToJsonSchemaHelper(
+        stringIndex,
+        checker,
+        undefined,
+        depth + 1,
+        seenTypes,
+        cyclicTypes,
+        definitions,
+        definitionStack,
+        false,
+        inProgressNames,
+        emittedRefs,
+      );
+      // Attempt to read JSDoc from index signature declaration if available
+      const sym = type.getSymbol?.();
+      let indexDoc: string | undefined;
+      if (sym) {
+        for (const decl of sym.declarations ?? []) {
+          if (ts.isInterfaceDeclaration(decl) || ts.isTypeLiteralNode(decl)) {
+            for (const member of decl.members) {
+              if (ts.isIndexSignatureDeclaration(member)) {
+                const docs = getDeclDocs(member);
+                if (docs.length > 0) {
+                  indexDoc = docs[0];
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      if (indexDoc) {
+        apSchema.description = indexDoc;
+      }
+      schema.additionalProperties = apSchema;
+    }
+  } catch (_e) {
+    try {
+      logger.debug(() =>
+        "Failed to extract index signature documentation; continuing without description"
+      );
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
+  }
   if (required.length > 0) schema.required = required;
   return schema;
 }
@@ -262,7 +429,7 @@ function typeToJsonSchemaHelper(
   inProgressNames: Set<string> = new Set(),
   emittedRefs: Set<string> = new Set(),
 ): any {
-  if (depth > 200) {
+  if (depth > MAX_RECURSION_DEPTH) {
     const namedKey = definitions ? getNamedTypeKey(type) : undefined;
     if (namedKey && definitions) {
       if (!definitions[namedKey]) {
@@ -774,7 +941,7 @@ export function getCycles(
   depth: number = 0,
 ): Set<ts.Type> {
   // Depth guard to avoid stack overflow in pathological cases
-  if (depth > 200) return cycles;
+  if (depth > MAX_RECURSION_DEPTH) return cycles;
 
   // Skip primitive types - they can't have cycles
   if (
@@ -927,6 +1094,13 @@ export function getCycles(
 /**
  * Convert a TypeScript type to JSONSchema
  * Handles recursive types with JSON Schema $ref/definitions
+ *
+ * JSDoc Support:
+ * - Root types: `/** Interface description *\/` appears as schema.description
+ * - Properties: `/** Property description *\/` appears in schema.properties[name].description
+ * - Tags (@deprecated, @example) are automatically filtered out
+ * - Explicit toSchema({ description: "..." }) overrides root JSDoc
+ * See descriptions-all.input.ts for comprehensive examples
  */
 export function typeToJsonSchema(
   type: ts.Type,
@@ -956,6 +1130,32 @@ export function typeToJsonSchema(
     inProgressNames,
     emittedRefs,
   );
+
+  // Attach root description from JSDoc if available and none provided by options layer
+  try {
+    const sym = (type as any).aliasSymbol || type.getSymbol?.() ||
+      (type as any).symbol;
+    const hasUserDecl = (sym?.declarations ?? []).some((d: ts.Declaration) =>
+      !d.getSourceFile().isDeclarationFile
+    );
+    if (hasUserDecl) {
+      const { text } = extractDocFromSymbolAndDecls(sym, checker);
+      if (
+        text && rootSchema && typeof rootSchema === "object" &&
+        !("description" in rootSchema)
+      ) {
+        (rootSchema as any).description = text;
+      }
+    }
+  } catch (_e) {
+    try {
+      logger.debug(() =>
+        "Failed to extract root type documentation; continuing without description"
+      );
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
+  }
 
   // If the root type itself is cyclic by identity, return a top-level $ref with definitions
   if (cyclicTypes.has(type)) {
