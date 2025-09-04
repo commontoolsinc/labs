@@ -263,12 +263,15 @@ function mainLogic(
           // TODO(bf): fix repeated block
           if (true) {
             const newTx = messagesCell.runtime.edit();
-            messagesCell.withTx(newTx).set([
-              ...(messagesCell.get() ?? []),
-              ...newMessages,
-            ]);
-            pending.withTx(newTx).set(false);
-            newTx.commit();
+            if (pending.withTx(newTx).get()) {
+              messagesCell.withTx(newTx).set([
+                ...(messagesCell.get() ?? []),
+                ...newMessages,
+              ]);
+              newTx.commit();
+            } else {
+              // no op
+            }
           }
         } catch (error: unknown) {
           console.error(error);
