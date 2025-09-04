@@ -1,10 +1,10 @@
 # Schema Transformer Refactor Plan
 
-This document defines the implementation plan to complete the schema
-transformer rewrite and to migrate tests out of `packages/js-runtime` into
-dedicated packages with clear ownership. The plan keeps
-`@commontools/schema-generator` focused on the JSON Schema engine and
-introduces a new package for TypeScript AST transformers.
+This document defines the implementation plan to complete the schema transformer
+rewrite and to migrate tests out of `packages/js-runtime` into dedicated
+packages with clear ownership. The plan keeps `@commontools/schema-generator`
+focused on the JSON Schema engine and introduces a new package for TypeScript
+AST transformers.
 
 ## Goals
 
@@ -12,8 +12,8 @@ introduces a new package for TypeScript AST transformers.
 - Clear separation between compile‑time AST transforms and schema generation.
 - Migrate schema‑related tests from `js-runtime` into
   `@commontools/schema-generator` for parity and focus.
-- Introduce a dedicated package for AST transformers and move transformer
-  tests there.
+- Introduce a dedicated package for AST transformers and move transformer tests
+  there.
 - Keep `js-runtime` focused on runtime/integration tests.
 
 ## Current State (observations)
@@ -50,9 +50,9 @@ introduces a new package for TypeScript AST transformers.
     - `opaque-ref.ts`
     - `imports.ts`, `transforms.ts`, `logging.ts`, `types.ts`, `utils.ts`,
       `debug.ts`
-  - Tests: input/expected fixture pairs for AST changes (Schema Transformer,
-    JSX Expression Transformer, Handler Schema Transformation, Compiler
-    directive enablement).
+  - Tests: input/expected fixture pairs for AST changes (Schema Transformer, JSX
+    Expression Transformer, Handler Schema Transformation, Compiler directive
+    enablement).
 
 - `@commontools/js-runtime` consumes transformers from
   `@commontools/ts-transformers` and retains only end‑to‑end runtime tests
@@ -79,8 +79,8 @@ Move tests based on what they validate:
 
 Testing model in schema‑generator:
 
-- Prefer fixture‑based tests with canonicalization for determinism and
-  semantic deep‑equality for expected vs actual:
+- Prefer fixture‑based tests with canonicalization for determinism and semantic
+  deep‑equality for expected vs actual:
   - `test/fixtures/schema/*.input.ts` (root type `SchemaRoot`) →
     `*.expected.json`.
   - Determinism is checked by generating twice and comparing canonicalized
@@ -108,7 +108,8 @@ Deliverables:
    - File: `packages/schema-generator/test/utils.ts`
    - Helpers:
      - `createTestProgram(code: string)` → `{ program, checker, sourceFile }`
-     - `getTypeFromCode(code: string, name: string)` → `{ type, checker,
+     - `getTypeFromCode(code: string, name: string)` →
+       `{ type, checker,
        typeNode? }`
      - `normalizeSchema(schema: unknown)` → stable object for equality
        comparisons (strip `$schema`, order `definitions`, optional `$ref`
@@ -139,8 +140,8 @@ Deliverables:
 4. Tasks
    - Keep `deno task test` running with `--no-check` until API generics align.
    - Provide and maintain `deno task test:check` to run with type checking; run
-     this in CI (non‑blocking) until generics are aligned, then flip the
-     default task to type‑checked.
+     this in CI (non‑blocking) until generics are aligned, then flip the default
+     task to type‑checked.
 
 5. De‑duplicate
    - After parity is achieved in `schema-generator`, remove redundant generator
@@ -152,8 +153,7 @@ Deliverables:
 Create `packages/ts-transformers` with:
 
 - `deno.json` with a `test` task, exports, and minimal imports.
-- `src/` contents migrated from
-  `packages/js-runtime/typescript/transformer/`:
+- `src/` contents migrated from `packages/js-runtime/typescript/transformer/`:
   - `schema.ts`
   - `opaque-ref.ts`
   - `imports.ts`, `transforms.ts`, `logging.ts`, `types.ts`, `utils.ts`,
@@ -179,8 +179,8 @@ Testing in the new package:
 
 - Update `@commontools/js-runtime` to import transformers from
   `@commontools/ts-transformers`.
-- Keep only end‑to‑end runtime tests in `js-runtime` (compiles/executes,
-  bundler wiring, recipe integration).
+- Keep only end‑to‑end runtime tests in `js-runtime` (compiles/executes, bundler
+  wiring, recipe integration).
 - Remove redundant transformer tests in `js-runtime` after migration.
 
 ## Phase 4 — CI and Cleanups
@@ -197,10 +197,13 @@ Testing in the new package:
 
 - Align `@commontools/api` `JSONSchema` generics with the JSON Schema spec and
   generator output:
-  - Make `$ref?: string` optional and ensure `properties?:
+  - Make `$ref?: string` optional and ensure
+    `properties?:
     Readonly<Record<string, JSONSchema>>`.
-  - Introduce `ExtendedJSONSchema = JSONSchema & { asCell?: boolean;
-    asStream?: boolean }` for compile‑time utilities.
+  - Introduce
+    `ExtendedJSONSchema = JSONSchema & { asCell?: boolean;
+    asStream?: boolean }`
+    for compile‑time utilities.
   - Update generic helpers to accept `T extends ExtendedJSONSchema` while
     manipulating markers; constrain to base `JSONSchema` after stripping.
 - Once updated, flip `schema-generator` tests back to strict type checking and
@@ -211,32 +214,36 @@ Testing in the new package:
 - Fixture parity: exact textual expectations from legacy tests may require
   normalization and looser assertions around ordering/formatting.
 - Union semantics: literal unions currently map to arrays for fixture
-  compatibility; if we decide to pivot to `enum`/`oneOf`, update both engine
-  and tests together.
+  compatibility; if we decide to pivot to `enum`/`oneOf`, update both engine and
+  tests together.
 - Package boundaries: avoid cross‑package test dependencies; tests in
   `schema-generator` should not import js-runtime utilities.
 
 ## Checklist
 
 Phase 1 (schema-generator):
+
 - [x] Add test utilities (`test/utils.ts`) and canonicalization helpers.
 - [x] Add focused schema tests covering Cell/Stream/Default, arrays/aliases,
-  recursion/cycles, type aliases/shared types, complex defaults, and
-  type‑to‑schema parity.
+      recursion/cycles, type aliases/shared types, complex defaults, and
+      type‑to‑schema parity.
 - [x] Add fixture runner with determinism check and golden update support.
-- [ ] Remove redundant schema tests from `js-runtime` (after parity is
-  verified across suites).
+- [ ] Remove redundant schema tests from `js-runtime` (after parity is verified
+      across suites).
 
 Phase 2 (new package):
+
 - [ ] Scaffold `packages/ts-transformers` with tasks/exports.
 - [ ] Move transformer sources from `js-runtime`.
 - [ ] Port fixture tests and utilities.
 
 Phase 3 (integration):
+
 - [ ] Update `js-runtime` to use new package.
 - [ ] Keep only E2E runtime tests in `js-runtime`.
 
 Phase 4 (stabilize):
+
 - [ ] Root CI runs all packages via `deno task test`.
 - [ ] Align API types; drop `--no-check` in `schema-generator` and make
-  type‑checked tests the default.
+      type‑checked tests the default.
