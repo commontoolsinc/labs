@@ -1,4 +1,4 @@
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 interface TodoItem {
   title: string;
   done: boolean;

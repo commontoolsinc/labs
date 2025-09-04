@@ -1,4 +1,4 @@
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 
 // Test basic Default type transformation
 interface UserSettings {

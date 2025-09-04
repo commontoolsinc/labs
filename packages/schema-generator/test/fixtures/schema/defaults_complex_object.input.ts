@@ -1,4 +1,4 @@
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 interface SchemaRoot {
   config: Default<
     { theme: string; count: number },
