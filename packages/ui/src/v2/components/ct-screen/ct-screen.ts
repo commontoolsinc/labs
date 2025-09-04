@@ -23,6 +23,7 @@ export class CTScreen extends BaseElement {
       display: flex;
       flex-direction: column;
       height: 100%;
+      overflow: hidden;
       box-sizing: border-box;
     }
 
