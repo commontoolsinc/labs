@@ -4,7 +4,7 @@ import {
   hasCommonToolsImport,
   removeCommonToolsImport,
 } from "./imports.ts";
-import { createSchemaTransformerV2 } from "../../../schema-generator/src/index.ts";
+import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 
 export interface SchemaTransformerOptions {
   logger?: (message: string) => void;
