@@ -110,15 +110,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     return type;
   }
 
-  private removeFromDefinitionStack(
-    definitionStack: Set<any>,
-    type: ts.Type,
-    typeNode?: ts.TypeNode,
-    checker?: ts.TypeChecker,
-  ) {
-    const key = this.createStackKey(type, typeNode, checker);
-    definitionStack.delete(key);
-  }
 
   /**
    * Format a type using the appropriate formatter
@@ -128,49 +119,34 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     isRootType: boolean = false,
   ): SchemaDefinition {
-    const {
-      cyclicTypes,
-      cyclicNames,
-      definitions,
-      definitionStack,
-      inProgressNames,
-      emittedRefs,
-      typeNode,
-    } = context;
-
     // Early named-type handling for named types (wrappers/anonymous filtered)
-    const inCycle = cyclicTypes.has(type);
+    const inCycle = context.cyclicTypes.has(type);
     const namedKey = getNamedTypeKey(type);
-    const inCycleByName = !!(namedKey && cyclicNames.has(namedKey));
+    const inCycleByName = !!(namedKey && context.cyclicNames.has(namedKey));
 
 
     if (namedKey && (inCycle || inCycleByName)) {
-      if (inProgressNames.has(namedKey) || definitions[namedKey]) {
-        emittedRefs.add(namedKey);
-        this.removeFromDefinitionStack(
-          definitionStack,
-          type,
-          typeNode,
-          context.typeChecker,
-        );
+      if (context.inProgressNames.has(namedKey) || context.definitions[namedKey]) {
+        context.emittedRefs.add(namedKey);
+        context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
         return { "$ref": `#/definitions/${namedKey}` };
       }
       // Mark as in-progress but delay writing definition until filled to preserve post-order
-      inProgressNames.add(namedKey);
+      context.inProgressNames.add(namedKey);
     }
 
     // Cycle detection: if we see the same type again by identity, emit a $ref
-    const stackKey = this.createStackKey(type, typeNode, context.typeChecker);
-    if (definitionStack.has(stackKey)) {
+    const stackKey = this.createStackKey(type, context.typeNode, context.typeChecker);
+    if (context.definitionStack.has(stackKey)) {
       if (namedKey) {
-        emittedRefs.add(namedKey);
+        context.emittedRefs.add(namedKey);
         return { "$ref": `#/definitions/${namedKey}` };
       }
       return { type: "object", additionalProperties: true };
     }
 
     // Push current type onto the stack
-    definitionStack.add(this.createStackKey(type, typeNode, context.typeChecker));
+    context.definitionStack.add(this.createStackKey(type, context.typeNode, context.typeChecker));
 
     // Try to find a formatter that supports this type
     for (const formatter of this.formatters) {
@@ -180,40 +156,25 @@ export class SchemaGenerator implements ISchemaGenerator {
         // If we seeded a named placeholder, fill it and return $ref for non-root
         if (namedKey && (inCycle || inCycleByName)) {
           // Finish cyclic def
-          definitions[namedKey] = result;
+          context.definitions[namedKey] = result;
           if (!context.definitionOrder.includes(namedKey)) {
             context.definitionOrder.push(namedKey);
           }
-          inProgressNames.delete(namedKey);
-          this.removeFromDefinitionStack(
-            definitionStack,
-            type,
-            typeNode,
-            context.typeChecker,
-          );
+          context.inProgressNames.delete(namedKey);
+          context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
           if (!isRootType) {
-            emittedRefs.add(namedKey);
+            context.emittedRefs.add(namedKey);
             return { "$ref": `#/definitions/${namedKey}` };
           }
         }
         // Pop after formatting
-        this.removeFromDefinitionStack(
-          definitionStack,
-          type,
-          typeNode,
-          context.typeChecker,
-        );
+        context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
         return result;
       }
     }
 
     // If no formatter supports this type, return a fallback
-    this.removeFromDefinitionStack(
-      definitionStack,
-      type,
-      typeNode,
-      context.typeChecker,
-    );
+    context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
     return { type: "object", additionalProperties: true };
   }
 
