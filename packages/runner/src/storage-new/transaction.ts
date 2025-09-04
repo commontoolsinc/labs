@@ -139,19 +139,26 @@ export class NewStorageTransaction implements IStorageTransaction {
         docId,
         path,
         (sub: unknown) => {
-          if (path.length === 0) {
-            return;
-          }
-          // When a value is provided, set it on the sub-proxy
-          // For deletes, value === undefined — client tx will treat as retraction on commit
+          // Root-level replacement is not mirrored in the scaffold to avoid
+          // unintended shape changes; delegate remains source of truth.
+          if (path.length === 0) return;
           try {
-            // @ts-ignore index signature at runtime via Automerge proxies
-            const key = path[path.length - 1];
-            // If we are at root, sub is the doc; else sub is parent container
-            // set/replace value
-            // For arrays, numeric keys work as indices
+            const key = path[path.length - 1]!;
+            const idx = Number.isInteger(Number(key)) ? Number(key) : undefined;
+            // Delete semantics when value is undefined
+            if (value === undefined) {
+              if (Array.isArray(sub) && idx !== undefined && idx >= 0) {
+                // deno-lint-ignore no-explicit-any
+                (sub as any).splice(idx, 1);
+              } else {
+                // deno-lint-ignore no-explicit-any
+                delete (sub as any)[key as any];
+              }
+              return;
+            }
+            // Assign/replace for object or array entries
             // deno-lint-ignore no-explicit-any
-            (sub as any)[key] = value as any;
+            (sub as any)[key as any] = value as any;
           } catch {
             // best-effort mirror only
           }
@@ -181,9 +188,12 @@ export class NewStorageTransaction implements IStorageTransaction {
     // Defer to delegate to produce runner notifications and replica updates
     const res = await this.delegate.commit();
     try {
-      // If delegate commit succeeded with writes, mirror the client tx commit
-      // to keep client overlay state in sync; we don't fail runner commit on this.
-      await this.#clientTx.commit?.();
+      // Only mirror client commit on success; on error, abort client tx overlays
+      if ((res as { ok?: Unit }).ok) {
+        await this.#clientTx.commit?.();
+      } else {
+        this.#clientTx.abort?.();
+      }
     } catch {
       // ignore client tx commit failures; delegate result is authoritative
     }
