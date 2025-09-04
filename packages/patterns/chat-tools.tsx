@@ -159,16 +159,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
     return {
       [NAME]: title,
       [UI]: (
-        <div
-          style={{ display: "flex", flexDirection: "column", height: "100%" }}
-        >
-          <h2 style={{ margin: "0 0 1rem 0", padding: "0 1rem" }}>{title}</h2>
+        <ct-screen>
+          <h2 slot="header" style={{ margin: 0, padding: "1rem" }}>{title}</h2>
 
           <ct-vscroll
             showScrollbar
             fadeEdges
             snapToBottom
-            style={{ flex: 1, minHeight: 0 }}
+            flex
           >
             {chat.map((msg) => {
               return (
@@ -191,7 +189,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             )}
           </ct-vscroll>
 
-          <div style={{ padding: "1rem", borderTop: "1px solid #e0e0e0" }}>
+          <div slot="footer" style={{ borderTop: "1px solid #e0e0e0", padding: "1rem" }}>
             <ct-message-input
               name="Ask"
               placeholder="Ask the LLM a question..."
@@ -214,7 +212,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
             <ct-list $value={list} />
           </div>
-        </div>
+        </ct-screen>
       ),
       chat,
     };
