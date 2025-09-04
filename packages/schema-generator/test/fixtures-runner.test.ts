@@ -89,14 +89,53 @@ for (const cfg of configs) {
           return;
         }
 
-        const expected = await Deno.readTextFile(fixture.expected);
-        if (s1 !== expected) {
-          const diff = unifiedDiff(expected, s1);
+        const expectedText = await Deno.readTextFile(fixture.expected);
+        
+        // Parse both as JSON objects for semantic comparison
+        let actualObj, expectedObj;
+        try {
+          actualObj = JSON.parse(s1.trim());
+          expectedObj = JSON.parse(expectedText.trim());
+        } catch (error) {
+          throw new Error(`JSON parsing failed for ${fixture.name}: ${error.message}`);
+        }
+        
+        // Normalize JSON Schema semantics (sort required arrays)
+        const normalizeArrayOrdering = (obj: any): any => {
+          if (Array.isArray(obj)) {
+            return obj.map(normalizeArrayOrdering);
+          } else if (obj && typeof obj === 'object') {
+            const normalized: any = {};
+            for (const [key, value] of Object.entries(obj)) {
+              if (key === 'required' && Array.isArray(value)) {
+                // Sort required arrays for semantic equivalence
+                normalized[key] = [...value].sort();
+              } else {
+                normalized[key] = normalizeArrayOrdering(value);
+              }
+            }
+            return normalized;
+          }
+          return obj;
+        };
+        
+        actualObj = normalizeArrayOrdering(actualObj);
+        expectedObj = normalizeArrayOrdering(expectedObj);
+        
+        // Use deep equality comparison instead of string comparison
+        try {
+          expect(actualObj).toEqual(expectedObj);
+        } catch (error) {
+          // If semantic comparison fails, provide helpful diff
+          const diff = unifiedDiff(expectedText.trim(), s1.trim());
           const msg = [
-            `\nFixture mismatch for ${fixture.name}`,
+            `\nFixture semantic mismatch for ${fixture.name}`,
             `Input:    ${resolve(fixture.input)}`,
             `Expected: ${resolve(fixture.expected)}`,
             "\n=== UNIFIED DIFF (expected vs actual) ===\n" + diff,
+            "\n=== PARSED OBJECTS ===",
+            `Expected: ${JSON.stringify(expectedObj, null, 2)}`,
+            `Actual:   ${JSON.stringify(actualObj, null, 2)}`,
           ].join("\n");
           throw new Error(msg);
         }

@@ -204,16 +204,20 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     checker?: ts.TypeChecker,
   ): any {
+    // Handle Default types (both direct and aliased) with enhanced keys to avoid false cycles
     if (typeNode && ts.isTypeReferenceNode(typeNode)) {
-      if (
-        ts.isIdentifier(typeNode.typeName) &&
-        typeNode.typeName.text === "Default"
-      ) {
-        return `Default_${type.flags}`;
-      }
-      // Check if this is an alias that resolves to Default
-      if (checker && isDefaultTypeRef(typeNode, checker)) {
-        return `Default_${type.flags}`;
+      const isDirectDefault = ts.isIdentifier(typeNode.typeName) && 
+        typeNode.typeName.text === "Default";
+      const isAliasedDefault = checker && isDefaultTypeRef(typeNode, checker);
+      
+      if (isDirectDefault || isAliasedDefault) {
+        // Create a more specific key that includes type argument info to avoid false cycles
+        const argTexts = typeNode.typeArguments ? 
+          typeNode.typeArguments.map(arg => arg.getText()).join(',') : '';
+        // Include a source location hash to further distinguish instances
+        const locationHash = typeNode.getSourceFile?.()?.fileName || '';
+        const position = typeNode.pos || 0;
+        return `Default_${type.flags}_${argTexts}_${locationHash}_${position}`;
       }
     }
     return type;
@@ -319,6 +323,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (formatter.supportsType(type, updatedContext)) {
         // Update context to include typeNode for formatters that need it
         const result = formatter.formatType(type, updatedContext);
+        
         // Do not promote non-cyclic named types into definitions by default.
         // Rely on cycle detection to introduce $ref/$definitions only when
         // necessary to satisfy recursion.
