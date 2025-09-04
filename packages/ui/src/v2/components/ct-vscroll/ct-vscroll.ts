@@ -33,6 +33,7 @@ export class CTVScroll extends BaseElement {
     },
     fadeEdges: { type: Boolean, reflect: true, attribute: "fade-edges" },
     snapToBottom: { type: Boolean, reflect: true, attribute: "snap-to-bottom" },
+    flex: { type: Boolean, reflect: true },
     padding: { type: String },
     height: { type: String },
     maxHeight: { type: String, attribute: "max-height" },
@@ -45,6 +46,11 @@ export class CTVScroll extends BaseElement {
       display: block;
       position: relative;
       overflow: hidden;
+    }
+
+    :host([flex]) {
+      flex: 1;
+      min-height: 0;
     }
 
     .scroll-wrapper {
@@ -157,6 +163,7 @@ export class CTVScroll extends BaseElement {
   declare showScrollbar: boolean;
   declare fadeEdges: boolean;
   declare snapToBottom: boolean;
+  declare flex: boolean;
   declare padding: string;
   declare height: string;
   declare maxHeight: string;
@@ -172,6 +179,7 @@ export class CTVScroll extends BaseElement {
     this.showScrollbar = false;
     this.fadeEdges = false;
     this.snapToBottom = false;
+    this.flex = false;
     this.padding = "0";
     this.height = "";
     this.maxHeight = "";

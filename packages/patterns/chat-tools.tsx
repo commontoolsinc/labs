@@ -159,62 +159,66 @@ export default recipe<LLMTestInput, LLMTestResult>(
     return {
       [NAME]: title,
       [UI]: (
-        <div
-          style={{ display: "flex", flexDirection: "column", height: "100%" }}
-        >
-          <h2 style={{ margin: "0 0 1rem 0", padding: "0 1rem" }}>{title}</h2>
+        <ct-screen>
+          <h2 slot="header">{title}</h2>
 
-          <ct-vscroll
-            showScrollbar
-            fadeEdges
-            snapToBottom
-            style={{ flex: 1, minHeight: 0 }}
-          >
-            {chat.map((msg) => {
-              return (
-                <ct-chat-message
-                  role={msg.role}
-                  content={msg.content}
-                  tools={tools}
-                  toolCalls={msg.toolCalls}
-                  toolResults={msg.toolResults}
+          <ct-autolayout tabNames={["Chat", "Tools"]}>
+            <ct-screen>
+              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+                {chat.map((msg) => {
+                  return (
+                    <ct-chat-message
+                      role={msg.role}
+                      content={msg.content}
+                      tools={tools}
+                      toolCalls={msg.toolCalls}
+                      toolResults={msg.toolResults}
+                    />
+                  );
+                })}
+                {ifElse(
+                  pending,
+                  <ct-chat-message
+                    role="assistant"
+                    content="..."
+                  />,
+                  null,
+                )}
+              </ct-vscroll>
+
+              <div>
+                <ct-message-input
+                  name="Ask"
+                  placeholder="Ask the LLM a question..."
+                  appearance="rounded"
+                  disabled={pending}
+                  onct-send={sendMessage({ addMessage })}
                 />
-              );
-            })}
-            {ifElse(
-              pending,
-              <ct-chat-message
-                role="assistant"
-                content="..."
-              />,
-              null,
-            )}
-          </ct-vscroll>
+                <ct-button
+                  id="clear-chat-button"
+                  onClick={clearChat({
+                    chat,
+                    llmResponse: { pending },
+                  })}
+                >
+                  Clear Chat
+                </ct-button>
+              </div>
+            </ct-screen>
 
-          <div style={{ padding: "1rem", borderTop: "1px solid #e0e0e0" }}>
-            <ct-message-input
-              name="Ask"
-              placeholder="Ask the LLM a question..."
-              appearance="rounded"
-              disabled={pending}
-              onct-send={sendMessage({ addMessage })}
-            />
+            <ct-vstack data-label="Tools">
+              <div>
+                <h3>Calculator</h3>
+                <pre>{calculatorResult}</pre>
+              </div>
 
-            <ct-button
-              id="clear-chat-button"
-              onClick={clearChat({
-                chat,
-                llmResponse: { pending },
-              })}
-            >
-              Clear Chat
-            </ct-button>
-
-            <pre>{calculatorResult}</pre>
-
-            <ct-list $value={list} />
-          </div>
-        </div>
+              <div>
+                <h3>Items</h3>
+                <ct-list $value={list} />
+              </div>
+            </ct-vstack>
+          </ct-autolayout>
+        </ct-screen>
       ),
       chat,
     };
