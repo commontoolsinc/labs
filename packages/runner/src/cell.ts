@@ -743,7 +743,7 @@ export class RegularCell<T> implements Cell<T> {
     }
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
-      // TODO: Transition source links to sigil links?
+      // TODO(@ubik2): Transition source links to sigil links?
       { "/": fromURI(sourceLink.id) },
     );
   }
