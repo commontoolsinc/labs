@@ -160,7 +160,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <h2 slot="header" style={{ margin: 0, padding: "1rem" }}>{title}</h2>
+          <h2 slot="header">{title}</h2>
 
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             <ct-screen>
@@ -186,7 +186,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 )}
               </ct-vscroll>
 
-              <div style={{ borderTop: "1px solid #e0e0e0", padding: "1rem" }}>
+              <div>
                 <ct-message-input
                   name="Ask"
                   placeholder="Ask the LLM a question..."
@@ -207,12 +207,12 @@ export default recipe<LLMTestInput, LLMTestResult>(
             </ct-screen>
 
             <ct-vstack data-label="Tools">
-              <div style={{ padding: "1rem" }}>
+              <div>
                 <h3>Calculator</h3>
                 <pre>{calculatorResult}</pre>
               </div>
 
-              <div style={{ padding: "1rem" }}>
+              <div>
                 <h3>Items</h3>
                 <ct-list $value={list} />
               </div>

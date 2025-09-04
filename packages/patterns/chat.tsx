@@ -85,7 +85,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <h2 slot="header" style={{ margin: 0, padding: "1rem" }}>{title}</h2>
+          <h2 slot="header">{title}</h2>
 
           <ct-vscroll
             showScrollbar
@@ -111,10 +111,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             )}
           </ct-vscroll>
 
-          <div
-            slot="footer"
-            style={{ borderTop: "1px solid #e0e0e0", padding: "1rem" }}
-          >
+          <div slot="footer">
             <ct-message-input
               name="Ask"
               placeholder="Ask the LLM a question..."
