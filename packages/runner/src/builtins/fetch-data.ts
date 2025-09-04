@@ -22,7 +22,7 @@ export function fetchData(
     result?: any;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  _addCancel: (cancel: () => void) => void,
+  addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
@@ -118,8 +118,9 @@ export function fetchData(
     errorWithLog.set(undefined);
 
     const thisRun = ++currentRun;
+    const abort = new AbortController();
 
-    fetch(url, options)
+    fetch(url, { signal: abort.signal, ...options })
       .then(processResponse)
       .then(async (data) => {
         if (thisRun !== currentRun) return;
@@ -158,5 +159,7 @@ export function fetchData(
         // Replace this with more fine-grained retry logic.
         // requestHash.setAtPath([], hash, log);
       });
+    // Add our cancel to the cancel group
+    addCancel(() => abort.abort());
   };
 }
