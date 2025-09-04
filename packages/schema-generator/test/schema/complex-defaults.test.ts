@@ -4,7 +4,7 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Complex defaults", () => {
-  it("array defaults with items shape", () => {
+  it("array defaults with items shape", async () => {
     const code = `
       interface Default<T,V> {}
       interface TodoItem { title: string; done: boolean; }
@@ -14,7 +14,7 @@ describe("Schema: Complex defaults", () => {
         matrix: Default<number[][], [[1,2],[3,4]]>;
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "WithArrayDefaults");
+    const { type, checker } = await getTypeFromCode(code, "WithArrayDefaults");
     const s = createSchemaTransformerV2()(type, checker);
     const empty = s.properties?.emptyItems as any;
     expect(empty.type).toBe("array");
@@ -31,7 +31,7 @@ describe("Schema: Complex defaults", () => {
     expect(mat.default).toEqual([[1,2],[3,4]]);
   });
 
-  it("object defaults with nested objects", () => {
+  it("object defaults with nested objects", async () => {
     const code = `
       interface Default<T,V> {}
       interface WithObjectDefaults {
@@ -39,7 +39,7 @@ describe("Schema: Complex defaults", () => {
         user: Default<{ name: string; settings: { notifications: boolean; email: string } }, { name: "Anonymous"; settings: { notifications: true; email: "user@example.com" } }>;
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "WithObjectDefaults");
+    const { type, checker } = await getTypeFromCode(code, "WithObjectDefaults");
     const s = createSchemaTransformerV2()(type, checker);
     const config = s.properties?.config as any;
     expect(config.type).toBe("object");
@@ -53,7 +53,7 @@ describe("Schema: Complex defaults", () => {
     expect(user.default).toEqual({ name: "Anonymous", settings: { notifications: true, email: "user@example.com" } });
   });
 
-  it("null/undefined defaults in Default<...>", () => {
+  it("null/undefined defaults in Default<...>", async () => {
     const code = `
       interface Default<T,V> {}
       interface WithNullDefaults {
@@ -61,7 +61,7 @@ describe("Schema: Complex defaults", () => {
         undefinable: Default<string | undefined, undefined>;
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "WithNullDefaults");
+    const { type, checker } = await getTypeFromCode(code, "WithNullDefaults");
     const s = createSchemaTransformerV2()(type, checker);
     const n = s.properties?.nullable as any;
     expect(n.default).toBe(null);

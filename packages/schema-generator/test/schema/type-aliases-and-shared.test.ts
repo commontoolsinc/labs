@@ -4,7 +4,7 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Type aliases and shared types", () => {
-  it("handles basic Cell/Stream/Default aliases", () => {
+  it("handles basic Cell/Stream/Default aliases", async () => {
     const code = `
       interface Cell<T> { get(): T; set(v: T): void; }
       interface Stream<T> { subscribe(cb: (v:T) => void): void; }
@@ -26,7 +26,7 @@ describe("Schema: Type aliases and shared types", () => {
         nestedAlias: MyCell<MyCell<string>[]>[];
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "TypeAliasTest");
+    const { type, checker } = await getTypeFromCode(code, "TypeAliasTest");
     const s = createSchemaTransformerV2()(type, checker);
     expect(s.properties?.genericCell?.type).toBe("string");
     expect(s.properties?.genericCell?.asCell).toBe(true);
@@ -50,12 +50,12 @@ describe("Schema: Type aliases and shared types", () => {
     expect(na.items?.items?.type).toBe("string");
   });
 
-  it("duplicates shared object type structure where referenced twice", () => {
+  it("duplicates shared object type structure where referenced twice", async () => {
     const code = `
       interface B { value: string; }
       interface A { b1: B; b2: B; }
     `;
-    const { type, checker } = getTypeFromCode(code, "A");
+    const { type, checker } = await getTypeFromCode(code, "A");
     const s = createSchemaTransformerV2()(type, checker);
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;

@@ -4,11 +4,11 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursion variants", () => {
-  it("nested recursive: children?: Node[]", () => {
+  it("nested recursive: children?: Node[]", async () => {
     const code = `
       interface Node { value: string; children?: Node[] }
     `;
-    const { type, checker } = getTypeFromCode(code, "Node");
+    const { type, checker } = await getTypeFromCode(code, "Node");
     const s = createSchemaTransformerV2()(type, checker);
     expect(s.$ref).toBe("#/definitions/Node");
     const d = s.definitions as any;
@@ -17,13 +17,13 @@ describe("Schema: Recursion variants", () => {
     expect(node.properties?.children?.items?.$ref).toBe("#/definitions/Node");
   });
 
-  it("multi-hop circular A -> B -> C -> A", () => {
+  it("multi-hop circular A -> B -> C -> A", async () => {
     const code = `
       interface A { b: B }
       interface B { c: C }
       interface C { a: A }
     `;
-    const { type, checker } = getTypeFromCode(code, "A");
+    const { type, checker } = await getTypeFromCode(code, "A");
     const s = createSchemaTransformerV2()(type, checker);
     expect(s.$ref).toBe("#/definitions/A");
     const defs = s.definitions as any;
@@ -32,12 +32,12 @@ describe("Schema: Recursion variants", () => {
     expect(defs.C?.properties?.a?.$ref).toBe("#/definitions/A");
   });
 
-  it("mutually recursive A <-> B", () => {
+  it("mutually recursive A <-> B", async () => {
     const code = `
       interface A { b?: B }
       interface B { a?: A }
     `;
-    const { type, checker } = getTypeFromCode(code, "A");
+    const { type, checker } = await getTypeFromCode(code, "A");
     const s = createSchemaTransformerV2()(type, checker);
     expect(s.$ref).toBe("#/definitions/A");
     const defs = s.definitions as any;

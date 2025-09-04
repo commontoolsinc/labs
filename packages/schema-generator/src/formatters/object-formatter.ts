@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
@@ -13,12 +13,12 @@ import type { SchemaGenerator } from "../schema-generator.ts";
 export class ObjectFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type, context: FormatterContext): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Handle object types (interfaces, type literals, classes)
     return (type.flags & ts.TypeFlags.Object) !== 0;
   }
 
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
 
     // Special-case Date to a string with date-time format (match old behavior)
@@ -71,7 +71,7 @@ export class ObjectFormatter implements TypeFormatter {
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
       const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
         resolvedPropType,
-        checker,
+        context,
         propTypeNode,
       );
       properties[propName] = generated;

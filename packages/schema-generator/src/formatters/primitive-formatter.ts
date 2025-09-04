@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
@@ -10,7 +10,7 @@ import { TypeWithInternals } from "../type-utils.ts";
  * Formatter for primitive TypeScript types
  */
 export class PrimitiveFormatter implements TypeFormatter {
-  supportsType(type: ts.Type, context: FormatterContext): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
     const flags = type.flags;
 
     return (flags & ts.TypeFlags.String) !== 0 ||
@@ -27,7 +27,7 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.Any) !== 0;
   }
 
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const flags = type.flags;
 
     // Handle literal types first (more specific)

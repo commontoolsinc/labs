@@ -4,11 +4,11 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursive and cyclic types", () => {
-  it("produces $ref + definitions for a recursive interface", () => {
+  it("produces $ref + definitions for a recursive interface", async () => {
     const code = `
       interface Node { value: number; next?: Node; }
     `;
-    const { type, checker } = getTypeFromCode(code, "Node");
+    const { type, checker } = await getTypeFromCode(code, "Node");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker);
     expect(result.$ref).toBe("#/definitions/Node");

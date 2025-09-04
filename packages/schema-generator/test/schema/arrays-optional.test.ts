@@ -4,11 +4,11 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Arrays and optional properties", () => {
-  it("marks optional array property as not required", () => {
+  it("marks optional array property as not required", async () => {
     const code = `
       interface X { ids?: number[]; }
     `;
-    const { type, checker, typeNode } = getTypeFromCode(code, "X");
+    const { type, checker, typeNode } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker, typeNode);
     expect(result.type).toBe("object");
@@ -18,13 +18,13 @@ describe("Schema: Arrays and optional properties", () => {
     expect(req.includes("ids")).toBe(false);
   });
 
-  it("supports Array<T> and T[] equally", () => {
+  it("supports Array<T> and T[] equally", async () => {
     const code = `
       interface A { items: Array<string>; }
       interface B { items: string[]; }
     `;
-    const a = getTypeFromCode(code, "A");
-    const b = getTypeFromCode(code, "B");
+    const a = await getTypeFromCode(code, "A");
+    const b = await getTypeFromCode(code, "B");
     const gen = createSchemaTransformerV2();
     const sa = gen(a.type, a.checker, a.typeNode);
     const sb = gen(b.type, b.checker, b.typeNode);

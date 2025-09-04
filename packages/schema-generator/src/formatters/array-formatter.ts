@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
@@ -10,11 +10,11 @@ import { getArrayElementInfo } from "../type-utils.ts";
 export class ArrayFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type, context: FormatterContext): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
     return !!getArrayElementInfo(type, context.typeChecker, context.typeNode);
   }
 
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const info = getArrayElementInfo(
       type,
       context.typeChecker,
@@ -33,9 +33,9 @@ export class ArrayFormatter implements TypeFormatter {
       );
     }
 
-    const items = this.schemaGenerator.generateSchema(
+    const items = this.schemaGenerator.formatChildType(
       info.elementType,
-      context.typeChecker,
+      context,
       info.elementNode,
     );
 

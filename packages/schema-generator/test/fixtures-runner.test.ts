@@ -97,7 +97,7 @@ for (const cfg of configs) {
           actualObj = JSON.parse(s1.trim());
           expectedObj = JSON.parse(expectedText.trim());
         } catch (error) {
-          throw new Error(`JSON parsing failed for ${fixture.name}: ${error.message}`);
+          throw new Error(`JSON parsing failed for ${fixture.name}: ${error instanceof Error ? error.message : String(error)}`);
         }
         
         // Normalize JSON Schema semantics (sort required arrays)
