@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
@@ -39,7 +39,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       : undefined;
   }
 
-  private getInnerTypeNode(context: FormatterContext): ts.TypeNode | undefined {
+  private getInnerTypeNode(context: GenerationContext): ts.TypeNode | undefined {
     if (
       context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
       context.typeNode.typeArguments &&
@@ -50,7 +50,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     return undefined;
   }
 
-  supportsType(type: ts.Type, context: FormatterContext): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Prefer node-driven detection to handle aliases where Default<T,V> erases to T
     const n = context.typeNode;
     if (n && ts.isTypeReferenceNode(n)) {
@@ -76,7 +76,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     return false;
   }
 
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
     const n = context.typeNode;
 
@@ -123,7 +123,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private formatCellType(
     typeRef: ts.TypeReference,
     checker: ts.TypeChecker,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     // Helper: if the context node is an alias like type CellArray<T> = Cell<T[]>,
     // detect and return the element node substituted with the actual argument.
@@ -179,7 +179,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       const elemType = checker.getTypeFromTypeNode(aliasElemNode);
       const items = this.schemaGenerator.formatChildType(
         elemType,
-        checker,
+        context,
         aliasElemNode,
       );
       return { type: "array", items, asCell: true } as SchemaDefinition;
@@ -198,7 +198,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       containerArg && !innerLooksLikeDefault &&
       !this.isNamedTypeRef(containerArg, "Default")
     ) {
-      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, checker);
+      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, context);
       if (arr) return { ...arr, asCell: true } as SchemaDefinition;
     }
     // Default<T,V> is handled by its own formatter; delegate and add asCell at the end
@@ -208,7 +208,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // preserve Default handling (including defaults) and allow array to be
     // detected within Default formatting.
     if (!innerLooksLikeDefault) {
-      const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
+      const arr = this.arrayItemsSchema(innerType, innerTypeNode, context);
       if (arr) return { ...arr, asCell: true } as SchemaDefinition;
     }
 
@@ -217,7 +217,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       : innerType;
     const innerSchema = this.schemaGenerator.formatChildType(
       nodeDrivenType,
-      context.typeChecker,
+      context,
       innerTypeNode,
     );
     return { ...innerSchema, asCell: true };
@@ -226,7 +226,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private formatStreamType(
     typeRef: ts.TypeReference,
     checker: ts.TypeChecker,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     // Mirror Cell<T> robustness: resolve via alias/resolved arguments and carry node
     const innerTypeNode = this.getInnerTypeNode(context);
@@ -246,7 +246,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       containerArg && !innerLooksLikeDefault &&
       !this.isNamedTypeRef(containerArg, "Default")
     ) {
-      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, checker);
+      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, context);
       if (arr) return { ...arr, asStream: true };
     }
     // If Stream<Default<T,V>> is encountered, Default handles default/union. Just add flags.
@@ -260,7 +260,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         return {
           ...(this.schemaGenerator.formatChildType(
             innerType,
-            context.typeChecker,
+            context,
             innerTypeNode,
           ) as any),
           asCell: true,
@@ -276,7 +276,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         return {
           ...(this.schemaGenerator.formatChildType(
             innerType,
-            context.typeChecker,
+            context,
             innerTypeNode,
           ) as any),
           asCell: true,
@@ -286,7 +286,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       return {
         ...(this.schemaGenerator.formatChildType(
           innerType,
-          context.typeChecker,
+          context,
           innerTypeNode,
         ) as any),
         asStream: true,
@@ -294,7 +294,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Handle Stream<Array<T>> and Stream<T[]>
-    const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
+    const arr = this.arrayItemsSchema(innerType, innerTypeNode, context);
     if (arr) return { ...arr, asStream: true } as SchemaDefinition;
 
     const nodeDrivenType = innerTypeNode
@@ -302,7 +302,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       : innerType;
     const innerSchema = this.schemaGenerator.formatChildType(
       nodeDrivenType,
-      context.typeChecker,
+      context,
       innerTypeNode,
     );
     // If inner is Cell<T> ensure both flags (covers aliases where node isn't Cell)
@@ -319,13 +319,13 @@ export class CommonToolsFormatter implements TypeFormatter {
   private arrayItemsSchema(
     valueType: ts.Type,
     valueNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
   ): SchemaDefinition | undefined {
-    const info = getArrayElementInfo(valueType, checker, valueNode);
+    const info = getArrayElementInfo(valueType, context.typeChecker, valueNode);
     if (!info) return undefined;
     const items = this.schemaGenerator.formatChildType(
       info.elementType,
-      checker,
+      context,
       info.elementNode,
     );
     return { type: "array", items } as SchemaDefinition;
@@ -333,7 +333,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   private extractDefaultTypeArguments(
     typeRef: ts.TypeReference,
-    context: FormatterContext,
+    context: GenerationContext,
     checker: ts.TypeChecker,
   ): {
     valueType: ts.Type;
@@ -410,7 +410,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   private inlineIfRef(
     schema: SchemaDefinition,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     const ref = schema && (schema as any).$ref as string | undefined;
     if (ref && ref.startsWith("#/definitions/") && context.definitions) {
@@ -424,7 +424,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private generateValueSchema(
     valueType: ts.Type,
     valueTypeNode: ts.TypeNode | undefined,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     // Handle array types first
     if (valueTypeNode && ts.isArrayTypeNode(valueTypeNode)) {
@@ -432,7 +432,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       const elemType = context.typeChecker.getTypeFromTypeNode(elemNode);
       const itemsRaw = this.schemaGenerator.formatChildType(
         elemType,
-        context.typeChecker,
+        context,
         elemNode,
       );
       return { type: "array", items: this.inlineIfRef(itemsRaw, context) };
@@ -447,7 +447,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (elemInfo) {
       const itemsRaw = this.schemaGenerator.formatChildType(
         elemInfo.elementType,
-        context.typeChecker,
+        context,
         elemInfo.elementNode,
       );
       return { type: "array", items: this.inlineIfRef(itemsRaw, context) };
@@ -459,7 +459,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         const nodeType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
         const raw = this.schemaGenerator.formatChildType(
           nodeType,
-          context.typeChecker,
+          context,
           valueTypeNode,
         );
         return this.inlineIfRef(raw, context);
@@ -473,7 +473,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     } else {
       const raw = this.schemaGenerator.formatChildType(
         valueType,
-        context.typeChecker,
+        context,
         valueTypeNode,
       );
       return this.inlineIfRef(raw, context);
@@ -501,7 +501,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     valueType: ts.Type,
     valueTypeNode: ts.TypeNode | undefined,
     valueSchema: SchemaDefinition,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     // Handle node-based union types (syntax-driven detection)
     if (valueTypeNode && ts.isUnionTypeNode(valueTypeNode)) {
@@ -530,7 +530,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private processNodeBasedUnion(
     unionNode: ts.UnionTypeNode,
     valueSchema: SchemaDefinition,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition | null {
     const parts = unionNode.types ?? [] as ts.TypeNode[];
     const isNullNode = (p: ts.TypeNode) =>
@@ -543,9 +543,9 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (hasNullNode && nonNullNodes.length === 1) {
       const nn = nonNullNodes[0]!;
       const nnType = context.typeChecker.getTypeFromTypeNode(nn);
-      const nnSchema = this.schemaGenerator.generateSchema(
+      const nnSchema = this.schemaGenerator.formatChildType(
         nnType,
-        context.typeChecker,
+        context,
         nn,
       );
 
@@ -563,7 +563,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     valueType: ts.Type,
     valueTypeNode: ts.TypeNode | undefined,
     valueSchema: SchemaDefinition,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition | null {
     const union = valueType as ts.UnionType;
     const members = union.types ?? [] as ts.Type[];
@@ -578,9 +578,9 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
 
     if (hasNull && nonNull.length === 1) {
-      const nonNullSchema = this.schemaGenerator.generateSchema(
+      const nonNullSchema = this.schemaGenerator.formatChildType(
         nonNull[0]!,
-        context.typeChecker,
+        context,
         valueTypeNode,
       );
 
@@ -590,9 +590,9 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
       return out as SchemaDefinition;
     } else if (hasUndef && nonUndef.length === 1) {
-      const s = this.schemaGenerator.generateSchema(
+      const s = this.schemaGenerator.formatChildType(
         nonUndef[0]!,
-        context.typeChecker,
+        context,
         valueTypeNode,
       );
       return this.inlineIfRef(s, context);
@@ -604,7 +604,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private formatDefaultType(
     typeRef: ts.TypeReference,
     checker: ts.TypeChecker,
-    context: FormatterContext,
+    context: GenerationContext,
   ): SchemaDefinition {
     const typeArgs = this.extractDefaultTypeArguments(
       typeRef,

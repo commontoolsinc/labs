@@ -4,12 +4,12 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
-  it("Default<string, 'hello'> inside object", () => {
+  it("Default<string, 'hello'> inside object", async () => {
     const code = `
       interface Default<T, V> {}
       interface X { field1: Default<string, "hello">; field2: Default<number, 42>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
     const s = gen(type, checker);
     expect(s.properties?.field1?.type).toBe("string");
@@ -18,13 +18,13 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(s.properties?.field2?.default).toBe(42);
   });
 
-  it("Cell<Default<string,'default'>>", () => {
+  it("Cell<Default<string,'default'>>", async () => {
     const code = `
       interface Default<T, V> {}
       interface Cell<T> { get(): T; set(v: T): void; }
       interface X { value: Cell<Default<string, "default">>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const s = createSchemaTransformerV2()(type, checker);
     const v = s.properties?.value as any;
     expect(v.type).toBe("string");
@@ -32,13 +32,13 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(v.asCell).toBe(true);
   });
 
-  it("Stream<Default<string,'initial'>>", () => {
+  it("Stream<Default<string,'initial'>>", async () => {
     const code = `
       interface Default<T, V> {}
       interface Stream<T> { subscribe(cb: (v:T) => void): void; }
       interface X { events: Stream<Default<string, "initial">>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const s = createSchemaTransformerV2()(type, checker);
     const ev = s.properties?.events as any;
     expect(ev.type).toBe("string");
@@ -46,12 +46,12 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(ev.asStream).toBe(true);
   });
 
-  it("array of Cell<string>", () => {
+  it("array of Cell<string>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(v: T): void; }
       interface X { items: Array<Cell<string>>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const s = createSchemaTransformerV2()(type, checker);
     const items = s.properties?.items as any;
     expect(items.type).toBe("array");
@@ -62,12 +62,12 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     }
   });
 
-  it("Cell<string[]>", () => {
+  it("Cell<string[]>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(v: T): void; }
       interface X { tags: Cell<string[]>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const s = createSchemaTransformerV2()(type, checker);
     const tags = s.properties?.tags as any;
     expect(tags.type).toBe("array");
@@ -75,7 +75,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(tags.asCell).toBe(true);
   });
 
-  it("complex nesting: Cell<Default<string,'d'>> and Default<string[], ['a','b']>", () => {
+  it("complex nesting: Cell<Default<string,'d'>> and Default<string[], ['a','b']>", async () => {
     const code = `
       interface Default<T, V> {}
       interface Cell<T> { get(): T; set(v: T): void; }
@@ -84,7 +84,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
         defaultArray: Default<string[], ["a", "b"]>;
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const s = createSchemaTransformerV2()(type, checker);
     const c = s.properties?.cellOfDefault as any;
     expect(c.type).toBe("string");

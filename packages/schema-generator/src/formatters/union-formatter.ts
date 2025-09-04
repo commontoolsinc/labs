@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
@@ -10,11 +10,11 @@ import { TypeWithInternals } from "../type-utils.ts";
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
     return (type.flags & ts.TypeFlags.Union) !== 0;
   }
 
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
 
@@ -32,7 +32,7 @@ export class UnionFormatter implements TypeFormatter {
     const nonNull = filtered.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
 
     const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition =>
-      this.schemaGenerator.generateSchema(t, context.typeChecker, typeNode);
+      this.schemaGenerator.formatChildType(t, context, typeNode);
 
     // Case: exactly one non-null member + null => oneOf
     if (hasNull && nonNull.length === 1) {

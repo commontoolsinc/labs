@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { PrimitiveFormatter } from "../src/formatters/primitive-formatter.ts";
-import type { FormatterContext } from "../src/interface.ts";
+import type { GenerationContext } from "../src/interface.ts";
 
 // Helper to create a minimal TypeScript program for testing
 function createTestProgram(
@@ -74,12 +74,15 @@ describe("PrimitiveFormatter", () => {
   const formatter = new PrimitiveFormatter();
 
   // Mock context for testing
-  const mockContext: FormatterContext = {
+  const mockContext: GenerationContext = {
     typeChecker: {} as ts.TypeChecker,
+    cyclicTypes: new Set(),
+    cyclicNames: new Set(),
     definitions: {},
+    definitionOrder: [],
+    emittedRefs: new Set(),
     definitionStack: new Set(),
     inProgressNames: new Set(),
-    emittedRefs: new Set(),
   };
 
   describe("supportsType", () => {

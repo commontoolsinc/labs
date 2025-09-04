@@ -4,7 +4,7 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: type-to-schema parity", () => {
-  it("generates schemas for inputs/outputs structures", () => {
+  it("generates schemas for inputs/outputs structures", async () => {
     const code = `
       interface Cell<T> { get(): T; set(v: T): void; }
       interface Stream<T> { subscribe(cb: (v:T)=>void): void }
@@ -13,9 +13,9 @@ describe("Schema: type-to-schema parity", () => {
       interface RecipeInput { values: Cell<string[]>; }
       interface RecipeOutput { values: string[]; updater: Stream<UpdaterInput>; }
     `;
-    const { type: uType, checker: uChecker, typeNode: uNode } = getTypeFromCode(code, "UpdaterInput");
-    const { type: iType, checker: iChecker, typeNode: iNode } = getTypeFromCode(code, "RecipeInput");
-    const { type: oType, checker: oChecker, typeNode: oNode } = getTypeFromCode(code, "RecipeOutput");
+    const { type: uType, checker: uChecker, typeNode: uNode } = await getTypeFromCode(code, "UpdaterInput");
+    const { type: iType, checker: iChecker, typeNode: iNode } = await getTypeFromCode(code, "RecipeInput");
+    const { type: oType, checker: oChecker, typeNode: oNode } = await getTypeFromCode(code, "RecipeOutput");
     const gen = createSchemaTransformerV2();
     const u = gen(uType, uChecker, uNode);
     const i = gen(iType, iChecker, iNode);

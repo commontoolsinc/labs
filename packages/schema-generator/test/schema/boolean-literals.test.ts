@@ -4,7 +4,7 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Boolean literals", () => {
-  it("should preserve boolean literal values in enum", () => {
+  it("should preserve boolean literal values in enum", async () => {
     const code = `
       interface BooleanLiterals {
         alwaysTrue: true;
@@ -12,7 +12,7 @@ describe("Schema: Boolean literals", () => {
         regularBoolean: boolean;
       }
     `;
-    const { type, checker } = getTypeFromCode(code, "BooleanLiterals");
+    const { type, checker } = await getTypeFromCode(code, "BooleanLiterals");
     const transformer = createSchemaTransformerV2();
     const schema = transformer(type, checker);
 
@@ -29,9 +29,9 @@ describe("Schema: Boolean literals", () => {
     expect(regularBoolean.enum).toBeUndefined(); // No enum for regular boolean
   });
 
-  it("should handle boolean literal types directly", () => {
+  it("should handle boolean literal types directly", async () => {
     const trueCode = `type AlwaysTrue = true;`;
-    const { type: trueType, checker } = getTypeFromCode(trueCode, "AlwaysTrue");
+    const { type: trueType, checker } = await getTypeFromCode(trueCode, "AlwaysTrue");
     const transformer = createSchemaTransformerV2();
     const trueSchema = transformer(trueType, checker);
 
@@ -39,7 +39,7 @@ describe("Schema: Boolean literals", () => {
     expect(trueSchema.enum).toEqual([true]);
 
     const falseCode = `type AlwaysFalse = false;`;
-    const { type: falseType, checker: falseChecker } = getTypeFromCode(falseCode, "AlwaysFalse");
+    const { type: falseType, checker: falseChecker } = await getTypeFromCode(falseCode, "AlwaysFalse");
     const falseSchema = transformer(falseType, falseChecker);
 
     expect(falseSchema.type).toBe("boolean");

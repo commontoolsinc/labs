@@ -4,12 +4,12 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Cell types", () => {
-  it("handles Cell<string>", () => {
+  it("handles Cell<string>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(value: T): void; }
       interface X { name: Cell<string>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker);
     const name = result.properties?.name as Record<string, unknown>;
@@ -19,12 +19,12 @@ describe("Schema: Cell types", () => {
     expect(result.required).toContain("name");
   });
 
-  it("handles Cell<Array<{id:string}>>", () => {
+  it("handles Cell<Array<{id:string}>>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(value: T): void; }
       interface X { users: Cell<Array<{ id: string }>>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker);
     const users = result.properties?.users as Record<string, any>;
@@ -35,13 +35,13 @@ describe("Schema: Cell types", () => {
     expect(users.asCell).toBe(true);
   });
 
-  it("handles Stream<Cell<number>>", () => {
+  it("handles Stream<Cell<number>>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(value: T): void; }
       interface Stream<T> { subscribe(cb: (v: T) => void): void; }
       interface X { value: Stream<Cell<number>>; }
     `;
-    const { type, checker } = getTypeFromCode(code, "X");
+    const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker);
     const prop = result.properties?.value as Record<string, unknown>;

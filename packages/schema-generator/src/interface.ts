@@ -16,20 +16,33 @@ export interface SchemaDefinition {
 }
 
 /**
- * Context passed to formatters during schema generation
+ * Unified context for schema generation - contains all state in one place
  */
-export interface FormatterContext {
+export interface GenerationContext {
+  // Immutable context (set once)
   /** TypeScript type checker */
-  typeChecker: ts.TypeChecker;
-  /** Definitions for cyclic types */
+  readonly typeChecker: ts.TypeChecker;
+  /** Pre-computed cyclic type set */
+  readonly cyclicTypes: ReadonlySet<ts.Type>;
+  /** Pre-computed cyclic name set */
+  readonly cyclicNames: ReadonlySet<string>;
+
+  // Accumulating state (grows during generation)
+  /** Named type definitions for $refs */
   definitions: Record<string, SchemaDefinition>;
-  /** Types currently being processed (for cycle detection) */
-  definitionStack: Set<ts.Type>;
-  /** Names currently being processed */
-  inProgressNames: Set<string>;
-  /** References that have been emitted */
+  /** Order definitions were created */
+  definitionOrder: string[];
+  /** Which $refs have been emitted */
   emittedRefs: Set<string>;
-  /** Type node for generic type extraction */
+
+  // Stack state (push/pop during recursion)
+  /** Current recursion path for cycle detection */
+  definitionStack: Set<any>;
+  /** Currently building these named types */
+  inProgressNames: Set<string>;
+
+  // Optional context
+  /** Type node for additional context */
   typeNode?: ts.TypeNode;
 }
 
@@ -40,12 +53,12 @@ export interface TypeFormatter {
   /**
    * Check if this formatter can handle the given type
    */
-  supportsType(type: ts.Type, context: FormatterContext): boolean;
+  supportsType(type: ts.Type, context: GenerationContext): boolean;
 
   /**
    * Convert the type to JSON Schema
    */
-  formatType(type: ts.Type, context: FormatterContext): SchemaDefinition;
+  formatType(type: ts.Type, context: GenerationContext): SchemaDefinition;
 }
 
 /**

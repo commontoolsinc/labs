@@ -7,7 +7,7 @@ describe("IntersectionFormatter", () => {
   const transformer = createSchemaTransformerV2();
 
   describe("successful intersections", () => {
-    it("should merge simple object intersection", () => {
+    it("should merge simple object intersection", async () => {
       const code = `
         interface ItemBase {
           text: string;
@@ -19,7 +19,7 @@ describe("IntersectionFormatter", () => {
         
         type ItemWithIndex = ItemBase & WithIndex;
       `;
-      const { type, checker } = getTypeFromCode(code, "ItemWithIndex");
+      const { type, checker } = await getTypeFromCode(code, "ItemWithIndex");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -28,7 +28,7 @@ describe("IntersectionFormatter", () => {
       expect(schema.required).toEqual(["text", "index"]);
     });
 
-    it("should merge complex nested intersection", () => {
+    it("should merge complex nested intersection", async () => {
       const code = `
         interface Item {
           text: string;
@@ -42,7 +42,7 @@ describe("IntersectionFormatter", () => {
           index: number;
         };
       `;
-      const { type, checker } = getTypeFromCode(code, "ListStateWithIndex");
+      const { type, checker } = await getTypeFromCode(code, "ListStateWithIndex");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -51,19 +51,19 @@ describe("IntersectionFormatter", () => {
       expect(schema.required).toEqual(["items", "index"]);
     });
 
-    it("should handle optional properties in intersection", () => {
+    it("should handle optional properties in intersection", async () => {
       const code = `
-        interface Required {
+        interface RequiredFields {
           name: string;
         }
         
-        interface Optional {
+        interface OptionalFields {
           description?: string;
         }
         
-        type Combined = Required & Optional;
+        type Combined = RequiredFields & OptionalFields;
       `;
-      const { type, checker } = getTypeFromCode(code, "Combined");
+      const { type, checker } = await getTypeFromCode(code, "Combined");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -74,7 +74,7 @@ describe("IntersectionFormatter", () => {
   });
 
   describe("unsupported intersections", () => {
-    it("should reject intersection with index signature", () => {
+    it("should reject intersection with index signature", async () => {
       const code = `
         interface Base {
           name: string;
@@ -86,7 +86,7 @@ describe("IntersectionFormatter", () => {
         
         type BadIntersection = Base & WithIndex;
       `;
-      const { type, checker } = getTypeFromCode(code, "BadIntersection");
+      const { type, checker } = await getTypeFromCode(code, "BadIntersection");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -94,7 +94,7 @@ describe("IntersectionFormatter", () => {
       expect(schema.$comment).toContain("index signature on constituent");
     });
 
-    it("should reject intersection with call signature", () => {
+    it("should reject intersection with call signature", async () => {
       const code = `
         interface Base {
           name: string;
@@ -107,7 +107,7 @@ describe("IntersectionFormatter", () => {
         
         type BadIntersection = Base & WithCallSig;
       `;
-      const { type, checker } = getTypeFromCode(code, "BadIntersection");
+      const { type, checker } = await getTypeFromCode(code, "BadIntersection");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -115,7 +115,7 @@ describe("IntersectionFormatter", () => {
       expect(schema.$comment).toContain("call/construct signatures on constituent");
     });
 
-    it("should reject intersection with non-object types", () => {
+    it("should reject intersection with non-object types", async () => {
       const code = `
         interface Base {
           name: string;
@@ -123,7 +123,7 @@ describe("IntersectionFormatter", () => {
         
         type BadIntersection = Base & string;
       `;
-      const { type, checker } = getTypeFromCode(code, "BadIntersection");
+      const { type, checker } = await getTypeFromCode(code, "BadIntersection");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -133,7 +133,7 @@ describe("IntersectionFormatter", () => {
   });
 
   describe("edge cases", () => {
-    it("should handle multiple interfaces with overlapping properties", () => {
+    it("should handle multiple interfaces with overlapping properties", async () => {
       const code = `
         interface A {
           shared: string;
@@ -147,7 +147,7 @@ describe("IntersectionFormatter", () => {
         
         type Combined = A & B;
       `;
-      const { type, checker } = getTypeFromCode(code, "Combined");
+      const { type, checker } = await getTypeFromCode(code, "Combined");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -157,7 +157,7 @@ describe("IntersectionFormatter", () => {
       expect(schema.required).toEqual(["shared", "a", "b"]);
     });
 
-    it("should handle three-way intersection", () => {
+    it("should handle three-way intersection", async () => {
       const code = `
         interface A {
           a: string;
@@ -173,7 +173,7 @@ describe("IntersectionFormatter", () => {
         
         type Triple = A & B & C;
       `;
-      const { type, checker } = getTypeFromCode(code, "Triple");
+      const { type, checker } = await getTypeFromCode(code, "Triple");
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");

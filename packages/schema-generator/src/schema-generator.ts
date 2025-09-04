@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  FormatterContext,
+  GenerationContext,
   SchemaDefinition,
   SchemaGenerator as ISchemaGenerator,
   TypeFormatter,
@@ -11,36 +11,25 @@ import { ArrayFormatter } from "./formatters/array-formatter.ts";
 import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
-import { 
-  getNamedTypeKey, 
-  isDefaultTypeRef, 
-  safeGetTypeOfSymbolAtLocation, 
-  safeGetIndexTypeOfType 
+import {
+  getNamedTypeKey,
+  isDefaultTypeRef,
+  safeGetIndexTypeOfType,
+  safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
 
 /**
  * Main schema generator that uses a chain of formatters
  */
 export class SchemaGenerator implements ISchemaGenerator {
-  private activeContext: {
-    definitions: Record<string, SchemaDefinition>;
-    cyclicTypes: Set<ts.Type>;
-    cyclicNames: Set<string>;
-    inProgressNames: Set<string>;
-    emittedRefs: Set<string>;
-    definitionStack: Set<ts.Type>;
-    inlineSchemas: Map<string, SchemaDefinition>;
-    definitionOrder: string[];
-  } | undefined;
   private formatters: TypeFormatter[] = [
-    new CommonToolsFormatter(this), // Pass self-reference for recursive delegation
+    new CommonToolsFormatter(this),
     new UnionFormatter(this),
     new IntersectionFormatter(this),
     // Prefer array detection before primitives to avoid Any-flag misrouting
     new ArrayFormatter(this),
     new PrimitiveFormatter(),
-    new ObjectFormatter(this), // Pass self-reference for recursive delegation
-    // TODO(#CT-841): Add more formatters here
+    new ObjectFormatter(this),
   ];
 
   /**
@@ -51,105 +40,32 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
   ): SchemaDefinition {
-    const isRoot = !this.activeContext;
-    if (isRoot) {
-      this.activeContext = {
-        definitions: {},
-        cyclicTypes: this.getCycles(type, checker).types,
-        cyclicNames: this.getCycles(type, checker).names,
-        inProgressNames: new Set<string>(),
-        emittedRefs: new Set<string>(),
-        definitionStack: new Set<ts.Type>(),
-        inlineSchemas: new Map<string, SchemaDefinition>(),
-        definitionOrder: [],
-      };
-    }
-
-    const {
-      definitions,
-      cyclicTypes,
-      cyclicNames,
-      inProgressNames,
-      emittedRefs,
-      definitionStack,
-      inlineSchemas,
-      definitionOrder,
-    } = this.activeContext!;
-
-    const context: FormatterContext = {
+    // Create unified context with all state
+    const cycles = this.getCycles(type, checker);
+    const context: GenerationContext = {
+      // Immutable context
       typeChecker: checker,
-      definitions,
-      definitionStack,
-      inProgressNames,
-      emittedRefs,
+      cyclicTypes: cycles.types,
+      cyclicNames: cycles.names,
+
+      // Accumulating state
+      definitions: {},
+      definitionOrder: [],
+      emittedRefs: new Set(),
+
+      // Stack state
+      definitionStack: new Set(),
+      inProgressNames: new Set(),
+
+      // Optional context
+      ...(typeNode && { typeNode }),
     };
 
-    const rootSchema = this.formatType(
-      type,
-      context,
-      typeNode,
-      cyclicTypes,
-      cyclicNames,
-      definitions,
-      definitionStack,
-      true,
-      inProgressNames,
-      emittedRefs,
-    );
+    // Generate the root schema
+    const rootSchema = this.formatType(type, context, true);
 
-    // If the root is named and either participates in a cycle OR we emitted a $ref
-    // to it anywhere within, promote the root to a top-level $ref and attach defs.
-    if (isRoot) {
-      let rootName = getNamedTypeKey(type);
-      if (!rootName && typeNode && ts.isTypeReferenceNode(typeNode)) {
-        const tn = typeNode.typeName;
-        if (ts.isIdentifier(tn)) rootName = tn.text;
-      }
-      if (
-        rootName &&
-        (cyclicTypes.has(type) || cyclicNames.has(rootName) ||
-          this.activeContext!.emittedRefs.has(rootName) ||
-          Object.keys(definitions).length > 0)
-      ) {
-        definitions[rootName] = rootSchema;
-        if (!this.activeContext!.definitionOrder.includes(rootName)) {
-          this.activeContext!.definitionOrder.push(rootName);
-        }
-        const ordered: Record<string, SchemaDefinition> = {};
-        for (const k of this.activeContext!.definitionOrder) {
-          if (definitions[k]) ordered[k] = definitions[k];
-        }
-        const out = {
-          "$ref": `#/definitions/${rootName}`,
-          "$schema": "http://json-schema.org/draft-07/schema#",
-          "definitions": ordered,
-        } as SchemaDefinition;
-        this.activeContext = undefined;
-        return out;
-      }
-    }
-
-    // If we have any definitions, attach them to the root schema
-    if (
-      isRoot && this.activeContext && this.activeContext.emittedRefs.size > 0 &&
-      Object.keys(definitions).length > 0
-    ) {
-      const ordered: Record<string, SchemaDefinition> = {};
-      for (const k of this.activeContext!.definitionOrder) {
-        if (definitions[k]) ordered[k] = definitions[k];
-      }
-      const out = {
-        ...rootSchema,
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "definitions": Object.keys(ordered).length ? ordered : definitions,
-      } as SchemaDefinition;
-      this.activeContext = undefined;
-      return out;
-    }
-
-    // No cycles/definitions to attach
-    if (isRoot) this.activeContext = undefined;
-    return rootSchema;
+    // Build final schema with definitions if needed
+    return this.buildFinalSchema(rootSchema, type, context, typeNode);
   }
 
   /**
@@ -159,41 +75,11 @@ export class SchemaGenerator implements ISchemaGenerator {
    */
   public formatChildType(
     type: ts.Type,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
     typeNode?: ts.TypeNode,
   ): SchemaDefinition {
-    if (!this.activeContext) {
-      // Fallback to full generate if no context yet
-      return this.generateSchema(type, checker, typeNode);
-    }
-    const {
-      definitions,
-      cyclicTypes,
-      cyclicNames,
-      inProgressNames,
-      emittedRefs,
-      definitionStack,
-    } = this.activeContext;
-
-    return this.formatType(
-      type,
-      {
-        typeChecker: checker,
-        definitions,
-        definitionStack,
-        inProgressNames,
-        emittedRefs,
-        typeNode: typeNode!,
-      },
-      typeNode,
-      cyclicTypes,
-      cyclicNames,
-      definitions,
-      definitionStack,
-      false,
-      inProgressNames,
-      emittedRefs,
-    );
+    const childContext = typeNode ? { ...context, typeNode } : context;
+    return this.formatType(type, childContext, false);
   }
 
   /**
@@ -206,31 +92,22 @@ export class SchemaGenerator implements ISchemaGenerator {
   ): any {
     // Handle Default types (both direct and aliased) with enhanced keys to avoid false cycles
     if (typeNode && ts.isTypeReferenceNode(typeNode)) {
-      const isDirectDefault = ts.isIdentifier(typeNode.typeName) && 
+      const isDirectDefault = ts.isIdentifier(typeNode.typeName) &&
         typeNode.typeName.text === "Default";
       const isAliasedDefault = checker && isDefaultTypeRef(typeNode, checker);
-      
+
       if (isDirectDefault || isAliasedDefault) {
         // Create a more specific key that includes type argument info to avoid false cycles
-        const argTexts = typeNode.typeArguments ? 
-          typeNode.typeArguments.map(arg => arg.getText()).join(',') : '';
+        const argTexts = typeNode.typeArguments
+          ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+          : "";
         // Include a source location hash to further distinguish instances
-        const locationHash = typeNode.getSourceFile?.()?.fileName || '';
+        const locationHash = typeNode.getSourceFile?.()?.fileName || "";
         const position = typeNode.pos || 0;
         return `Default_${type.flags}_${argTexts}_${locationHash}_${position}`;
       }
     }
     return type;
-  }
-
-  private addToDefinitionStack(
-    definitionStack: Set<any>,
-    type: ts.Type,
-    typeNode?: ts.TypeNode,
-    checker?: ts.TypeChecker,
-  ) {
-    const key = this.createStackKey(type, typeNode, checker);
-    definitionStack.add(key);
   }
 
   private removeFromDefinitionStack(
@@ -243,37 +120,31 @@ export class SchemaGenerator implements ISchemaGenerator {
     definitionStack.delete(key);
   }
 
-  private isInDefinitionStack(
-    definitionStack: Set<any>,
-    type: ts.Type,
-    typeNode?: ts.TypeNode,
-    checker?: ts.TypeChecker,
-  ): boolean {
-    const key = this.createStackKey(type, typeNode, checker);
-    return definitionStack.has(key);
-  }
-
   /**
    * Format a type using the appropriate formatter
    */
   private formatType(
     type: ts.Type,
-    context: FormatterContext,
-    typeNode?: ts.TypeNode,
-    cyclicTypes?: Set<ts.Type>,
-    cyclicNames?: Set<string>,
-    definitions?: Record<string, SchemaDefinition>,
-    definitionStack: Set<ts.Type> = new Set(),
+    context: GenerationContext,
     isRootType: boolean = false,
-    inProgressNames: Set<string> = new Set(),
-    emittedRefs: Set<string> = new Set(),
   ): SchemaDefinition {
+    const {
+      cyclicTypes,
+      cyclicNames,
+      definitions,
+      definitionStack,
+      inProgressNames,
+      emittedRefs,
+      typeNode,
+    } = context;
+
     // Early named-type handling for named types (wrappers/anonymous filtered)
-    const inCycle = !!(cyclicTypes && cyclicTypes.has(type));
-    const namedKey = definitions ? getNamedTypeKey(type) : undefined;
-    const inCycleByName =
-      !!(namedKey && cyclicNames && cyclicNames.has(namedKey));
-    if (namedKey && definitions && (inCycle || inCycleByName)) {
+    const inCycle = cyclicTypes.has(type);
+    const namedKey = getNamedTypeKey(type);
+    const inCycleByName = !!(namedKey && cyclicNames.has(namedKey));
+
+
+    if (namedKey && (inCycle || inCycleByName)) {
       if (inProgressNames.has(namedKey) || definitions[namedKey]) {
         emittedRefs.add(namedKey);
         this.removeFromDefinitionStack(
@@ -289,53 +160,29 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Cycle detection: if we see the same type again by identity, emit a $ref
-    if (
-      this.isInDefinitionStack(
-        definitionStack,
-        type,
-        typeNode,
-        context.typeChecker,
-      )
-    ) {
-      if (definitions) {
-        const defName = getNamedTypeKey(type);
-        if (defName) {
-          emittedRefs.add(defName);
-          return { "$ref": `#/definitions/${defName}` };
-        }
+    const stackKey = this.createStackKey(type, typeNode, context.typeChecker);
+    if (definitionStack.has(stackKey)) {
+      if (namedKey) {
+        emittedRefs.add(namedKey);
+        return { "$ref": `#/definitions/${namedKey}` };
       }
       return { type: "object", additionalProperties: true };
     }
 
     // Push current type onto the stack
-    this.addToDefinitionStack(
-      definitionStack,
-      type,
-      typeNode,
-      context.typeChecker,
-    );
-
-    // Defer array handling to ArrayFormatter with node-aware context
+    definitionStack.add(this.createStackKey(type, typeNode, context.typeChecker));
 
     // Try to find a formatter that supports this type
     for (const formatter of this.formatters) {
-      const updatedContext = typeNode ? { ...context, typeNode } : context;
-      if (formatter.supportsType(type, updatedContext)) {
-        // Update context to include typeNode for formatters that need it
-        const result = formatter.formatType(type, updatedContext);
-        
-        // Do not promote non-cyclic named types into definitions by default.
-        // Rely on cycle detection to introduce $ref/$definitions only when
-        // necessary to satisfy recursion.
+      if (formatter.supportsType(type, context)) {
+        const result = formatter.formatType(type, context);
+
         // If we seeded a named placeholder, fill it and return $ref for non-root
-        if (namedKey && definitions && (inCycle || inCycleByName)) {
+        if (namedKey && (inCycle || inCycleByName)) {
           // Finish cyclic def
           definitions[namedKey] = result;
-          if (
-            this.activeContext &&
-            !this.activeContext.definitionOrder.includes(namedKey)
-          ) {
-            this.activeContext.definitionOrder.push(namedKey);
+          if (!context.definitionOrder.includes(namedKey)) {
+            context.definitionOrder.push(namedKey);
           }
           inProgressNames.delete(namedKey);
           this.removeFromDefinitionStack(
@@ -368,6 +215,129 @@ export class SchemaGenerator implements ISchemaGenerator {
       context.typeChecker,
     );
     return { type: "object", additionalProperties: true };
+  }
+
+  /**
+   * Build the final schema with definitions if needed
+   */
+  private buildFinalSchema(
+    rootSchema: SchemaDefinition,
+    type: ts.Type,
+    context: GenerationContext,
+    typeNode?: ts.TypeNode,
+  ): SchemaDefinition {
+    const { definitions, emittedRefs, definitionOrder } = context;
+
+    // If no definitions were created or used, return simple schema
+    if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
+      return rootSchema;
+    }
+
+    // Check if root schema should be promoted to a definition
+    const namedKey = getNamedTypeKey(type);
+    const shouldPromoteRoot = this.shouldPromoteToRef(
+      rootSchema,
+      namedKey,
+      context,
+    );
+
+    if (shouldPromoteRoot && namedKey) {
+      // Add root schema to definitions if not already there
+      if (!definitions[namedKey]) {
+        definitions[namedKey] = rootSchema;
+        if (!definitionOrder.includes(namedKey)) {
+          definitionOrder.push(namedKey);
+        }
+      }
+
+      // Return schema with $ref to root and definitions
+      return {
+        $schema: "https://json-schema.org/draft-07/schema#",
+        $ref: `#/definitions/${namedKey}`,
+        definitions: this.orderDefinitions(definitions, definitionOrder),
+      };
+    }
+
+    // Return root schema with definitions
+    return {
+      $schema: "https://json-schema.org/draft-07/schema#",
+      ...rootSchema,
+      definitions: this.orderDefinitions(definitions, definitionOrder),
+    };
+  }
+
+  /**
+   * Determine if root schema should be promoted to a $ref
+   */
+  private shouldPromoteToRef(
+    rootSchema: SchemaDefinition,
+    namedKey: string | undefined,
+    context: GenerationContext,
+  ): boolean {
+    if (!namedKey) return false;
+
+    const { definitions, emittedRefs } = context;
+
+    // If the root type already exists in definitions and has been referenced, promote it
+    if (definitions[namedKey] && emittedRefs.has(namedKey)) {
+      return true;
+    }
+
+    // Don't promote simple schemas to refs
+    if (this.isSimpleSchema(rootSchema)) {
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a schema is simple enough to not warrant promotion to $ref
+   */
+  private isSimpleSchema(schema: SchemaDefinition): boolean {
+    // Simple primitive types
+    if (
+      schema.type && !schema.properties && !schema.items &&
+      !schema.additionalProperties
+    ) {
+      return true;
+    }
+
+    // Empty objects with just additionalProperties
+    if (
+      schema.type === "object" && !schema.properties &&
+      schema.additionalProperties === true
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Order definitions according to creation order
+   */
+  private orderDefinitions(
+    definitions: Record<string, SchemaDefinition>,
+    definitionOrder: string[],
+  ): Record<string, SchemaDefinition> {
+    const ordered: Record<string, SchemaDefinition> = {};
+
+    // Add definitions in creation order
+    for (const key of definitionOrder) {
+      if (definitions[key]) {
+        ordered[key] = definitions[key];
+      }
+    }
+
+    // Add any remaining definitions (shouldn't happen, but safety net)
+    for (const [key, value] of Object.entries(definitions)) {
+      if (!ordered[key]) {
+        ordered[key] = value;
+      }
+    }
+
+    return ordered;
   }
 
   /**
@@ -416,12 +386,23 @@ export class SchemaGenerator implements ISchemaGenerator {
           // Traverse properties
           if (checker) {
             for (const prop of checker.getPropertiesOfType(t)) {
-              const location = prop.valueDeclaration ?? (prop.declarations?.[0] as any);
-              const pt = safeGetTypeOfSymbolAtLocation(checker, prop, location, "cycle detection property");
+              const location = prop.valueDeclaration ??
+                (prop.declarations?.[0] as any);
+              const pt = safeGetTypeOfSymbolAtLocation(
+                checker,
+                prop,
+                location,
+                "cycle detection property",
+              );
               if (pt) visit(pt);
             }
             // Traverse numeric index (arrays/tuples)
-            const idx = safeGetIndexTypeOfType(checker, t, ts.IndexKind.Number, "cycle detection numeric index");
+            const idx = safeGetIndexTypeOfType(
+              checker,
+              t,
+              ts.IndexKind.Number,
+              "cycle detection numeric index",
+            );
             if (idx) visit(idx);
           }
         }
