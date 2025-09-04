@@ -28,8 +28,13 @@ introduces a new package for TypeScript AST transformers.
   shape and should move.
 - We added alias‑aware array detection to support nested aliases like
   `Cell<DataArray>` in minimal compiler hosts.
-- Running `deno task test` in `schema-generator` is configured; we currently
-  use `--no-check` until API generics are aligned.
+- Running `deno task test` in `schema-generator` is configured. For now, tests
+  run with `--no-check` due to `@commontools/api` generic constraints; a
+  `test:check` task exists to re‑enable strict type‑checking once the API
+  generics align with the generator’s output.
+  - Wrapper semantics are centralized in `CommonToolsFormatter`; arrays are
+    handled by `ArrayFormatter` and a small helper in the Common Tools
+    formatter. `ObjectFormatter` is intentionally thin and delegates.
 
 ## Target Architecture
 
@@ -74,9 +79,13 @@ Move tests based on what they validate:
 
 Testing model in schema‑generator:
 
-- Prefer fixture‑based tests with full string comparison of canonical JSON:
-  `test/fixtures/schema/*.input.ts` (root type `SchemaRoot`) →
-  `*.expected.json`.
+- Prefer fixture‑based tests with canonicalization for determinism and
+  semantic deep‑equality for expected vs actual:
+  - `test/fixtures/schema/*.input.ts` (root type `SchemaRoot`) →
+    `*.expected.json`.
+  - Determinism is checked by generating twice and comparing canonicalized
+    strings; expected vs actual uses parsed JSON with order‑insensitive
+    comparison where appropriate (for readability and robustness).
 - Keep focused unit tests for formatter behavior where useful.
 - We removed the temporary “golden snapshot” tests; fixtures now serve as the
   primary stability checks.
@@ -129,7 +138,9 @@ Deliverables:
 
 4. Tasks
    - Keep `deno task test` running with `--no-check` until API generics align.
-   - Provide `deno task test:check` to run with type checking.
+   - Provide and maintain `deno task test:check` to run with type checking; run
+     this in CI (non‑blocking) until generics are aligned, then flip the
+     default task to type‑checked.
 
 5. De‑duplicate
    - After parity is achieved in `schema-generator`, remove redundant generator
@@ -175,8 +186,10 @@ Testing in the new package:
 ## Phase 4 — CI and Cleanups
 
 - Ensure the root `deno task test` runs both new packages’ tests.
-- When API generics are aligned, remove `--no-check` from
-  `schema-generator`’s default test task.
+- When `@commontools/api` generics are aligned with the generator’s runtime
+  schema shape (`$ref?`, `properties?`, markers via an extended schema type),
+  remove `--no-check` from `schema-generator`’s default test task and make
+  type‑checked tests the default locally and in CI.
 - Optionally add a minimal compatibility/sanity test in `js-runtime` that
   exercises both transformers to reduce regression risk.
 
@@ -190,7 +203,8 @@ Testing in the new package:
     asStream?: boolean }` for compile‑time utilities.
   - Update generic helpers to accept `T extends ExtendedJSONSchema` while
     manipulating markers; constrain to base `JSONSchema` after stripping.
-- Once updated, flip `schema-generator` tests back to strict type checking.
+- Once updated, flip `schema-generator` tests back to strict type checking and
+  remove any transitional allowances in the fixture harness.
 
 ## Risks and Considerations
 
@@ -205,14 +219,13 @@ Testing in the new package:
 ## Checklist
 
 Phase 1 (schema-generator):
-- [ ] Add `test/utils.ts` helpers.
-- [ ] Add `schema/cell-types.test.ts`.
-- [ ] Add `schema/arrays-and-aliases.test.ts`.
-- [ ] Add `schema/recursion-and-cycles.test.ts`.
-- [ ] Add `schema/type-aliases-and-shared.test.ts`.
-- [ ] Add `schema/complex-defaults.test.ts`.
-- [ ] Add `schema/type-to-schema.test.ts`.
-- [ ] Remove redundant schema tests from `js-runtime`.
+- [x] Add test utilities (`test/utils.ts`) and canonicalization helpers.
+- [x] Add focused schema tests covering Cell/Stream/Default, arrays/aliases,
+  recursion/cycles, type aliases/shared types, complex defaults, and
+  type‑to‑schema parity.
+- [x] Add fixture runner with determinism check and golden update support.
+- [ ] Remove redundant schema tests from `js-runtime` (after parity is
+  verified across suites).
 
 Phase 2 (new package):
 - [ ] Scaffold `packages/ts-transformers` with tasks/exports.
@@ -225,4 +238,5 @@ Phase 3 (integration):
 
 Phase 4 (stabilize):
 - [ ] Root CI runs all packages via `deno task test`.
-- [ ] Align API types; drop `--no-check` in `schema-generator`.
+- [ ] Align API types; drop `--no-check` in `schema-generator` and make
+  type‑checked tests the default.
