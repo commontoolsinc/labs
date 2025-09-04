@@ -4,6 +4,22 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursion variants", () => {
+  it("simple recursive: next?: Node", async () => {
+    const code = `
+      interface Node { value: number; next?: Node; }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Node");
+    const gen = createSchemaTransformerV2();
+    const result = gen(type, checker);
+    expect(result.$ref).toBe("#/definitions/Node");
+    const defs = result.definitions as Record<string, any>;
+    expect(defs).toBeDefined();
+    expect(defs.Node?.type).toBe("object");
+    expect(defs.Node?.properties?.value?.type).toBe("number");
+    const next = defs.Node?.properties?.next;
+    expect(next?.$ref).toBe("#/definitions/Node");
+  });
+
   it("nested recursive: children?: Node[]", async () => {
     const code = `
       interface Node { value: string; children?: Node[] }
