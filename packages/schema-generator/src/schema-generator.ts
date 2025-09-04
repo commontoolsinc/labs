@@ -110,7 +110,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     return type;
   }
 
-
   /**
    * Format a type using the appropriate formatter
    */
@@ -124,11 +123,14 @@ export class SchemaGenerator implements ISchemaGenerator {
     const namedKey = getNamedTypeKey(type);
     const inCycleByName = !!(namedKey && context.cyclicNames.has(namedKey));
 
-
     if (namedKey && (inCycle || inCycleByName)) {
-      if (context.inProgressNames.has(namedKey) || context.definitions[namedKey]) {
+      if (
+        context.inProgressNames.has(namedKey) || context.definitions[namedKey]
+      ) {
         context.emittedRefs.add(namedKey);
-        context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
+        context.definitionStack.delete(
+          this.createStackKey(type, context.typeNode, context.typeChecker),
+        );
         return { "$ref": `#/definitions/${namedKey}` };
       }
       // Mark as in-progress but delay writing definition until filled to preserve post-order
@@ -136,7 +138,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Cycle detection: if we see the same type again by identity, emit a $ref
-    const stackKey = this.createStackKey(type, context.typeNode, context.typeChecker);
+    const stackKey = this.createStackKey(
+      type,
+      context.typeNode,
+      context.typeChecker,
+    );
     if (context.definitionStack.has(stackKey)) {
       if (namedKey) {
         context.emittedRefs.add(namedKey);
@@ -146,7 +152,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Push current type onto the stack
-    context.definitionStack.add(this.createStackKey(type, context.typeNode, context.typeChecker));
+    context.definitionStack.add(
+      this.createStackKey(type, context.typeNode, context.typeChecker),
+    );
 
     // Try to find a formatter that supports this type
     for (const formatter of this.formatters) {
@@ -161,20 +169,26 @@ export class SchemaGenerator implements ISchemaGenerator {
             context.definitionOrder.push(namedKey);
           }
           context.inProgressNames.delete(namedKey);
-          context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
+          context.definitionStack.delete(
+            this.createStackKey(type, context.typeNode, context.typeChecker),
+          );
           if (!isRootType) {
             context.emittedRefs.add(namedKey);
             return { "$ref": `#/definitions/${namedKey}` };
           }
         }
         // Pop after formatting
-        context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
+        context.definitionStack.delete(
+          this.createStackKey(type, context.typeNode, context.typeChecker),
+        );
         return result;
       }
     }
 
     // If no formatter supports this type, return a fallback
-    context.definitionStack.delete(this.createStackKey(type, context.typeNode, context.typeChecker));
+    context.definitionStack.delete(
+      this.createStackKey(type, context.typeNode, context.typeChecker),
+    );
     return { type: "object", additionalProperties: true };
   }
 
@@ -196,11 +210,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Check if root schema should be promoted to a definition
     const namedKey = getNamedTypeKey(type);
-    const shouldPromoteRoot = this.shouldPromoteToRef(
-      rootSchema,
-      namedKey,
-      context,
-    );
+    const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
     if (shouldPromoteRoot && namedKey) {
       // Add root schema to definitions if not already there
@@ -231,7 +241,6 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Determine if root schema should be promoted to a $ref
    */
   private shouldPromoteToRef(
-    rootSchema: SchemaDefinition,
     namedKey: string | undefined,
     context: GenerationContext,
   ): boolean {
@@ -240,39 +249,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const { definitions, emittedRefs } = context;
 
     // If the root type already exists in definitions and has been referenced, promote it
-    if (definitions[namedKey] && emittedRefs.has(namedKey)) {
-      return true;
-    }
-
-    // Don't promote simple schemas to refs
-    if (this.isSimpleSchema(rootSchema)) {
-      return false;
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if a schema is simple enough to not warrant promotion to $ref
-   */
-  private isSimpleSchema(schema: SchemaDefinition): boolean {
-    // Simple primitive types
-    if (
-      schema.type && !schema.properties && !schema.items &&
-      !schema.additionalProperties
-    ) {
-      return true;
-    }
-
-    // Empty objects with just additionalProperties
-    if (
-      schema.type === "object" && !schema.properties &&
-      schema.additionalProperties === true
-    ) {
-      return true;
-    }
-
-    return false;
+    return !!(definitions[namedKey] && emittedRefs.has(namedKey));
   }
 
   /**
