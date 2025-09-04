@@ -17,7 +17,7 @@ export class UnionFormatter implements TypeFormatter {
   formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
-    
+
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");
     }
@@ -47,7 +47,7 @@ export class UnionFormatter implements TypeFormatter {
         (m.flags & ts.TypeFlags.NumberLiteral) !== 0 ||
         (m.flags & ts.TypeFlags.BooleanLiteral) !== 0
       );
-    
+
     if (allLiteral) {
       const values = nonNull.map((m) => {
         if (m.flags & ts.TypeFlags.StringLiteral) {
@@ -61,16 +61,16 @@ export class UnionFormatter implements TypeFormatter {
         }
         return undefined;
       }).filter((v) => v !== undefined);
-      
-      // Special case: union of both boolean literals {true, false} becomes type: "boolean" 
+
+      // Special case: union of both boolean literals {true, false} becomes type: "boolean"
       const boolValues = values.filter((v) => typeof v === "boolean");
       const nonBoolValues = values.filter((v) => typeof v !== "boolean");
-      
+
       if (boolValues.length === 2 && nonBoolValues.length === 0) {
         // Union of true | false becomes regular boolean type
         return { type: "boolean" };
       }
-      
+
       return { enum: values };
     }
 

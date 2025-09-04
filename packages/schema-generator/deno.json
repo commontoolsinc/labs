@@ -7,7 +7,8 @@
   },
   "imports": {
     "typescript": "npm:typescript",
-    "@commontools/utils": "../utils/src/index.ts"
+    "@commontools/utils": "../utils/src/index.ts",
+    "@commontools/static": "../static/index.ts"
   },
   "tasks": {
     "test": "deno test --no-check --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS test/**/*.test.ts",
