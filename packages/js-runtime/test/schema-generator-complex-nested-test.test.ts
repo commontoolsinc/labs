@@ -142,7 +142,7 @@ describe("Schema Generator Complex Nested Types Test", () => {
 
     // Status should be a string enum
     expect(statusProp?.enum).toEqual(["active", "inactive", "pending"]);
-    
+
     // Priority should be a number enum
     expect(priorityProp?.enum).toEqual([1, 2, 3]);
   });
