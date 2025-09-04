@@ -4,7 +4,7 @@ import { Identity } from "@commontools/identity";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Cell, ID } from "../src/builder/types.ts";
-import { type IStorage, Runtime } from "../src/runtime.ts";
+import { Runtime } from "../src/runtime.ts";
 import { isAnyCellLink } from "../src/link-utils.ts";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
