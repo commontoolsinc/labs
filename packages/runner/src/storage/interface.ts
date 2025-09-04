@@ -94,11 +94,10 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
+   *
+   * @returns Promise that resolves when the cell sync is complete.
    */
-  syncCell<T = any>(
-    cell: Cell<T>,
-    schemaContext?: SchemaContext,
-  ): Promise<Cell<T>>;
+  syncCell<T>(cell: Cell<T>): Promise<Cell<T>>;
 }
 
 export interface IRemoteStorageProviderSettings {

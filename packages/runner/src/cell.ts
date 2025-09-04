@@ -609,7 +609,7 @@ export class RegularCell<T> implements Cell<T> {
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
     if (this.link.id.startsWith("data:")) return this;
-    return this.runtime.storageManager.syncCell(this) as Promise<Cell<T>>;
+    return this.runtime.storageManager.syncCell<T>(this);
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(

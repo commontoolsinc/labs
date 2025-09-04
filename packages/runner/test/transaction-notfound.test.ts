@@ -57,10 +57,7 @@ class MockStorageManager implements IStorageManager {
     return Promise.resolve();
   }
 
-  syncCell<T = any>(
-    cell: Cell<T>,
-    _schemaContext?: SchemaContext,
-  ): Promise<Cell<T>> {
+  syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
     return Promise.resolve(cell);
   }
 

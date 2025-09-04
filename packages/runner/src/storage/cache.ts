@@ -1984,30 +1984,21 @@ export class StorageManager implements IStorageManager {
     return promise;
   }
 
-  async syncCell<T = any>(
+  async syncCell<T>(
     cell: Cell<T>,
-    schemaContext?: Consumer.SchemaContext,
   ): Promise<Cell<T>> {
-    // If we aren't overriding the schema context, and we have a schema in the cell, use that
-    if (
-      schemaContext === undefined && isCell(cell) &&
-      cell.schema !== undefined
-    ) {
-      schemaContext = {
-        schema: cell.schema,
-        rootSchema: (cell.rootSchema !== undefined)
-          ? cell.rootSchema
-          : cell.schema,
-      };
-    }
+    const { space, id, schema, rootSchema } = cell.getAsNormalizedFullLink();
+    if (!space) throw new Error("No space set");
+    const storageProvider = this.open(space);
+
+    const schemaContext = schema === undefined
+      ? { schema: false, rootSchema: false }
+      : { schema, rootSchema: rootSchema ?? schema };
+
     const selector = schemaContext === undefined ? undefined : {
       path: cell.path.map((p) => p.toString()),
       schemaContext,
     };
-
-    const { space, id } = cell.getAsNormalizedFullLink();
-    if (!space) throw new Error("No space set");
-    const storageProvider = this.open(space);
 
     await storageProvider.sync(id, selector);
     return cell;

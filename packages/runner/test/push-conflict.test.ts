@@ -38,7 +38,7 @@ describe.skip("Push conflict", () => {
     synced() {
       return Promise.resolve();
     },
-    syncCell<T>(cell: Cell<T>, _schemaContext?: Consumer.SchemaContext) {
+    syncCell<T>(cell: Cell<T>) {
       return Promise.resolve(cell);
     },
     close() {
