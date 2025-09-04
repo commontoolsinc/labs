@@ -31,7 +31,10 @@ describe("Schema: Boolean literals", () => {
 
   it("should handle boolean literal types directly", async () => {
     const trueCode = `type AlwaysTrue = true;`;
-    const { type: trueType, checker } = await getTypeFromCode(trueCode, "AlwaysTrue");
+    const { type: trueType, checker } = await getTypeFromCode(
+      trueCode,
+      "AlwaysTrue",
+    );
     const transformer = createSchemaTransformerV2();
     const trueSchema = transformer(trueType, checker);
 
@@ -39,7 +42,10 @@ describe("Schema: Boolean literals", () => {
     expect(trueSchema.enum).toEqual([true]);
 
     const falseCode = `type AlwaysFalse = false;`;
-    const { type: falseType, checker: falseChecker } = await getTypeFromCode(falseCode, "AlwaysFalse");
+    const { type: falseType, checker: falseChecker } = await getTypeFromCode(
+      falseCode,
+      "AlwaysFalse",
+    );
     const falseSchema = transformer(falseType, falseChecker);
 
     expect(falseSchema.type).toBe("boolean");

@@ -1,2 +1,4 @@
-interface SchemaRoot { name: string; age: number }
-
+interface SchemaRoot {
+  name: string;
+  age: number;
+}

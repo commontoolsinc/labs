@@ -39,7 +39,9 @@ export class CommonToolsFormatter implements TypeFormatter {
       : undefined;
   }
 
-  private getInnerTypeNode(context: GenerationContext): ts.TypeNode | undefined {
+  private getInnerTypeNode(
+    context: GenerationContext,
+  ): ts.TypeNode | undefined {
     if (
       context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
       context.typeNode.typeArguments &&

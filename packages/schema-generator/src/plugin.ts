@@ -22,7 +22,7 @@ export function createSchemaTransformerV2(): (
  */
 export { SchemaGenerator };
 export type {
+  GenerationContext,
   SchemaDefinition,
   TypeFormatter,
-  GenerationContext,
 } from "./interface.ts";

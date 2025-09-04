@@ -1,2 +1,3 @@
-interface SchemaRoot { items?: string[] }
-
+interface SchemaRoot {
+  items?: string[];
+}

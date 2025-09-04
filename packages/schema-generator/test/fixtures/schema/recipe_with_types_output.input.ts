@@ -17,4 +17,3 @@ interface OutputSchemaInterface extends InputSchemaInterface {
 }
 
 type SchemaRoot = OutputSchemaInterface;
-

@@ -28,7 +28,7 @@ describe("Schema: Complex defaults", () => {
     expect(mat.type).toBe("array");
     expect(mat.items?.type).toBe("array");
     expect(mat.items?.items?.type).toBe("number");
-    expect(mat.default).toEqual([[1,2],[3,4]]);
+    expect(mat.default).toEqual([[1, 2], [3, 4]]);
   });
 
   it("object defaults with nested objects", async () => {
@@ -50,7 +50,10 @@ describe("Schema: Complex defaults", () => {
     expect(user.type).toBe("object");
     expect(user.properties?.name?.type).toBe("string");
     expect(user.properties?.settings?.type).toBe("object");
-    expect(user.default).toEqual({ name: "Anonymous", settings: { notifications: true, email: "user@example.com" } });
+    expect(user.default).toEqual({
+      name: "Anonymous",
+      settings: { notifications: true, email: "user@example.com" },
+    });
   });
 
   it("null/undefined defaults in Default<...>", async () => {

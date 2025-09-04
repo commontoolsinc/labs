@@ -41,12 +41,15 @@ async function writeText(path: string, data: string) {
 }
 
 // Collect fixtures at module load time
-const allFixtures: Map<string, Array<{ name: string; input: string; expected: string }>> = new Map();
+const allFixtures: Map<
+  string,
+  Array<{ name: string; input: string; expected: string }>
+> = new Map();
 
 for (const cfg of configs) {
   const baseDir = `./test/fixtures/${cfg.directory}`;
   const fixtures: Array<{ name: string; input: string; expected: string }> = [];
-  
+
   try {
     for await (const entry of walk(baseDir, { match: [/\.input\.ts$/] })) {
       const input = entry.path;
@@ -58,14 +61,14 @@ for (const cfg of configs) {
   } catch {
     // Directory might not exist
   }
-  
+
   allFixtures.set(cfg.directory, fixtures);
 }
 
 // Generate test suites
 for (const cfg of configs) {
   const fixtures = allFixtures.get(cfg.directory) || [];
-  
+
   describe(cfg.describe, () => {
     it("has fixtures", () => {
       expect(fixtures.length).toBeGreaterThan(0);
@@ -77,7 +80,10 @@ for (const cfg of configs) {
         const typeName = "SchemaRoot"; // Convention: root type is named 'SchemaRoot'
 
         const gen = createSchemaTransformerV2();
-        const { type, checker, typeNode } = await getTypeFromCode(code, typeName);
+        const { type, checker, typeNode } = await getTypeFromCode(
+          code,
+          typeName,
+        );
         const obj1 = normalizeSchema(gen(type, checker, typeNode));
         const obj2 = normalizeSchema(gen(type, checker, typeNode));
         const s1 = JSON.stringify(obj1, null, 2) + "\n";
@@ -90,24 +96,28 @@ for (const cfg of configs) {
         }
 
         const expectedText = await Deno.readTextFile(fixture.expected);
-        
+
         // Parse both as JSON objects for semantic comparison
         let actualObj, expectedObj;
         try {
           actualObj = JSON.parse(s1.trim());
           expectedObj = JSON.parse(expectedText.trim());
         } catch (error) {
-          throw new Error(`JSON parsing failed for ${fixture.name}: ${error instanceof Error ? error.message : String(error)}`);
+          throw new Error(
+            `JSON parsing failed for ${fixture.name}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
-        
+
         // Normalize JSON Schema semantics (sort required arrays)
         const normalizeArrayOrdering = (obj: any): any => {
           if (Array.isArray(obj)) {
             return obj.map(normalizeArrayOrdering);
-          } else if (obj && typeof obj === 'object') {
+          } else if (obj && typeof obj === "object") {
             const normalized: any = {};
             for (const [key, value] of Object.entries(obj)) {
-              if (key === 'required' && Array.isArray(value)) {
+              if (key === "required" && Array.isArray(value)) {
                 // Sort required arrays for semantic equivalence
                 normalized[key] = [...value].sort();
               } else {
@@ -118,10 +128,10 @@ for (const cfg of configs) {
           }
           return obj;
         };
-        
+
         actualObj = normalizeArrayOrdering(actualObj);
         expectedObj = normalizeArrayOrdering(expectedObj);
-        
+
         // Use deep equality comparison instead of string comparison
         try {
           expect(actualObj).toEqual(expectedObj);

@@ -42,7 +42,10 @@ describe("IntersectionFormatter", () => {
           index: number;
         };
       `;
-      const { type, checker } = await getTypeFromCode(code, "ListStateWithIndex");
+      const { type, checker } = await getTypeFromCode(
+        code,
+        "ListStateWithIndex",
+      );
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -112,7 +115,9 @@ describe("IntersectionFormatter", () => {
 
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
-      expect(schema.$comment).toContain("call/construct signatures on constituent");
+      expect(schema.$comment).toContain(
+        "call/construct signatures on constituent",
+      );
     });
 
     it("should reject intersection with non-object types", async () => {

@@ -1,2 +1,5 @@
 type Shared = { a: number; b: string };
-interface SchemaRoot { one: Shared; two: Shared }
+interface SchemaRoot {
+  one: Shared;
+  two: Shared;
+}

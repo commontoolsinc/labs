@@ -30,12 +30,21 @@ interface ListConfig {
 
 // Test Default with objects
 interface ComplexDefault {
-  metadata: Default<{ version: number; author: string }, { version: 1, author: "system" }>;
-  config: Default<{ enabled: boolean; value: number }, { enabled: true, value: 100 }>;
+  metadata: Default<
+    { version: number; author: string },
+    { version: 1; author: "system" }
+  >;
+  config: Default<
+    { enabled: boolean; value: number },
+    { enabled: true; value: 100 }
+  >;
 }
 
 // Test Default with Cell types
-interface Cell<T> { get(): T; set(v: T): void }
+interface Cell<T> {
+  get(): T;
+  set(v: T): void;
+}
 interface CellDefaults {
   counter: Cell<Default<number, 0>>;
   messages: Cell<Default<string[], []>>;

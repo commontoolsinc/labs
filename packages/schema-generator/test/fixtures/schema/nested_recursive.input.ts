@@ -1,1 +1,3 @@
-interface SchemaRoot { child?: { node?: SchemaRoot } }
+interface SchemaRoot {
+  child?: { node?: SchemaRoot };
+}
