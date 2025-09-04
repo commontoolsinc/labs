@@ -1,4 +1,4 @@
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 
 // Test Date type transformations
 interface UserProfile {

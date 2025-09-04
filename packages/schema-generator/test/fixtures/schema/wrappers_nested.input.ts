@@ -1,4 +1,4 @@
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 interface Cell<T> {
   get(): T;
   set(v: T): void;

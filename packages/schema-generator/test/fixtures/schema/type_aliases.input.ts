@@ -5,7 +5,7 @@ interface Cell<T> {
 interface Stream<T> {
   subscribe(cb: (v: T) => void): void;
 }
-interface Default<T, V> {}
+type Default<T, V> = unknown;
 type MyCell<T> = Cell<T>;
 type MyStream<T> = Stream<T>;
 type MyDefault<T, V> = Default<T, V>;
