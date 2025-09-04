@@ -7,6 +7,7 @@ import type { MemorySpace } from "../storage.ts";
 import * as SubscriptionManager from "../storage/subscription.ts";
 import { StorageClient } from "../../../storage/src/client/index.ts";
 import { NewStorageProvider } from "./provider.ts";
+import { uriFromDocId } from "./address.ts";
 import { NewStorageTransaction } from "./transaction.ts";
 
 /**
@@ -23,10 +24,20 @@ export class NewStorageManager implements IStorageManager {
   #apiUrl?: URL;
   #subscription = SubscriptionManager.create();
 
-  constructor(delegate: IStorageManager, opts?: { apiUrl?: URL }) {
+  constructor(
+    delegate: IStorageManager,
+    opts?: {
+      apiUrl?: URL;
+      logLevel?: "off" | "error" | "warn" | "info" | "debug";
+      client?: StorageClient;
+    },
+  ) {
     this.#delegate = delegate;
     this.#apiUrl = opts?.apiUrl;
-    this.#client = new StorageClient({ baseUrl: opts?.apiUrl?.toString() });
+    this.#client = opts?.client ?? new StorageClient({
+      baseUrl: opts?.apiUrl?.toString(),
+      logLevel: opts?.logLevel,
+    });
     // Forward notifications from legacy delegate to our hub (commit/revert/load/etc.)
     this.#delegate.subscribe({
       next: (n) => this.#subscription.next(n),
@@ -34,6 +45,7 @@ export class NewStorageManager implements IStorageManager {
     // Bridge storage client change events to runner notifications
     this.#client.onChange((e) => {
       // Coarse integrate notification on any doc change
+      const uri = uriFromDocId(e.docId) ?? (`doc:${e.docId}` as any);
       this.#subscription.next({
         type: "integrate",
         space: e.space as MemorySpace,
@@ -42,27 +54,29 @@ export class NewStorageManager implements IStorageManager {
           [Symbol.iterator](): Iterator<
             import("../storage/interface.ts").IMemoryChange
           > {
-            let done = false;
+            let i = 0;
+            const changes: Array<
+              import("../storage/interface.ts").IMemoryChange
+            > = [
+              {
+                address: {
+                  id: uri,
+                  type: "application/json",
+                  path: [],
+                },
+                before: e.before as any,
+                after: e.after as any,
+              },
+            ];
             return {
               next: () => {
-                if (done) {
+                if (i >= changes.length) {
                   return { done: true, value: undefined } as IteratorResult<
                     any
                   >;
                 }
-                done = true;
-                return {
-                  done: false,
-                  value: {
-                    address: {
-                      id: `doc:${e.docId}`,
-                      type: "application/json",
-                      path: [],
-                    },
-                    before: e.before as any,
-                    after: e.after as any,
-                  },
-                } as IteratorResult<any>;
+                const value = changes[i++]!;
+                return { done: false, value } as IteratorResult<any>;
               },
             } as Iterator<any>;
           },

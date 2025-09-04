@@ -53,7 +53,7 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
     try {
       await this.#client.get(this.#space, {
         consumerId: this.#consumerId,
-        query: { docId, path },
+        query: { docId, path, schema: selector?.schemaContext },
       });
       return { ok: {} };
     } catch (e) {

@@ -45,10 +45,25 @@ export function openRemote(options: {
       try {
         const v = Deno.env.get("API_URL");
         if (v) return new URL(v);
-      } catch {}
+      } catch {
+        // ignore env access failures
+      }
       return undefined;
     })();
-    return new NewStorageManager(legacy, { apiUrl });
+    const logLevel = (() => {
+      try {
+        const v = Deno.env.get("LOG_LEVEL");
+        if (!v) return undefined;
+        const s = v.toLowerCase();
+        return (s === "off" || s === "error" || s === "warn" || s === "info" ||
+            s === "debug")
+          ? s
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    return new NewStorageManager(legacy, { apiUrl, logLevel } as any);
   }
   return (RemoteStorageManager as unknown as {
     open: (o: typeof options) => IStorageManager;

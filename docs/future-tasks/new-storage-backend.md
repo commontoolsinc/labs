@@ -921,15 +921,15 @@ Acceptance:
   - [x] Lazily manage per-space connections (scaffolded cache)
   - [x] `edit()` returns adapter transaction (delegated temporarily)
   - [x] `synced()` awaits in-flight work (delegated temporarily)
-  - [ ] Bridge subscription events to runner notifications
+  - [x] Bridge subscription events to runner notifications
 
 - [ ] Implement `IStorageTransaction` (adapter)
   - [ ] Maintain runner journal (reads/writes)
-  - [ ] `read()` from composed view; record invariants
+  - [x] `read()` from composed view; record invariants
   - [ ] `write()` stages per-path changes; no network
   - [ ] `commit()` batches by `(space, docId)` into one client tx; submit
   - [ ] Map receipts to commit/revert notifications; handle conflicts/rollback
-  - [ ] `abort()` drops staged writes and finalizes status
+  - [x] `abort()` drops staged writes and finalizes status
 
 - [ ] Implement minimal `IStorageProviderWithReplica` (per-space)
   - [ ] `replica.did()` returns space DID
@@ -942,7 +942,7 @@ Acceptance:
   - [x] `packages/runner/src/storage/factory.ts` selects manager by
         `ENABLE_NEW_STORAGE ∈ {"1","true","on"}`
   - [x] Configure client `baseUrl` from `API_URL`
-  - [ ] Respect `LOG_LEVEL`
+  - [x] Respect `LOG_LEVEL`
 
 - [x] Shell wiring
   - [x] Use storage-factory when constructing the runtime
@@ -952,7 +952,7 @@ Acceptance:
         `baseUrl`
 
 - [ ] Eventing and telemetry
-  - [ ] Bridge client events to runner subscription capability
+  - [x] Bridge client events to runner subscription capability
   - [ ] Mirror connection/push/pull/subscription state to `RuntimeTelemetry`
 
 - [ ] Testing

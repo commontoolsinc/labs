@@ -14,9 +14,30 @@ function base64UrlEncode(input: string): string {
     .replaceAll("=", "");
 }
 
+/** Decode a base64url (no padding) string back to UTF-8 string. */
+function base64UrlDecode(input: string): string {
+  const s = input.replaceAll("-", "+").replaceAll("_", "/");
+  // Pad to multiple of 4
+  const pad = s.length % 4 === 0 ? 0 : 4 - (s.length % 4);
+  const padded = s + "=".repeat(pad);
+  try {
+    return atob(padded);
+  } catch {
+    return "";
+  }
+}
+
 /** Deterministic mapping from runner URI to storage docId. */
 export function docIdFromUri(uri: URI): string {
   return `doc:${base64UrlEncode(uri)}`;
+}
+
+/** Best-effort reverse mapping from storage docId to runner URI. */
+export function uriFromDocId(docId: string): URI | undefined {
+  if (!docId.startsWith("doc:")) return undefined;
+  const encoded = docId.slice(4);
+  const decoded = base64UrlDecode(encoded);
+  return decoded as URI;
 }
 
 /** Pass-through; runner MemorySpace is already a DID. */

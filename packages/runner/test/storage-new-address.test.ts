@@ -4,6 +4,7 @@ import {
   docIdFromUri,
   getDocRef,
   pathFromAddress,
+  uriFromDocId,
 } from "../src/storage-new/address.ts";
 
 describe("storage-new/address", () => {
@@ -32,5 +33,11 @@ describe("storage-new/address", () => {
     });
     expect(ref.docId.startsWith("doc:")).toBe(true);
     expect(ref.path).toEqual(["x", "y"]);
+  });
+
+  it("uriFromDocId reverses docIdFromUri", () => {
+    const uri = "of:hello/world" as any;
+    const doc = docIdFromUri(uri);
+    expect(uriFromDocId(doc)).toBe(uri);
   });
 });
