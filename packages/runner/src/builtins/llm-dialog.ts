@@ -31,7 +31,11 @@ const client = new LLMClient();
  * @param action - The mutation action to perform if pending is true
  * @returns true if the action was performed, false otherwise
  */
-function perform(runtime: IRuntime, pending: Cell<boolean>, action: (tx: IExtendedStorageTransaction) => void) {
+function perform(
+  runtime: IRuntime,
+  pending: Cell<boolean>,
+  action: (tx: IExtendedStorageTransaction) => void,
+) {
   const tx = runtime.edit();
   if (pending.withTx(tx).get()) {
     action(tx);
@@ -54,7 +58,12 @@ function perform(runtime: IRuntime, pending: Cell<boolean>, action: (tx: IExtend
  * @param toolCall - The LLM tool call containing id, name, and arguments
  * @returns Promise that resolves to the tool execution result
  */
-async function invokeHandlerAsToolCall(runtime: IRuntime, parentCell: Cell<any>, toolDef: Cell<BuiltInLLMTool>, toolCall: LLMToolCall) {
+async function invokeHandlerAsToolCall(
+  runtime: IRuntime,
+  parentCell: Cell<any>,
+  toolDef: Cell<BuiltInLLMTool>,
+  toolCall: LLMToolCall,
+) {
   const handlerTx = runtime.edit();
   const result = runtime.getCell<any>(
     parentCell.space,
@@ -173,8 +182,9 @@ function mainLogic(
   inputsCell: Cell<BuiltInLLMParams>,
   pending: Cell<boolean>,
 ) {
-  const { system, stop, maxTokens, model } = inputsCell.getAsQueryResult([], tx) ??
-    {};
+  const { system, stop, maxTokens, model } =
+    inputsCell.getAsQueryResult([], tx) ??
+      {};
 
   const messagesCell = inputsCell.key("messages");
   const toolsCell = inputsCell.key("tools");
@@ -224,10 +234,17 @@ function mainLogic(
           // Execute each tool call and collect results
           const toolResults: any[] = [];
           for (const toolCall of llmResult.toolCalls) {
-            const toolDef = toolsCell.key(toolCall.name) as Cell<BuiltInLLMTool>;
+            const toolDef = toolsCell.key(toolCall.name) as Cell<
+              BuiltInLLMTool
+            >;
 
             try {
-              const resultValue = await invokeHandlerAsToolCall(runtime, parentCell, toolDef, toolCall);
+              const resultValue = await invokeHandlerAsToolCall(
+                runtime,
+                parentCell,
+                toolDef,
+                toolCall,
+              );
               // this is probably a proxy, so it may still update in the conversation history reactively later
               // but we intend this to be a static / snapshot at this stage
               toolResults.push({
@@ -258,7 +275,7 @@ function mainLogic(
           if (success) {
             // TODO(bf): [CT-859] when we support continuations, call mainLogic() again here
           } else {
-            console.info('Did not write to conversation due to pending=false')
+            console.info("Did not write to conversation due to pending=false");
           }
         } catch (error: unknown) {
           console.error(error);
