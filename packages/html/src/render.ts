@@ -147,11 +147,10 @@ const bindChildren = (
       if (currentNode) {
         // Replace the previous DOM node, if any
         currentNode.replaceWith(newRendered.node);
-        keyedChildren.get(key)?.cancel();
         // Update the mapping entry to capture any newly-rendered node.
         keyedChildren.set(key, {
           ...keyedChildren.get(key)!,
-          ...newRendered,
+          node: newRendered.node,
         });
       }
 

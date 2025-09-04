@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
-import { createRef } from "./doc-map.ts";
+import { createRef } from "./create-ref.ts";
 import { isCell, RegularCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -480,7 +480,7 @@ export function normalizeAndDiff(
     if (Array.isArray(currentValue) && currentValue.length != newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema)
+        ? runtime.cfc.lubSchema(link.schema, link.rootSchema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)

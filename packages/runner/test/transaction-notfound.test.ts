@@ -6,6 +6,8 @@ import type {
   IStorageManager,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import { Cell } from "../src/cell.ts";
+import { SchemaContext } from "../src/builder/types.ts";
 
 // Mock replica that simulates non-existent documents
 class MockReplica implements ISpaceReplica {
@@ -55,7 +57,15 @@ class MockStorageManager implements IStorageManager {
     return Promise.resolve();
   }
 
+  syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
+    return Promise.resolve(cell);
+  }
+
   subscribe() {}
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 describe("Transaction NotFound Behavior", () => {

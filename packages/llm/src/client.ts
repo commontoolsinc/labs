@@ -5,6 +5,8 @@ import {
   LLMMessage,
   LLMRequest,
   LLMResponse,
+  LLMToolCall,
+  LLMToolResult,
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
@@ -45,8 +47,9 @@ export class LLMClient {
    * Sends a request to the LLM service.
    *
    * @param userRequest The LLM request object.
-   * @param partialCB Optional callback for streaming responses.
-   * @returns The full LLM response as a string.
+   * @param partialCB Optional callback for streaming text responses.
+   * @param toolCallCB Optional callback for tool call events.
+   * @returns The full LLM response with content and tool information.
    * @throws If the request fails after retrying with fallback models.
    */
   async sendRequest(
@@ -107,6 +110,8 @@ export class LLMClient {
     let doneReading = false;
     let buffer = "";
     let text = "";
+    const toolCalls: LLMToolCall[] = [];
+    const toolResults: LLMToolResult[] = [];
 
     while (!doneReading) {
       const { value, done } = await reader.read();
@@ -122,9 +127,37 @@ export class LLMClient {
 
           if (line) {
             try {
-              const t = JSON.parse(line);
-              text += t;
-              if (callback) callback(text);
+              const event = JSON.parse(line);
+
+              // Handle different event types from AI SDK fullStream
+              if (typeof event === "string") {
+                // Legacy text delta format
+                text += event;
+                if (callback) callback(text);
+              } else if (event.type === "text-delta") {
+                // New structured text delta
+                text += event.textDelta;
+                if (callback) callback(text);
+              } else if (event.type === "tool-call") {
+                // Tool call event
+                const toolCall: LLMToolCall = {
+                  id: event.toolCallId,
+                  name: event.toolName,
+                  arguments: event.args,
+                };
+                toolCalls.push(toolCall);
+              } else if (event.type === "tool-result") {
+                // Tool result event
+                const toolResult: LLMToolResult = {
+                  toolCallId: event.toolCallId,
+                  result: event.result,
+                  error: event.error,
+                };
+                toolResults.push(toolResult);
+              } else if (event.type === "finish") {
+                // Stream finished
+                break;
+              }
             } catch (error) {
               console.error("Failed to parse JSON line:", line, error);
             }
@@ -136,15 +169,22 @@ export class LLMClient {
     // Handle any remaining buffer
     if (buffer.trim()) {
       try {
-        const t = JSON.parse(buffer.trim());
-        text += t;
-        if (callback) callback(text);
+        const event = JSON.parse(buffer.trim());
+        if (typeof event === "string") {
+          text += event;
+          if (callback) callback(text);
+        }
       } catch (error) {
         console.error("Failed to parse final JSON line:", buffer, error);
       }
     }
 
-    return { content: text, id };
+    return {
+      content: text,
+      id,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      toolResults: toolResults.length > 0 ? toolResults : undefined,
+    };
   }
 }
 

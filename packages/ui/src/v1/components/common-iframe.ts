@@ -106,7 +106,7 @@ export class CommonIframeElement extends LitElement {
             <div class="error-content">
               <h2>Error</h2>
               <p><strong>Description:</strong> ${this._errorDetails
-            .description}</p>
+                .description}</p>
               <p><strong>Source:</strong> ${this._errorDetails.source}</p>
               <p><strong>Line:</strong> ${this._errorDetails.lineno}</p>
               <p><strong>Column:</strong> ${this._errorDetails.colno}</p>

@@ -10,7 +10,7 @@ import {
   BuiltInLLMParams,
   BuiltInLLMState,
 } from "@commontools/api";
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -107,10 +107,7 @@ export function llm(
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: (messages ?? []).map((content: string, index: number) => ({
-        role: index % 2 ? "assistant" : "user",
-        content,
-      })),
+      messages: messages ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -142,6 +139,10 @@ export function llm(
 
     const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
+      // TODO(bf): we should consider an `asyncTx` pattern here akin to `stream-data.ts`
+      const status = tx.status();
+      if (status.status !== "ready") return;
+
       partialWithLog.set(text);
     };
 

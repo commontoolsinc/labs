@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-DENO_VERSION_REQUIRED="2.3.5"
+DENO_VERSION_REQUIRED="2.4.5"
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
 if [ "$DENO_VERSION" != "$DENO_VERSION_REQUIRED" ]; then

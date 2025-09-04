@@ -80,7 +80,7 @@ describe("Storage Subscription", () => {
     it("should receive commit notification when transaction is committed", async () => {
       const subscription = new Subscription();
 
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Use direct transaction operations like the original test
       const entityId = `of:test-commit-${Date.now()}` as Entity;
@@ -109,7 +109,7 @@ describe("Storage Subscription", () => {
     it("should include source transaction in commit notification", async () => {
       const subscription = new Subscription();
 
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Create a cell and write some data
       const cell = runtime.getCell<{ test: string }>(
@@ -138,8 +138,8 @@ describe("Storage Subscription", () => {
       const subscription1 = new Subscription();
       const subscription2 = new Subscription();
 
-      runtime.storage.subscribe(subscription1);
-      runtime.storage.subscribe(subscription2);
+      runtime.storageManager.subscribe(subscription1);
+      runtime.storageManager.subscribe(subscription2);
 
       // Create a cell and write some data
       const cell = runtime.getCell<{ value: number }>(
@@ -246,7 +246,7 @@ describe("Storage Subscription", () => {
     it("should receive load notification when data is loaded from cache", async () => {
       // Subscribe to notifications
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Get the replica and call load to trigger load notification
       const { replica } = storageManager.open(space);
@@ -284,7 +284,7 @@ describe("Storage Subscription", () => {
 
       // Create subscription
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Call pull on the replica
       const { replica } = storageManager.open(space);
@@ -309,7 +309,7 @@ describe("Storage Subscription", () => {
     it("should receive integrate notification when data is integrated", async () => {
       // Subscribe to notifications
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Use Cell interface to write something and commit
       const cell1 = runtime.getCell<{ version: number }>(
@@ -363,7 +363,7 @@ describe("Storage Subscription", () => {
 
       // Subscribe to notifications after commit
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // Get the provider and trigger a reset operation
       const { replica } = storageManager.open(space);
@@ -393,7 +393,7 @@ describe("Storage Subscription", () => {
         },
       };
 
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       // First transaction
       const cell1 = runtime.getCell<{ count: number }>(
@@ -438,11 +438,11 @@ describe("Storage Subscription", () => {
       };
 
       // Subscribe with error-throwing subscription
-      runtime.storage.subscribe(errorSubscription);
+      runtime.storageManager.subscribe(errorSubscription);
 
       // Also subscribe with a normal subscription to verify system continues
       const normalSubscription = new Subscription();
-      runtime.storage.subscribe(normalSubscription);
+      runtime.storageManager.subscribe(normalSubscription);
 
       const cell = runtime.getCell<{ test: boolean }>(
         space,
@@ -486,7 +486,7 @@ describe("Storage Subscription", () => {
 
     it("should receive source cell notification when source cell is set", async () => {
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      runtime.storageManager.subscribe(subscription);
 
       const cell = runtime.getCell<{ test: string }>(
         space,

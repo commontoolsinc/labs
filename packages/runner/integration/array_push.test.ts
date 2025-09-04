@@ -6,17 +6,10 @@
  * fast the client can render 100 mapped elements, which often ends up creating a
  * lot of vdom nodes
  */
-import {
-  ANYONE,
-  createAdminSession,
-  type DID,
-  Identity,
-  Session,
-} from "@commontools/identity";
+import { ANYONE, Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { getEntityId, type JSONSchema, Runtime } from "../src/index.ts";
-import { createBuilder } from "../src/builder/factory.ts";
+import { Runtime } from "../src/index.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;
@@ -92,7 +85,7 @@ async function runTest() {
     {},
   );
   charm = (await charmManager.get(charm))!; // Attach result schema
-  console.log("Result charm ID:", getEntityId(charm));
+  console.log("Result charm ID:", charm.entityId);
   console.log("Result charm schema:", charm.schema);
 
   // Wait so we can load the page on the browser
@@ -119,7 +112,7 @@ async function runTest() {
 
   console.log("Waiting for runtime to finish and storage to sync...");
   await runtime.idle();
-  await runtime.storage.synced();
+  await runtime.storageManager.synced();
   console.log("Storage synced");
 
   // Now we should have all elements

@@ -78,12 +78,13 @@ export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
+const DEFAULT_RETRIES = 5;
 
 export class Scheduler implements IScheduler {
-  private pending = new Set<Action>();
-  private eventQueue: ((tx: IExtendedStorageTransaction) => any)[] = [];
+  private eventQueue: { action: Action; retriesLeft: number }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
-  private dirty = new Set<SpaceURIAndType>();
+
+  private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
@@ -128,7 +129,7 @@ export class Scheduler implements IScheduler {
     }
 
     // Subscribe to storage notifications
-    this.runtime.storage.subscribe(this.createStorageSubscription());
+    this.runtime.storageManager.subscribe(this.createStorageSubscription());
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
@@ -141,68 +142,69 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  schedule(action: Action, log: ReactivityLog): Cancel {
+  subscribe(
+    action: Action,
+    log: ReactivityLog,
+    scheduleImmediately: boolean = false,
+  ): Cancel {
     const reads = this.setDependencies(action, log);
-    logger.debug(() => ["Scheduling action:", action, reads]);
-    reads.forEach((addr) =>
-      this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`)
+
+    logger.debug(
+      () => ["Subscribing to action:", action, reads, scheduleImmediately],
     );
 
-    this.queueExecution();
-    this.pending.add(action);
+    if (scheduleImmediately) {
+      this.queueExecution();
+      this.pending.add(action);
+    } else {
+      const pathsByEntity = addressesToPathByEntity(reads);
 
-    return () => this.unschedule(action);
+      logger.debug(() => [
+        `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
+        `Entities: ${pathsByEntity.size}`,
+        `Reads: ${reads.length}`,
+      ]);
+
+      const entities = new Set<SpaceAndURI>();
+
+      for (const [spaceAndURI, paths] of pathsByEntity) {
+        entities.add(spaceAndURI);
+        if (!this.triggers.has(spaceAndURI)) {
+          this.triggers.set(spaceAndURI, new Map());
+        }
+        const pathsWithValues = paths.map((path) =>
+          [
+            "value",
+            ...path,
+          ] as readonly MemoryAddressPathComponent[]
+        );
+        this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+
+        logger.debug(() => [
+          `[SUBSCRIBE] Registered action for ${spaceAndURI}`,
+          `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
+        ]);
+      }
+
+      this.cancels.set(action, () => {
+        logger.debug(() => [
+          `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
+          `Entities: ${entities.size}`,
+        ]);
+        for (const spaceAndURI of entities) {
+          this.triggers.get(spaceAndURI)?.delete(action);
+        }
+      });
+    }
+
+    return () => this.unsubscribe(action);
   }
 
-  unschedule(action: Action): void {
+  unsubscribe(action: Action): void {
     this.cancels.get(action)?.();
     this.cancels.delete(action);
     this.dependencies.delete(action);
     this.pending.delete(action);
-  }
-
-  subscribe(action: Action, log: ReactivityLog): Cancel {
-    const reads = this.setDependencies(action, log);
-    const pathsByEntity = addressesToPathByEntity(reads);
-
-    logger.debug(() => [
-      `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
-      `Entities: ${pathsByEntity.size}`,
-      `Reads: ${reads.length}`,
-    ]);
-
-    const entities = new Set<SpaceAndURI>();
-
-    for (const [spaceAndURI, paths] of pathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.triggers.has(spaceAndURI)) {
-        this.triggers.set(spaceAndURI, new Map());
-      }
-      const pathsWithValues = paths.map((path) =>
-        [
-          "value",
-          ...path,
-        ] as readonly MemoryAddressPathComponent[]
-      );
-      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-
-      logger.debug(() => [
-        `[SUBSCRIBE] Registered action for ${spaceAndURI}`,
-        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
-      ]);
-    }
-
-    this.cancels.set(action, () => {
-      logger.debug(() => [
-        `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
-        `Entities: ${entities.size}`,
-      ]);
-      for (const spaceAndURI of entities) {
-        this.triggers.get(spaceAndURI)?.delete(action);
-      }
-    });
-
-    return () => this.unschedule(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -231,8 +233,7 @@ export class Scheduler implements IScheduler {
             this.handleError(error as Error, action);
           }
         } finally {
-          // Set up reactive subscriptions after the action runs
-          // This matches the original scheduler behavior
+          // Set up new reactive subscriptions after the action runs
           tx.commit();
           const log = txToReactivityLog(tx);
 
@@ -279,13 +280,18 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  queueEvent(eventLink: NormalizedFullLink, event: any): void {
+  queueEvent(
+    eventLink: NormalizedFullLink,
+    event: any,
+    retries: number = DEFAULT_RETRIES,
+  ): void {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
-        this.eventQueue.push((tx: IExtendedStorageTransaction) =>
-          handler(tx, event)
-        );
+        this.eventQueue.push({
+          action: (tx: IExtendedStorageTransaction) => handler(tx, event),
+          retriesLeft: retries,
+        });
       }
     }
   }
@@ -378,9 +384,6 @@ export class Scheduler implements IScheduler {
                   }`,
                   `Action name: ${action.name || "anonymous"}`,
                 ]);
-                this.dirty.add(
-                  `${spaceAndURI}/${change.address.type}` as SpaceURIAndType,
-                );
                 this.queueExecution();
                 this.pending.add(action);
               }
@@ -440,25 +443,43 @@ export class Scheduler implements IScheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
-    // Process next event from the event queue. Will mark more docs as dirty.
-    const handler = this.eventQueue.shift();
-    if (handler) {
+    // Process next event from the event queue.
+
+    // TODO(seefeld): This should maybe run _after_ all pending actions, so it's
+    // based on the newest state. OTOH, if it has no dependencies and changes
+    // data, then this causes redundant runs. So really we should add this to
+    // the topological sort in the right way.
+    const event = this.eventQueue.shift();
+    if (event) {
+      const { action, retriesLeft } = event;
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
-        handler,
+        handler: action,
       });
       const finalize = (error?: unknown) => {
         try {
-          if (error) this.handleError(error as Error, handler);
+          if (error) this.handleError(error as Error, action);
         } finally {
-          tx.commit();
+          tx.commit().then(({ error }) => {
+            // If the transaction failed, and we have retries left, queue the
+            // event again at the beginning of the queue. This isn't guaranteed
+            // to be the same order as the original event, but it's close
+            // enough, especially for a series of event that act on the same
+            // conflicting data.
+            if (error && retriesLeft > 0) {
+              this.eventQueue.unshift({ action, retriesLeft: retriesLeft - 1 });
+              // Ensure the re-queued event gets processed even if the scheduler
+              // finished this cycle before the commit completed.
+              this.queueExecution();
+            }
+          });
         }
       };
       const tx = this.runtime.edit();
 
       try {
         this.runningPromise = Promise.resolve(
-          this.runtime.harness.invoke(() => handler(tx)),
+          this.runtime.harness.invoke(() => action(tx)),
         ).then(() => finalize()).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
@@ -466,28 +487,22 @@ export class Scheduler implements IScheduler {
       }
     }
 
-    const order = topologicalSort(
-      this.pending,
-      this.dependencies,
-      this.dirty,
-    );
-
-    // Clear pending and dirty sets, and cancel all listeners for docs on already
-    // scheduled actions.
-    this.pending.clear();
-    this.dirty.clear();
+    const order = topologicalSort(this.pending, this.dependencies);
 
     logger.debug(() => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
 
+    // Now run all functions. This will resubscribe actions with their new
+    // dependencies.
     for (const fn of order) {
-      this.cancels.get(fn)?.();
-    }
+      // Maybe it was unsubscribed since it was added to the order.
+      if (!this.pending.has(fn)) continue;
 
-    // Now run all functions. This will create new listeners to mark docs dirty
-    // and schedule the next run.
-    for (const fn of order) {
+      // Take off pending list and unsubscribe, run will resubscribe.
+      this.pending.delete(fn);
+      this.unsubscribe(fn);
+
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
         this.handleError(
@@ -516,67 +531,22 @@ export class Scheduler implements IScheduler {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<SpaceAndURI>,
 ): Action[] {
-  const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
 
-  // First pass: identify relevant actions
-  for (const action of actions) {
-    const { reads } = dependencies.get(action)!;
-    // TODO(seefeld): Keep track of affected paths
-    if (reads.length === 0) {
-      // Actions with no dependencies are always relevant. Note that they must
-      // be manually added to `pending`, which happens only once on `schedule`.
-      relevantActions.add(action);
-    } else if (
-      reads.some((addr) => dirty.has(`${addr.space}/${addr.id}/${addr.type}`))
-    ) {
-      relevantActions.add(action);
-    }
-  }
-
-  // Second pass: add downstream actions
-  let size;
-  do {
-    size = relevantActions.size;
-    for (const action of actions) {
-      if (!relevantActions.has(action)) {
-        const { writes } = dependencies.get(action)!;
-        for (const write of writes) {
-          if (
-            Array.from(relevantActions).some((relevantAction) =>
-              dependencies
-                .get(relevantAction)!
-                .reads.some(
-                  (addr) =>
-                    addr.space === write.space &&
-                    addr.id === write.id &&
-                    arraysOverlap(write.path, addr.path),
-                )
-            )
-          ) {
-            relevantActions.add(action);
-            break;
-          }
-        }
-      }
-    }
-  } while (relevantActions.size > size);
-
   // Initialize graph and inDegree for relevant actions
-  for (const action of relevantActions) {
+  for (const action of actions) {
     graph.set(action, new Set());
     inDegree.set(action, 0);
   }
 
   // Build the graph
-  for (const actionA of relevantActions) {
+  for (const actionA of actions) {
     const { writes } = dependencies.get(actionA)!;
     const graphA = graph.get(actionA)!;
     for (const write of writes) {
-      for (const actionB of relevantActions) {
+      for (const actionB of actions) {
         if (actionA !== actionB && !graphA.has(actionB)) {
           const { reads } = dependencies.get(actionB)!;
           if (
@@ -607,10 +577,10 @@ function topologicalSort(
     }
   }
 
-  while (queue.length > 0 || visited.size < relevantActions.size) {
+  while (queue.length > 0 || visited.size < actions.size) {
     if (queue.length === 0) {
       // Handle cycle: choose an unvisited node with the lowest in-degree
-      const unvisitedAction = Array.from(relevantActions)
+      const unvisitedAction = Array.from(actions)
         .filter((action) => !visited.has(action))
         .reduce((a, b) => (inDegree.get(a)! < inDegree.get(b)! ? a : b));
       queue.push(unvisitedAction);

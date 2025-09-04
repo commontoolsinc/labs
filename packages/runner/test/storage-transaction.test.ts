@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
+import { Runtime } from "../src/runtime.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   INotFoundError,
 } from "../src/storage/interface.ts";
-import { getEntityId } from "../src/doc-map.ts";
+import { getEntityId } from "../src/create-ref.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

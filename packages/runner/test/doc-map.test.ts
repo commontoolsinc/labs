@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createRef, type EntityId, getEntityId } from "../src/doc-map.ts";
+import { createRef, getEntityId } from "../src/create-ref.ts";
 import { refer } from "merkle-reference";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -114,14 +114,6 @@ describe("cell-map", () => {
 
       // Also verify the cells are equal
       expect(retrievedCell.equals(c)).toBe(true);
-    });
-
-    it("should return undefined for non-existent entity ID", () => {
-      const nonExistentId = createRef() as EntityId;
-      // Note: We must use getDocByEntityId directly here because getCellFromEntityId
-      // always creates a new doc if not found (createIfNotFound: true)
-      expect(runtime.documentMap.getDocByEntityId(space, nonExistentId, false))
-        .toBeUndefined();
     });
   });
 

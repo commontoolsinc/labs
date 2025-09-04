@@ -28,6 +28,11 @@ circuit as current will flow through it. Different analogy could be to think of
 [charm] as a process, where's [spell] would be a program and [cell]s would be
 program inputs and outputs.
 
+There are a few more specific terms for [some cells](charm-cell-diagram.md) within the charm.
+- Result Cell -- This is the main charm cell. The UI will be built here.
+- Process Cell -- This holds much of the working state of the charm.
+- Recipe Cell -- Contains the recipe source code.
+
 ## CRDT (Conflict-free Replicated Data Type)
 
 A data structure that can resolve conflicts automatically in distributed

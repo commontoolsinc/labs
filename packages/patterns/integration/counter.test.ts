@@ -32,6 +32,8 @@ describe("counter direct operations test", () => {
           "counter.tsx",
         ),
       ),
+      // We operate on the charm in this thread
+      { start: true },
     );
   });
 

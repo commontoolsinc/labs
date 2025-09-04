@@ -31,6 +31,8 @@ describe("ct-render integration test", () => {
           "ct-render.tsx",
         ),
       ),
+      // We operate on the charm in this thread
+      { start: true },
     );
   });
 

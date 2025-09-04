@@ -98,7 +98,8 @@ export class CharmController {
 
   async setInput(input: object): Promise<void> {
     const recipe = await this.getRecipe();
-    await execute(this.#manager, this.id, recipe, input);
+    // Use setup/start so we can update inputs without forcing reschedule
+    await execute(this.#manager, this.id, recipe, input, { start: true });
   }
 
   async getRecipe(): Promise<Recipe> {
@@ -166,8 +167,9 @@ async function execute(
   charmId: string,
   recipe: Recipe,
   input?: object,
+  options?: { start?: boolean },
 ): Promise<void> {
-  await manager.runWithRecipe(recipe, charmId, input);
+  await manager.runWithRecipe(recipe, charmId, input, options);
   await manager.runtime.idle();
   await manager.synced();
 }

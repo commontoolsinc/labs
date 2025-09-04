@@ -62,7 +62,7 @@ export async function generateObject(
           };
         },
       }),
-      maxTokens: params.maxTokens,
+      maxOutputTokens: params.maxTokens,
       ...(params.system && { system: params.system }),
     });
 

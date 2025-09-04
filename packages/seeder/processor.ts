@@ -8,7 +8,6 @@ import { Verifier } from "./verifier.ts";
 import { CharmManager } from "@commontools/charm";
 import { CommandType } from "./interfaces.ts";
 import { createDataCharm, processWorkflow } from "@commontools/charm";
-import { getEntityId } from "@commontools/runner";
 import { isRecord } from "@commontools/utils/types";
 
 export class Processor {
@@ -121,7 +120,7 @@ export class Processor {
 
         const charm = form.generation?.charm;
         if (charm) {
-          const id = getEntityId(charm);
+          const id = charm.entityId;
           if (id) {
             return this.verify({ id: id["/"], prompt, name: this.name });
           }
@@ -155,7 +154,7 @@ export class Processor {
 
         const newCharm = form.generation?.charm;
         if (newCharm) {
-          const id = getEntityId(newCharm);
+          const id = newCharm.entityId;
           if (id) {
             return this.verify({ id: id["/"], prompt, name: this.name });
           }
@@ -181,7 +180,7 @@ export class Processor {
           prompt,
         );
 
-        const id = getEntityId(charm);
+        const id = charm.entityId;
         console.log(`Charm added from JSON import`, { id });
         if (id) {
           console.log(`Charm added from JSON import: ${id["/"]}`);

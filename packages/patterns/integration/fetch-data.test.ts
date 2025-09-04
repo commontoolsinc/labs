@@ -1,4 +1,4 @@
-import { env } from "@commontools/integration";
+import { env, Page, waitFor } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
@@ -40,6 +40,7 @@ describe("fetch data integration test", () => {
             "fetch-data.tsx",
           ),
         ),
+        { start: true },
       );
     });
 
@@ -60,17 +61,7 @@ describe("fetch data integration test", () => {
         identity,
       });
 
-      // Wait for charm to load and verify github title exists
-      const titleElement = await page.waitForSelector("#github-title", {
-        strategy: "pierce",
-      });
-      assert(titleElement, "Should find github title element");
-
-      // Verify initial value
-      const initialText = await titleElement.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(initialText?.trim(), "next.js");
+      await waitForTitle("next.js", page);
 
       // Also verify via direct operations
       const repoUrl = charm.input.get(["repoUrl"]);
@@ -83,7 +74,6 @@ describe("fetch data integration test", () => {
     ignore,
     fn: async () => {
       const page = shell.page();
-      const manager = cc.manager();
 
       // Set new repo URL via direct operation
       await charm.input.set(
@@ -101,18 +91,7 @@ describe("fetch data integration test", () => {
         identity,
       });
 
-      // Wait for data to load
-
-      const titleElement = await page.waitForSelector("#github-title", {
-        strategy: "pierce",
-      });
-      assert(titleElement, "Should find github title element");
-
-      // Verify updated value
-      const updatedText = await titleElement.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(updatedText?.trim(), "labs");
+      await waitForTitle("labs", page);
 
       // Also verify via direct operations
       const repoUrl = charm.input.get(["repoUrl"]);
@@ -120,3 +99,17 @@ describe("fetch data integration test", () => {
     },
   });
 });
+
+async function waitForTitle(title: string, page: Page) {
+  await waitFor(async () => {
+    const titleElement = await page.waitForSelector("#github-title", {
+      strategy: "pierce",
+    });
+
+    // Verify updated value
+    const updatedText = await titleElement.evaluate((el: HTMLElement) =>
+      el.textContent
+    );
+    return updatedText?.trim() === title;
+  });
+}

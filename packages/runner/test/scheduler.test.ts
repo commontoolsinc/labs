@@ -10,6 +10,9 @@ import {
 } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import type { Entity } from "@commontools/memory/interface";
+import * as Fact from "@commontools/memory/fact";
+import * as Changes from "@commontools/memory/changes";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -67,7 +70,8 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
     a.withTx(tx).send(2); // Simulate external change
@@ -109,13 +113,13 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.schedule(adder, {
+    runtime.scheduler.subscribe(adder, {
       reads: [
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    });
+    }, true);
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2); // No log, simulate external change
@@ -157,7 +161,8 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
 
@@ -168,7 +173,7 @@ describe("scheduler", () => {
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
 
-    runtime.scheduler.unschedule(adder);
+    runtime.scheduler.unsubscribe(adder);
     a.withTx(tx).send(3);
     tx.commit();
     tx = runtime.edit();
@@ -208,13 +213,13 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    const cancel = runtime.scheduler.schedule(adder, {
+    const cancel = runtime.scheduler.subscribe(adder, {
       reads: [
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    });
+    }, true);
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2);
@@ -283,8 +288,10 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder1);
-    await runtime.scheduler.run(adder2);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(4);
@@ -368,9 +375,12 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    await runtime.scheduler.run(adder1);
-    await runtime.scheduler.run(adder2);
-    await runtime.scheduler.run(adder3);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, true);
+    await runtime.idle();
 
     await runtime.idle();
 
@@ -406,7 +416,8 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    await runtime.scheduler.run(inc);
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(counter.get()).toBe(1);
     await runtime.idle();
     expect(counter.get()).toBe(1);
@@ -423,7 +434,7 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.schedule(inc, { reads: [], writes: [] });
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
     await runtime.idle();
     expect(runs).toBe(1);
   });
@@ -469,7 +480,12 @@ describe("scheduler", () => {
     };
 
     // Run the action initially
-    await runtime.scheduler.run(ignoredReadAction);
+    runtime.scheduler.subscribe(
+      ignoredReadAction,
+      { reads: [], writes: [] },
+      true,
+    );
+    await runtime.idle();
     expect(actionRunCount).toBe(1);
     expect(lastReadValue).toEqual({ value: 1 });
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
@@ -684,7 +700,8 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    await runtime.scheduler.run(action);
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    await runtime.idle();
 
     runtime.scheduler.addEventHandler(
       eventHandler,
@@ -709,4 +726,72 @@ describe("event handling", () => {
     expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
   });
+
+  it(
+    "should retry event handler when commit fails, up to retries count",
+    async () => {
+      // Prepare remote memory with existing fact to induce conflict on commit
+      const memory = storageManager.session().mount(space);
+      const entityId = `test:retry-conflict-${Date.now()}` as Entity;
+      const existingFact = Fact.assert({
+        the: "application/json",
+        of: entityId,
+        is: { version: 1 },
+      });
+      await memory.transact({ changes: Changes.from([existingFact]) });
+
+      // Reset local replica so local writes will conflict with remote state
+      const { replica } = storageManager.open(space);
+      (replica as any).reset();
+
+      // Set up an event cell and commit initial state
+      const eventCell = runtime.getCell<number>(
+        space,
+        "should retry event handler on conflict",
+        undefined,
+        tx,
+      );
+      eventCell.set(0);
+      await tx.commit();
+
+      // Event handler that writes a conflicting value to the same entity
+      let attempts = 0;
+      const handler: EventHandler = (tx, _event) => {
+        attempts++;
+        // Force commit failure for the first 5 attempts to exercise retries.
+        if (attempts <= 5) {
+          tx.abort("force-abort-for-retry");
+          return;
+        }
+        // On the final attempt, perform a regular write.
+        tx.write({
+          space,
+          id: entityId,
+          type: "application/json",
+          path: [],
+        }, { version: 2 });
+      };
+
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      // Queue event (uses default retries configured in scheduler)
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+      );
+
+      // First idle may return before the commit callback schedules retries.
+      await runtime.idle();
+      // Wait for any re-queued events to process.
+      await runtime.idle();
+
+      // Should attempt initial + default retries times (DEFAULT_RETRIES=5)
+      expect(attempts).toBe(6);
+
+      // No further assertions needed; this verifies retry behavior only.
+    },
+  );
 });

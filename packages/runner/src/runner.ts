@@ -65,44 +65,53 @@ export class Runner implements IRunner {
   constructor(readonly runtime: IRuntime) {}
 
   /**
-   * Run a recipe.
-   *
-   * resultDoc is required and should have an id. processCell is created if not
-   * already set.
-   *
-   * If no recipe is provided, the previous one is used, and the recipe is started
-   * if it isn't already started.
-   *
-   * If no argument is provided, the previous one is used, and the recipe is
-   * started if it isn't already running.
-   *
-   * If a new recipe or any argument value is provided, a currently running recipe
-   * is stopped, the recipe and argument replaced and the recipe restarted.
-   *
-   * @param recipeFactory - Function that takes the argument and returns a recipe.
-   * @param argument - The argument to pass to the recipe. Can be static data
-   * and/or cell references, including cell value proxies, docs and regular cells.
-   * @param resultDoc - Doc to run the recipe off.
-   * @returns The result cell.
+   * Prepare a charm for running by creating/updating its process and result
+   * cells, registering the recipe, and applying defaults/arguments.
+   * This does not schedule any nodes. Use start() to schedule execution.
    */
-  run<T, R>(
+  setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
-  run<T, R = any>(
+  setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
-  run<T, R = any>(
-    providedTx: IExtendedStorageTransaction,
+
+  /**
+   * Configure charm without running it. If the charm is already running and the
+   * recipe changes, it will stop the charm.
+   */
+  setup<T, R = any>(
+    providedTx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R> {
+    const tx = providedTx ?? this.runtime.edit();
+    this.setupInternal(tx, recipeOrModule, argument, resultCell);
+    if (!providedTx) tx.commit();
+    return resultCell;
+  }
+
+  /**
+   * Internal setup that returns whether scheduling is required.
+   */
+  private setupInternal<T, R = any>(
+    providedTx: IExtendedStorageTransaction | undefined,
+    recipeOrModule: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): {
+    resultCell: Cell<R>;
+    recipe?: Recipe;
+    processCell?: Cell<any>;
+    needsStart: boolean;
+  } {
     const tx = providedTx ?? this.runtime.edit();
 
     type ProcessCellData = {
@@ -149,8 +158,7 @@ export class Runner implements IRunner {
       console.warn(
         "No recipe provided and no recipe found in process doc. Not running.",
       );
-      if (!providedTx) tx.commit();
-      return resultCell;
+      return { resultCell, needsStart: false };
     }
 
     let recipe: Recipe;
@@ -191,19 +199,17 @@ export class Runner implements IRunner {
       ) as T;
     }
 
-    if (this.cancels.has(this.getDocKey(resultCell))) {
+    const key = this.getDocKey(resultCell);
+    const alreadyRunning = this.cancels.has(key);
+
+    if (alreadyRunning) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
-      if (
-        argument === undefined &&
-        recipeId === previousRecipeId
-      ) {
-        if (!providedTx) tx.commit();
-        return resultCell;
+      if (argument === undefined && recipeId === previousRecipeId) {
+        return { resultCell, needsStart: false };
       }
 
       if (previousRecipeId === recipeId) {
-        console.log("updating argument", argument);
         // If the recipe is the same, but argument is different, just update the
         // argument without stopping
         diffAndUpdate(
@@ -213,22 +219,12 @@ export class Runner implements IRunner {
           argument,
           processCell.getAsNormalizedFullLink(),
         );
-        if (!providedTx) tx.commit();
-        return resultCell;
+        return { resultCell, needsStart: false };
       }
 
-      // TODO(seefeld): If recipe is the same, but argument is different, just
-      // update the argument without stopping
-
-      // Otherwise stop execution of the old recipe. TODO: Await, but this will
-      // make all this async.
+      // Otherwise stop execution of the old recipe.
       this.stop(resultCell);
     }
-
-    // Keep track of subscriptions to cancel them later
-    const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(this.getDocKey(resultCell), cancel);
-    this.allCancels.add(cancel);
 
     // Walk the recipe's schema and extract all default values
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
@@ -298,7 +294,76 @@ export class Runner implements IRunner {
           processCell.getAsQueryResult(path as PropertyKey[], tx);
     }
 
-    // Discover and cache all JavaScript functions in the recipe before instantiation
+    // Discover and cache all JavaScript functions in the recipe before start
+    this.discoverAndCacheFunctions(recipe);
+
+    return { resultCell, recipe, processCell, needsStart: true };
+  }
+
+  /**
+   * Start scheduling nodes for a previously set up charm.
+   * If already started, this is a no-op.
+   */
+  start<T = any>(resultCell: Cell<T>): void {
+    const tx = this.runtime.edit();
+    try {
+      this.startWithTx(tx, resultCell);
+    } finally {
+      // No writes expected; commit to release resources.
+      tx.commit();
+    }
+  }
+
+  private startWithTx<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    givenRecipe?: Recipe,
+  ): void {
+    const key = this.getDocKey(resultCell);
+    if (this.cancels.has(key)) return; // Already started
+
+    const processCell = resultCell.withTx(tx).getSourceCell();
+    if (!processCell) {
+      console.warn("Cannot start: process cell missing. Did you call setup()?");
+      return;
+    }
+
+    let recipe: Recipe | undefined = givenRecipe;
+    if (!recipe) {
+      const recipeId = processCell.withTx(tx).key(TYPE).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+      if (!recipeId) {
+        console.warn("Cannot start: recipe id missing in process cell.");
+        return;
+      }
+      const resolved = this.runtime.recipeManager.recipeById(recipeId);
+      if (!resolved) throw new Error(`Unknown recipe: ${recipeId}`);
+      if (isModule(resolved)) {
+        const module = resolved as Module;
+        recipe = {
+          argumentSchema: module.argumentSchema ?? {},
+          resultSchema: module.resultSchema ?? {},
+          result: { $alias: { path: ["internal"] } },
+          nodes: [
+            {
+              module,
+              inputs: { $alias: { path: ["argument"] } },
+              outputs: { $alias: { path: ["internal"] } },
+            },
+          ],
+        } satisfies Recipe;
+      } else {
+        recipe = resolved as Recipe;
+      }
+    }
+
+    // Keep track of subscriptions to cancel them later
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancels.set(key, cancel);
+    this.allCancels.add(cancel);
+
+    // Re-discover functions to be safe (idempotent)
     this.discoverAndCacheFunctions(recipe);
 
     for (const node of recipe.nodes) {
@@ -312,11 +377,63 @@ export class Runner implements IRunner {
         recipe,
       );
     }
+  }
 
-    // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
-    // Return the correct type based on what was passed in
+  /**
+   * Run a recipe.
+   *
+   * resultCell is required and should have an id. processCell is created if not
+   * already set.
+   *
+   * If no recipe is provided, the previous one is used, and the recipe is
+   * started if it isn't already started.
+   *
+   * If no argument is provided, the previous one is used, and the recipe is
+   * started if it isn't already running.
+   *
+   * If a new recipe or any argument value is provided, a currently running
+   * recipe is stopped, the recipe and argument replaced and the recipe
+   * restarted.
+   *
+   * @param recipeFactory - Function that takes the argument and returns a
+   * recipe.
+   * @param argument - The argument to pass to the recipe. Can be static data
+   * and/or cell references, including cell value proxies, docs and regular
+   * cells.
+   * @param resultCell - Cell to run the recipe off.
+   * @returns The result cell.
+   */
+  run<T, R>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    providedTx: IExtendedStorageTransaction,
+    recipeOrModule: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R> {
+    const tx = providedTx ?? this.runtime.edit();
 
-    // We created our own transaction, so we need to commit it
+    const { needsStart, recipe } = this.setupInternal(
+      tx,
+      recipeOrModule,
+      argument,
+      resultCell,
+    );
+
+    if (needsStart) {
+      this.startWithTx(tx, resultCell, recipe);
+    }
+
     if (!providedTx) tx.commit();
 
     return resultCell;
@@ -345,13 +462,12 @@ export class Runner implements IRunner {
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     const tx = givenTx || this.runtime.edit();
-    this.run(
+    const setupRes = this.setupInternal(
       tx,
       recipe,
       inputs,
       resultCell.withTx(tx),
     );
-    const txPromise = givenTx ? undefined : tx.commit();
 
     // If a new recipe was specified, make sure to sync any new cells
     // TODO(seefeld): Possible race condition here with lifted functions running
@@ -361,6 +477,11 @@ export class Runner implements IRunner {
     if (recipe || !synced) {
       await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
     }
+
+    if (setupRes.needsStart) {
+      this.startWithTx(tx, resultCell.withTx(tx), setupRes.recipe);
+    }
+    const txPromise = givenTx ? undefined : tx.commit();
 
     if (txPromise) {
       const { error } = await txPromise;
@@ -894,7 +1015,11 @@ export class Runner implements IRunner {
         recipe,
       });
       addCancel(
-        this.runtime.scheduler.schedule(wrappedAction, { reads, writes }),
+        this.runtime.scheduler.subscribe(
+          wrappedAction,
+          { reads, writes },
+          true,
+        ),
       );
     }
   }
@@ -960,10 +1085,11 @@ export class Runner implements IRunner {
     );
 
     addCancel(
-      this.runtime.scheduler.schedule(action, {
-        reads: inputCells,
-        writes: outputCells,
-      }),
+      this.runtime.scheduler.subscribe(
+        action,
+        { reads: inputCells, writes: outputCells },
+        true,
+      ),
     );
   }
 

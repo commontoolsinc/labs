@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { NAME, type Recipe } from "../src/builder/types.ts";
@@ -25,7 +26,7 @@ describe("runRecipe", () => {
   });
 
   afterEach(async () => {
-    await runtime?.storage.synced();
+    await runtime?.storageManager.synced();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -736,6 +737,271 @@ describe("runRecipe", () => {
     // Verify second instance is unaffected
     expect(internal2.nested.value).toBe("initial");
     expect(result2.getAsQueryResult().nested.value).toBe("initial");
+  });
+});
+
+describe("setup/start", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.storageManager.synced();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("setup does not schedule; start schedules and runs", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" }, output: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
+          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "setup does not schedule");
+
+    // Only setup – should not run the node yet
+    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    await runtime.idle();
+
+    // Output hasn't been computed yet
+    expect(resultCell.getAsQueryResult()).toEqual({ output: undefined });
+
+    // Start – should schedule and compute output
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 1 });
+  });
+
+  it("setup with same recipe updates argument without restart", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" }, output: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
+          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "setup updates argument");
+    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 1 });
+
+    // Update only via setup; scheduler should react to argument change
+    runtime.setup(undefined, recipe, { input: 2 }, resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 2 });
+  });
+
+  it("start is idempotent when called multiple times", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "output"] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "start idempotent");
+    runtime.setup(undefined, recipe, { input: 7 }, resultCell);
+    runtime.start(resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 7 });
+
+    // Change input and ensure only a single recomputation occurs in effect
+    runtime.setup(undefined, recipe, { input: 9 }, resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 9 });
+  });
+
+  it("stop and restart works with setup/start", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input,
+          },
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "output"] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "stop and restart");
+    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 1 });
+
+    // Stop the scheduling
+    runtime.runner.stop(resultCell);
+
+    // Change argument via setup; without start nothing should recompute yet
+    runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+    await runtime.idle();
+    // Still the old output
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 1 });
+
+    // Restart
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 5 });
+  });
+
+  it("setup with Module wraps to recipe and runs on start", async () => {
+    const mod = {
+      type: "javascript" as const,
+      implementation: (v: { input: number }) => ({ output: v.input * 3 }),
+    };
+
+    const resultCell = runtime.getCell(space, "setup with module");
+    runtime.setup(undefined, mod as any, { input: 2 } as any, resultCell);
+    await runtime.idle();
+
+    // Not started yet; no output
+    expect(resultCell.getAsQueryResult()).toEqual({ output: undefined });
+
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 6 });
+  });
+
+  it("setup without recipe reuses previous recipe", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" }, output: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
+      nodes: [
+        {
+          module: { type: "passthrough" },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
+          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "setup reuse previous recipe");
+    runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 5 });
+
+    // Stop and setup without specifying recipe; should reuse stored one
+    runtime.runner.stop(resultCell);
+    runtime.setup(
+      undefined,
+      undefined as any,
+      { input: 10 } as any,
+      resultCell,
+    );
+    await runtime.idle();
+    // Not started yet; result still aliases internal and shows previous value
+    expect(resultCell.get()).toMatchObjectIgnoringSymbols({
+      output: { $alias: { path: ["internal", "output"] } },
+    });
+
+    // Verify a recipe id is present after setup without passing recipe
+    const source = resultCell.getSourceCell()!;
+    expect(typeof source.key("$TYPE").get()).toEqual("string");
+
+    // Also verify the argument was updated in the process cell
+    expect((source.getAsQueryResult() as any).argument.input).toEqual(10);
+
+    // Start again (scheduling) just to ensure no errors
+    runtime.start(resultCell);
+    await runtime.idle();
+  });
+
+  it("setup with cell argument and start reacts to cell updates", async () => {
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" }, output: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { path: ["argument", "output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => value * 2,
+          },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["argument", "output"] } },
+        },
+      ],
+    };
+
+    const tx = runtime.edit();
+    const inputCell = runtime.getCell<{ input: number; output: number }>(
+      space,
+      "setup with cell arg: input",
+      undefined,
+      tx,
+    );
+    inputCell.set({ input: 3, output: 0 });
+    await tx.commit();
+
+    const resultCell = runtime.getCell(space, "setup with cell arg");
+    runtime.setup(undefined, recipe, inputCell, resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 6 });
+
+    const tx2 = runtime.edit();
+    inputCell.withTx(tx2).send({ input: 4, output: 0 });
+    await tx2.commit();
+    await runtime.idle();
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 8 });
   });
 });
 

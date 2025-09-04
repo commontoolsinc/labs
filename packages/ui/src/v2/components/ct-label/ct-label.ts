@@ -99,10 +99,10 @@ export class CTLabel extends BaseElement {
       >
         <slot></slot>
         ${this.required
-        ? html`
-          <span class="required-indicator" part="required">*</span>
-        `
-        : null}
+          ? html`
+            <span class="required-indicator" part="required">*</span>
+          `
+          : null}
       </label>
     `;
   }

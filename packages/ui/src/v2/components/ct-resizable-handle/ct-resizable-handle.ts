@@ -185,10 +185,10 @@ export class CTResizableHandle extends BaseElement {
     return html`
       <div class="handle" part="handle">
         ${this.withHandle
-        ? html`
-          <div class="grip-icon" part="grip"></div>
-        `
-        : ""}
+          ? html`
+            <div class="grip-icon" part="grip"></div>
+          `
+          : ""}
       </div>
     `;
   }

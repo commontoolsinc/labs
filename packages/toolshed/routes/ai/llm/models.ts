@@ -4,7 +4,7 @@ import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
 import { createXai, xai } from "@ai-sdk/xai";
-import type { LanguageModelV1 } from "ai";
+import type { LanguageModel } from "ai";
 
 import env from "@/env.ts";
 
@@ -21,7 +21,7 @@ export type Capabilities = {
 };
 
 type ModelConfig = {
-  model: LanguageModelV1;
+  model: LanguageModel;
   name: string;
   capabilities: Capabilities;
   aliases: string[];
@@ -73,9 +73,7 @@ const addModel = ({
     modelName = modelName.split("-thinking")[0];
   }
 
-  const model = providerOptions
-    ? provider(modelName, providerOptions)
-    : provider(modelName);
+  const model = provider(modelName);
 
   const config: ModelConfig = {
     model,
@@ -324,7 +322,6 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
 if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
-    compatibility: "strict",
   });
   console.log(" Adding 🤖 openai");
   addModel({

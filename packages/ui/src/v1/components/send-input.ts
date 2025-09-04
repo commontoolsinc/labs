@@ -9,6 +9,10 @@ export class SendMessageElement extends LitElement {
         display: block;
       }
 
+      :host([inline]) {
+        display: inline-block;
+      }
+
       .unibox {
         display: grid;
         grid-template-columns: 1fr min-content;
@@ -20,15 +24,21 @@ export class SendMessageElement extends LitElement {
   static override properties = {
     name: { type: String },
     placeholder: { type: String },
+    inline: { type: Boolean, reflect: true },
+    value: { type: String },
   };
 
   declare name: string;
   declare placeholder: string;
+  declare inline: boolean;
+  declare value: string;
 
   constructor() {
     super();
     this.name = "";
     this.placeholder = "";
+    this.inline = false;
+    this.value = "";
   }
 
   send(event: Event) {
@@ -56,12 +66,13 @@ export class SendMessageElement extends LitElement {
 
   override render() {
     return html`
-      <div class="unibox">
+      <div class="unibox" @click="${(e: Event) => e.stopPropagation()}">
         <common-input
           appearance="rounded"
           class="unibox-input"
           id="input"
           .placeholder="${this.placeholder}"
+          .value="${this.value}"
           @keydown="${this.keyDown}"
         >
         </common-input>

@@ -217,7 +217,7 @@ async function main() {
       }
       if (quit) {
         await runtime.idle();
-        await runtime.storage.synced();
+        await runtime.storageManager.synced();
         // This console.log is load bearing for the integration tests. This is
         // how the integration tests get the charm ID.
         console.log("created charm: ", getEntityId(charm)!["/"]);
@@ -226,7 +226,7 @@ async function main() {
     } catch (error) {
       console.error("Error loading and compiling recipe:", error);
       if (quit) {
-        await runtime.storage.synced();
+        await runtime.storageManager.synced();
         Deno.exit(1);
       }
     }

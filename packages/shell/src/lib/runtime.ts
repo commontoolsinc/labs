@@ -152,7 +152,7 @@ export class RuntimeInternals extends EventTarget {
         // Await storage being synced, at least for now, as the page fully
         // reloads. Once we have in-page navigation with reloading, we don't
         // need this anymore
-        runtime.storage.synced().then(async () => {
+        runtime.storageManager.synced().then(async () => {
           // Check if the charm is already in the list
           const charms = charmManager.getCharms();
           const existingCharm = charms.get().find((charm) =>

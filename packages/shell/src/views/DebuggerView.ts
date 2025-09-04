@@ -806,8 +806,8 @@ export class XDebuggerView extends LitElement {
             <div class="event-detail">
               <span class="event-detail-label">recipe:</span>
               <span class="event-detail-value">${"name" in fn.recipe
-              ? fn.recipe.name
-              : "unknown"}</span>
+                ? fn.recipe.name
+                : "unknown"}</span>
             </div>
           `);
           if (isRecord(fn.module) && fn.module?.name) {
@@ -823,7 +823,7 @@ export class XDebuggerView extends LitElement {
               <div class="event-detail">
                 <span class="event-detail-label">reads:</span>
                 <span class="event-detail-value">${fn.reads
-                .length} dependencies</span>
+                  .length} dependencies</span>
               </div>
             `);
           }
@@ -832,7 +832,7 @@ export class XDebuggerView extends LitElement {
               <div class="event-detail">
                 <span class="event-detail-label">writes:</span>
                 <span class="event-detail-value">${fn.writes
-                .length} outputs</span>
+                  .length} outputs</span>
               </div>
             `);
           }
@@ -850,7 +850,7 @@ export class XDebuggerView extends LitElement {
             <div class="event-detail">
               <span class="event-detail-label">error:</span>
               <span class="event-detail-value" style="color: #ef4444;">${eventData
-              .error}</span>
+                .error}</span>
             </div>
           `);
         }
@@ -872,9 +872,9 @@ export class XDebuggerView extends LitElement {
               <div class="event-detail">
                 <span class="event-detail-label">path:</span>
                 <span class="event-detail-value">${(change.address
-                .path as string[]).join(
-                  "/",
-                )}</span>
+                  .path as string[]).join(
+                    "/",
+                  )}</span>
               </div>
             `);
           }
@@ -896,10 +896,10 @@ export class XDebuggerView extends LitElement {
               <span class="event-detail-label">change:</span>
               <span class="event-detail-value">
                 ${change.before === undefined
-              ? "created"
-              : change.after === undefined
-              ? "deleted"
-              : "updated"}
+                  ? "created"
+                  : change.after === undefined
+                  ? "deleted"
+                  : "updated"}
               </span>
             </div>
           `);
@@ -913,12 +913,12 @@ export class XDebuggerView extends LitElement {
             <div class="event-detail">
               <span class="event-detail-label">${key}:</span>
               <span class="event-detail-value">${typeof value === "string"
-              ? value
-              : typeof value === "boolean"
-              ? value.toString()
-              : typeof value === "number"
-              ? value.toString()
-              : JSON.stringify(value)}</span>
+                ? value
+                : typeof value === "boolean"
+                ? value.toString()
+                : typeof value === "number"
+                ? value.toString()
+                : JSON.stringify(value)}</span>
             </div>
           `);
         }
@@ -935,8 +935,8 @@ export class XDebuggerView extends LitElement {
       return html`
         <div class="empty-state">
           ${this.searchText || this.activeSubtopics.size === 0
-          ? "No events matching filters"
-          : "No telemetry events yet"}
+            ? "No events matching filters"
+            : "No telemetry events yet"}
         </div>
       `;
     }
@@ -947,70 +947,70 @@ export class XDebuggerView extends LitElement {
     return html`
       <div class="events-list">
         ${reversedEvents.map((marker, index) => {
-        const actualIndex = events.length - 1 - index;
-        const isExpanded = this.expandedEvents.has(actualIndex);
-        const color = this.getEventColor(marker);
+          const actualIndex = events.length - 1 - index;
+          const isExpanded = this.expandedEvents.has(actualIndex);
+          const color = this.getEventColor(marker);
 
-        return html`
-          <div
-            class="event-item ${isExpanded ? "expanded" : ""}"
-            @click="${() => this.toggleEventExpand(actualIndex)}"
-          >
-            <div class="event-header">
-              <div class="event-main">
-                <span class="event-icon" style="color: ${color}">
-                  ${this.getEventIcon(marker)}
-                </span>
-                <div class="event-content">
-                  <div class="event-type">${marker.type}</div>
-                  <div class="event-details">
-                    ${this.renderEventDetails(marker)}
+          return html`
+            <div
+              class="event-item ${isExpanded ? "expanded" : ""}"
+              @click="${() => this.toggleEventExpand(actualIndex)}"
+            >
+              <div class="event-header">
+                <div class="event-main">
+                  <span class="event-icon" style="color: ${color}">
+                    ${this.getEventIcon(marker)}
+                  </span>
+                  <div class="event-content">
+                    <div class="event-type">${marker.type}</div>
+                    <div class="event-details">
+                      ${this.renderEventDetails(marker)}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="event-time">
-                ${this.formatTime(marker.timeStamp)}
-              </div>
-            </div>
-
-            ${isExpanded
-            ? html`
-              <div class="event-expanded ${this.fullHeightEvents.has(
-                  actualIndex,
-                )
-                ? "full-height"
-                : ""}">
-                <div class="json-controls">
-                  <button
-                    type="button"
-                    class="json-control-btn"
-                    @click="${(e: Event) => {
-                e.stopPropagation();
-                this.toggleJsonFullHeight(actualIndex);
-              }}"
-                  >
-                    ${this.fullHeightEvents.has(actualIndex)
-                ? "Collapse"
-                : "Expand"}
-                  </button>
-                  <button
-                    type="button"
-                    class="json-control-btn"
-                    @click="${(e: Event) => {
-                e.stopPropagation();
-                this.copyJson(marker);
-              }}"
-                  >
-                    Copy
-                  </button>
+                <div class="event-time">
+                  ${this.formatTime(marker.timeStamp)}
                 </div>
-                <pre>${JSON.stringify(marker, null, 2)}</pre>
               </div>
-            `
-            : ""}
-          </div>
-        `;
-      })}
+
+              ${isExpanded
+                ? html`
+                  <div class="event-expanded ${this.fullHeightEvents.has(
+                      actualIndex,
+                    )
+                    ? "full-height"
+                    : ""}">
+                    <div class="json-controls">
+                      <button
+                        type="button"
+                        class="json-control-btn"
+                        @click="${(e: Event) => {
+                          e.stopPropagation();
+                          this.toggleJsonFullHeight(actualIndex);
+                        }}"
+                      >
+                        ${this.fullHeightEvents.has(actualIndex)
+                          ? "Collapse"
+                          : "Expand"}
+                      </button>
+                      <button
+                        type="button"
+                        class="json-control-btn"
+                        @click="${(e: Event) => {
+                          e.stopPropagation();
+                          this.copyJson(marker);
+                        }}"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <pre>${JSON.stringify(marker, null, 2)}</pre>
+                  </div>
+                `
+                : ""}
+            </div>
+          `;
+        })}
       </div>
     `;
   }
@@ -1020,7 +1020,7 @@ export class XDebuggerView extends LitElement {
     const allEvents = this.isPaused
       ? this.pausedMarkers
       : this.telemetryMarkers;
-    const filteredCount = this.getFilteredEvents().length;
+    const filteredCount = this.visible ? this.getFilteredEvents().length : 0;
 
     return html`
       ${this.visible
@@ -1038,16 +1038,16 @@ export class XDebuggerView extends LitElement {
               <div class="title">
                 <span class="title-icon">🐛</span>
                 Shell Debugger ${this.isPaused
-            ? html`
-              <span class="paused-indicator">PAUSED</span>
-            `
-            : ""}
+                  ? html`
+                    <span class="paused-indicator">PAUSED</span>
+                  `
+                  : ""}
               </div>
               <div class="stats">
                 <div class="stat">
                   <span class="stat-label">Events:</span>
                   <span class="stat-value">${filteredCount} / ${allEvents
-            .length}</span>
+                    .length}</span>
                 </div>
                 <div class="stat">
                   <span class="stat-label">Filters:</span>
@@ -1059,76 +1059,83 @@ export class XDebuggerView extends LitElement {
             <div class="toolbar-container">
               <div class="topics-filter">
                 ${Object.entries(TOPIC_HIERARCHY).map(([key, topic]) => {
-            const topicKey = key as TopicKey;
-            const state = this.getTopicState(topicKey);
-            const subtopicKeys = Object.keys(topic.subtopics);
-            const hasDropdown = subtopicKeys.length > 0; // Show dropdown even for single subtopic
-            const isDropdownOpen = this.openDropdowns.has(topicKey);
+                  const topicKey = key as TopicKey;
+                  const state = this.getTopicState(topicKey);
+                  const subtopicKeys = Object.keys(topic.subtopics);
+                  const hasDropdown = subtopicKeys.length > 0; // Show dropdown even for single subtopic
+                  const isDropdownOpen = this.openDropdowns.has(topicKey);
 
-            return html`
-              <div class="topic-button-group">
-                <button
-                  type="button"
-                  class="topic-toggle ${state}"
-                  style="--topic-color: ${topic.color}"
-                  @click="${() => this.toggleTopic(topicKey)}"
-                  title="${topic.label}"
-                >
-                  <span class="topic-icon">${topic.icon}</span>
-                  ${topic.label} ${state === "partial"
-                ? html`
-                  <span style="font-size: 0.5rem; opacity: 0.7; margin-left: 0.25rem;">
-                    ${Object.keys(topic.subtopics).filter((sk) =>
-                    this.activeSubtopics.has(`${topicKey}.${sk}`)
-                  ).length}/${subtopicKeys.length}
-                  </span>
-                `
-                : ""}
-                </button>
-                ${hasDropdown
-                ? html`
-                  <button
-                    type="button"
-                    class="dropdown-trigger"
-                    style="--topic-color: ${topic.color}"
-                    @click="${(e: Event) => this.toggleDropdown(topicKey, e)}"
-                    title="Filter subtopics"
-                  >
-                    ${isDropdownOpen ? "▲" : "▼"}
-                  </button>
-                  ${isDropdownOpen
-                    ? html`
-                      <div class="subtopic-dropdown" style="--topic-color: ${topic
-                        .color}">
-                        ${Object.entries(topic.subtopics).map(
-                        ([subKey, subtopic]) => {
-                          const fullKey = `${topicKey}.${subKey}`;
-                          const isChecked = this.activeSubtopics.has(fullKey);
-                          return html`
-                            <label class="subtopic-item">
-                              <input
-                                type="checkbox"
-                                class="subtopic-checkbox"
-                                .checked="${isChecked}"
-                                @change="${(e: Event) => {
-                              e.stopPropagation();
-                              this.toggleSubtopic(topicKey, subKey);
-                            }}"
-                                @click="${(e: Event) => e.stopPropagation()}"
-                              />
-                              ${subtopic.label}
-                            </label>
-                          `;
-                        },
-                      )}
-                      </div>
-                    `
-                    : ""}
-                `
-                : ""}
-              </div>
-            `;
-          })}
+                  return html`
+                    <div class="topic-button-group">
+                      <button
+                        type="button"
+                        class="topic-toggle ${state}"
+                        style="--topic-color: ${topic.color}"
+                        @click="${() => this.toggleTopic(topicKey)}"
+                        title="${topic.label}"
+                      >
+                        <span class="topic-icon">${topic.icon}</span>
+                        ${topic.label} ${state === "partial"
+                          ? html`
+                            <span style="font-size: 0.5rem; opacity: 0.7; margin-left: 0.25rem;">
+                              ${Object.keys(topic.subtopics).filter((sk) =>
+                                this.activeSubtopics.has(`${topicKey}.${sk}`)
+                              ).length}/${subtopicKeys.length}
+                            </span>
+                          `
+                          : ""}
+                      </button>
+                      ${hasDropdown
+                        ? html`
+                          <button
+                            type="button"
+                            class="dropdown-trigger"
+                            style="--topic-color: ${topic.color}"
+                            @click="${(e: Event) =>
+                              this.toggleDropdown(topicKey, e)}"
+                            title="Filter subtopics"
+                          >
+                            ${isDropdownOpen ? "▲" : "▼"}
+                          </button>
+                          ${isDropdownOpen
+                            ? html`
+                              <div class="subtopic-dropdown" style="--topic-color: ${topic
+                                .color}">
+                                ${Object.entries(topic.subtopics).map(
+                                  ([subKey, subtopic]) => {
+                                    const fullKey = `${topicKey}.${subKey}`;
+                                    const isChecked = this.activeSubtopics.has(
+                                      fullKey,
+                                    );
+                                    return html`
+                                      <label class="subtopic-item">
+                                        <input
+                                          type="checkbox"
+                                          class="subtopic-checkbox"
+                                          .checked="${isChecked}"
+                                          @change="${(e: Event) => {
+                                            e.stopPropagation();
+                                            this.toggleSubtopic(
+                                              topicKey,
+                                              subKey,
+                                            );
+                                          }}"
+                                          @click="${(e: Event) =>
+                                            e.stopPropagation()}"
+                                        />
+                                        ${subtopic.label}
+                                      </label>
+                                    `;
+                                  },
+                                )}
+                              </div>
+                            `
+                            : ""}
+                        `
+                        : ""}
+                    </div>
+                  `;
+                })}
               </div>
 
               <div class="controls">
@@ -1139,19 +1146,19 @@ export class XDebuggerView extends LitElement {
                     class="search-input ${this.searchText ? "has-value" : ""}"
                     .value="${this.searchText}"
                     @input="${(e: Event) =>
-            this.searchText = (e.target as HTMLInputElement).value}"
+                      this.searchText = (e.target as HTMLInputElement).value}"
                   />
                   ${this.searchText
-            ? html`
-              <button
-                type="button"
-                class="clear-search"
-                @click="${() => this.searchText = ""}"
-              >
-                ×
-              </button>
-            `
-            : ""}
+                    ? html`
+                      <button
+                        type="button"
+                        class="clear-search"
+                        @click="${() => this.searchText = ""}"
+                      >
+                        ×
+                      </button>
+                    `
+                    : ""}
                 </div>
 
                 <button
@@ -1184,8 +1191,8 @@ export class XDebuggerView extends LitElement {
             </div>
 
             <div class="content-area ${this.resizeController.isResizing
-            ? "resizing"
-            : ""}">
+              ? "resizing"
+              : ""}">
               ${this.renderEvents()}
             </div>
           </div>

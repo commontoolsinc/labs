@@ -102,7 +102,7 @@ export async function setBGCharm({
     await tx.commit();
 
     // Ensure changes are synced
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return true;
   } else {
@@ -115,7 +115,7 @@ export async function setBGCharm({
       status: "Re-initializing",
     });
     tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
-    await runtime.storage.synced();
+    await runtime.storageManager.synced();
 
     return false;
   }
@@ -152,7 +152,7 @@ export async function getBGCharms(
     ifc: { classification: ["secret"] },
   } as const satisfies JSONSchema;
   await charmsCell.asSchema(privilegedSchema).sync();
-  await runtime.storage.synced();
+  await runtime.storageManager.synced();
 
   return charmsCell;
 }

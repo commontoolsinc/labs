@@ -154,13 +154,13 @@ This plan should be entirely incremental and can be rolled out step by step.
   - [x] In fact automatically start syncing already, as this will be the future
         behavior. This is just for await.
   - [ ] Add option to only await a locally cached version if available.
-- [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
+- [x] Add path-dependent listeners to memory: A helper on `Storage`, that given
       a `TX` calls a callback _once_ on future changes on what was read during
       the transaction (observing only changes affecting the read path). Make it
       cancelable (the scheduler will e.g. cancel this before executing the
       action again). First design the API.
-- [ ] Shim the API above and switch scheduler to use it
-  - [ ] The current reads and writes from a TX can be read out, which scheduler
+- [x] Shim the API above and switch scheduler to use it
+  - [x] The current reads and writes from a TX can be read out, which scheduler
         will use to update the dependency graph. In fact scheduler will inside
         the callback do both this and adding the callback just before returning.
         It does so to not miss any updates.
@@ -170,13 +170,13 @@ This plan should be entirely incremental and can be rolled out step by step.
         after `tx.commit()` is called. If the transaction attempts to read a
         value that has changed since the start of the transaction, the
         transaction is aborted.
-- [ ] Shift `Cell.sync()` to make schema queries on memory directly.
-- [ ] Implement new listener API.
-  - [ ] Path-dependent means that we diff updates and compute what paths have
+- [x] Shift `Cell.sync()` to make schema queries on memory directly.
+- [x] Implement new listener API.
+  - [x] Path-dependent means that we diff updates and compute what paths have
         changed. Callback gets called if any paths overlap, i.e. one is a subset
         of the other. See `compactifyPath` and `pathAffected` for current
         implementation.
-- [ ] Scheduler retries events whose transaction failed. It does so up to N
+- [x] Scheduler retries events whose transaction failed. It does so up to N
       times and calls a callback after the last retry (both configurable via
       `Runtime` constructor). Events are retried after all read cells are fully
       synced and reactive functions that are queued up are settled, so it's
@@ -184,13 +184,13 @@ This plan should be entirely incremental and can be rolled out step by step.
       into the queue after any reactive function that might update the handlers
       inputs, but before any that read its outputs)
   - [ ] For change sets that only write (e.g. only push or set), we could just
-        reapply those without re-runnin the handler. But this could also be a
+        reapply those without re-running the handler. But this could also be a
         future optimization.
-- [ ] More selectively purge the nursery on conflicts by observing conflicted
+- [x] More selectively purge the nursery on conflicts by observing conflicted
       reads. CT-451
-- [ ] On conflicts add data that changed unless it was already sent to the
+- [x] On conflicts add data that changed unless it was already sent to the
       client by a query. CT-452
-- [ ] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
+- [x] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
 - [x] Memory layer with pending changes after a conflicted write: rollback to
       heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320

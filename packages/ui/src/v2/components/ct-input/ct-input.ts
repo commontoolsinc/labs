@@ -545,8 +545,8 @@ export class CTInput extends BaseElement {
         size="${ifDefined(this.size || undefined)}"
         ?multiple="${this.multiple && this.type === "file"}"
         accept="${ifDefined(
-        this.accept && this.type === "file" ? this.accept : undefined,
-      )}"
+          this.accept && this.type === "file" ? this.accept : undefined,
+        )}"
         list="${ifDefined(this.list || undefined)}"
         ?spellcheck="${this.spellcheck}"
         @input="${this._handleInput}"

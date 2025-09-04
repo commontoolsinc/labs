@@ -59,6 +59,7 @@ import type {
   StorageValue,
   URI,
 } from "./interface.ts";
+import { type Cell, isCell } from "../cell.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
@@ -1981,6 +1982,26 @@ export class StorageManager implements IStorageManager {
       this.#providers.values().map((provider) => provider.synced()),
     ).finally(() => setTimeout(() => resolve(), 0));
     return promise;
+  }
+
+  async syncCell<T>(
+    cell: Cell<T>,
+  ): Promise<Cell<T>> {
+    const { space, id, schema, rootSchema } = cell.getAsNormalizedFullLink();
+    if (!space) throw new Error("No space set");
+    const storageProvider = this.open(space);
+
+    const schemaContext = schema === undefined
+      ? { schema: false, rootSchema: false }
+      : { schema, rootSchema: rootSchema ?? schema };
+
+    const selector = schemaContext === undefined ? undefined : {
+      path: cell.path.map((p) => p.toString()),
+      schemaContext,
+    };
+
+    await storageProvider.sync(id, selector);
+    return cell;
   }
 }
 

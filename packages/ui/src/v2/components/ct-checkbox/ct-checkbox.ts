@@ -62,281 +62,283 @@ export class CTCheckbox extends BaseElement {
       box-shadow:
         0 0 0 2px var(--background, #fff),
         0 0 0 4px var(--ring, #94a3b8);
-    }
-
-    .checkbox {
-      position: relative;
-      width: 1rem; /* size-4 */
-      height: 1rem; /* size-4 */
-      border: 1px solid var(--primary, #0f172a);
-      border-radius: 0.25rem; /* rounded */
-      background-color: var(--background, #fff);
-      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .checkbox.checked,
-    .checkbox.indeterminate {
-      background-color: var(--primary, #0f172a);
-      border-color: var(--primary, #0f172a);
-    }
-
-    .checkbox.disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-    }
-
-    /* Checkmark using CSS transforms */
-    .checkmark {
-      display: none;
-      width: 10px;
-      height: 6px;
-      position: relative;
-    }
-
-    .checkbox.checked .checkmark {
-      display: block;
-    }
-
-    .checkbox.checked .checkmark::after {
-      content: "";
-      position: absolute;
-      left: 2.5px;
-      top: -2.5px;
-      width: 4px;
-      height: 7px;
-      border: solid var(--primary-foreground, #f8fafc);
-      border-width: 0 2px 2px 0;
-      transform: rotate(45deg);
-    }
-
-    /* Indeterminate state - horizontal line */
-    .checkbox.indeterminate .checkmark {
-      display: block;
-      width: 8px;
-      height: 2px;
-      background-color: var(--primary-foreground, #f8fafc);
-    }
-
-    .checkbox.indeterminate .checkmark::after {
-      display: none;
-    }
-
-    /* Hidden native input for form compatibility */
-    .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border-width: 0;
-    }
-
-    /* Hover state */
-    :host(:not([disabled]):hover) .checkbox:not(.checked):not(.indeterminate) {
-      border-color: var(--primary, #0f172a);
-    }
-
-    /* Animation for checkmark */
-    .checkbox.checked .checkmark::after {
-      animation: checkmark-animation 200ms ease-out;
-    }
-
-    @keyframes checkmark-animation {
-      0% {
-        transform: rotate(45deg) scale(0);
       }
-      100% {
-        transform: rotate(45deg) scale(1);
+
+      .checkbox {
+        position: relative;
+        width: 1rem; /* size-4 */
+        height: 1rem; /* size-4 */
+        border: 1px solid var(--primary, #0f172a);
+        border-radius: 0.25rem; /* rounded */
+        background-color: var(--background, #fff);
+        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
-    }
-  `;
 
-  static override properties = {
-    checked: { type: Boolean, reflect: true },
-    disabled: { type: Boolean, reflect: true },
-    indeterminate: { type: Boolean, reflect: true },
-    name: { type: String },
-    value: { type: String },
-  };
+      .checkbox.checked,
+      .checkbox.indeterminate {
+        background-color: var(--primary, #0f172a);
+        border-color: var(--primary, #0f172a);
+      }
 
-  declare checked: Cell<boolean> | boolean;
-  declare disabled: boolean;
-  declare indeterminate: boolean;
-  declare name: string;
-  declare value: string;
+      .checkbox.disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
 
-  private _checkedCellController = createBooleanCellController(this, {
-    timing: {
-      strategy: "immediate",
-      delay: 0,
-    },
-    onChange: (newValue: boolean, oldValue: boolean) => {
-      this.emit("ct-change", {
-        checked: newValue,
-        indeterminate: this.indeterminate,
-      });
-    },
-  });
+      /* Checkmark using CSS transforms */
+      .checkmark {
+        display: none;
+        width: 10px;
+        height: 6px;
+        position: relative;
+      }
 
-  constructor() {
-    super();
-    this.checked = false;
-    this.disabled = false;
-    this.indeterminate = false;
-    this.name = "";
-    this.value = "on";
-  }
+      .checkbox.checked .checkmark {
+        display: block;
+      }
 
-  private getChecked(): boolean {
-    return this._checkedCellController.getValue();
-  }
+      .checkbox.checked .checkmark::after {
+        content: "";
+        position: absolute;
+        left: 2.5px;
+        top: -2.5px;
+        width: 4px;
+        height: 7px;
+        border: solid var(--primary-foreground, #f8fafc);
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
 
-  private setChecked(newValue: boolean): void {
-    this._checkedCellController.setValue(newValue);
-  }
+      /* Indeterminate state - horizontal line */
+      .checkbox.indeterminate .checkmark {
+        display: block;
+        width: 8px;
+        height: 2px;
+        background-color: var(--primary-foreground, #f8fafc);
+      }
 
-  override connectedCallback() {
-    super.connectedCallback();
-    // Make the element focusable
-    this.tabIndex = this.disabled ? -1 : 0;
-    this.setAttribute("role", "checkbox");
-    this._updateAriaAttributes();
-    // Bind initial checked value
-    this._checkedCellController.bind(this.checked);
-    // Add event listeners to the host element to make entire component clickable
-    this.addEventListener("click", this._handleClick);
-    this.addEventListener("keydown", this._handleKeydown);
-  }
+      .checkbox.indeterminate .checkmark::after {
+        display: none;
+      }
 
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // Clean up event listeners
-    this.removeEventListener("click", this._handleClick);
-    this.removeEventListener("keydown", this._handleKeydown);
-  }
+      /* Hidden native input for form compatibility */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+      }
 
-  override willUpdate(
-    changedProperties: Map<string | number | symbol, unknown>,
-  ) {
-    super.willUpdate(changedProperties);
+      /* Hover state */
+      :host(:not([disabled]):hover) .checkbox:not(.checked):not(.indeterminate) {
+        border-color: var(--primary, #0f172a);
+      }
 
-    // If the checked property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("checked")) {
-      // Bind the new checked (Cell or plain) to the controller
-      this._checkedCellController.bind(this.checked);
-    }
-  }
+      /* Animation for checkmark */
+      .checkbox.checked .checkmark::after {
+        animation: checkmark-animation 200ms ease-out;
+      }
 
-  override updated(changedProperties: Map<string | number | symbol, unknown>) {
-    super.updated(changedProperties);
+      @keyframes checkmark-animation {
+        0% {
+          transform: rotate(45deg) scale(0);
+        }
+        100% {
+          transform: rotate(45deg) scale(1);
+        }
+      }
+    `;
 
-    if (changedProperties.has("disabled")) {
-      this.tabIndex = this.disabled ? -1 : 0;
-    }
-
-    if (
-      changedProperties.has("checked") ||
-      changedProperties.has("indeterminate") ||
-      changedProperties.has("disabled")
-    ) {
-      this._updateAriaAttributes();
-    }
-  }
-
-  override render() {
-    const isChecked = this.getChecked();
-    const checkboxClasses = {
-      "checkbox": true,
-      "checked": isChecked && !this.indeterminate,
-      "indeterminate": this.indeterminate,
-      "disabled": this.disabled,
+    static override properties = {
+      checked: { type: Boolean, reflect: true },
+      disabled: { type: Boolean, reflect: true },
+      indeterminate: { type: Boolean, reflect: true },
+      name: { type: String },
+      value: { type: String },
     };
 
-    const classString = Object.entries(checkboxClasses)
-      .filter(([_, value]) => value)
-      .map(([key]) => key)
-      .join(" ");
+    declare checked: Cell<boolean> | boolean;
+    declare disabled: boolean;
+    declare indeterminate: boolean;
+    declare name: string;
+    declare value: string;
 
-    return html`
-      <div
-        class="${classString}"
-        part="checkbox"
-      >
-        <span class="checkmark" part="checkmark"></span>
-      </div>
-      <slot></slot>
-      <input
-        type="checkbox"
-        class="sr-only"
-        ?checked="${isChecked}"
-        ?disabled="${this.disabled}"
-        name="${ifDefined(this.name || undefined)}"
-        value="${this.value}"
-        tabindex="-1"
-        aria-hidden="true"
-      />
-    `;
-  }
+    private _checkedCellController = createBooleanCellController(this, {
+      timing: {
+        strategy: "immediate",
+        delay: 0,
+      },
+      onChange: (newValue: boolean, oldValue: boolean) => {
+        this.emit("ct-change", {
+          checked: newValue,
+          indeterminate: this.indeterminate,
+        });
+      },
+    });
 
-  private _updateAriaAttributes() {
-    const isChecked = this.getChecked();
-    this.setAttribute(
-      "aria-checked",
-      this.indeterminate ? "mixed" : String(isChecked),
-    );
-    this.setAttribute("aria-disabled", String(this.disabled));
-  }
-
-  private _handleClick(event: Event) {
-    if (this.disabled) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-
-    // Toggle checked state
-    const oldChecked = this.getChecked();
-    this.setChecked(!oldChecked);
-
-    // Clear indeterminate state when clicked
-    if (this.indeterminate) {
+    constructor() {
+      super();
+      this.checked = false;
+      this.disabled = false;
       this.indeterminate = false;
+      this.name = "";
+      this.value = "on";
     }
 
-    // Note: ct-change event is emitted by the cell controller's onChange callback
-  }
-
-  private _handleKeydown(event: KeyboardEvent) {
-    if (this.disabled) {
-      return;
+    private getChecked(): boolean {
+      return this._checkedCellController.getValue();
     }
 
-    // Handle Space key
-    if (event.key === " " || event.key === "Spacebar") {
-      event.preventDefault();
-      this._handleClick(event);
+    private setChecked(newValue: boolean): void {
+      this._checkedCellController.setValue(newValue);
+    }
+
+    override connectedCallback() {
+      super.connectedCallback();
+      // Make the element focusable
+      this.tabIndex = this.disabled ? -1 : 0;
+      this.setAttribute("role", "checkbox");
+      this._updateAriaAttributes();
+      // Bind initial checked value
+      this._checkedCellController.bind(this.checked);
+      // Add event listeners to the host element to make entire component clickable
+      this.addEventListener("click", this._handleClick);
+      this.addEventListener("keydown", this._handleKeydown);
+    }
+
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      // Clean up event listeners
+      this.removeEventListener("click", this._handleClick);
+      this.removeEventListener("keydown", this._handleKeydown);
+    }
+
+    override willUpdate(
+      changedProperties: Map<string | number | symbol, unknown>,
+    ) {
+      super.willUpdate(changedProperties);
+
+      // If the checked property itself changed (e.g., switched to a different cell)
+      if (changedProperties.has("checked")) {
+        // Bind the new checked (Cell or plain) to the controller
+        this._checkedCellController.bind(this.checked);
+      }
+    }
+
+    override updated(
+      changedProperties: Map<string | number | symbol, unknown>,
+    ) {
+      super.updated(changedProperties);
+
+      if (changedProperties.has("disabled")) {
+        this.tabIndex = this.disabled ? -1 : 0;
+      }
+
+      if (
+        changedProperties.has("checked") ||
+        changedProperties.has("indeterminate") ||
+        changedProperties.has("disabled")
+      ) {
+        this._updateAriaAttributes();
+      }
+    }
+
+    override render() {
+      const isChecked = this.getChecked();
+      const checkboxClasses = {
+        "checkbox": true,
+        "checked": isChecked && !this.indeterminate,
+        "indeterminate": this.indeterminate,
+        "disabled": this.disabled,
+      };
+
+      const classString = Object.entries(checkboxClasses)
+        .filter(([_, value]) => value)
+        .map(([key]) => key)
+        .join(" ");
+
+      return html`
+        <div
+          class="${classString}"
+          part="checkbox"
+        >
+          <span class="checkmark" part="checkmark"></span>
+        </div>
+        <slot></slot>
+        <input
+          type="checkbox"
+          class="sr-only"
+          ?checked="${isChecked}"
+          ?disabled="${this.disabled}"
+          name="${ifDefined(this.name || undefined)}"
+          value="${this.value}"
+          tabindex="-1"
+          aria-hidden="true"
+        />
+      `;
+    }
+
+    private _updateAriaAttributes() {
+      const isChecked = this.getChecked();
+      this.setAttribute(
+        "aria-checked",
+        this.indeterminate ? "mixed" : String(isChecked),
+      );
+      this.setAttribute("aria-disabled", String(this.disabled));
+    }
+
+    private _handleClick(event: Event) {
+      if (this.disabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      // Toggle checked state
+      const oldChecked = this.getChecked();
+      this.setChecked(!oldChecked);
+
+      // Clear indeterminate state when clicked
+      if (this.indeterminate) {
+        this.indeterminate = false;
+      }
+
+      // Note: ct-change event is emitted by the cell controller's onChange callback
+    }
+
+    private _handleKeydown(event: KeyboardEvent) {
+      if (this.disabled) {
+        return;
+      }
+
+      // Handle Space key
+      if (event.key === " " || event.key === "Spacebar") {
+        event.preventDefault();
+        this._handleClick(event);
+      }
+    }
+
+    /**
+     * Focus the checkbox programmatically
+     */
+    override focus(): void {
+      super.focus();
+    }
+
+    /**
+     * Blur the checkbox programmatically
+     */
+    override blur(): void {
+      super.blur();
     }
   }
 
-  /**
-   * Focus the checkbox programmatically
-   */
-  override focus(): void {
-    super.focus();
-  }
-
-  /**
-   * Blur the checkbox programmatically
-   */
-  override blur(): void {
-    super.blur();
-  }
-}
-
-globalThis.customElements.define("ct-checkbox", CTCheckbox);
+  globalThis.customElements.define("ct-checkbox", CTCheckbox);

@@ -37,7 +37,6 @@ describe("Storage", () => {
 
   afterEach(async () => {
     await tx.commit();
-    await runtime?.storage.cancelAll();
     await storageManager?.close();
     // _processCurrentBatch leaves sleep behind that makes deno error
     await new Promise((wake) => setTimeout(wake, 1));
@@ -203,7 +202,7 @@ describe("Storage", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      await runtime.storage.synced();
+      await runtime.storageManager.synced();
 
       const query = storageManager
         .mount(space)
