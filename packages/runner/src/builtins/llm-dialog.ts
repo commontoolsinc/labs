@@ -247,11 +247,12 @@ function mainLogic(
           assistantMessage.toolResults = toolResults;
           newMessages.push(assistantMessage);
 
-          const success = perform(runtime, pending, (newTx) => {
-            messagesCell.withTx(newTx).set([
+          const success = perform(runtime, pending, (tx) => {
+            messagesCell.withTx(tx).set([
               ...(messagesCell.get() ?? []),
               ...newMessages,
             ]);
+            pending.withTx(tx).set(false);
           });
 
           if (success) {
