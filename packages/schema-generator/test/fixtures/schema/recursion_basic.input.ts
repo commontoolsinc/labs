@@ -1,2 +1,4 @@
-interface SchemaRoot { value: number; next?: SchemaRoot }
-
+interface SchemaRoot {
+  value: number;
+  next?: SchemaRoot;
+}

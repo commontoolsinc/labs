@@ -1,2 +1,4 @@
-interface SchemaRoot { value: string; children?: SchemaRoot[] }
-
+interface SchemaRoot {
+  value: string;
+  children?: SchemaRoot[];
+}

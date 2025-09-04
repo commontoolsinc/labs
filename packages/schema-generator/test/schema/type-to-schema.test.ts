@@ -13,9 +13,12 @@ describe("Schema: type-to-schema parity", () => {
       interface RecipeInput { values: Cell<string[]>; }
       interface RecipeOutput { values: string[]; updater: Stream<UpdaterInput>; }
     `;
-    const { type: uType, checker: uChecker, typeNode: uNode } = await getTypeFromCode(code, "UpdaterInput");
-    const { type: iType, checker: iChecker, typeNode: iNode } = await getTypeFromCode(code, "RecipeInput");
-    const { type: oType, checker: oChecker, typeNode: oNode } = await getTypeFromCode(code, "RecipeOutput");
+    const { type: uType, checker: uChecker, typeNode: uNode } =
+      await getTypeFromCode(code, "UpdaterInput");
+    const { type: iType, checker: iChecker, typeNode: iNode } =
+      await getTypeFromCode(code, "RecipeInput");
+    const { type: oType, checker: oChecker, typeNode: oNode } =
+      await getTypeFromCode(code, "RecipeOutput");
     const gen = createSchemaTransformerV2();
     const u = gen(uType, uChecker, uNode);
     const i = gen(iType, iChecker, iNode);

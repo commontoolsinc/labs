@@ -17,7 +17,7 @@ export class IntersectionFormatter implements TypeFormatter {
     const checker = context.typeChecker;
     const inter = type as ts.IntersectionType;
     const parts = inter.types ?? [];
-    
+
     if (parts.length === 0) {
       throw new Error("IntersectionFormatter received empty intersection type");
     }
@@ -48,14 +48,23 @@ export class IntersectionFormatter implements TypeFormatter {
 
       try {
         // Reject types with index signatures as they can't be safely merged
-        const stringIndex = checker.getIndexTypeOfType(part, ts.IndexKind.String);
-        const numberIndex = checker.getIndexTypeOfType(part, ts.IndexKind.Number);
+        const stringIndex = checker.getIndexTypeOfType(
+          part,
+          ts.IndexKind.String,
+        );
+        const numberIndex = checker.getIndexTypeOfType(
+          part,
+          ts.IndexKind.Number,
+        );
         if (stringIndex || numberIndex) {
           return "index signature on constituent";
         }
 
         // Reject types with call/construct signatures as they're not object properties
-        const callSigs = checker.getSignaturesOfType(part, ts.SignatureKind.Call);
+        const callSigs = checker.getSignaturesOfType(
+          part,
+          ts.SignatureKind.Call,
+        );
         const constructSigs = checker.getSignaturesOfType(
           part,
           ts.SignatureKind.Construct,
@@ -91,7 +100,9 @@ export class IntersectionFormatter implements TypeFormatter {
           for (const [key, value] of Object.entries(schema.properties)) {
             if (mergedProps[key] && mergedProps[key] !== value) {
               // Property conflict - could improve this with more sophisticated merging
-              console.warn(`Intersection property conflict for key '${key}' - using first definition`);
+              console.warn(
+                `Intersection property conflict for key '${key}' - using first definition`,
+              );
             } else {
               mergedProps[key] = value;
             }
@@ -121,7 +132,9 @@ export class IntersectionFormatter implements TypeFormatter {
     return result;
   }
 
-  private isObjectSchema(schema: SchemaDefinition): schema is SchemaDefinition & { 
+  private isObjectSchema(
+    schema: SchemaDefinition,
+  ): schema is SchemaDefinition & {
     properties?: Record<string, SchemaDefinition>;
     required?: string[];
   } {

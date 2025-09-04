@@ -8,11 +8,13 @@ let typeLibsCache: Record<string, string> | undefined;
  * Load TypeScript environment types (es2023, dom, jsx)
  * Same functionality as js-runtime but implemented independently
  */
-async function getTypeScriptEnvironmentTypes(): Promise<Record<string, string>> {
+async function getTypeScriptEnvironmentTypes(): Promise<
+  Record<string, string>
+> {
   if (typeLibsCache) {
     return typeLibsCache;
   }
-  
+
   const cache = new StaticCache();
   const es2023 = await cache.getText("types/es2023.d.ts");
   const jsx = await cache.getText("types/jsx.d.ts");
@@ -28,7 +30,9 @@ async function getTypeScriptEnvironmentTypes(): Promise<Record<string, string>> 
 
 export async function createTestProgram(
   code: string,
-): Promise<{ program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }> {
+): Promise<
+  { program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }
+> {
   const fileName = "test.ts";
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -45,7 +49,7 @@ export async function createTestProgram(
       if (name === fileName) {
         return sourceFile;
       }
-      
+
       // Map lib.d.ts requests to es2023 definitions (same as js-runtime)
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return ts.createSourceFile(
@@ -55,9 +59,9 @@ export async function createTestProgram(
           true,
         );
       }
-      
+
       // Handle other library files (map case-insensitive)
-      const libName = name.toLowerCase().replace('.d.ts', '');
+      const libName = name.toLowerCase().replace(".d.ts", "");
       if (typeLibs[libName]) {
         return ts.createSourceFile(
           name,
@@ -66,7 +70,7 @@ export async function createTestProgram(
           true,
         );
       }
-      
+
       return undefined;
     },
     writeFile: () => {},
@@ -75,11 +79,11 @@ export async function createTestProgram(
     fileExists: (name) => {
       if (name === fileName) return true;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
-      
+
       // Check library files (case-insensitive)
-      const libName = name.toLowerCase().replace('.d.ts', '');
+      const libName = name.toLowerCase().replace(".d.ts", "");
       if (typeLibs[libName]) return true;
-      
+
       return false;
     },
     readFile: (name) => {
@@ -87,11 +91,11 @@ export async function createTestProgram(
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return typeLibs.es2023;
       }
-      
+
       // Handle library files (case-insensitive)
-      const libName = name.toLowerCase().replace('.d.ts', '');
+      const libName = name.toLowerCase().replace(".d.ts", "");
       if (typeLibs[libName]) return typeLibs[libName];
-      
+
       return undefined;
     },
     getCanonicalFileName: (f) => f,
@@ -136,7 +140,7 @@ export async function getTypeFromCode(
   });
 
   if (!foundType) throw new Error(`Type ${typeName} not found in code`);
-  return foundTypeNode 
+  return foundTypeNode
     ? { type: foundType, checker, typeNode: foundTypeNode }
     : { type: foundType, checker };
 }
@@ -198,7 +202,9 @@ function deepCanonicalize(node: unknown): unknown {
 
   // Sort definitions keys deterministically
   if (isPlainObject(out.definitions)) {
-    out.definitions = sortObjectKeys(out.definitions as Record<string, unknown>);
+    out.definitions = sortObjectKeys(
+      out.definitions as Record<string, unknown>,
+    );
   }
 
   // Apply oneOf normalization for nullable patterns

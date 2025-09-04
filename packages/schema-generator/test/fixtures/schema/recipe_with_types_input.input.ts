@@ -13,4 +13,3 @@ interface InputSchemaInterface {
 }
 
 type SchemaRoot = InputSchemaInterface;
-
