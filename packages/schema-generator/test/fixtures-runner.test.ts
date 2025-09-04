@@ -40,27 +40,40 @@ async function writeText(path: string, data: string) {
   await Deno.writeTextFile(path, data);
 }
 
-for (const cfg of configs) {
-  describe(cfg.describe, () => {
-    const baseDir = `./test/fixtures/${cfg.directory}`;
-    const cases: Array<{ input: string; expected: string }> = [];
+// Collect fixtures at module load time
+const allFixtures: Map<string, Array<{ name: string; input: string; expected: string }>> = new Map();
 
-    it("collects fixtures", async () => {
-      for await (
-        const entry of walk(baseDir, { match: [/\.input\.ts$/] })
-      ) {
-        const input = entry.path;
-        const stem = input.replace(/\.input\.ts$/, "");
-        const expected = `${stem}.expected.json`;
-        cases.push({ input, expected });
-      }
-      expect(cases.length).toBeGreaterThan(0);
+for (const cfg of configs) {
+  const baseDir = `./test/fixtures/${cfg.directory}`;
+  const fixtures: Array<{ name: string; input: string; expected: string }> = [];
+  
+  try {
+    for await (const entry of walk(baseDir, { match: [/\.input\.ts$/] })) {
+      const input = entry.path;
+      const stem = input.replace(/\.input\.ts$/, "");
+      const expected = `${stem}.expected.json`;
+      const name = input.replace(`${baseDir}/`, "").replace(/\.input\.ts$/, "");
+      fixtures.push({ name, input, expected });
+    }
+  } catch {
+    // Directory might not exist
+  }
+  
+  allFixtures.set(cfg.directory, fixtures);
+}
+
+// Generate test suites
+for (const cfg of configs) {
+  const fixtures = allFixtures.get(cfg.directory) || [];
+  
+  describe(cfg.describe, () => {
+    it("has fixtures", () => {
+      expect(fixtures.length).toBeGreaterThan(0);
     });
 
-    for (const c of cases) {
-      const name = c.input.replace(`${baseDir}/`, "").replace(/\.input\.ts$/, "");
-      it(`matches expected for ${name}`, async () => {
-        const code = await Deno.readTextFile(c.input);
+    for (const fixture of fixtures) {
+      it(`matches expected for ${fixture.name}`, async () => {
+        const code = await Deno.readTextFile(fixture.input);
         const typeName = "SchemaRoot"; // Convention: root type is named 'SchemaRoot'
 
         const gen = createSchemaTransformerV2();
@@ -72,17 +85,17 @@ for (const cfg of configs) {
         expect(s1).toEqual(s2); // determinism
 
         if (Deno.env.get("UPDATE_GOLDENS") === "1") {
-          await writeText(c.expected, s1);
+          await writeText(fixture.expected, s1);
           return;
         }
 
-        const expected = await Deno.readTextFile(c.expected);
+        const expected = await Deno.readTextFile(fixture.expected);
         if (s1 !== expected) {
           const diff = unifiedDiff(expected, s1);
           const msg = [
-            `\nFixture mismatch for ${name}`,
-            `Input:    ${resolve(c.input)}`,
-            `Expected: ${resolve(c.expected)}`,
+            `\nFixture mismatch for ${fixture.name}`,
+            `Input:    ${resolve(fixture.input)}`,
+            `Expected: ${resolve(fixture.expected)}`,
             "\n=== UNIFIED DIFF (expected vs actual) ===\n" + diff,
           ].join("\n");
           throw new Error(msg);

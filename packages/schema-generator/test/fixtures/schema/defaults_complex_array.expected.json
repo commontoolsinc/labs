@@ -12,8 +12,8 @@
           }
         },
         "required": [
-          "title",
-          "done"
+          "done",
+          "title"
         ],
         "type": "object"
       },
@@ -51,9 +51,8 @@
   },
   "required": [
     "emptyItems",
-    "prefilledItems",
-    "matrix"
+    "matrix",
+    "prefilledItems"
   ],
   "type": "object"
 }
-
