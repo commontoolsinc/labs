@@ -11,6 +11,7 @@ describe("cli init", () => {
     const root = join(import.meta.dirname!, "..");
     expect(await exists(join(root, "tsconfig.json"))).toEqual(false);
     expect(await exists(join(root, ".ct-types"))).toEqual(false);
+    expect(await exists(join(root, ".ct-docs"))).toEqual(false);
 
     try {
       const { code, stdout, stderr } = await ct("init");
@@ -20,6 +21,7 @@ describe("cli init", () => {
 
       const types = join(root, ".ct-types");
       expect(await exists(join(root, "tsconfig.json"))).toEqual(true);
+      expect(await exists(join(root, ".ct-docs"))).toEqual(true);
       expect(await exists(join(types, "commontools", "index.d.ts"))).toEqual(
         true,
       );
@@ -31,6 +33,7 @@ describe("cli init", () => {
     } finally {
       await Deno.remove(join(root, "tsconfig.json"), { recursive: true });
       await Deno.remove(join(root, ".ct-types"), { recursive: true });
+      await Deno.remove(join(root, ".ct-docs"), { recursive: true });
     }
   });
 });
