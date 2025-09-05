@@ -127,38 +127,28 @@ export function fetchData(
 
         await runtime.idle();
 
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to set the result.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-
-        pendingWithLog.withTx(asyncTx).set(false);
-        resultWithLog.withTx(asyncTx).set(data);
-        requestHashWithLog.withTx(asyncTx).set(hash);
-
-        if (asyncTx !== tx) asyncTx.commit();
+        await runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(data);
+          requestHash.withTx(tx).set(hash);
+        });
       })
       .catch(async (err) => {
         if (thisRun !== currentRun) return;
 
         await runtime.idle();
 
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to set the error.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-
-        pendingWithLog.withTx(asyncTx).set(false);
-        errorWithLog.withTx(asyncTx).set(err);
-
-        if (asyncTx !== tx) asyncTx.commit();
+        await runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(undefined);
+          error.withTx(tx).set(err);
+        });
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
         // requestHash.setAtPath([], hash, log);
       });
+
     // Add our cancel to the cancel group
     addCancel(() => abort.abort());
   };

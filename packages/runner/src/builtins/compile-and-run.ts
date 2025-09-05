@@ -161,55 +161,40 @@ export function compileAndRun(
         (err) => {
           if (thisRun !== currentRun) return;
 
-          // All this code runside outside the original action, and the
-          // transaction above might have closed by the time this is called. If
-          // so, we create a new one to set the error.
-          const status = tx.status();
-          const asyncTx = status.status === "ready" ? tx : runtime.edit();
-
-          // Extract structured errors if this is a CompilerError
-          if (err instanceof CompilerError) {
-            const structuredErrors = err.errors.map((e) => ({
-              line: e.line ?? 1,
-              column: e.column ?? 1,
-              message: e.message,
-              type: e.type,
-              file: e.file,
-            }));
-            errorsWithLog.withTx(asyncTx).set(structuredErrors);
-          } else {
-            errorWithLog.withTx(asyncTx).set(
-              err.message + (err.stack ? "\n" + err.stack : ""),
-            );
-          }
-          if (asyncTx !== tx) asyncTx.commit();
+          runtime.editWithRetry((asyncTx) => {
+            // Extract structured errors if this is a CompilerError
+            if (err instanceof CompilerError) {
+              const structuredErrors = err.errors.map((e) => ({
+                line: e.line ?? 1,
+                column: e.column ?? 1,
+                message: e.message,
+                type: e.type,
+                file: e.file,
+              }));
+              errors.withTx(asyncTx).set(structuredErrors);
+            } else {
+              error.withTx(asyncTx).set(
+                err.message + (err.stack ? "\n" + err.stack : ""),
+              );
+            }
+          });
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
 
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to set the status.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-        pendingWithLog.withTx(asyncTx).set(false);
-        if (asyncTx !== tx) asyncTx.commit();
+        runtime.editWithRetry((asyncTx) => {
+          pending.withTx(asyncTx).set(false);
+        });
       });
 
-    compilePromise.then(async (recipe) => {
+    compilePromise.then((recipe) => {
       if (thisRun !== currentRun) return;
       if (recipe) {
         // TODO(ja): to support editting of existing charms / running with
         // inputs from other charms, we will need to think more about
         // how we pass input into the builtin.
 
-        // All this code runside outside the original action, and the
-        // transaction above might have closed by the time this is called. If
-        // so, we create a new one to start the charm.
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-        await runtime.runSynced(result.withTx(asyncTx), recipe, input.get());
-        if (asyncTx !== tx) asyncTx.commit();
+        runtime.runSynced(result, recipe, input.get());
       }
       // TODO(seefeld): Add capturing runtime errors.
     });
