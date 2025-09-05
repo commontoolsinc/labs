@@ -109,10 +109,11 @@ const searchWeb = handler<
       const env = getRecipeEnvironment();
       // In local development, the frontend runs on 5173 but the API is on 8000
       // In production, they're on the same domain
-      const apiUrl = env.apiUrl.hostname === "localhost" && env.apiUrl.port === "5173"
-        ? new URL("http://localhost:8000")
-        : env.apiUrl;
-      
+      const apiUrl =
+        env.apiUrl.hostname === "localhost" && env.apiUrl.port === "5173"
+          ? new URL("http://localhost:8000")
+          : env.apiUrl;
+
       const response = await fetch(
         new URL("/api/agent-tools/web-search", apiUrl),
         {
@@ -151,11 +152,69 @@ const searchWeb = handler<
     }
   },
 );
+
+const readWebpage = handler<
+  { url: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
+  async (args, state) => {
+    try {
+      state.result.set(`Reading: ${args.url}...`);
+
+      const env = getRecipeEnvironment();
+      // In local development, the frontend runs on 5173 but the API is on 8000
+      // In production, they're on the same domain
+      const apiUrl =
+        env.apiUrl.hostname === "localhost" && env.apiUrl.port === "5173"
+          ? new URL("http://localhost:8000")
+          : env.apiUrl;
+
+      const response = await fetch(
+        new URL("/api/agent-tools/web-read", apiUrl),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: args.url,
+            max_tokens: 4000,
+            include_code: true,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to read webpage: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Format the content with metadata
+      const formattedContent = `Title: ${data.metadata?.title || "Unknown"}\n` +
+        `Date: ${data.metadata?.date || "Unknown"}\n` +
+        `Word Count: ${data.metadata?.word_count || 0}\n\n` +
+        `Content:\n${data.content?.substring(0, 2000)}${
+          data.content?.length > 2000 ? "..." : ""
+        }`;
+
+      state.result.set(formattedContent);
+      args.result.set(formattedContent);
+    } catch (error) {
+      const errorMsg = `Read error: ${
+        (error as any)?.message || "Unknown error"
+      }`;
+      state.result.set(errorMsg);
+      args.result.set(errorMsg);
+    }
+  },
+);
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
     const calculatorResult = cell<string>("");
     const searchWebResult = cell<string>("");
+    const readWebpageResult = cell<string>("");
 
     const tools = {
       search_web: {
@@ -171,6 +230,21 @@ export default recipe<LLMTestInput, LLMTestResult>(
           required: ["query"],
         } as JSONSchema,
         handler: searchWeb({ result: searchWebResult }),
+      },
+      read_webpage: {
+        description: "Read and extract content from a specific webpage URL.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description:
+                "The URL of the webpage to read and extract content from.",
+            },
+          },
+          required: ["url"],
+        } as JSONSchema,
+        handler: readWebpage({ result: readWebpageResult }),
       },
       calculator: {
         description:
@@ -279,6 +353,11 @@ export default recipe<LLMTestInput, LLMTestResult>(
               <div>
                 <h3>Web Search</h3>
                 <pre>{searchWebResult}</pre>
+              </div>
+
+              <div>
+                <h3>Web Page Reader</h3>
+                <pre>{readWebpageResult}</pre>
               </div>
 
               <div>
