@@ -97,12 +97,35 @@ const clearChat = handler(
   },
 );
 
+const searchWeb = handler<
+  { query: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
+  (args, state) => {
+    state.result.set(`Searching the web for ${args.query}`);
+  },
+);
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
     const calculatorResult = cell<string>("");
+    const searchWebResult = cell<string>("");
 
     const tools = {
+      search_web: {
+        description: "Search the web for information.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The query to search the web for.",
+            },
+          },
+          required: ["query"],
+        } as JSONSchema,
+        handler: searchWeb({ result: searchWebResult }),
+      },
       calculator: {
         description:
           "Calculate the result of a mathematical expression. Supports +, -, *, /, and parentheses.",
@@ -207,6 +230,11 @@ export default recipe<LLMTestInput, LLMTestResult>(
             </ct-screen>
 
             <ct-vstack data-label="Tools">
+              <div>
+                <h3>Web Search</h3>
+                <pre>{searchWebResult}</pre>
+              </div>
+
               <div>
                 <h3>Calculator</h3>
                 <pre>{calculatorResult}</pre>
