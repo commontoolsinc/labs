@@ -676,7 +676,7 @@ function typeToJsonSchemaHelper(
       );
     }
     return {
-      oneOf: unionTypes.map((t) =>
+      anyOf: unionTypes.map((t) =>
         typeToJsonSchemaHelper(
           t,
           checker,
