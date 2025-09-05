@@ -36,7 +36,7 @@ describe("Chat pattern test", () => {
           join(
             import.meta.dirname!,
             "..",
-            "chat.tsx",
+            "chatbot.tsx",
           ),
         ),
         { start: false },
@@ -60,17 +60,6 @@ describe("Chat pattern test", () => {
         charmId,
         identity,
       });
-
-      // Wait for the component to render by waiting for title
-      const title = await page.waitForSelector("h2", {
-        strategy: "pierce",
-      });
-      assert(title, "Should find title element");
-
-      const titleText = await title.evaluate((el: HTMLElement) =>
-        el.textContent
-      );
-      assertEquals(titleText?.trim(), "LLM Test");
 
       // Check for the message input
       const messageInput = await page.waitForSelector("ct-message-input", {

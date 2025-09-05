@@ -90,7 +90,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
     });
 
     const items = derive(result, (models) => {
-      if (!result) return [];
+      if (!models) return [];
 
       console.log("[LLM] Models:", models);
       const items = Object.keys(models as any).map((key) => ({
