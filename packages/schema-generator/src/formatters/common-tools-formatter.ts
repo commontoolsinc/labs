@@ -10,12 +10,13 @@ import {
   safeGetTypeFromTypeNode,
   TypeWithInternals,
 } from "../type-utils.ts";
+import { SchemaGenerator } from "../plugin.ts";
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
  */
 export class CommonToolsFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: any) {
+  constructor(private schemaGenerator: SchemaGenerator) {
     if (!schemaGenerator) {
       throw new Error(
         "CommonToolsFormatter requires a schemaGenerator instance",
@@ -230,6 +231,33 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: GenerationContext,
   ): SchemaDefinition {
+    // Centralize Cell detection and Stream flag application
+    const isCellNode = (node?: ts.TypeNode): boolean => {
+      return !!(
+        node && ts.isTypeReferenceNode(node) &&
+        ts.isIdentifier(node.typeName) &&
+        node.typeName.text === "Cell"
+      );
+    };
+    const isCellType = (t: ts.Type): boolean => {
+      return !!(
+        (t.flags & ts.TypeFlags.Object) !== 0 &&
+        ((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0 &&
+        ((t as ts.TypeReference).target?.symbol?.name === "Cell")
+      );
+    };
+    const withStreamFlags = (
+      base: SchemaDefinition,
+      innerT: ts.Type,
+      innerN: ts.TypeNode | undefined,
+      containerArgIsCell: boolean,
+    ): SchemaDefinition => {
+      const innerIsCell = containerArgIsCell || isCellNode(innerN) ||
+        isCellType(innerT);
+      return innerIsCell
+        ? { ...base, asCell: true, asStream: true }
+        : { ...base, asStream: true };
+    };
     // Mirror Cell<T> robustness: resolve via alias/resolved arguments and carry node
     const innerTypeNode = this.getInnerTypeNode(context);
 
@@ -251,48 +279,15 @@ export class CommonToolsFormatter implements TypeFormatter {
       const arr = this.arrayItemsSchema(containerArg, innerTypeNode, context);
       if (arr) return { ...arr, asStream: true };
     }
-    // If Stream<Default<T,V>> is encountered, Default handles default/union. Just add flags.
+    // If Stream<Default<T,V>> is encountered, Default handles default/union.
+    // Generate child schema and apply Stream/Cell flags based on inner shape.
     if (innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
-      // If Stream< Cell<T> >, ensure both flags where fixtures expect it
-      if (
-        ts.isTypeReferenceNode(innerTypeNode) &&
-        innerTypeNode.typeName && ts.isIdentifier(innerTypeNode.typeName) &&
-        innerTypeNode.typeName.text === "Cell"
-      ) {
-        return {
-          ...(this.schemaGenerator.formatChildType(
-            innerType,
-            context,
-            innerTypeNode,
-          ) as any),
-          asCell: true,
-          asStream: true,
-        } as SchemaDefinition;
-      }
-      // Also detect alias-resolved Cell via type or container argument
-      if (
-        containerArgIsCell ||
-        (innerType && (innerType.flags & ts.TypeFlags.Object) !== 0 &&
-          ((innerType as ts.TypeReference).target?.symbol?.name === "Cell"))
-      ) {
-        return {
-          ...(this.schemaGenerator.formatChildType(
-            innerType,
-            context,
-            innerTypeNode,
-          ) as any),
-          asCell: true,
-          asStream: true,
-        } as SchemaDefinition;
-      }
-      return {
-        ...(this.schemaGenerator.formatChildType(
-          innerType,
-          context,
-          innerTypeNode,
-        ) as any),
-        asStream: true,
-      } as SchemaDefinition;
+      const child = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        innerTypeNode,
+      );
+      return withStreamFlags(child, innerType, innerTypeNode, containerArgIsCell);
     }
 
     // Handle Stream<Array<T>> and Stream<T[]>
@@ -307,15 +302,12 @@ export class CommonToolsFormatter implements TypeFormatter {
       context,
       innerTypeNode,
     );
-    // If inner is Cell<T> ensure both flags (covers aliases where node isn't Cell)
-    if (
-      containerArgIsCell ||
-      ((innerType.flags & ts.TypeFlags.Object) !== 0 &&
-        ((innerType as ts.TypeReference).target?.symbol?.name === "Cell"))
-    ) {
-      return { ...innerSchema, asCell: true, asStream: true };
-    }
-    return { ...innerSchema, asStream: true };
+    return withStreamFlags(
+      innerSchema,
+      innerType,
+      innerTypeNode,
+      containerArgIsCell,
+    );
   }
 
   private arrayItemsSchema(
@@ -414,6 +406,14 @@ export class CommonToolsFormatter implements TypeFormatter {
     schema: SchemaDefinition,
     context: GenerationContext,
   ): SchemaDefinition {
+    /*
+     * Draft-07 $ref constraint:
+     * In JSON Schema draft-07, when a schema object contains $ref, validators
+     * ignore all sibling keywords of that object. To attach keywords like
+     * `default` (e.g., from Default<T,V>) to the effective schema, we inline
+     * local #/definitions targets here. Only the immediate $ref is inlined;
+     * we do not recursively inline nested $refs to avoid expanding cycles.
+     */
     const ref = schema && (schema as any).$ref as string | undefined;
     if (ref && ref.startsWith("#/definitions/") && context.definitions) {
       const name = ref.replace("#/definitions/", "");
