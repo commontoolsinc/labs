@@ -51,7 +51,8 @@ export class ObjectFormatter implements TypeFormatter {
       if (!isOptional) required.push(propName);
 
       let propTypeNode: ts.TypeNode | undefined;
-      const propDecl = prop.valueDeclaration ?? (prop.declarations?.[0] as any);
+      const propDecl = prop.valueDeclaration ??
+        (prop.declarations?.[0] as ts.Declaration);
       if (propDecl) {
         if (
           ts.isPropertySignature(propDecl) || ts.isPropertyDeclaration(propDecl)

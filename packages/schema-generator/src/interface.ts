@@ -12,7 +12,15 @@ export interface SchemaDefinition {
   $ref?: string;
   $schema?: string;
   definitions?: Record<string, SchemaDefinition>;
-  [key: string]: any;
+  // Common JSON Schema (draft-07) keywords we use
+  default?: unknown;
+  enum?: unknown[];
+  oneOf?: SchemaDefinition[];
+  anyOf?: SchemaDefinition[];
+  format?: string;
+  $comment?: string;
+  // Allow extensions (e.g., asCell/asStream) and future keywords
+  [key: string]: unknown;
 }
 
 /**

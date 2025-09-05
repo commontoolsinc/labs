@@ -287,7 +287,12 @@ export class CommonToolsFormatter implements TypeFormatter {
         context,
         innerTypeNode,
       );
-      return withStreamFlags(child, innerType, innerTypeNode, containerArgIsCell);
+      return withStreamFlags(
+        child,
+        innerType,
+        innerTypeNode,
+        containerArgIsCell,
+      );
     }
 
     // Handle Stream<Array<T>> and Stream<T[]>
@@ -414,7 +419,7 @@ export class CommonToolsFormatter implements TypeFormatter {
      * local #/definitions targets here. Only the immediate $ref is inlined;
      * we do not recursively inline nested $refs to avoid expanding cycles.
      */
-    const ref = schema && (schema as any).$ref as string | undefined;
+    const ref = schema?.$ref as string | undefined;
     if (ref && ref.startsWith("#/definitions/") && context.definitions) {
       const name = ref.replace("#/definitions/", "");
       const def = context.definitions[name];
@@ -486,7 +491,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     defaultType: ts.Type,
     defaultTypeNode: ts.TypeNode | undefined,
     checker: ts.TypeChecker,
-  ): any {
+  ): unknown {
     // Try complex extraction first (from node)
     if (defaultTypeNode) {
       const complex = this.extractComplexDefaultValue(defaultTypeNode, checker);
@@ -551,11 +556,11 @@ export class CommonToolsFormatter implements TypeFormatter {
         nn,
       );
 
-      const out: any = { oneOf: [{ type: "null" }, nnSchema] };
-      if ((valueSchema as any).default !== undefined) {
-        out.default = (valueSchema as any).default;
+      const out: SchemaDefinition = { oneOf: [{ type: "null" }, nnSchema] };
+      if (valueSchema.default !== undefined) {
+        out.default = valueSchema.default;
       }
-      return out as SchemaDefinition;
+      return out;
     }
 
     return null;
@@ -586,11 +591,13 @@ export class CommonToolsFormatter implements TypeFormatter {
         valueTypeNode,
       );
 
-      const out: any = { oneOf: [nonNullSchema, { type: "null" }] };
-      if ((valueSchema as any).default !== undefined) {
-        out.default = (valueSchema as any).default;
+      const out: SchemaDefinition = {
+        oneOf: [nonNullSchema, { type: "null" }],
+      };
+      if (valueSchema.default !== undefined) {
+        out.default = valueSchema.default;
       }
-      return out as SchemaDefinition;
+      return out;
     } else if (hasUndef && nonUndef.length === 1) {
       const s = this.schemaGenerator.formatChildType(
         nonUndef[0]!,
@@ -632,7 +639,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
 
     if (defaultValue !== undefined) {
-      (valueSchema as any).default = defaultValue;
+      valueSchema.default = defaultValue;
     }
 
     return this.processDefaultUnionTypes(
@@ -671,7 +678,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private extractLiteralDefaultValue(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): any {
+  ): unknown {
     // Simple extraction of literal values (string, number, boolean) from types as fallback
     if (type.flags & ts.TypeFlags.StringLiteral) {
       return (type as ts.StringLiteralType).value;
@@ -693,7 +700,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   private extractComplexDefaultValue(
     node: ts.TypeNode,
     checker: ts.TypeChecker,
-  ): any {
+  ): unknown {
     if (ts.isLiteralTypeNode(node)) {
       const lit = node.literal;
       if (ts.isStringLiteral(lit)) return lit.text;
@@ -706,7 +713,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     if (ts.isTypeLiteralNode(node)) {
-      const obj: any = {};
+      const obj: Record<string, unknown> = {};
       for (const member of node.members) {
         if (
           ts.isPropertySignature(member) && member.name &&
