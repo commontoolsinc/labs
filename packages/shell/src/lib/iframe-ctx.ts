@@ -76,6 +76,9 @@ export const setupIframe = (runtime: Runtime) =>
         ) {
           const tx = context.runtime.edit();
           context.withTx(tx).key(key).set(value);
+          // No retry, since if there is a conflict, the iframe will by the time
+          // this promise resolves have already gotten the base-line truth (In
+          // other words: It's correct to ignore this edit)
           tx.commit();
         } else {
           console.warn(

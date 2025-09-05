@@ -152,9 +152,9 @@ export function streamData(
 
             await runtime.idle();
 
-            const asyncTx = runtime.edit();
-            resultWithLog.withTx(asyncTx).set(parsedData);
-            await asyncTx.commit();
+            await runtime.editWithRetry((tx) => {
+              result.withTx(tx).set(parsedData);
+            });
 
             id = undefined;
             event = undefined;
@@ -177,12 +177,11 @@ export function streamData(
 
         await runtime.idle();
 
-        const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
-        pendingWithLog.withTx(asyncTx).set(false);
-        resultWithLog.withTx(asyncTx).set(undefined);
-        errorWithLog.withTx(asyncTx).set(e);
-        if (asyncTx !== tx) asyncTx.commit();
+        await runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(undefined);
+          error.withTx(tx).set(e);
+        });
 
         // Allow retrying the same request.
         previousCall = "";

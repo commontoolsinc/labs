@@ -186,12 +186,9 @@ export async function persistTokens(
     };
 
     // Set the new tokens to the auth cell
-    const tx = authCell.runtime.edit();
-    authCell.withTx(tx).set(tokenData);
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
-
-    // Ensure the cell is synced
-    await runtime.storageManager.synced();
+    await authCell.runtime.editWithRetry((tx) => {
+      authCell.withTx(tx).set(tokenData);
+    });
 
     return tokenData;
   } catch (error) {
@@ -302,12 +299,9 @@ export async function clearAuthData(authCellDocLink: string) {
     };
 
     // Set the empty data to the auth cell
-    const tx = authCell.runtime.edit();
-    authCell.withTx(tx).set(emptyAuthData);
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
-
-    // Ensure the cell is synced
-    await runtime.storageManager.synced();
+    await authCell.runtime.editWithRetry((tx) => {
+      authCell.withTx(tx).set(emptyAuthData);
+    });
 
     return emptyAuthData;
   } catch (error) {
