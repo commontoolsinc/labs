@@ -11,10 +11,10 @@ import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
-  IStorageSubscriptionCapability,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
@@ -109,7 +109,7 @@ export interface IRuntime {
   editWithRetry(
     fn: (tx: IExtendedStorageTransaction) => void,
     maxRetries?: number,
-  ): Promise<boolean>;
+  ): Promise<CommitError | undefined>;
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
@@ -436,17 +436,18 @@ export class Runtime implements IRuntime {
   editWithRetry(
     fn: (tx: IExtendedStorageTransaction) => void,
     maxRetries: number = DEFAULT_MAX_RETRIES,
-  ): Promise<boolean> {
+  ): Promise<CommitError | undefined> {
     const tx = this.edit();
     fn(tx);
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
           return this.editWithRetry(fn, maxRetries - 1);
+        } else {
+          return error;
         }
-        return false;
       }
-      return true;
+      return undefined;
     });
   }
 

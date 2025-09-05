@@ -96,6 +96,10 @@ export class Runner implements IRunner {
       this.setupInternal(providedTx, recipeOrModule, argument, resultCell);
       return Promise.resolve(resultCell);
     } else {
+      // Ignore errors after retrying for now, as outside the tx, we'll see the
+      // latest true value, it just lost the ract against someone else changing
+      // the recipe or argument. Correct action is anyhow similar to what would
+      // have happened if the write succeeded and was immediately overwritten.
       return this.runtime.editWithRetry((tx) => {
         this.setupInternal(tx, recipeOrModule, argument, resultCell);
       }).then(() => resultCell);
@@ -477,7 +481,7 @@ export class Runner implements IRunner {
         resultCell.withTx(givenTx),
       );
     } else {
-      await this.runtime.editWithRetry((tx) => {
+      const error = await this.runtime.editWithRetry((tx) => {
         setupRes = this.setupInternal(
           tx,
           recipe,
@@ -485,6 +489,10 @@ export class Runner implements IRunner {
           resultCell.withTx(tx),
         );
       });
+      if (error) {
+        console.error("Error setting up recipe", error);
+        setupRes = undefined;
+      }
     }
 
     // If a new recipe was specified, make sure to sync any new cells

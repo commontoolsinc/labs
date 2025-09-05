@@ -202,7 +202,7 @@ export const generateNewRecipeVersion = async (
     llmRequestId,
   );
 
-  newCharm.runtime.editWithRetry((tx) => {
+  await newCharm.runtime.editWithRetry((tx) => {
     newCharm.withTx(tx).getSourceCell(charmSourceCellSchema)?.key("lineage")
       .push(
         {

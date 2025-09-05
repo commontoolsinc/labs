@@ -186,7 +186,7 @@ export class CharmManager {
     let changed = false;
 
     await this.syncCharms(this.pinnedCharms);
-    return await this.runtime.editWithRetry((tx) => {
+    return (!await this.runtime.editWithRetry((tx) => {
       const newPinnedCharms = filterOutEntity(
         this.pinnedCharms.withTx(tx),
         charmId,
@@ -197,7 +197,7 @@ export class CharmManager {
       } else {
         changed = false;
       }
-    }) && changed;
+    })) && changed;
   }
 
   async unpin(charm: Cell<Charm> | string | EntityId) {
@@ -250,7 +250,7 @@ export class CharmManager {
 
   async emptyTrash() {
     await this.syncCharms(this.trashedCharms);
-    return await this.runtime.editWithRetry((tx) => {
+    await this.runtime.editWithRetry((tx) => {
       const trashedCharms = this.trashedCharms.withTx(tx);
       trashedCharms.set([]);
     });
@@ -809,7 +809,7 @@ export class CharmManager {
 
     await this.unpin(idOrCharm);
 
-    return await this.runtime.editWithRetry((tx) => {
+    return (!await this.runtime.editWithRetry((tx) => {
       // Find the charm in the main list
       const charm = this.charms.withTx(tx).get().find((c) =>
         isSameEntity(c, id)
@@ -833,7 +833,7 @@ export class CharmManager {
       }
 
       success = true;
-    }) && success;
+    })) && success;
   }
 
   // Permanently delete a charm (from trash or directly)
@@ -845,7 +845,7 @@ export class CharmManager {
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    return await this.runtime.editWithRetry((tx) => {
+    return (!await this.runtime.editWithRetry((tx) => {
       // Remove from trash if present
       const newTrashedCharms = filterOutEntity(
         this.trashedCharms.withTx(tx),
@@ -855,7 +855,7 @@ export class CharmManager {
         this.trashedCharms.withTx(tx).set(newTrashedCharms);
         success = true;
       }
-    }) && success;
+    })) && success;
   }
 
   async runPersistent(
