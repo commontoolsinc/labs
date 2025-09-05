@@ -5,6 +5,7 @@ import {
   cell,
   Default,
   derive,
+  fetchData,
   h,
   handler,
   ifElse,
@@ -83,6 +84,24 @@ export default recipe<LLMTestInput, LLMTestResult>(
     //   }
     // });
 
+    const { result } = fetchData({
+      url: "/api/ai/llm/models",
+      mode: "json",
+    });
+
+    const items = derive(result, (models) => {
+      if (!result) return [];
+
+      console.log("[LLM] Models:", models);
+      const items = Object.keys(models as any).map((key) => ({
+        label: key,
+        value: key,
+      }));
+
+      console.log("[LLM] Items:", items);
+      return items;
+    });
+
     return {
       [NAME]: title,
       [UI]: (
@@ -98,27 +117,12 @@ export default recipe<LLMTestInput, LLMTestResult>(
               Clear Chat
             </ct-button>
 
-            <ct-select
-              items={[
-                {
-                  label: "Claude Opus",
-                  value: "anthropic:claude-opus-4-20250514",
-                },
-                {
-                  label: "Claude Opus Thinking",
-                  value: "anthropic:claude-opus-4-20250514-thinking",
-                },
-                {
-                  label: "Claude Sonnet",
-                  value: "anthropic:claude-sonnet-4-20250514",
-                },
-                {
-                  label: "Claude Sonnet Thinking",
-                  value: "anthropic:claude-sonnet-4-20250514-thinking",
-                },
-              ]}
-              $value={model}
-            />
+            <div>
+              <ct-select
+                items={items}
+                $value={model}
+              />
+            </div>
           </ct-hstack>
 
           <ct-vscroll
