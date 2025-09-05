@@ -315,3 +315,76 @@ export function isDefaultTypeRef(
   }
   return false;
 }
+
+/**
+ * When a usage is an alias of Cell<T[]> (e.g., type A<T> = Cell<T[]>),
+ * return the element type node from the usage site (the T in Cell<T[]>).
+ */
+export function getAliasElementNodeForCellArray(
+  node: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  if (!node || !ts.isTypeReferenceNode(node)) return undefined;
+  let current: ts.TypeNode | undefined = node;
+  let depth = 0;
+  while (current && ts.isTypeReferenceNode(current) && depth < 5) {
+    const sym = checker.getSymbolAtLocation(current.typeName);
+    const decl = sym?.declarations?.[0];
+    if (!decl || !ts.isTypeAliasDeclaration(decl)) break;
+    const aliased = decl.type;
+    if (ts.isTypeReferenceNode(aliased)) {
+      if (ts.isIdentifier(aliased.typeName) && aliased.typeName.text === "Cell") {
+        const inner = aliased.typeArguments?.[0];
+        if (inner && ts.isArrayTypeNode(inner)) {
+          // Found pattern Cell<T[]>; return the actual type argument from usage
+          return node.typeArguments?.[0];
+        }
+        return undefined;
+      }
+      // Follow the alias reference
+      current = aliased;
+      depth++;
+      continue;
+    }
+    if (ts.isParenthesizedTypeNode(aliased)) {
+      current = aliased.type as ts.TypeNode;
+      depth++;
+      continue;
+    }
+    break;
+  }
+  return undefined;
+}
+
+/**
+ * Helper for wrapper types (Cell/Stream) to detect if the inner resolves to
+ * an array, considering containerArg, inner type, and the syntax node, while
+ * optionally skipping when the inner syntactically looks like Default<...>.
+ */
+export function getContainerArrayElementInfoForWrapper(
+  containerArg: ts.Type | undefined,
+  innerType: ts.Type,
+  innerTypeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  opts: { skipIfInnerLooksLikeDefault?: boolean } = {},
+): ArrayElementInfo | undefined {
+  const innerLooksLikeDefault = !!(
+    innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
+    isDefaultTypeRef(innerTypeNode, checker)
+  );
+
+  if (opts.skipIfInnerLooksLikeDefault && innerLooksLikeDefault) {
+    return undefined;
+  }
+
+  if (
+    containerArg &&
+    !((containerArg.flags & ts.TypeFlags.Object) !== 0 &&
+      ((containerArg as ts.TypeReference).target?.symbol?.name === "Default"))
+  ) {
+    const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
+    if (info) return info;
+  }
+
+  return getArrayElementInfo(innerType, checker, innerTypeNode);
+}
