@@ -2,11 +2,11 @@ import { createRouter } from "@/lib/create-app.ts";
 import * as handlers from "./web-read.handlers.ts";
 import * as routes from "./web-read.routes.ts";
 import { cors } from "@hono/hono/cors";
-const router = createRouter()
-  .openapi(routes.webRead, handlers.webRead);
+
+const router = createRouter();
 
 router.use(
-  "/api/agent-tools/web-read",
+  "/api/agent-tools/web-read/*",
   cors({
     origin: "*",
     allowMethods: ["POST", "OPTIONS"],
@@ -16,5 +16,7 @@ router.use(
     credentials: true,
   }),
 );
+
+router.openapi(routes.webRead, handlers.webRead);
 
 export default router;

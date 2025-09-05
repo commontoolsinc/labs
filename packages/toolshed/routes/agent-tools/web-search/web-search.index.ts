@@ -3,11 +3,10 @@ import * as handlers from "./web-search.handlers.ts";
 import * as routes from "./web-search.routes.ts";
 import { cors } from "@hono/hono/cors";
 
-const router = createRouter()
-  .openapi(routes.webSearch, handlers.webSearch);
+const router = createRouter();
 
 router.use(
-  "/api/agent-tools/web-search",
+  "/api/agent-tools/web-search/*",
   cors({
     origin: "*",
     allowMethods: ["POST", "OPTIONS"],
@@ -17,5 +16,7 @@ router.use(
     credentials: true,
   }),
 );
+
+router.openapi(routes.webSearch, handlers.webSearch);
 
 export default router;
