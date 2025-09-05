@@ -183,14 +183,15 @@ if (this.role === 'tool' && Array.isArray(this.content)) {
 - ✅ Added `read_webpage` tool to chat-tools.tsx
 - ✅ Implemented basic chained tool calls support (recursive mainLogic)
 - ✅ Modified generateText.ts to preserve tool results (temporary solution)
+- ✅ Updated type definitions to match Vercel AI SDK format
+- ✅ Refactored llm-dialog.ts to create proper message structure
+- ✅ Updated generateText.ts to handle new message format
+- ✅ Updated ct-chat-message component to render tool messages
 
 ### TODO
-- [ ] Update type definitions to match Vercel AI SDK format
-- [ ] Refactor llm-dialog.ts to create proper message structure
-- [ ] Update generateText.ts to handle new message format
-- [ ] Update ct-chat-message component to render tool messages
-- [ ] Remove temporary workarounds
-- [ ] Comprehensive testing
+- [ ] Remove temporary workarounds (if any remaining)
+- [ ] Comprehensive testing with actual LLM
+- [ ] Verify chained tool calls work properly (search → read)
 
 ## Key Files
 
