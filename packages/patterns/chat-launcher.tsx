@@ -1,5 +1,6 @@
 /// <cts-enable />
-import { Default, h, handler, NAME, recipe, UI } from "commontools";
+import { Default, h, handler, NAME, navigateTo, recipe, UI } from "commontools";
+import Chat from "./chat.tsx";
 
 type ChatLauncherInput = {
   title: Default<string, "Chat Launcher">;
@@ -13,7 +14,21 @@ const handleNewChat = handler<
   unknown,
   Record<string, never>
 >((_, __) => {
-  console.log("New chat button clicked");
+  console.log("[ChatLauncher] New chat button clicked");
+
+  // Create a new chat instance with default values
+  const chatTitle = `Chat ${new Date().toISOString()}`;
+  console.log(`[ChatLauncher] Creating new chat with title: ${chatTitle}`);
+
+  const newChatInstance = Chat({
+    title: chatTitle,
+    chat: [],
+  });
+
+  console.log("[ChatLauncher] Chat instance created, navigating...");
+
+  // Navigate to the new chat
+  return navigateTo(newChatInstance);
 });
 
 export default recipe<ChatLauncherInput, ChatLauncherOutput>(
