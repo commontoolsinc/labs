@@ -101,8 +101,46 @@ const searchWeb = handler<
   { query: string; result: Cell<string> },
   { result: Cell<string> }
 >(
-  (args, state) => {
-    state.result.set(`Searching the web for ${args.query}`);
+  async (args, state) => {
+    try {
+      state.result.set(`Searching: ${args.query}...`);
+
+      const response = await fetch(
+        "http://localhost:3000/api/agent-tools/web-search",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: args.query,
+            max_results: 5,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Format the search results
+      const formattedResults = data.results
+        .map((r: any, i: number) =>
+          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
+        )
+        .join("\n\n");
+
+      state.result.set(formattedResults || "No results found");
+      args.result.set(formattedResults || "No results found");
+    } catch (error) {
+      const errorMsg = `Search error: ${
+        (error as any)?.message || "Unknown error"
+      }`;
+      state.result.set(errorMsg);
+      args.result.set(errorMsg);
+    }
   },
 );
 export default recipe<LLMTestInput, LLMTestResult>(
