@@ -815,7 +815,7 @@ function subscribeToReferencedDocs<T>(
   let cleanup: Cancel | undefined = callback(value);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
-  // write to other cells, and we rety by design anyway below when read data
+  // write to other cells, and we retry by design anyway below when read data
   // changed. But ideally we enforce read-only as well.
   tx.commit();
 
