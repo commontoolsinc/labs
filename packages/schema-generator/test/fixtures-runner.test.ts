@@ -95,6 +95,7 @@ for (const cfg of configs) {
           return;
         }
 
+
         const expectedText = await Deno.readTextFile(fixture.expected);
 
         // Parse both as JSON objects for semantic comparison
