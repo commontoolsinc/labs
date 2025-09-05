@@ -89,7 +89,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     typeNode?: ts.TypeNode,
     checker?: ts.TypeChecker,
-  ): any {
+  ): string | ts.Type {
     // Handle Default types (both direct and aliased) with enhanced keys to avoid false cycles
     if (typeNode && ts.isTypeReferenceNode(typeNode)) {
       const isDirectDefault = ts.isIdentifier(typeNode.typeName) &&
@@ -324,8 +324,8 @@ export class SchemaGenerator implements ISchemaGenerator {
           // Traverse properties
           if (checker) {
             for (const prop of checker.getPropertiesOfType(t)) {
-              const location = prop.valueDeclaration ??
-                (prop.declarations?.[0] as any);
+              const location: ts.Node = prop.valueDeclaration ??
+                (prop.declarations?.[0] as ts.Declaration);
               const pt = safeGetTypeOfSymbolAtLocation(
                 checker,
                 prop,
