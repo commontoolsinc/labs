@@ -26,6 +26,7 @@ type ListItem = {
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   chat: Default<Array<BuiltInLLMMessage>, []>;
+  chatSessions: Default<Array<Array<BuiltInLLMMessage>>, []>;
 };
 
 type LLMTestResult = {
@@ -36,9 +37,25 @@ const sendMessage = handler<
   { detail: { message: string } },
   {
     addMessage: Stream<BuiltInLLMMessage>;
+    chatSessions: Cell<Array<Array<BuiltInLLMMessage>>>;
+    chat: Cell<Array<BuiltInLLMMessage>>;
   }
->((event, { addMessage }) => {
+>((event, { addMessage, chatSessions, chat }) => {
+  console.log("[sendMessage] Message sent:", event.detail.message);
+
   addMessage.send({ role: "user", content: event.detail.message });
+
+  // Push a snapshot that includes the just-sent user message
+  const currentChat = chat.get();
+  const snapshotWithUserMessage: Array<BuiltInLLMMessage> = [
+    ...currentChat,
+    { role: "user", content: event.detail.message } as BuiltInLLMMessage,
+  ];
+  console.log(
+    "[sendMessage] adding chat to sessions (post-send snapshot), length:",
+    snapshotWithUserMessage.length,
+  );
+  chatSessions.push(snapshotWithUserMessage as any);
 });
 
 const clearChat = handler(
@@ -58,7 +75,23 @@ const clearChat = handler(
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
-  ({ title, chat }) => {
+  ({ title, chat, chatSessions }) => {
+    // Remove the recipe body code that tries to read chat.get()
+    // Just use the derive block
+
+    // Use derive to add this chat to the chatSessions list when chat changes
+    derive(chat, (chatMessages) => {
+      console.log(
+        "[CHAT derive] chatMessages changed, length:",
+        chatMessages.length,
+      );
+      // Always add if there are messages
+      if (chatMessages.length > 0) {
+        console.log("[CHAT derive] adding chat to sessions");
+        chatSessions.push(chatMessages as any);
+      }
+    });
+
     const calculatorResult = cell<string>("");
 
     const { addMessage, pending } = llmDialog({
@@ -117,7 +150,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               placeholder="Ask the LLM a question..."
               appearance="rounded"
               disabled={pending}
-              onct-send={sendMessage({ addMessage })}
+              onct-send={sendMessage({ addMessage, chatSessions, chat })}
             />
 
             <ct-button
