@@ -38,8 +38,6 @@ export interface GenerationContext {
   // Accumulating state (grows during generation)
   /** Named type definitions for $refs */
   definitions: Record<string, SchemaDefinition>;
-  /** Order definitions were created */
-  definitionOrder: string[];
   /** Which $refs have been emitted */
   emittedRefs: Set<string>;
 

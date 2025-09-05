@@ -50,7 +50,6 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       // Accumulating state
       definitions: {},
-      definitionOrder: [],
       emittedRefs: new Set(),
 
       // Stack state
@@ -165,9 +164,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         if (namedKey && (inCycle || inCycleByName)) {
           // Finish cyclic def
           context.definitions[namedKey] = result;
-          if (!context.definitionOrder.includes(namedKey)) {
-            context.definitionOrder.push(namedKey);
-          }
           context.inProgressNames.delete(namedKey);
           context.definitionStack.delete(
             this.createStackKey(type, context.typeNode, context.typeChecker),
@@ -201,7 +197,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     typeNode?: ts.TypeNode,
   ): SchemaDefinition {
-    const { definitions, emittedRefs, definitionOrder } = context;
+    const { definitions, emittedRefs } = context;
 
     // If no definitions were created or used, return simple schema
     if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
@@ -216,16 +212,13 @@ export class SchemaGenerator implements ISchemaGenerator {
       // Add root schema to definitions if not already there
       if (!definitions[namedKey]) {
         definitions[namedKey] = rootSchema;
-        if (!definitionOrder.includes(namedKey)) {
-          definitionOrder.push(namedKey);
-        }
       }
 
       // Return schema with $ref to root and definitions
       return {
         $schema: "https://json-schema.org/draft-07/schema#",
         $ref: `#/definitions/${namedKey}`,
-        definitions: this.orderDefinitions(definitions, definitionOrder),
+        definitions,
       };
     }
 
@@ -233,7 +226,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     return {
       $schema: "https://json-schema.org/draft-07/schema#",
       ...rootSchema,
-      definitions: this.orderDefinitions(definitions, definitionOrder),
+      definitions,
     };
   }
 
@@ -252,31 +245,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     return !!(definitions[namedKey] && emittedRefs.has(namedKey));
   }
 
-  /**
-   * Order definitions according to creation order
-   */
-  private orderDefinitions(
-    definitions: Record<string, SchemaDefinition>,
-    definitionOrder: string[],
-  ): Record<string, SchemaDefinition> {
-    const ordered: Record<string, SchemaDefinition> = {};
-
-    // Add definitions in creation order
-    for (const key of definitionOrder) {
-      if (definitions[key]) {
-        ordered[key] = definitions[key];
-      }
-    }
-
-    // Add any remaining definitions (shouldn't happen, but safety net)
-    for (const [key, value] of Object.entries(definitions)) {
-      if (!ordered[key]) {
-        ordered[key] = value;
-      }
-    }
-
-    return ordered;
-  }
 
   /**
    * Detect cycles in the type graph
