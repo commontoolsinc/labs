@@ -4,11 +4,7 @@ import * as routes from "./llm.routes.ts";
 import env from "@/env.ts";
 import { cors } from "@hono/hono/cors";
 
-const router = createRouter()
-  .openapi(routes.getModels, handlers.getModels)
-  .openapi(routes.generateText, handlers.generateText)
-  .openapi(routes.feedback, handlers.submitFeedback)
-  .openapi(routes.generateObject, handlers.generateObject);
+const router = createRouter();
 
 router.use(
   "/api/ai/llm/*",
@@ -21,5 +17,11 @@ router.use(
     credentials: true,
   }),
 );
+
+router
+  .openapi(routes.getModels, handlers.getModels)
+  .openapi(routes.generateText, handlers.generateText)
+  .openapi(routes.feedback, handlers.submitFeedback)
+  .openapi(routes.generateObject, handlers.generateObject);
 
 export default router;
