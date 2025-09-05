@@ -228,7 +228,32 @@ export interface BuiltInLLMTypedContent {
   type: "text" | "image";
   data: string;
 }
-export type BuiltInLLMContent = string | BuiltInLLMTypedContent[];
+
+// New content part types matching Vercel AI SDK
+export interface BuiltInLLMTextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface BuiltInLLMToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, any>;
+}
+
+export interface BuiltInLLMToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  result: any;
+  error?: string;
+}
+
+// Update message content to support arrays with new part types
+export type BuiltInLLMContent = 
+  | string 
+  | Array<BuiltInLLMTextPart | BuiltInLLMToolCallPart | BuiltInLLMToolResultPart | BuiltInLLMTypedContent>;
 
 export interface BuiltInLLMTool {
   description: string;
@@ -236,6 +261,7 @@ export interface BuiltInLLMTool {
   handler?: (args: any) => any | Promise<any>; // Client-side only
 }
 
+// Legacy interfaces - kept for backward compatibility during migration
 export interface BuiltInLLMToolCall {
   id: string;
   name: string;
@@ -251,6 +277,7 @@ export interface BuiltInLLMToolResult {
 export type BuiltInLLMMessage = {
   role: "user" | "assistant" | "tool";
   content: BuiltInLLMContent;
+  // Deprecated - will be removed after migration
   toolCalls?: BuiltInLLMToolCall[];
   toolResults?: BuiltInLLMToolResult[];
 };

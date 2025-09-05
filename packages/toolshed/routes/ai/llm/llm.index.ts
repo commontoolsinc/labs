@@ -24,4 +24,5 @@ router
   .openapi(routes.feedback, handlers.submitFeedback)
   .openapi(routes.generateObject, handlers.generateObject);
 
+export type LLMRouter = typeof router;
 export default router;

@@ -20,6 +20,29 @@ interface Tool {
   parameters?: Record<string, any>;
 }
 
+// New content part types matching Vercel AI SDK
+interface TextPart {
+  type: 'text';
+  text: string;
+}
+
+interface ToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, any>;
+}
+
+interface ToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  result: any;
+  error?: string;
+}
+
+type ContentPart = TextPart | ToolCallPart | ToolResultPart;
+
 /**
  * CTChatMessage - Chat message component with markdown support
  *
@@ -62,7 +85,8 @@ export class CTChatMessage extends BaseElement {
         justify-content: flex-end;
       }
 
-      :host([role="assistant"]) .message-wrapper {
+      :host([role="assistant"]) .message-wrapper,
+      :host([role="tool"]) .message-wrapper {
         justify-content: flex-start;
       }
 
@@ -118,6 +142,12 @@ export class CTChatMessage extends BaseElement {
       .message-assistant {
         background-color: var(--ct-color-gray-100, #f3f4f6);
         color: var(--ct-color-gray-900, #111827);
+      }
+
+      .message-tool {
+        background-color: var(--ct-color-blue-50, #eff6ff);
+        color: var(--ct-color-gray-900, #111827);
+        border: 1px solid var(--ct-color-blue-200, #bfdbfe);
       }
 
       .message-content {
@@ -261,8 +291,8 @@ export class CTChatMessage extends BaseElement {
     toolResults: { type: Object },
   };
 
-  declare role: "user" | "assistant";
-  declare content: string;
+  declare role: "user" | "assistant" | "tool";
+  declare content: string | ContentPart[];
   declare streaming: boolean;
   declare tools: { [id: string]: Tool };
   declare toolCalls: ToolCall[];
@@ -287,8 +317,19 @@ export class CTChatMessage extends BaseElement {
     }
   }
 
-  private _renderMarkdown(content: string): string {
+  private _renderMarkdown(content: string | ContentPart[]): string {
     if (!content) return "";
+
+    // Handle content array format
+    if (Array.isArray(content)) {
+      const textContent = content
+        .filter((part): part is TextPart => part.type === 'text')
+        .map(part => part.text)
+        .join('\n');
+      
+      if (!textContent) return "";
+      content = textContent;
+    }
 
     // Configure marked for safer rendering
     marked.setOptions({
@@ -300,13 +341,59 @@ export class CTChatMessage extends BaseElement {
   }
 
   private _renderToolAttachments() {
+    // Handle new content array format
+    if (Array.isArray(this.content)) {
+      const toolCallParts = this.content.filter(
+        (part): part is ToolCallPart => part.type === 'tool-call'
+      );
+      const toolResultParts = this.content.filter(
+        (part): part is ToolResultPart => part.type === 'tool-result'
+      );
+
+      if (toolCallParts.length > 0 || toolResultParts.length > 0) {
+        return html`
+          <div class="tool-attachments">
+            ${toolCallParts.map(
+              (call) =>
+                html`
+                  <div class="tool-item tool-call">
+                    <div class="tool-header">
+                      <span class="tool-icon">🔧</span>
+                      <span>Tool Call: ${call.toolName}</span>
+                    </div>
+                    <pre class="tool-content">${JSON.stringify(
+                      call.args,
+                      null,
+                      2,
+                    )}</pre>
+                  </div>
+                `,
+            )}
+            ${toolResultParts.map(
+              (result) =>
+                html`
+                  <div class="tool-item tool-result">
+                    <div class="tool-header">
+                      <span class="tool-icon">${result.error ? '❌' : '✓'}</span>
+                      <span>Tool Result: ${result.toolName}</span>
+                    </div>
+                    <pre class="tool-content">${result.error || JSON.stringify(result.result, null, 2)}</pre>
+                  </div>
+                `,
+            )}
+          </div>
+        `;
+      }
+    }
+
+    // Handle legacy format (backward compatibility)
     const toolCalls = this.toolCalls;
     const toolResults = this.toolResults;
     const tools = this.tools;
 
     if (
       !toolCalls && !toolResults ||
-      (toolCalls.length === 0 && toolResults.length === 0)
+      (toolCalls?.length === 0 && toolResults?.length === 0)
     ) {
       return null;
     }

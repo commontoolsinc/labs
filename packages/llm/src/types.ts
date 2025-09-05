@@ -26,7 +26,32 @@ export interface LLMTypedContent {
   type: "text" | "image";
   data: string;
 }
-export type LLMContent = string | LLMTypedContent[];
+
+// New content part types matching Vercel AI SDK
+export interface LLMTextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface LLMToolCallPart {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, any>;
+}
+
+export interface LLMToolResultPart {
+  type: 'tool-result';
+  toolCallId: string;
+  toolName: string;
+  result: any;
+  error?: string;
+}
+
+// Update message content to support arrays with new part types
+export type LLMContent = 
+  | string 
+  | Array<LLMTextPart | LLMToolCallPart | LLMToolResultPart | LLMTypedContent>;
 
 export interface LLMTool {
   description: string;
@@ -34,6 +59,7 @@ export interface LLMTool {
   handler?: (args: any) => any | Promise<any>; // Client-side only
 }
 
+// Legacy interfaces - kept for backward compatibility during migration
 export interface LLMToolCall {
   id: string;
   name: string;
@@ -47,8 +73,9 @@ export interface LLMToolResult {
 }
 
 export type LLMMessage = {
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "system";
   content: LLMContent;
+  // Deprecated - will be removed after migration
   toolCalls?: LLMToolCall[];
   toolCallId?: string; // for tool result messages
 };
@@ -105,10 +132,37 @@ export function isLLMTypedContent(input: unknown): input is LLMTypedContent {
     typeof input.data === "string";
 }
 
+export function isLLMTextPart(input: unknown): input is LLMTextPart {
+  return isRecord(input) && !Array.isArray(input) &&
+    input.type === "text" &&
+    typeof input.text === "string";
+}
+
+export function isLLMToolCallPart(input: unknown): input is LLMToolCallPart {
+  return isRecord(input) && !Array.isArray(input) &&
+    input.type === "tool-call" &&
+    typeof input.toolCallId === "string" &&
+    typeof input.toolName === "string" &&
+    isRecord(input.args);
+}
+
+export function isLLMToolResultPart(input: unknown): input is LLMToolResultPart {
+  return isRecord(input) && !Array.isArray(input) &&
+    input.type === "tool-result" &&
+    typeof input.toolCallId === "string" &&
+    typeof input.toolName === "string" &&
+    (!(("error" in input) || typeof input.error === "string"));
+}
+
+export function isLLMContentPart(input: unknown): boolean {
+  return isLLMTypedContent(input) || isLLMTextPart(input) || 
+    isLLMToolCallPart(input) || isLLMToolResultPart(input);
+}
+
 export function isLLMContent(input: unknown): input is LLMContent {
   return typeof input === "string"
     ? true
-    : isArrayOf<LLMTypedContent>(isLLMTypedContent, input);
+    : Array.isArray(input) && input.every(isLLMContentPart);
 }
 
 export function isLLMToolCall(input: unknown): input is LLMToolCall {
@@ -134,7 +188,7 @@ export function isLLMTool(input: unknown): input is LLMTool {
 export function isLLMMessage(input: unknown): input is LLMMessage {
   return isRecord(input) && !Array.isArray(input) &&
     (input.role === "user" || input.role === "assistant" ||
-      input.role === "tool") &&
+      input.role === "tool" || input.role === "system") &&
     isLLMContent(input.content) &&
     (!("toolCalls" in input) || (Array.isArray(input.toolCalls) &&
       input.toolCalls.every((tc: unknown) => isLLMToolCall(tc)))) &&

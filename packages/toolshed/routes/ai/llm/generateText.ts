@@ -4,6 +4,9 @@ import {
   type LLMMessage,
   type LLMRequest,
   type LLMTool,
+  type LLMToolCallPart,
+  type LLMToolResultPart,
+  type LLMTextPart,
 } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
 
@@ -100,8 +103,8 @@ export function configureJsonMode(
 
     // Use prefill for non-streaming responses to anchor the JSON structure
     if (
-      !isStreaming && messages.length > 0 &&
-      messages[messages.length - 1].role === "user"
+      !isStreaming && coreMessages.length > 0 &&
+      coreMessages[coreMessages.length - 1].role === "user"
     ) {
       streamParams.prefill = {
         text: "{\n",
@@ -148,39 +151,103 @@ export async function generateText(
   }
 
   // Convert messages to Vercel AI SDK format
-  // We need to handle tool calls and results properly
-  const messages = params.messages.map((message) => {
-    // Handle assistant messages with tool calls/results
-    if (message.role === "assistant") {
-      // If there are tool results, append them as text for now
-      // This is a temporary solution until we properly implement CT-859
-      if (message.toolResults && message.toolResults.length > 0) {
-        const toolResultsText = message.toolResults
-          .map(r => `Tool ${r.id}: ${JSON.stringify(r.result || r.error)}`)
-          .join("\n");
-        return {
-          role: "assistant",
-          content: message.content + "\n\nTool Results:\n" + toolResultsText
-        };
+  // Handle the new content array format with tool calls and results
+  const coreMessages = params.messages.map((message): CoreMessage | null => {
+    // Handle user messages
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        return { role: "user", content: message.content };
       }
-      return {
-        role: "assistant",
-        content: message.content || ""
-      };
+      // If content is an array, extract text parts
+      if (Array.isArray(message.content)) {
+        const textParts = message.content
+          .filter((part): part is LLMTextPart => 
+            typeof part === "object" && "type" in part && part.type === "text"
+          )
+          .map(part => part.text)
+          .join("\n");
+        return { role: "user", content: textParts || "" };
+      }
     }
     
-    // Keep user messages as-is if they have string content
-    if (message.role === "user" && typeof message.content === "string") {
-      return message;
+    // Handle assistant messages with content arrays
+    if (message.role === "assistant") {
+      // Handle string content
+      if (typeof message.content === "string") {
+        return { role: "assistant", content: message.content };
+      }
+      
+      // Handle content array with tool calls
+      if (Array.isArray(message.content)) {
+        const parts: any[] = [];
+        
+        for (const contentPart of message.content) {
+          if (contentPart.type === "text") {
+            parts.push({ type: "text", text: (contentPart as LLMTextPart).text });
+          } else if (contentPart.type === "tool-call") {
+            const toolCall = contentPart as LLMToolCallPart;
+            parts.push({
+              type: "tool-call",
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              args: toolCall.args,
+            });
+          }
+        }
+        
+        return { role: "assistant", content: parts };
+      }
+      
+      // Handle legacy format with toolCalls/toolResults (backward compatibility)
+      if (message.toolCalls && message.toolCalls.length > 0) {
+        const parts: any[] = [];
+        if (message.content) {
+          parts.push({ type: "text", text: String(message.content) });
+        }
+        for (const toolCall of message.toolCalls) {
+          parts.push({
+            type: "tool-call",
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            args: toolCall.arguments,
+          });
+        }
+        return { role: "assistant", content: parts };
+      }
+      
+      return { role: "assistant", content: String(message.content || "") };
     }
     
-    // Filter out any other message types for now
+    // Handle tool messages
+    if (message.role === "tool") {
+      if (Array.isArray(message.content)) {
+        const toolResults = message.content
+          .filter((part): part is LLMToolResultPart =>
+            typeof part === "object" && "type" in part && part.type === "tool-result"
+          );
+        
+        if (toolResults.length > 0) {
+          const toolResult = toolResults[0]; // Vercel AI SDK expects one result per message
+          return {
+            role: "tool",
+            content: [{
+              type: "tool-result",
+              toolCallId: toolResult.toolCallId,
+              toolName: toolResult.toolName,
+              result: toolResult.error ? { error: toolResult.error } : toolResult.result,
+            }],
+          } as CoreMessage;
+        }
+      }
+    }
+    
+    // Filter out unhandled message types
     return null;
-  }).filter(msg => msg !== null);
+  }).filter((msg): msg is CoreMessage => msg !== null);
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
-    messages: messages as CoreMessage[],
+    messages: coreMessages,
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
@@ -224,7 +291,7 @@ export async function generateText(
     !modelConfig.capabilities.systemPrompt && params.system &&
     messages.length > 0
   ) {
-    messages[0].content = `${params.system}\n\n${messages[0].content}`;
+    coreMessages[0].content = `${params.system}\n\n${coreMessages[0].content}`;
     streamParams.system = undefined;
   }
 
@@ -302,15 +369,15 @@ export async function generateText(
       result += params.stop;
     }
 
-    if (messages[messages.length - 1].role === "user") {
-      messages.push({ role: "assistant", content: result });
-    } else {
-      messages[messages.length - 1].content = result;
-    }
+    // Create the assistant response message
+    const assistantMessage: LLMMessage = {
+      role: "assistant",
+      content: result,
+    };
 
     return {
-      message: messages[messages.length - 1],
-      messages: [...messages],
+      message: assistantMessage,
+      messages: [...params.messages, assistantMessage],
       spanId,
     };
   }
@@ -320,8 +387,9 @@ export async function generateText(
     async start(controller) {
       let result = "";
       // If last message was from assistant, send it first
-      if (messages[messages.length - 1].role === "assistant") {
-        const content = messages[messages.length - 1].content;
+      if (params.messages.length > 0 && params.messages[params.messages.length - 1].role === "assistant") {
+        const lastMessage = params.messages[params.messages.length - 1];
+        const content = lastMessage.content;
         // This `content` could be a `LLMTypedContent`, which isn't supported here.
         if (typeof content !== "string") {
           throw new Error("LLMTypedContent not supported in responses.");
@@ -387,12 +455,7 @@ export async function generateText(
         result = cleanJsonResponse(result);
       }
 
-      // Update message history
-      if (messages[messages.length - 1].role === "user") {
-        messages.push({ role: "assistant", content: result });
-      } else {
-        messages[messages.length - 1].content = result;
-      }
+      // Message history will be updated in onStreamComplete
 
       // Send finish event to client
       controller.enqueue(
@@ -403,11 +466,18 @@ export async function generateText(
         ),
       );
 
+      // Create the assistant response message
+      const assistantMessage: LLMMessage = {
+        role: "assistant",
+        content: result,
+      };
+      const finalMessages = [...params.messages, assistantMessage];
+
       // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {
         params.onStreamComplete({
-          message: messages[messages.length - 1],
-          messages: [...messages],
+          message: assistantMessage,
+          messages: finalMessages,
           originalRequest: params,
         });
       }
@@ -416,9 +486,15 @@ export async function generateText(
     },
   });
 
+  // Create a placeholder assistant message for streaming response
+  const assistantMessage: LLMMessage = {
+    role: "assistant",
+    content: "", // Will be filled by streaming
+  };
+
   return {
-    message: messages[messages.length - 1],
-    messages: [...messages],
+    message: assistantMessage,
+    messages: [...params.messages, assistantMessage],
     stream,
     spanId,
   };

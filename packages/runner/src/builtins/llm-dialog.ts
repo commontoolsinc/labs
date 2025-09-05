@@ -12,6 +12,9 @@ import {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTool,
+  BuiltInLLMToolCallPart,
+  BuiltInLLMToolResultPart,
+  BuiltInLLMTextPart,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
@@ -223,21 +226,40 @@ function mainLogic(
         try {
           const newMessages: BuiltInLLMMessage[] = [];
 
-          // Add assistant message with tool calls to conversation
-          // This structure will change in CT-859
+          // Create assistant message with tool-call content parts
+          const assistantContentParts: Array<BuiltInLLMTextPart | BuiltInLLMToolCallPart> = [];
+          
+          // Add text content if present
+          if (llmResult.content) {
+            assistantContentParts.push({
+              type: "text",
+              text: llmResult.content,
+            });
+          }
+
+          // Add tool call parts
+          for (const toolCall of llmResult.toolCalls) {
+            assistantContentParts.push({
+              type: "tool-call",
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              args: toolCall.arguments,
+            });
+          }
+
           const assistantMessage: BuiltInLLMMessage = {
             role: "assistant",
-            content: llmResult.content,
-            toolCalls: llmResult.toolCalls,
+            content: assistantContentParts,
           };
+          newMessages.push(assistantMessage);
 
-          // Execute each tool call and collect results
-          const toolResults: any[] = [];
+          // Execute each tool call and create separate tool messages
           for (const toolCall of llmResult.toolCalls) {
             const toolDef = toolsCell.key(toolCall.name) as Cell<
               BuiltInLLMTool
             >;
 
+            let toolResultPart: BuiltInLLMToolResultPart;
             try {
               const resultValue = await invokeHandlerAsToolCall(
                 runtime,
@@ -245,24 +267,30 @@ function mainLogic(
                 toolDef,
                 toolCall,
               );
-              // this is probably a proxy, so it may still update in the conversation history reactively later
-              // but we intend this to be a static / snapshot at this stage
-              toolResults.push({
-                id: toolCall.id,
+              toolResultPart = {
+                type: "tool-result",
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
                 result: resultValue,
-              });
+              };
             } catch (error) {
               console.error(`Tool ${toolCall.name} failed:`, error);
-              toolResults.push({
-                id: toolCall.id,
+              toolResultPart = {
+                type: "tool-result",
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                result: null,
                 error: error instanceof Error ? error.message : String(error),
-              });
+              };
             }
-          }
 
-          // Update the assistant message to include tool results
-          assistantMessage.toolResults = toolResults;
-          newMessages.push(assistantMessage);
+            // Create a separate tool message for each result
+            const toolMessage: BuiltInLLMMessage = {
+              role: "tool",
+              content: [toolResultPart],
+            };
+            newMessages.push(toolMessage);
+          }
 
           const success = perform(runtime, pending, (tx) => {
             messagesCell.withTx(tx).set([
@@ -273,9 +301,9 @@ function mainLogic(
           });
 
           if (success) {
-            // CT-859: Support continuations - call mainLogic() again for chained tool calls
+            // Support continuations - call mainLogic() again for chained tool calls
             // The LLM will see the tool results and can make additional tool calls
-            console.log("[CT-859] Continuing conversation after tool calls...");
+            console.log("Continuing conversation after tool calls...");
             
             // Create a new transaction for the continuation
             const continueTx = runtime.edit();
