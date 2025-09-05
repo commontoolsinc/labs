@@ -1,6 +1,8 @@
 import { css, html, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type Cell } from "@commontools/runner";
+import { createCellController } from "../../core/cell-controller.ts";
 
 /**
  * CTSelect – Dropdown/select component that accepts an array of generic JS objects
@@ -15,7 +17,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {string}  placeholder – Placeholder text rendered as a disabled option
  *
  * @prop {Array<SelectItem>} items – Data used to generate options
- * @prop {unknown|unknown[]} value – Selected value(s). Array when `multiple`
+ * @prop {Cell<unknown>|Cell<unknown[]>|unknown|unknown[]} value – Selected value(s) - supports both Cell and plain values
  *
  * @fires ct-change – detail: { value, oldValue, items }
  * @fires change – detail: { value, oldValue, items }
@@ -109,6 +111,25 @@ export class CTSelect extends BaseElement {
   private _select!: HTMLSelectElement;
   /** Mapping from stringified option key -> SelectItem */
   private _keyMap = new Map<string, SelectItem>();
+  
+  /* ---------- Cell controller for value binding ---------- */
+  private _cellController = createCellController<unknown | unknown[]>(this, {
+    timing: { strategy: "immediate" }, // Select changes should be immediate
+    onChange: (newValue, oldValue) => {
+      // Emit change events
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        items: this.items,
+      });
+
+      this.emit("change", {
+        value: newValue,
+        oldValue,
+        items: this.items,
+      });
+    },
+  });
 
   /* ---------- Reactive properties ---------- */
   static override properties = {
@@ -131,7 +152,7 @@ export class CTSelect extends BaseElement {
   declare name: string;
   declare placeholder: string;
   declare items: SelectItem[];
-  declare value: unknown | unknown[];
+  declare value: Cell<unknown> | Cell<unknown[]> | unknown | unknown[];
 
   constructor() {
     super();
@@ -150,7 +171,20 @@ export class CTSelect extends BaseElement {
     this._select = this.shadowRoot!.querySelector(
       "select",
     ) as HTMLSelectElement;
+    
+    // Initialize cell controller binding
+    this._cellController.bind(this.value);
     this.applyValueToDom();
+  }
+
+  override willUpdate(changedProperties: Map<string, any>) {
+    super.willUpdate(changedProperties);
+
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
+      // Bind the new value (Cell or plain) to the controller
+      this._cellController.bind(this.value);
+    }
   }
 
   override updated(changed: Map<string | number | symbol, unknown>) {
@@ -158,6 +192,7 @@ export class CTSelect extends BaseElement {
       // Rebuild key map each time items array changes
       this._buildKeyMap();
     }
+    
     if (changed.has("value") || changed.has("items")) {
       this.applyValueToDom();
     }
@@ -183,8 +218,9 @@ export class CTSelect extends BaseElement {
   }
 
   private _renderPlaceholder() {
+    const currentValue = this.getCurrentValue();
     const hasSelection =
-      (this.multiple ? (this.value as unknown[])?.length : this.value) ?? false;
+      (this.multiple ? (currentValue as unknown[])?.length : currentValue) ?? false;
 
     // Use placeholder if provided, otherwise use "-" (no selection)
     const placeholderText = this.placeholder || "-";
@@ -250,31 +286,21 @@ export class CTSelect extends BaseElement {
   /* ---------- Events ---------- */
   private _onChange(e: Event) {
     const select = e.target as HTMLSelectElement;
-    const oldValue = this.value;
+    const oldValue = this.getCurrentValue();
+    let newValue: unknown | unknown[];
 
     if (this.multiple) {
       const selectedKeys = Array.from(select.selectedOptions).map(
         (o) => o.value,
       );
-      const vals = selectedKeys.map((k) => this._keyMap.get(k)!.value);
-      this.value = vals;
+      newValue = selectedKeys.map((k) => this._keyMap.get(k)!.value);
     } else {
       const optKey = select.value;
-      this.value = this._keyMap.get(optKey)?.value;
+      newValue = this._keyMap.get(optKey)?.value;
     }
 
-    this.emit("ct-change", {
-      value: this.value,
-      oldValue,
-      items: this.items,
-    });
-
-    // Also emit a standard "change" event for frameworks that rely on it
-    this.emit("change", {
-      value: this.value,
-      oldValue,
-      items: this.items,
-    });
+    // Always update through cell controller
+    this._cellController.setValue(newValue);
   }
 
   /* ---------- Public API ---------- */
@@ -308,20 +334,29 @@ export class CTSelect extends BaseElement {
   }
 
   /**
+   * Get the current value from the cell controller
+   */
+  private getCurrentValue(): unknown | unknown[] {
+    return this._cellController.getValue();
+  }
+
+  /**
    * After any update, ensure DOM option selection state
-   * matches the `value` property.
+   * matches the current value.
    */
   private applyValueToDom() {
     if (!this._select) return;
 
+    const currentValue = this.getCurrentValue();
+
     if (this.multiple) {
-      const values = (this.value as unknown[] | undefined) ?? [];
+      const values = (currentValue as unknown[] | undefined) ?? [];
       Array.from(this._select.options).forEach((opt) => {
         const item = this._keyMap.get(opt.value);
         opt.selected = item ? values.includes(item.value) : false;
       });
     } else {
-      const val = this.value;
+      const val = currentValue;
       const matchKey = [...this._keyMap.entries()].find(
         ([, item]) => item.value === val,
       )?.[0];
