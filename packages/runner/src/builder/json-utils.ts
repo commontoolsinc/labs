@@ -152,9 +152,7 @@ export function createJsonSchema(
         return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
       }
 
-      const tx = runtime?.edit();
-      const cell = tx && runtime?.getCellFromLink(link, undefined, tx);
-      tx?.commit();
+      const cell = runtime?.getCellFromLink(link);
       if (!cell) return {}; // TODO(seefeld): Should be `true`
 
       let schema = cell.schema;

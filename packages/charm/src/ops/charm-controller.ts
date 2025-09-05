@@ -37,23 +37,22 @@ class CharmPropIo implements CharmCellIo {
 
   async set(value: unknown, path?: CellPath) {
     const manager = this.#cc.manager();
-    const tx = manager.runtime.edit();
-    const targetCell = this.#getTargetCell();
 
-    // Build the path with transaction context
-    let txCell = targetCell.withTx(tx);
-    for (const segment of (path ?? [])) {
-      txCell = txCell.key(segment);
-    }
+    await manager.runtime.editWithRetry((tx) => {
+      const targetCell = this.#getTargetCell();
 
-    // Set the value
-    // FIXME: types
-    // Charm input is not a Charm
-    txCell.set(value as Charm);
-    const result = await tx.commit();
-    if (result.error) {
-      throw result.error;
-    }
+      // Build the path with transaction context
+      let txCell = targetCell.withTx(tx);
+      for (const segment of (path ?? [])) {
+        txCell = txCell.key(segment);
+      }
+
+      // Set the value
+      // FIXME: types
+      // Charm input is not a Charm
+      txCell.set(value as Charm);
+    });
+
     await manager.runtime.idle();
     await manager.synced();
   }
