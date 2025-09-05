@@ -171,13 +171,13 @@ export interface IRuntime {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   run<T, R>(
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
@@ -258,13 +258,13 @@ export interface IRunner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
 
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -581,19 +581,19 @@ export class Runtime implements IRuntime {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R> {
+  ): Promise<Cell<R>> {
     return this.runner.setup<T, R>(tx, recipeOrModule, argument, resultCell);
   }
   run<T, R>(
