@@ -5,8 +5,8 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import {
-  getArrayElementInfo,
   getAliasElementNodeForCellArray,
+  getArrayElementInfo,
   getContainerArrayElementInfoForWrapper,
   isDefaultTypeRef,
   safeGetTypeFromTypeNode,
@@ -96,7 +96,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Type safety: ensure we have an object type with reference for interface cases
     if (!(type.flags & ts.TypeFlags.Object)) {
-      return { type: "object", additionalProperties: true };
+      return { type: "object", additionalProperties: true }; // throw error probably
     }
 
     const objectType = type as ts.ObjectType;
