@@ -111,7 +111,7 @@ export class CTSelect extends BaseElement {
   private _select!: HTMLSelectElement;
   /** Mapping from stringified option key -> SelectItem */
   private _keyMap = new Map<string, SelectItem>();
-  
+
   /* ---------- Cell controller for value binding ---------- */
   private _cellController = createCellController<unknown | unknown[]>(this, {
     timing: { strategy: "immediate" }, // Select changes should be immediate
@@ -171,7 +171,7 @@ export class CTSelect extends BaseElement {
     this._select = this.shadowRoot!.querySelector(
       "select",
     ) as HTMLSelectElement;
-    
+
     // Initialize cell controller binding
     this._cellController.bind(this.value);
     this.applyValueToDom();
@@ -192,7 +192,7 @@ export class CTSelect extends BaseElement {
       // Rebuild key map each time items array changes
       this._buildKeyMap();
     }
-    
+
     if (changed.has("value") || changed.has("items")) {
       this.applyValueToDom();
     }
@@ -220,7 +220,8 @@ export class CTSelect extends BaseElement {
   private _renderPlaceholder() {
     const currentValue = this.getCurrentValue();
     const hasSelection =
-      (this.multiple ? (currentValue as unknown[])?.length : currentValue) ?? false;
+      (this.multiple ? (currentValue as unknown[])?.length : currentValue) ??
+        false;
 
     // Use placeholder if provided, otherwise use "-" (no selection)
     const placeholderText = this.placeholder || "-";

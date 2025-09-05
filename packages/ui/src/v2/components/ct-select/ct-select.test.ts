@@ -104,9 +104,9 @@ describe("CTSelect", () => {
     ];
 
     element.items = testItems;
-    
+
     // Should accept items with groups
     expect(element.items.length).toBe(4);
-    expect(element.items.every(item => item.group)).toBe(true);
+    expect(element.items.every((item) => item.group)).toBe(true);
   });
 });
