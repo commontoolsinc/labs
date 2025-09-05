@@ -98,7 +98,6 @@ export class Runner implements IRunner {
     } else {
       return this.runtime.editWithRetry((tx) => {
         this.setupInternal(tx, recipeOrModule, argument, resultCell);
-        return resultCell;
       }).then(() => resultCell);
     }
   }

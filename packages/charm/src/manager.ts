@@ -194,6 +194,8 @@ export class CharmManager {
       if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
         changed = true;
+      } else {
+        changed = false;
       }
     }) && changed;
   }
