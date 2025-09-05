@@ -1,6 +1,7 @@
 import "core-js/proposals/explicit-resource-management";
 import "@commontools/ui/v1";
 import "@commontools/ui/v2";
+import { setLLMUrl } from "@commontools/llm";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { AppUpdateEvent } from "./lib/app/events.ts";
 import { XRootView } from "./views/RootView.ts";
@@ -12,6 +13,9 @@ import "./globals.ts";
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);
+
+// Configure LLM client to use the correct API URL
+setLLMUrl(API_URL.toString());
 
 const root = document.querySelector("x-root-view");
 if (!root) throw new Error("No root view found.");
