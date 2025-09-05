@@ -431,7 +431,7 @@ export class Runtime implements IRuntime {
    *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
-   * @returns Promise that resolves when the transaction is committed.
+   * @returns Promise<boolean> that resolves to true on success, or false after exhausting retries.
    */
   editWithRetry(
     fn: (tx: IExtendedStorageTransaction) => void,
