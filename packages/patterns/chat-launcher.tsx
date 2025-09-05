@@ -48,7 +48,7 @@ const createChat = handler<
 
   console.log(
     "[ChatLauncher] newChatInstance",
-    JSON.stringify(newChatInstance),
+    "created",
   );
   // Navigate to the new chat
   return navigateTo(newChatInstance);
@@ -60,7 +60,7 @@ export default recipe<MainRecipeInput>(
     derive(title, (t) => console.log("title=", t));
 
     return {
-      [NAME]: { title },
+      [NAME]: title,
       [UI]: (
         <div>
           <h2>title is {title}</h2>

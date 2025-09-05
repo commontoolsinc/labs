@@ -45,17 +45,19 @@ const sendMessage = handler<
 
   addMessage.send({ role: "user", content: event.detail.message });
 
-  // Push a snapshot that includes the just-sent user message
+  // Ensure the current chat is in sessions (by reference) and bump list ref for reactivity
+  const sessions = chatSessions.get();
   const currentChat = chat.get();
-  const snapshotWithUserMessage: Array<BuiltInLLMMessage> = [
-    ...currentChat,
-    { role: "user", content: event.detail.message } as BuiltInLLMMessage,
-  ];
-  console.log(
-    "[sendMessage] adding chat to sessions (post-send snapshot), length:",
-    snapshotWithUserMessage.length,
-  );
-  chatSessions.push(snapshotWithUserMessage as any);
+  const alreadyPresent = sessions.some((session) => session === currentChat);
+  if (!alreadyPresent) {
+    console.log("[sendMessage] adding chat to sessions (by ref)");
+    chatSessions.set([...sessions, currentChat as any]);
+  } else {
+    chatSessions.set([...sessions]);
+    console.log(
+      "[sendMessage] chat already present in sessions (by ref), bumped list ref",
+    );
+  }
 });
 
 const clearChat = handler(
@@ -85,10 +87,23 @@ export default recipe<LLMTestInput, LLMTestResult>(
         "[CHAT derive] chatMessages changed, length:",
         chatMessages.length,
       );
-      // Always add if there are messages
+      // Only add once per chat (by reference)
       if (chatMessages.length > 0) {
-        console.log("[CHAT derive] adding chat to sessions");
-        chatSessions.push(chatMessages as any);
+        console.log("[CHAT derive] nonzero length chatMessages");
+        const sessions = chatSessions.get();
+        const alreadyPresent = sessions.some((session) =>
+          session === chatMessages
+        );
+        if (!alreadyPresent) {
+          console.log("[CHAT derive] adding chat to sessions (by ref)");
+          chatSessions.set([...sessions, chatMessages as any]);
+        } else {
+          // Bump reference so launcher re-derives and re-renders message lists
+          chatSessions.set([...sessions]);
+          console.log(
+            "[CHAT derive] chat already present in sessions (by ref), bumped list ref",
+          );
+        }
       }
     });
 
