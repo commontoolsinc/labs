@@ -21,14 +21,14 @@ async function isValidCache(path: string): Promise<boolean> {
 export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
   const logger = c.get("logger");
   const payload = await c.req.json();
-  const { query, max_results = 5 } = payload;
+  const { query, max_results = 5, include_content = false } = payload;
 
-  const cacheKey = `${query}-${max_results}`;
+  const cacheKey = `${query}-${max_results}-${include_content}`;
   const promptSha = await sha256(cacheKey);
   const cachePath = `${CACHE_DIR}/${promptSha}.json`;
 
   logger.info(
-    { query, max_results, promptSha },
+    { query, max_results, include_content, promptSha },
     "Starting web search",
   );
 
@@ -66,13 +66,21 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
     const searchUrl = new URL(JINA_SEARCH_ENDPOINT);
     searchUrl.searchParams.set("q", query);
 
+    // Build headers based on whether we want content or not
+    const headers: Record<string, string> = {
+      "Accept": "application/json",
+      "Authorization": `Bearer ${env.JINA_API_KEY}`,
+    };
+
+    if (include_content) {
+      headers["X-Engine"] = "direct"; // Fetch content from search results
+    } else {
+      headers["X-Respond-With"] = "no-content"; // Only search results, no content
+    }
+
     const response = await fetch(searchUrl.toString(), {
       method: "GET",
-      headers: {
-        "Accept": "application/json",
-        "Authorization": `Bearer ${env.JINA_API_KEY}`,
-        "X-Respond-With": "no-content", // Request only search results, no page content
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -95,15 +103,21 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
     const result = await response.json();
     logger.info({ result }, "Search completed successfully");
 
-    // Transform the Jina response to our API schema
+    // Transform the Jina response to our API schema, preserving more fields
     const transformedResult = {
+      code: result.code,
+      status: result.status,
       query,
       results: (result.data || []).slice(0, max_results).map((item: any) => ({
         title: item.title || "Untitled",
         url: item.url,
-        snippet: item.description || item.content?.substring(0, 200) || "",
+        description: item.description || item.content?.substring(0, 200) || "",
+        content: item.content || "",
+        date: item.date,
+        usage: item.usage,
       })),
       total_results: result.data?.length || 0,
+      meta: result.meta,
     };
 
     // Save to cache

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 const tags = ["Agent Tools"];
 
-// Advanced options schema for POST endpoint
+// Web reader options schema for POST endpoint
 const WebReaderOptionsSchema = z.object({
   url: z.string().url().describe("The URL to extract content from"),
   include_images: z.boolean().default(false)
@@ -17,60 +17,8 @@ const WebReaderOptionsSchema = z.object({
     .describe("Maximum number of tokens to extract"),
 });
 
-// Simple GET endpoint
-export const readWebPage = createRoute({
-  path: "/api/agent-tools/web-read/:url{.+}",
-  method: "get",
-  tags,
-  request: {
-    params: z.object({
-      url: z.string().describe("URL encoded web page URL to read").openapi({
-        example: "https://metar-taf.com/KAFF",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            content: z.string(),
-            metadata: z.object({
-              title: z.string().optional(),
-              author: z.string().optional(),
-              date: z.string().optional(),
-              word_count: z.number(),
-            }),
-          }),
-        },
-      },
-      description: "Extracted web page content",
-    },
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Invalid request parameters",
-    },
-    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Error extracting content",
-    },
-  },
-});
-
-// Advanced POST endpoint
-export const readWebPageAdvanced = createRoute({
+// Web read POST endpoint
+export const webRead = createRoute({
   path: "/api/agent-tools/web-read",
   method: "post",
   tags,
@@ -107,7 +55,7 @@ export const readWebPageAdvanced = createRoute({
           }),
         },
       },
-      description: "Extracted web page content with advanced options",
+      description: "Extracted web page content",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {
@@ -132,5 +80,4 @@ export const readWebPageAdvanced = createRoute({
   },
 });
 
-export type ReadWebPageRoute = typeof readWebPage;
-export type ReadWebPageAdvancedRoute = typeof readWebPageAdvanced;
+export type WebReadRoute = typeof webRead;

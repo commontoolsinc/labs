@@ -5,6 +5,7 @@ import {
   cell,
   Default,
   derive,
+  getRecipeEnvironment,
   h,
   handler,
   ifElse,
@@ -105,8 +106,9 @@ const searchWeb = handler<
     try {
       state.result.set(`Searching: ${args.query}...`);
 
+      const env = getRecipeEnvironment();
       const response = await fetch(
-        "http://localhost:3000/api/agent-tools/web-search",
+        new URL("/api/agent-tools/web-search", env.apiUrl),
         {
           method: "POST",
           headers: {
@@ -128,7 +130,7 @@ const searchWeb = handler<
       // Format the search results
       const formattedResults = data.results
         .map((r: any, i: number) =>
-          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
+          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`
         )
         .join("\n\n");
 
