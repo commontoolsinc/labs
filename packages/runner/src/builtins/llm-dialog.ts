@@ -269,11 +269,18 @@ function mainLogic(
               ...(messagesCell.get() ?? []),
               ...newMessages,
             ]);
-            pending.withTx(tx).set(false);
+            // Keep pending true to continue the conversation
           });
 
           if (success) {
-            // TODO(bf): [CT-859] when we support continuations, call mainLogic() again here
+            // CT-859: Support continuations - call mainLogic() again for chained tool calls
+            // The LLM will see the tool results and can make additional tool calls
+            console.log("[CT-859] Continuing conversation after tool calls...");
+            
+            // Create a new transaction for the continuation
+            const continueTx = runtime.edit();
+            mainLogic(continueTx, runtime, parentCell, inputsCell, pending);
+            continueTx.commit();
           } else {
             console.info("Did not write to conversation due to pending=false");
           }

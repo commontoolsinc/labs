@@ -147,12 +147,36 @@ export async function generateText(
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
-  // `streamText` messages only support "user", "assistant" roles
-  // and string content.
-  const messages = params.messages.filter((message) => {
-    return (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string";
-  });
+  // Convert messages to Vercel AI SDK format
+  // We need to handle tool calls and results properly
+  const messages = params.messages.map((message) => {
+    // Handle assistant messages with tool calls/results
+    if (message.role === "assistant") {
+      // If there are tool results, append them as text for now
+      // This is a temporary solution until we properly implement CT-859
+      if (message.toolResults && message.toolResults.length > 0) {
+        const toolResultsText = message.toolResults
+          .map(r => `Tool ${r.id}: ${JSON.stringify(r.result || r.error)}`)
+          .join("\n");
+        return {
+          role: "assistant",
+          content: message.content + "\n\nTool Results:\n" + toolResultsText
+        };
+      }
+      return {
+        role: "assistant",
+        content: message.content || ""
+      };
+    }
+    
+    // Keep user messages as-is if they have string content
+    if (message.role === "user" && typeof message.content === "string") {
+      return message;
+    }
+    
+    // Filter out any other message types for now
+    return null;
+  }).filter(msg => msg !== null);
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
