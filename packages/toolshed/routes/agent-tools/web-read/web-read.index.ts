@@ -3,14 +3,13 @@ import * as handlers from "./web-read.handlers.ts";
 import * as routes from "./web-read.routes.ts";
 import { cors } from "@hono/hono/cors";
 const router = createRouter()
-  .openapi(routes.readWebPage, handlers.readWebPage)
-  .openapi(routes.readWebPageAdvanced, handlers.readWebPageAdvanced);
+  .openapi(routes.webRead, handlers.webRead);
 
 router.use(
-  "/api/agent-tools/web-read/*",
+  "/api/agent-tools/web-read",
   cors({
     origin: "*",
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowMethods: ["POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     exposeHeaders: ["Content-Length", "X-Disk-Cache"],
     maxAge: 3600,
