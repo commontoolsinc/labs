@@ -60,9 +60,11 @@ export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
     const calculatorResult = cell<string>("");
+    const model = cell<string>("anthropic:claude-sonnet-4-20250514");
 
     const { addMessage, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
+      model,
       messages: chat,
     });
 
@@ -85,7 +87,39 @@ export default recipe<LLMTestInput, LLMTestResult>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <h2 slot="header">{title}</h2>
+          <ct-hstack justify="between" slot="header">
+            <ct-button
+              id="clear-chat-button"
+              onClick={clearChat({
+                chat,
+                llmResponse: { pending },
+              })}
+            >
+              Clear Chat
+            </ct-button>
+
+            <ct-select
+              items={[
+                {
+                  label: "Claude Opus",
+                  value: "anthropic:claude-opus-4-20250514",
+                },
+                {
+                  label: "Claude Opus Thinking",
+                  value: "anthropic:claude-opus-4-20250514-thinking",
+                },
+                {
+                  label: "Claude Sonnet",
+                  value: "anthropic:claude-sonnet-4-20250514",
+                },
+                {
+                  label: "Claude Sonnet Thinking",
+                  value: "anthropic:claude-sonnet-4-20250514-thinking",
+                },
+              ]}
+              $value={model}
+            />
+          </ct-hstack>
 
           <ct-vscroll
             showScrollbar
@@ -119,16 +153,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
               disabled={pending}
               onct-send={sendMessage({ addMessage })}
             />
-
-            <ct-button
-              id="clear-chat-button"
-              onClick={clearChat({
-                chat,
-                llmResponse: { pending },
-              })}
-            >
-              Clear Chat
-            </ct-button>
           </div>
         </ct-screen>
       ),
