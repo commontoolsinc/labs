@@ -46,6 +46,21 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     expect(ev.asStream).toBe(true);
   });
 
+  it("Stream<Default<string[], ['a']>> yields array schema with default", async () => {
+    const code = `
+      interface Default<T, V> {}
+      interface Stream<T> { subscribe(cb: (v:T) => void): void; }
+      interface X { events: Stream<Default<string[], ["a"]>>; }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const s = createSchemaTransformerV2()(type, checker);
+    const ev = s.properties?.events as any;
+    expect(ev.type).toBe("array");
+    expect(ev.items?.type).toBe("string");
+    expect(ev.default).toEqual(["a"]);
+    expect(ev.asStream).toBe(true);
+  });
+
   it("array of Cell<string>", async () => {
     const code = `
       interface Cell<T> { get(): T; set(v: T): void; }

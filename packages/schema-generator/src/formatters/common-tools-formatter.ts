@@ -6,6 +6,8 @@ import type {
 } from "../interface.ts";
 import {
   getArrayElementInfo,
+  getAliasElementNodeForCellArray,
+  getContainerArrayElementInfoForWrapper,
   isDefaultTypeRef,
   safeGetTypeFromTypeNode,
   TypeWithInternals,
@@ -128,47 +130,6 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: GenerationContext,
   ): SchemaDefinition {
-    // Helper: if the context node is an alias like type CellArray<T> = Cell<T[]>,
-    // detect and return the element node substituted with the actual argument.
-    const getAliasArrayElementFromCell = (
-      node: ts.TypeNode | undefined,
-    ): ts.TypeNode | undefined => {
-      if (!node || !ts.isTypeReferenceNode(node)) return undefined;
-      // Walk alias chain up to a small depth to see if it resolves to Cell<T[]>
-      let current: ts.TypeNode | undefined = node;
-      let depth = 0;
-      while (current && ts.isTypeReferenceNode(current) && depth < 5) {
-        const sym = checker.getSymbolAtLocation(current.typeName);
-        const decl = sym?.declarations?.[0];
-        if (!decl || !ts.isTypeAliasDeclaration(decl)) break;
-        const aliased = decl.type;
-        if (ts.isTypeReferenceNode(aliased)) {
-          if (
-            ts.isIdentifier(aliased.typeName) &&
-            aliased.typeName.text === "Cell"
-          ) {
-            const inner = aliased.typeArguments?.[0];
-            if (inner && ts.isArrayTypeNode(inner)) {
-              // Found pattern Cell<T[]>; return the actual type argument from usage
-              return node.typeArguments?.[0];
-            }
-            return undefined;
-          }
-          // Follow the alias to the next reference
-          current = aliased;
-          depth++;
-          continue;
-        }
-        // Parenthesized or other wrappers: try to unwrap
-        if (ts.isParenthesizedTypeNode(aliased)) {
-          current = aliased.type as ts.TypeNode;
-          depth++;
-          continue;
-        }
-        break;
-      }
-      return undefined;
-    };
     // Get the typeNode from context (like the old system did)
     const innerTypeNode = this.getInnerTypeNode(context);
 
@@ -177,7 +138,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
 
     // Alias like type CellArray<T> = Cell<T[]>; synthesize array from alias mapping
-    const aliasElemNode = getAliasArrayElementFromCell(context.typeNode);
+    const aliasElemNode = getAliasElementNodeForCellArray(
+      context.typeNode,
+      checker,
+    );
     if (aliasElemNode) {
       const elemType = checker.getTypeFromTypeNode(aliasElemNode);
       const items = this.schemaGenerator.formatChildType(
@@ -187,32 +151,22 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
       return { type: "array", items, asCell: true } as SchemaDefinition;
     }
-    // Alias-aware array detection on the actual container argument
+    // Array detection with alias awareness and Default<T,V> preservation
     const containerArg = this.getContainerArg(typeRef, 0);
-    // If the inner node syntactically refers to Default<...>, do NOT
-    // short-circuit via array detection on the erased type. Let Default
-    // formatting handle defaults and then array wrapping will be discovered
-    // when formatting the inner value type.
-    const innerLooksLikeDefault = !!(
-      innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-      isDefaultTypeRef(innerTypeNode, checker)
+    const arrInfo = getContainerArrayElementInfoForWrapper(
+      containerArg,
+      innerType,
+      innerTypeNode,
+      checker,
+      { skipIfInnerLooksLikeDefault: true },
     );
-    if (
-      containerArg && !innerLooksLikeDefault &&
-      !this.isNamedTypeRef(containerArg, "Default")
-    ) {
-      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, context);
-      if (arr) return { ...arr, asCell: true } as SchemaDefinition;
-    }
-    // Default<T,V> is handled by its own formatter; delegate and add asCell at the end
-
-    // Handle Cell<Array<T>> and Cell<T[]> using the shared helper, unless
-    // the inner syntactically looks like Default<...>, in which case we must
-    // preserve Default handling (including defaults) and allow array to be
-    // detected within Default formatting.
-    if (!innerLooksLikeDefault) {
-      const arr = this.arrayItemsSchema(innerType, innerTypeNode, context);
-      if (arr) return { ...arr, asCell: true } as SchemaDefinition;
+    if (arrInfo) {
+      const items = this.schemaGenerator.formatChildType(
+        arrInfo.elementType,
+        context,
+        arrInfo.elementNode,
+      );
+      return { type: "array", items, asCell: true } as SchemaDefinition;
     }
 
     const nodeDrivenType = innerTypeNode
@@ -239,13 +193,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         node.typeName.text === "Cell"
       );
     };
-    const isCellType = (t: ts.Type): boolean => {
-      return !!(
-        (t.flags & ts.TypeFlags.Object) !== 0 &&
-        ((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0 &&
-        ((t as ts.TypeReference).target?.symbol?.name === "Cell")
-      );
-    };
+    const isCellType = (t: ts.Type): boolean => this.isNamedTypeRef(t, "Cell");
     const withStreamFlags = (
       base: SchemaDefinition,
       innerT: ts.Type,
@@ -272,12 +220,20 @@ export class CommonToolsFormatter implements TypeFormatter {
       innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
       isDefaultTypeRef(innerTypeNode, checker)
     );
-    if (
-      containerArg && !innerLooksLikeDefault &&
-      !this.isNamedTypeRef(containerArg, "Default")
-    ) {
-      const arr = this.arrayItemsSchema(containerArg, innerTypeNode, context);
-      if (arr) return { ...arr, asStream: true };
+    const arrInfo = getContainerArrayElementInfoForWrapper(
+      containerArg,
+      innerType,
+      innerTypeNode,
+      checker,
+      { skipIfInnerLooksLikeDefault: true },
+    );
+    if (arrInfo) {
+      const items = this.schemaGenerator.formatChildType(
+        arrInfo.elementType,
+        context,
+        arrInfo.elementNode,
+      );
+      return { type: "array", items, asStream: true } as SchemaDefinition;
     }
     // If Stream<Default<T,V>> is encountered, Default handles default/union.
     // Generate child schema and apply Stream/Cell flags based on inner shape.
