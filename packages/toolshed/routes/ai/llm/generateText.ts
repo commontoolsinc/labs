@@ -103,8 +103,8 @@ export function configureJsonMode(
 
     // Use prefill for non-streaming responses to anchor the JSON structure
     if (
-      !isStreaming && coreMessages.length > 0 &&
-      coreMessages[coreMessages.length - 1].role === "user"
+      !isStreaming && messages.length > 0 &&
+      messages[messages.length - 1].role === "user"
     ) {
       streamParams.prefill = {
         text: "{\n",
@@ -235,7 +235,7 @@ export async function generateText(
               toolCallId: toolResult.toolCallId,
               toolName: toolResult.toolName,
               result: toolResult.error ? { error: toolResult.error } : toolResult.result,
-            }],
+            } as any], // Cast to any due to SDK v5 type differences
           } as CoreMessage;
         }
       }
@@ -281,7 +281,7 @@ export async function generateText(
     configureJsonMode(
       streamParams,
       params.model,
-      messages,
+      params.messages,
       params.stream || false,
     );
   }
@@ -289,7 +289,7 @@ export async function generateText(
   // Handle models that don't support system prompts
   if (
     !modelConfig.capabilities.systemPrompt && params.system &&
-    messages.length > 0
+    coreMessages.length > 0
   ) {
     coreMessages[0].content = `${params.system}\n\n${coreMessages[0].content}`;
     streamParams.system = undefined;
