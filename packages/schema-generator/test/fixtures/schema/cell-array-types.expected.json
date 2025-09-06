@@ -1,0 +1,31 @@
+{
+  "properties": {
+    "v": {
+      "asCell": true,
+      "items": {
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "w": {
+      "asCell": true,
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "v",
+    "w"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,62 @@
+{
+  "properties": {
+    "config": {
+      "default": {
+        "count": 10,
+        "theme": "dark"
+      },
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "theme": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "theme",
+        "count"
+      ],
+      "type": "object"
+    },
+    "user": {
+      "default": {
+        "name": "Anonymous",
+        "settings": {
+          "email": "user@example.com",
+          "notifications": true
+        }
+      },
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "settings": {
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "notifications": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "notifications",
+            "email"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "settings"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "config",
+    "user"
+  ],
+  "type": "object"
+}

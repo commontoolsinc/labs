@@ -1,0 +1,37 @@
+{
+  "$ref": "#/definitions/TreeNode",
+  "definitions": {
+    "TreeBranch": {
+      "properties": {
+        "metadata": {
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/definitions/TreeNode"
+        }
+      },
+      "required": [
+        "metadata",
+        "node"
+      ],
+      "type": "object"
+    },
+    "TreeNode": {
+      "properties": {
+        "left": {
+          "$ref": "#/definitions/TreeBranch"
+        },
+        "right": {
+          "$ref": "#/definitions/TreeBranch"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$ref": "#/definitions/SchemaRoot",
+  "definitions": {
+    "SchemaRoot": {
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/definitions/SchemaRoot"
+          },
+          "type": "array"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    }
+  }
+}

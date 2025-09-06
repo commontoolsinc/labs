@@ -1,0 +1,35 @@
+{
+  "$ref": "#/definitions/NodeA",
+  "definitions": {
+    "NodeA": {
+      "properties": {
+        "nodeB": {
+          "$ref": "#/definitions/NodeB"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeB",
+        "value"
+      ],
+      "type": "object"
+    },
+    "NodeB": {
+      "properties": {
+        "nodeA": {
+          "$ref": "#/definitions/NodeA"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "nodeA",
+        "value"
+      ],
+      "type": "object"
+    }
+  }
+}

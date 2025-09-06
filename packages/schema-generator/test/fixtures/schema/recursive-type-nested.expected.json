@@ -1,0 +1,27 @@
+{
+  "definitions": {
+    "LinkedList": {
+      "properties": {
+        "next": {
+          "$ref": "#/definitions/LinkedList"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "list": {
+      "$ref": "#/definitions/LinkedList"
+    }
+  },
+  "required": [
+    "list"
+  ],
+  "type": "object"
+}

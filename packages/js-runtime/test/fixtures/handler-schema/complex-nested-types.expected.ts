@@ -1,5 +1,7 @@
 /// <cts-enable />
 import { handler, Cell, recipe, JSONSchema } from "commontools";
+// Updated 2025-09-03: String literal unions now generate correct JSON Schema
+// (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {
     user: {
         name: string;
@@ -36,10 +38,7 @@ const userHandler = handler({
             required: ["name", "email"]
         },
         action: {
-            type: "array",
-            items: {
-                type: "string"
-            }
+            enum: ["create", "update", "delete"]
         }
     },
     required: ["user", "action"]

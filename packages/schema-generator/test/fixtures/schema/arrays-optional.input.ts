@@ -1,0 +1,3 @@
+interface SchemaRoot {
+  items?: string[];
+}
