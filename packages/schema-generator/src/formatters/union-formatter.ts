@@ -35,6 +35,9 @@ export class UnionFormatter implements TypeFormatter {
       this.schemaGenerator.formatChildType(t, context, typeNode);
 
     // Case: exactly one non-null member + null => anyOf (nullable type)
+    // Note: We use anyOf instead of oneOf for better consumer compatibility.
+    // For nullable types (T | null), both work identically since a value is either
+    // null OR the other type, never both. anyOf is more easily supported.
     if (hasNull && nonNull.length === 1) {
       const item = generate(nonNull[0]!);
       return { anyOf: [item, { type: "null" }] };
