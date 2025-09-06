@@ -82,30 +82,30 @@ export default recipe<LLMTestInput, LLMTestResult>(
     // Just use the derive block
 
     // Use derive to add this chat to the chatSessions list when chat changes
-    derive(chat, (chatMessages) => {
-      console.log(
-        "[CHAT derive] chatMessages changed, length:",
-        chatMessages.length,
-      );
-      // Only add once per chat (by reference)
-      if (chatMessages.length > 0) {
-        console.log("[CHAT derive] nonzero length chatMessages");
-        const sessions = chatSessions.get();
-        const alreadyPresent = sessions.some((session) =>
-          session === chatMessages
-        );
-        if (!alreadyPresent) {
-          console.log("[CHAT derive] adding chat to sessions (by ref)");
-          chatSessions.set([...sessions, chatMessages as any]);
-        } else {
-          // Bump reference so launcher re-derives and re-renders message lists
-          chatSessions.set([...sessions]);
-          console.log(
-            "[CHAT derive] chat already present in sessions (by ref), bumped list ref",
-          );
-        }
-      }
-    });
+    // derive(chat, (chatMessages) => {
+    //   console.log(
+    //     "[CHAT derive] chatMessages changed, length:",
+    //     chatMessages.length,
+    //   );
+    //   // Only add once per chat (by reference)
+    //   if (chatMessages.length > 0) {
+    //     console.log("[CHAT derive] nonzero length chatMessages");
+    //     const sessions = chatSessions.get();
+    //     const alreadyPresent = sessions.some((session) =>
+    //       session === chatMessages
+    //     );
+    //     if (!alreadyPresent) {
+    //       console.log("[CHAT derive] adding chat to sessions (by ref)");
+    //       chatSessions.set([...sessions, chatMessages as any]);
+    //     } else {
+    //       // Bump reference so launcher re-derives and re-renders message lists
+    //       chatSessions.set([...sessions]);
+    //       console.log(
+    //         "[CHAT derive] chat already present in sessions (by ref), bumped list ref",
+    //       );
+    //     }
+    //   }
+    // });
 
     const calculatorResult = cell<string>("");
 
