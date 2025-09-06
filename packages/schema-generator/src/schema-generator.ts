@@ -245,7 +245,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     return !!(definitions[namedKey] && emittedRefs.has(namedKey));
   }
 
-
   /**
    * Detect cycles in the type graph
    */

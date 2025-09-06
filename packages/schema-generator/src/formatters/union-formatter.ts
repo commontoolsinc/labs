@@ -34,10 +34,10 @@ export class UnionFormatter implements TypeFormatter {
     const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition =>
       this.schemaGenerator.formatChildType(t, context, typeNode);
 
-    // Case: exactly one non-null member + null => oneOf
+    // Case: exactly one non-null member + null => anyOf (nullable type)
     if (hasNull && nonNull.length === 1) {
       const item = generate(nonNull[0]!);
-      return { oneOf: [item, { type: "null" }] };
+      return { anyOf: [item, { type: "null" }] };
     }
 
     // Case: all members are string/number/boolean literals -> enum
