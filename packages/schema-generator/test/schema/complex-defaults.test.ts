@@ -69,10 +69,10 @@ describe("Schema: Complex defaults", () => {
     const n = s.properties?.nullable as any;
     expect(n.default).toBe(null);
     // OneOf representation may vary; ensure at least type is present
-    expect(n.oneOf || n.type).toBeDefined();
+    expect(n.anyOf || n.type).toBeDefined();
     const u = s.properties?.undefinable as any;
     // Typically no default field for undefined
     expect(u.default).toBeUndefined();
-    expect(u.type || u.oneOf).toBeDefined();
+    expect(u.type || u.anyOf).toBeDefined();
   });
 });

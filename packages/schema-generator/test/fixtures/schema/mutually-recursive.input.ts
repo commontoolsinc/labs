@@ -1,4 +1,4 @@
-// Mutually recursive pattern: NodeA ↔ NodeB  
+// Mutually recursive pattern: NodeA ↔ NodeB
 interface NodeA {
   value: string;
   nodeB: NodeB;

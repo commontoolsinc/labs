@@ -4,5 +4,5 @@ interface LinkedList {
   next?: LinkedList;
 }
 
-// Root type for schema generation  
+// Root type for schema generation
 type SchemaRoot = LinkedList;

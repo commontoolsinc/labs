@@ -333,7 +333,9 @@ export function getAliasElementNodeForCellArray(
     if (!decl || !ts.isTypeAliasDeclaration(decl)) break;
     const aliased = decl.type;
     if (ts.isTypeReferenceNode(aliased)) {
-      if (ts.isIdentifier(aliased.typeName) && aliased.typeName.text === "Cell") {
+      if (
+        ts.isIdentifier(aliased.typeName) && aliased.typeName.text === "Cell"
+      ) {
         const inner = aliased.typeArguments?.[0];
         if (inner && ts.isArrayTypeNode(inner)) {
           // Found pattern Cell<T[]>; return the actual type argument from usage

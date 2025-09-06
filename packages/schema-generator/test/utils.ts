@@ -165,15 +165,15 @@ function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return sorted;
 }
 
-function normalizeOneOf(node: any): any {
-  if (!Array.isArray(node.oneOf)) return node;
-  // If oneOf contains exactly one null and one non-null, put null first.
-  if (node.oneOf.length === 2) {
-    const a = node.oneOf[0];
-    const b = node.oneOf[1];
+function normalizeAnyOf(node: any): any {
+  if (!Array.isArray(node.anyOf)) return node;
+  // If anyOf contains exactly one null and one non-null, put null first.
+  if (node.anyOf.length === 2) {
+    const a = node.anyOf[0];
+    const b = node.anyOf[1];
     const isNull = (x: any) => isPlainObject(x) && x.type === "null";
     if (isNull(b) && !isNull(a)) {
-      node.oneOf = [b, a];
+      node.anyOf = [b, a];
     }
   }
   return node;
@@ -207,8 +207,8 @@ function deepCanonicalize(node: unknown): unknown {
     );
   }
 
-  // Apply oneOf normalization for nullable patterns
-  normalizeOneOf(out);
+  // Apply anyOf normalization for nullable patterns
+  normalizeAnyOf(out);
 
   // Finally sort all object keys to ensure stable ordering in comparisons
   return sortObjectKeys(out);

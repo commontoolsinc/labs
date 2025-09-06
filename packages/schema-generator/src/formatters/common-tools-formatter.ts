@@ -512,7 +512,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         nn,
       );
 
-      const out: SchemaDefinition = { oneOf: [{ type: "null" }, nnSchema] };
+      const out: SchemaDefinition = { anyOf: [{ type: "null" }, nnSchema] };
       if (valueSchema.default !== undefined) {
         out.default = valueSchema.default;
       }
@@ -548,7 +548,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
 
       const out: SchemaDefinition = {
-        oneOf: [nonNullSchema, { type: "null" }],
+        anyOf: [nonNullSchema, { type: "null" }],
       };
       if (valueSchema.default !== undefined) {
         out.default = valueSchema.default;

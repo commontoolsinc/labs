@@ -3,7 +3,7 @@
     "document": {
       "properties": {
         "archivedAt": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "null"
             },
@@ -55,7 +55,7 @@
           "type": "string"
         },
         "lastLogin": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "null"
             },

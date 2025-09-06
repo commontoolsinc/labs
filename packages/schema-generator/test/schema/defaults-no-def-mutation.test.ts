@@ -30,4 +30,3 @@ describe("Schema: Default<T,V> does not mutate shared definitions", () => {
     }
   });
 });
-
