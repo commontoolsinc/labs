@@ -102,6 +102,12 @@ declare global {
         "value"?: string,
         "onct-change"?: any,
       } & Children & HTMLElementProps;
+      "ct-select": {
+        "$value": OpaqueRef<any | any[]>,
+        "items": { label: string, value: any }[],
+        "multiple"?: boolean,
+        "onct-change"?: OpaqueRef<HandlerEvent<{ items: { label: string, value: any }[], value: any | any[] }>>,
+      } & Children & HTMLElementProps;
     }
   }
 }
