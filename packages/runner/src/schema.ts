@@ -347,6 +347,10 @@ export function validateAndTransform(
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((
           option,
+        ) => (option.asCell || option.asStream))) ||
+      (Array.isArray(resolvedSchema?.oneOf) &&
+        resolvedSchema.oneOf.every((
+          option,
         ) => (option.asCell || option.asStream))))
   ) {
     // The reference should reflect the current _value_. So if it's a reference,
@@ -428,16 +432,19 @@ export function validateAndTransform(
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
-  if (Array.isArray(resolvedSchema.anyOf)) {
-    const options = resolvedSchema.anyOf
-      .map((option) => {
-        const resolved = resolveSchema(option, rootSchema);
-        // Copy `asCell` over, necessary for $ref case.
-        if (option.asCell) return { ...resolved, asCell: true };
-        if (option.asStream) return { ...resolved, asStream: true };
-        else return resolved;
-      })
-      .filter((option) => option !== undefined);
+  if (
+    Array.isArray(resolvedSchema.anyOf) || Array.isArray(resolvedSchema.oneOf)
+  ) {
+    const options =
+      ((resolvedSchema.anyOf ?? resolvedSchema.oneOf)! as JSONSchema[])
+        .map((option) => {
+          const resolved = resolveSchema(option, rootSchema);
+          // Copy `asCell` over, necessary for $ref case.
+          if (option.asCell) return { ...resolved, asCell: true };
+          if (option.asStream) return { ...resolved, asStream: true };
+          else return resolved;
+        })
+        .filter((option) => option !== undefined);
 
     if (Array.isArray(value)) {
       const arrayOptions = options.filter((option) => option.type === "array");
@@ -455,8 +462,13 @@ export function validateAndTransform(
       // TODO(seefeld): Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
-        if (option.items?.anyOf && Array.isArray(option.items.anyOf)) {
-          merged.push(...option.items.anyOf);
+        if (
+          (option.items?.anyOf && Array.isArray(option.items.anyOf)) ||
+          (option.items?.oneOf && Array.isArray(option.items.oneOf))
+        ) {
+          merged.push(
+            ...((option.items.anyOf ?? option.items.oneOf)! as JSONSchema[]),
+          );
         } else if (option.items) merged.push(option.items);
       }
       return validateAndTransform(
@@ -479,7 +491,7 @@ export function validateAndTransform(
         const asCellRemoved = objectCandidates
           .filter((option) => option.asCell)
           .map((option) =>
-            (option.anyOf ?? [option]).map((branch) => {
+            (option.anyOf ?? option.oneOf ?? [option]).map((branch) => {
               const { asCell: _filteredOut, asStream: _filteredOut2, ...rest } =
                 branch as any;
               return rest;
