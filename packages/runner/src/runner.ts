@@ -469,7 +469,6 @@ export class Runner implements IRunner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
-    const tx = givenTx || this.runtime.edit();
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
     if (givenTx) {
       // If tx is given, i.e. result cell was part of a tx that is still open,
@@ -497,11 +496,21 @@ export class Runner implements IRunner {
 
     // If a new recipe was specified, make sure to sync any new cells
     if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
+      await this.syncCellsForRunningRecipe(resultCell, recipe);
     }
 
     if (setupRes?.needsStart) {
+      const tx = givenTx || this.runtime.edit();
       this.startWithTx(tx, resultCell.withTx(tx), setupRes.recipe);
+      if (!givenTx) {
+        // Should be unnecessary as the start itself is read-only
+        // TODO(seefeld): Enforce this by adding a read-only flag for tx
+        await tx.commit().then((error) => {
+          if (error) {
+            logger.error("Error committing transaction", error);
+          }
+        });
+      }
     }
 
     return recipe?.resultSchema
