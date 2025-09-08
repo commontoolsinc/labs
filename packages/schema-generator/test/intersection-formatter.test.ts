@@ -90,7 +90,10 @@ describe("IntersectionFormatter", () => {
         
         type IntersectionWithCall = Base & WithCallSig;
       `;
-      const { type, checker } = await getTypeFromCode(code, "IntersectionWithCall");
+      const { type, checker } = await getTypeFromCode(
+        code,
+        "IntersectionWithCall",
+      );
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");
@@ -113,7 +116,10 @@ describe("IntersectionFormatter", () => {
         
         type IntersectionWithConstruct = Base & WithConstructSig;
       `;
-      const { type, checker } = await getTypeFromCode(code, "IntersectionWithConstruct");
+      const { type, checker } = await getTypeFromCode(
+        code,
+        "IntersectionWithConstruct",
+      );
       const schema = transformer(type, checker);
 
       expect(schema.type).toBe("object");

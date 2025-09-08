@@ -237,13 +237,29 @@ function processDefaultValue(
     Array.isArray(defaultValue) &&
     resolvedSchema.items
   ) {
+    // Handle boolean items values
+    let itemSchema: JSONSchema;
+    if (resolvedSchema.items === true) {
+      // items: true means allow any item type
+      itemSchema = {};
+    } else if ((resolvedSchema.items as any) === false) {
+      // items: false means no additional items allowed (empty arrays only)
+      // For default value processing, we'll treat this as an error
+      throw new Error(
+        "Cannot process default values for array with items: false - no items are allowed",
+      );
+    } else {
+      // items is a JSONSchema object
+      itemSchema = resolvedSchema.items as JSONSchema;
+    }
+
     const result = defaultValue.map((item, i) =>
       processDefaultValue(
         runtime,
         tx,
         {
           ...link,
-          schema: resolvedSchema.items,
+          schema: itemSchema,
           path: [...link.path, String(i)],
         },
         item,
@@ -711,11 +727,27 @@ export function validateAndTransform(
       // cell.set(array);
       // ```
       // work as expected.
+      // Handle boolean items values for element schema
+      let elementSchema: JSONSchema;
+      if (resolvedSchema.items === true) {
+        // items: true means allow any item type
+        elementSchema = {};
+      } else if (resolvedSchema.items === false) {
+        // items: false means no additional items allowed
+        // This should technically be an error, but for compatibility we'll use empty schema
+        elementSchema = {};
+      } else if (resolvedSchema.items) {
+        // items is a JSONSchema object
+        elementSchema = resolvedSchema.items;
+      } else {
+        // No items schema specified, default to empty schema
+        elementSchema = {};
+      }
+
       let elementLink: NormalizedFullLink = {
         ...link,
         path: [...link.path, String(i)],
-        // TODO(seefeld): Should be `true` instead of `{}`
-        schema: resolvedSchema.items ?? {},
+        schema: elementSchema,
       };
       const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
       if (maybeLink) {

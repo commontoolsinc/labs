@@ -97,16 +97,20 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Type safety: ensure we have an object type with reference for interface cases
     if (!(type.flags & ts.TypeFlags.Object)) {
       throw new Error(
-        `CommonToolsFormatter received non-object type: ${context.typeChecker.typeToString(type)} (flags: ${type.flags}). ` +
-        `This should not happen if supportsType() is working correctly.`
+        `CommonToolsFormatter received non-object type: ${
+          context.typeChecker.typeToString(type)
+        } (flags: ${type.flags}). ` +
+          `This should not happen if supportsType() is working correctly.`,
       );
     }
 
     const objectType = type as ts.ObjectType;
     if (!(objectType.objectFlags & ts.ObjectFlags.Reference)) {
       throw new Error(
-        `CommonToolsFormatter received Object type without Reference flags: ${context.typeChecker.typeToString(type)} (objectFlags: ${objectType.objectFlags}). ` +
-        `This should not happen if supportsType() is working correctly.`
+        `CommonToolsFormatter received Object type without Reference flags: ${
+          context.typeChecker.typeToString(type)
+        } (objectFlags: ${objectType.objectFlags}). ` +
+          `This should not happen if supportsType() is working correctly.`,
       );
     }
 
@@ -115,8 +119,10 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     if (!symbol) {
       throw new Error(
-        `CommonToolsFormatter found TypeReference without symbol: ${context.typeChecker.typeToString(type)}. ` +
-        `This should not happen if supportsType() is working correctly.`
+        `CommonToolsFormatter found TypeReference without symbol: ${
+          context.typeChecker.typeToString(type)
+        }. ` +
+          `This should not happen if supportsType() is working correctly.`,
       );
     }
 
@@ -132,7 +138,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       default:
         throw new Error(
           `CommonToolsFormatter received unexpected type name: "${name}". ` +
-          `Expected Cell, Stream, or Default. This should not happen if supportsType() is working correctly.`
+            `Expected Cell, Stream, or Default. This should not happen if supportsType() is working correctly.`,
         );
     }
   }
@@ -441,8 +447,12 @@ export class CommonToolsFormatter implements TypeFormatter {
       } catch (error) {
         // Re-throw with better context - don't mask schema generation failures
         throw new Error(
-          `Failed to generate schema for Default<T,V> value type: ${context.typeChecker.typeToString(valueType)}. ` +
-          `Original error: ${error instanceof Error ? error.message : String(error)}`
+          `Failed to generate schema for Default<T,V> value type: ${
+            context.typeChecker.typeToString(valueType)
+          }. ` +
+            `Original error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
         );
       }
     } else {
@@ -590,8 +600,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
     if (!typeArgs) {
       throw new Error(
-        `Failed to extract type arguments from Default<T,V> type: ${context.typeChecker.typeToString(typeRef as ts.Type)}. ` +
-        `Default types must have exactly 2 type arguments.`
+        `Failed to extract type arguments from Default<T,V> type: ${
+          context.typeChecker.typeToString(typeRef as ts.Type)
+        }. ` +
+          `Default types must have exactly 2 type arguments.`,
       );
     }
 

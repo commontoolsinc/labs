@@ -73,10 +73,10 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "string", enum: ["never"] };
     }
     if ((flags & ts.TypeFlags.Unknown) || (flags & ts.TypeFlags.Any)) {
-      return { 
-        type: "object", 
+      return {
+        type: "object",
         additionalProperties: true,
-        $comment: "TypeScript 'unknown' or 'any' type - can be any value"
+        $comment: "TypeScript 'unknown' or 'any' type - can be any value",
       };
     }
 
