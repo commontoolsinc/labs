@@ -1,9 +1,6 @@
 /// <cts-enable />
 import { Cell, derive, h, handler, NAME, recipe, str, UI, JSONSchema } from "commontools";
-const adder = handler({
-    type: "object",
-    additionalProperties: true
-} as const satisfies JSONSchema, {
+const adder = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
         values: {

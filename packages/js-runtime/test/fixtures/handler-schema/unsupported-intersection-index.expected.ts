@@ -10,10 +10,7 @@ interface ListState {
 type Indexed = {
     [k: string]: unknown;
 };
-const removeItem = handler({
-    type: "object",
-    additionalProperties: true
-} as const satisfies JSONSchema, {
+const removeItem = handler({} as const satisfies JSONSchema, {
     type: "object",
     additionalProperties: true,
     $comment: "Unsupported intersection pattern: index signature on constituent"

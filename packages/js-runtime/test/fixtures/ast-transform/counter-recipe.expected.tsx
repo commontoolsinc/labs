@@ -6,10 +6,7 @@ interface CounterState {
 interface RecipeState {
     value: Default<number, 0>;
 }
-const increment = handler({
-    type: "object",
-    additionalProperties: true
-} as const satisfies JSONSchema, {
+const increment = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -21,10 +18,7 @@ const increment = handler({
 } as const satisfies JSONSchema, (e, state) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler({
-    type: "object",
-    additionalProperties: true
-} as const satisfies JSONSchema, {
+const decrement = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
         value: {

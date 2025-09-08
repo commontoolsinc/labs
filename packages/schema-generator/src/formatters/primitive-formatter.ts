@@ -64,20 +64,20 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "null" };
     }
     if (flags & ts.TypeFlags.Undefined) {
-      return { type: "string", enum: ["undefined"] };
+      // undefined cannot occur in JSON - return {} which matches anything
+      return {};
     }
     if (flags & ts.TypeFlags.Void) {
-      return { type: "string", enum: ["void"] };
+      // void cannot occur in JSON - return {} which matches anything  
+      return {};
     }
     if (flags & ts.TypeFlags.Never) {
-      return { type: "string", enum: ["never"] };
+      // never cannot occur in JSON - return {} which matches anything
+      return {};
     }
     if ((flags & ts.TypeFlags.Unknown) || (flags & ts.TypeFlags.Any)) {
-      return {
-        type: "object",
-        additionalProperties: true,
-        $comment: "TypeScript 'unknown' or 'any' type - can be any value",
-      };
+      // unknown/any can be any JSON value (primitive or object) - {} matches everything
+      return {};
     }
 
     // Fallback

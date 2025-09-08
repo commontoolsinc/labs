@@ -52,8 +52,8 @@ describe("SchemaGenerator", () => {
         "T",
       );
       const schema = generator.generateSchema(type, checker, typeNode);
-      expect(schema.type).toBe("object");
-      expect(schema.additionalProperties).toBe(true);
+      // unknown/any returns {} which matches anything (primitives and objects)
+      expect(schema).toEqual({});
     });
   });
 });
