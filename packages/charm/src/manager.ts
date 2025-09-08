@@ -187,11 +187,9 @@ export class CharmManager {
 
     await this.syncCharms(this.pinnedCharms);
     return (!await this.runtime.editWithRetry((tx) => {
-      const newPinnedCharms = filterOutEntity(
-        this.pinnedCharms.withTx(tx),
-        charmId,
-      );
-      if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
+      const pinnedCharms = this.pinnedCharms.withTx(tx);
+      const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
+      if (newPinnedCharms.length !== pinnedCharms.get().length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
         changed = true;
       } else {
