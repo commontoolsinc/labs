@@ -303,12 +303,14 @@ export async function clearAuthData(authCellDocLink: string) {
     };
 
     // Set the empty data to the auth cell
-    await authCell.runtime.editWithRetry((tx) => {
+    const error = await authCell.runtime.editWithRetry((tx) => {
       authCell.withTx(tx).set(emptyAuthData);
     });
+    if (error) throw error;
 
     return emptyAuthData;
   } catch (error) {
+    logger.error("Error clearing auth data", error);
     throw new Error(`Error clearing auth data: ${error}`);
   }
 }
