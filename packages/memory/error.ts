@@ -50,9 +50,7 @@ export class TheConflictError extends Error implements ConflictError {
     super(
       conflict.expected == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${
-          refer(
-            actual,
-          )
+          refer(actual)
         }`
         : conflict.actual == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exist`
