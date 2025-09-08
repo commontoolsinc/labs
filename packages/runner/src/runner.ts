@@ -490,7 +490,7 @@ export class Runner implements IRunner {
         );
       });
       if (error) {
-        console.error("Error setting up recipe", error);
+        logger.error("Error setting up recipe", error);
         setupRes = undefined;
       }
     }
