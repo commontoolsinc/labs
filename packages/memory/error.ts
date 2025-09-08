@@ -40,6 +40,27 @@ export const connection = (
   cause: SystemError,
 ): ToJSON<ConnectionError> => new TheConnectionError(address.href, cause);
 
+/**
+ * If conflict.expected is null, that means that we expected this to be the
+ * first fact (or first after a retraction), but since we're in here, there
+ * was already another current fact that's different than the fact we tried
+ * to write.
+ *
+ * If conflict.actual is null, that means we expected to be the next fact in
+ * a series, but the server doesn't have our previous fact. That may be due
+ * to someone else retracting the fact, or we may just have sent invalid or
+ * out of order data.
+ *
+ * If conflict.existsInHistory is true, it means that while the fact that we
+ * tried to write is in the current history, it's not the latest fact. This
+ * generally means that the client is a little behind. These don't need to be
+ * retried, because they have been written, just perhaps not by the same
+ * client.
+ *
+ * If none of those is the case, we have an expected previous value and it
+ * just doesn't match the current value. This would be the case if another
+ * client wrote a different value than us.
+ */
 export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
   conflict: Conflict;
