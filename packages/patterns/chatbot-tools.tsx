@@ -108,15 +108,8 @@ const searchWeb = handler<
       state.result.set(`Searching: ${args.query}...`);
 
       const env = getRecipeEnvironment();
-      // In local development, the frontend runs on 5173 but the API is on 8000
-      // In production, they're on the same domain
-      const apiUrl =
-        env.apiUrl.hostname === "localhost" && env.apiUrl.port === "5173"
-          ? new URL("http://localhost:8000")
-          : env.apiUrl;
-
       const response = await fetch(
-        new URL("/api/agent-tools/web-search", apiUrl),
+        new URL("/api/agent-tools/web-search", env.apiUrl),
         {
           method: "POST",
           headers: {
@@ -163,15 +156,8 @@ const readWebpage = handler<
       state.result.set(`Reading: ${args.url}...`);
 
       const env = getRecipeEnvironment();
-      // In local development, the frontend runs on 5173 but the API is on 8000
-      // In production, they're on the same domain
-      const apiUrl =
-        env.apiUrl.hostname === "localhost" && env.apiUrl.port === "5173"
-          ? new URL("http://localhost:8000")
-          : env.apiUrl;
-
       const response = await fetch(
-        new URL("/api/agent-tools/web-read", apiUrl),
+        new URL("/api/agent-tools/web-read", env.apiUrl),
         {
           method: "POST",
           headers: {
