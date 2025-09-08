@@ -7,31 +7,26 @@ import {
   type LLMGenerateObjectRequest,
   type LLMMessage,
   type LLMRequest,
-  LLMTypedContent,
+  type LLMTypedContentPart,
 } from "@commontools/llm/types";
 
 const tags = ["AI Language Models"];
 
-const TypedMessageSchema = toZod<LLMTypedContent>().with({
-  type: z.enum(["text", "image"]),
-  data: z.string(),
+const MessageContentSchema = z.object({
+  type: z.enum(["text", "image", "tool-call", "tool-result"]),
+  text: z.string().optional(),
+  image: z.string().url().optional(),
+  toolCall: z.string().optional(),
+  toolResponse: z.string().optional(),
 });
 
-export const MessageSchema = toZod<LLMMessage>().with({
-  role: z.enum(["user", "assistant", "tool"]),
-  content: z.union([
-    z.string(),
-    z.array(TypedMessageSchema),
-  ]),
-  toolCalls: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    arguments: z.record(z.any()),
-  })).optional(),
-  toolCallId: z.string().optional(),
+export const MessageSchema = z.object({
+  role: z.enum(["system", "user", "assistant", "tool"]),
+  content: z.union([z.string(), z.array(MessageContentSchema)]),
 });
 
-export type LLMResponseMessage = z.infer<typeof MessageSchema>;
+// TODO: remove
+export type LLMResponseMessage = LLMMessage;
 
 export const LLMRequestSchema = toZod<LLMRequest>().with({
   messages: z.array(MessageSchema),

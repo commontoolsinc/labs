@@ -220,8 +220,29 @@ function mainLogic(
         try {
           const newMessages: BuiltInLLMMessage[] = [];
 
-          // Add assistant message with tool calls to conversation
-          // This structure will change in CT-859
+          // Create assistant message with tool-call content parts
+          const assistantContentParts: Array<
+            BuiltInLLMTextPart | BuiltInLLMToolCallPart
+          > = [];
+
+          // Add text content if present
+          if (llmResult.content) {
+            assistantContentParts.push({
+              type: "text",
+              text: llmResult.content,
+            });
+          }
+
+          // Add tool call parts
+          for (const toolCall of llmResult.toolCalls) {
+            assistantContentParts.push({
+              type: "tool-call",
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              args: toolCall.arguments,
+            });
+          }
+
           const assistantMessage: BuiltInLLMMessage = {
             role: "assistant",
             content: llmResult.content,
@@ -263,14 +284,21 @@ function mainLogic(
 
           const success = perform(runtime, pending, (tx) => {
             messagesCell.withTx(tx).set([
-              ...(messagesCell.get() ?? []),
+              ...(messagesCell.withTx(tx).get() ?? []),
               ...newMessages,
             ]);
             pending.withTx(tx).set(false);
           });
 
           if (success) {
-            // TODO(bf): [CT-859] when we support continuations, call mainLogic() again here
+            // Support continuations - call mainLogic() again for chained tool calls
+            // The LLM will see the tool results and can make additional tool calls
+            console.log("Continuing conversation after tool calls...");
+
+            // Create a new transaction for the continuation
+            const continueTx = runtime.edit();
+            mainLogic(continueTx, runtime, parentCell, inputsCell, pending);
+            continueTx.commit();
           } else {
             console.info("Did not write to conversation due to pending=false");
           }
@@ -286,7 +314,7 @@ function mainLogic(
 
         const tx = runtime.edit();
         messagesCell.withTx(tx).set([
-          ...(messagesCell.get() ?? []),
+          ...(messagesCell.withTx(tx).get() ?? []),
           assistantMessage,
         ]);
         pending.withTx(tx).set(false);

@@ -147,12 +147,110 @@ export async function generateText(
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
-  // `streamText` messages only support "user", "assistant" roles
-  // and string content.
-  const messages = params.messages.filter((message) => {
-    return (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string";
-  });
+  // Convert messages to Vercel AI SDK format
+  // Handle the new content array format with tool calls and results
+  // TODO(bf): instead of transforming into this format here, maybe we should just align our types completely
+  // with vercel?
+  const coreMessages = params.messages.map((message): CoreMessage | null => {
+    // Handle user messages
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        return { role: "user", content: message.content };
+      }
+      // If content is an array, extract text parts
+      if (Array.isArray(message.content)) {
+        const textParts = message.content
+          .filter((part): part is LLMTextPart =>
+            typeof part === "object" && "type" in part && part.type === "text"
+          )
+          .map((part) => part.text)
+          .join("\n");
+        return { role: "user", content: textParts || "" };
+      }
+    }
+
+    // Handle assistant messages with content arrays
+    if (message.role === "assistant") {
+      // Handle string content
+      if (typeof message.content === "string") {
+        return { role: "assistant", content: message.content };
+      }
+
+      // Handle content array with tool calls
+      if (Array.isArray(message.content)) {
+        const parts: any[] = [];
+
+        for (const contentPart of message.content) {
+          if (contentPart.type === "text") {
+            parts.push({
+              type: "text",
+              text: (contentPart as LLMTextPart).text,
+            });
+          } else if (contentPart.type === "tool-call") {
+            const toolCall = contentPart as LLMToolCallPart;
+            parts.push({
+              type: "tool-call",
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              input: toolCall.args,
+            });
+          }
+        }
+
+        return { role: "assistant", content: parts };
+      }
+
+      // Handle legacy format with toolCalls/toolResults (backward compatibility)
+      if (message.toolCalls && message.toolCalls.length > 0) {
+        const parts: any[] = [];
+        if (message.content) {
+          parts.push({ type: "text", text: String(message.content) });
+        }
+        for (const toolCall of message.toolCalls) {
+          parts.push({
+            type: "tool-call",
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            input: toolCall.arguments,
+          });
+        }
+        return { role: "assistant", content: parts };
+      }
+
+      return { role: "assistant", content: String(message.content || "") };
+    }
+
+    // Handle tool messages
+    if (message.role === "tool") {
+      if (Array.isArray(message.content)) {
+        const toolResults = message.content
+          .filter((part): part is LLMToolResultPart =>
+            typeof part === "object" && "type" in part &&
+            part.type === "tool-result"
+          );
+
+        if (toolResults.length > 0) {
+          const toolResult = toolResults[0]; // Vercel AI SDK expects one result per message
+          return {
+            role: "tool",
+            content: [{
+              type: "tool-result",
+              toolCallId: toolResult.toolCallId,
+              toolName: toolResult.toolName,
+              output: toolResult.error
+                ? { type: "error-text", value: toolResult.error }
+                : (typeof toolResult.result === "string"
+                  ? { type: "text", value: toolResult.result }
+                  : { type: "json", value: toolResult.result }),
+            } as any], // Cast to any due to SDK v5 type differences
+          } as CoreMessage;
+        }
+      }
+    }
+
+    // Filter out unhandled message types
+    return null;
+  }).filter((msg): msg is CoreMessage => msg !== null);
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,

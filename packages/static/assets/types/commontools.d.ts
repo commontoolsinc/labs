@@ -122,11 +122,38 @@ export type JSONSchema = {
         integrity?: string[];
     };
 };
-export interface BuiltInLLMTypedContent {
-    type: "text" | "image";
-    data: string;
+export interface BuiltInLLMTextPart {
+    type: "text";
+    text: string;
 }
-export type BuiltInLLMContent = string | BuiltInLLMTypedContent[];
+export interface BuiltInLLMImagePart {
+    type: "image";
+    url: string;
+}
+export interface BuiltInLLMToolCallPart {
+    type: "tool-call";
+    toolCallId: string;
+    toolName: string;
+    args: Record<string, any>;
+}
+export interface BuiltInLLMToolResultPart {
+    type: "tool-result";
+    toolCallId: string;
+    toolName: string;
+    result: any;
+    error?: string;
+}
+export type BuiltInLLMContentPart = {
+    type: "text" | "image" | "tool-call" | "tool-result";
+    text?: string;
+    image?: string;
+    toolCallId?: string;
+    toolName?: string;
+    args?: Record<string, any>;
+    result?: any;
+    error?: string;
+};
+export type BuiltInLLMContent = string | Array<BuiltInLLMContentPart>;
 export interface BuiltInLLMTool {
     description: string;
     inputSchema: JSONSchema;
@@ -143,7 +170,7 @@ export interface BuiltInLLMToolResult {
     error?: string;
 }
 export type BuiltInLLMMessage = {
-    role: "user" | "assistant" | "tool";
+    role: "user" | "assistant" | "tool" | "system";
     content: BuiltInLLMContent;
     toolCalls?: BuiltInLLMToolCall[];
     toolResults?: BuiltInLLMToolResult[];

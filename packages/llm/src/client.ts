@@ -11,6 +11,31 @@ import {
 
 type PartialCallback = (text: string) => void;
 
+function toJSON(obj: any): string {
+  return JSON.stringify(obj, (key, value) => {
+    // If it's a proxy, try to get the underlying target
+    if (value && typeof value === "object") {
+      try {
+        // Common proxy implementations store the target in a property
+        // You might need to adjust based on your proxy implementation
+        const target = value.__target || value._target || value;
+
+        // Test if it's actually a proxy by checking for trap behavior
+        const descriptors = Object.getOwnPropertyDescriptors(target);
+        if (descriptors.args && !descriptors.args.configurable) {
+          // Return the actual target value for non-configurable properties
+          return target;
+        }
+
+        return value;
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  });
+}
+
 let llmApiUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
@@ -72,7 +97,7 @@ export class LLMClient {
     const response = await fetch(llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: toJSON(request),
     });
 
     if (!response.ok) {
