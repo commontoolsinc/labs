@@ -183,19 +183,19 @@ export class CharmManager {
   }
 
   async unpinById(charmId: EntityId) {
+    let changed = false;
+
     await this.syncCharms(this.pinnedCharms);
-    const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
-
-    if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
-      const tx = this.runtime.edit();
+    return (!await this.runtime.editWithRetry((tx) => {
       const pinnedCharms = this.pinnedCharms.withTx(tx);
-      pinnedCharms.set(newPinnedCharms);
-      await tx.commit();
-      await this.runtime.idle();
-      return true;
-    }
-
-    return false;
+      const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
+      if (newPinnedCharms.length !== pinnedCharms.get().length) {
+        this.pinnedCharms.withTx(tx).set(newPinnedCharms);
+        changed = true;
+      } else {
+        changed = false;
+      }
+    })) && changed;
   }
 
   async unpin(charm: Cell<Charm> | string | EntityId) {
@@ -219,41 +219,38 @@ export class CharmManager {
     await this.syncCharms(this.trashedCharms);
     await this.syncCharms(this.charms);
 
-    const tx = this.runtime.edit();
+    const error = await this.runtime.editWithRetry((tx) => {
+      const trashedCharms = this.trashedCharms.withTx(tx);
 
-    const trashedCharms = this.trashedCharms.withTx(tx);
+      const id = getEntityId(idOrCharm);
+      if (!id) return false;
 
-    const id = getEntityId(idOrCharm);
-    if (!id) return false;
+      // Find the charm in trash
+      const trashedCharm = trashedCharms.get().find((charm) =>
+        isSameEntity(charm, id)
+      );
 
-    // Find the charm in trash
-    const trashedCharm = trashedCharms.get().find((charm) =>
-      isSameEntity(charm, id)
-    );
+      if (!trashedCharm) return false;
 
-    if (!trashedCharm) return false;
+      // Remove from trash
+      const newTrashedCharms = filterOutEntity(trashedCharms, id);
+      trashedCharms.set(newTrashedCharms);
 
-    // Remove from trash
-    const newTrashedCharms = filterOutEntity(trashedCharms, id);
-    trashedCharms.set(newTrashedCharms);
-
-    // Add back to charms
-    await this.add([trashedCharm], tx);
-
-    await tx.commit(); // TODO(seefeld): Retry?
+      // Add back to charms
+      this.addCharms([trashedCharm], tx);
+    });
 
     await this.runtime.idle();
-    return true;
+
+    return !error;
   }
 
   async emptyTrash() {
     await this.syncCharms(this.trashedCharms);
-    const tx = this.runtime.edit();
-    const trashedCharms = this.trashedCharms.withTx(tx);
-    trashedCharms.set([]);
-    await tx.commit();
-    await this.runtime.idle();
-    return true;
+    await this.runtime.editWithRetry((tx) => {
+      const trashedCharms = this.trashedCharms.withTx(tx);
+      trashedCharms.set([]);
+    });
   }
 
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
@@ -266,20 +263,27 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[], tx?: IExtendedStorageTransaction) {
-    await this.syncCharms(this.charms);
-    await this.runtime.idle();
-
-    const transaction = tx ?? this.runtime.edit();
-    const charms = this.charms.withTx(transaction);
+  private addCharms(newCharms: Cell<Charm>[], tx: IExtendedStorageTransaction) {
+    const charms = this.charms.withTx(tx);
 
     newCharms.forEach((charm) => {
       if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
         charms.push(charm);
       }
     });
+  }
 
-    if (!tx) await transaction.commit(); // TODO(seefeld): Retry?
+  async add(newCharms: Cell<Charm>[], tx?: IExtendedStorageTransaction) {
+    await this.syncCharms(this.charms);
+    await this.runtime.idle();
+
+    if (tx) {
+      this.addCharms(newCharms, tx);
+    } else {
+      await this.runtime.editWithRetry((tx) => {
+        this.addCharms(newCharms, tx);
+      });
+    }
   }
 
   syncCharms(cell: Cell<Cell<Charm>[]>) {
@@ -789,6 +793,8 @@ export class CharmManager {
   // note: removing a charm doesn't clean up the charm's cells
   // Now moves the charm to trash instead of just removing it
   async remove(idOrCharm: string | EntityId | Cell<Charm>) {
+    let success = false;
+
     await Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
@@ -800,50 +806,51 @@ export class CharmManager {
 
     await this.unpin(idOrCharm);
 
-    // Find the charm in the main list
-    const charm = this.charms.get().find((c) => isSameEntity(c, id));
-    if (!charm) return false;
-
-    // Move to trash if not already there
-    if (!this.trashedCharms.get().some((c) => isSameEntity(c, id))) {
-      const tx = this.runtime.edit();
-      const trashedCharms = this.trashedCharms.withTx(tx);
-      trashedCharms.push(charm);
-      await tx.commit();
-    }
-
-    // Remove from main list
-    const newCharms = filterOutEntity(this.charms, id);
-    if (newCharms.length !== this.charms.get().length) {
-      const tx = this.runtime.edit();
+    return (!await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
-      charms.set(newCharms);
-      await tx.commit();
-      await this.runtime.idle();
-      return true;
-    }
+      const trashedCharms = this.trashedCharms.withTx(tx);
 
-    return false;
+      // Find the charm in the main list
+      const charm = charms.get().find((c) => isSameEntity(c, id));
+      if (!charm) {
+        success = false;
+      } else {
+        // Move to trash if not already there
+        if (!trashedCharms.get().some((c) => isSameEntity(c, id))) {
+          trashedCharms.push(charm);
+        }
+
+        // Remove from main list
+        const newCharms = filterOutEntity(charms, id);
+        if (newCharms.length !== charms.get().length) {
+          charms.set(newCharms);
+        }
+
+        success = true;
+      }
+    })) && success;
   }
 
   // Permanently delete a charm (from trash or directly)
   async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
+    let success;
+
     await this.syncCharms(this.trashedCharms);
 
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
-    // Remove from trash if present
-    const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
-    if (newTrashedCharms.length !== this.trashedCharms.get().length) {
-      const tx = this.runtime.edit();
-      this.trashedCharms.withTx(tx).set(newTrashedCharms);
-      tx.commit();
-      await this.runtime.idle();
-      return true;
-    }
-
-    return false;
+    return (!await this.runtime.editWithRetry((tx) => {
+      // Remove from trash if present
+      const trashedCharms = this.trashedCharms.withTx(tx);
+      const newTrashedCharms = filterOutEntity(trashedCharms, id);
+      if (newTrashedCharms.length !== trashedCharms.get().length) {
+        trashedCharms.set(newTrashedCharms);
+        success = true;
+      } else {
+        success = false;
+      }
+    })) && success;
   }
 
   async runPersistent(
@@ -915,11 +922,11 @@ export class CharmManager {
     await this.add([charm]);
 
     if (llmRequestId) {
-      const tx = this.runtime.edit();
-      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
-        .withTx(tx)
-        .set(llmRequestId);
-      await tx.commit();
+      this.runtime.editWithRetry((tx) => {
+        charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+          .withTx(tx)
+          .set(llmRequestId);
+      });
     }
 
     return charm;
@@ -1004,44 +1011,43 @@ export class CharmManager {
         "Target",
       );
 
-    const tx = this.runtime.edit();
+    await this.runtime.editWithRetry((tx) => {
+      // Navigate to the source path
+      // Cannot navigate `Cell<unknown>`
+      // FIXME: types
+      // deno-lint-ignore no-explicit-any
+      let sourceResultCell = sourceCell.withTx(tx) as Cell<any>;
+      // For charms, manager.get() already returns the result cell, so no need to add "result"
 
-    // Navigate to the source path
-    // Cannot navigate `Cell<unknown>`
-    // FIXME: types
-    // deno-lint-ignore no-explicit-any
-    let sourceResultCell = sourceCell.withTx(tx) as Cell<any>;
-    // For charms, manager.get() already returns the result cell, so no need to add "result"
-
-    for (const segment of sourcePath) {
-      sourceResultCell = sourceResultCell.key(segment);
-    }
-
-    // Navigate to the target path
-    const targetKey = targetPath.pop();
-    if (targetKey === undefined) {
-      throw new Error("Target path cannot be empty");
-    }
-
-    // Cannot navigate `Cell<unknown>`
-    // FIXME: types
-    // deno-lint-ignore no-explicit-any
-    let targetInputCell = targetCell.withTx(tx) as Cell<any>;
-    if (targetIsCharm) {
-      // For charms, target fields are in the source cell's argument
-      const sourceCell = targetCell.getSourceCell(processSchema);
-      if (!sourceCell) {
-        throw new Error("Target charm has no source cell");
+      for (const segment of sourcePath) {
+        sourceResultCell = sourceResultCell.key(segment);
       }
-      targetInputCell = sourceCell.key("argument").withTx(tx);
-    }
 
-    for (const segment of targetPath) {
-      targetInputCell = targetInputCell.key(segment);
-    }
+      // Navigate to the target path
+      const targetKey = targetPath.pop();
+      if (targetKey === undefined) {
+        throw new Error("Target path cannot be empty");
+      }
 
-    targetInputCell.key(targetKey).set(sourceResultCell);
-    await tx.commit();
+      // Cannot navigate `Cell<unknown>`
+      // FIXME: types
+      // deno-lint-ignore no-explicit-any
+      let targetInputCell = targetCell.withTx(tx) as Cell<any>;
+      if (targetIsCharm) {
+        // For charms, target fields are in the source cell's argument
+        const sourceCell = targetCell.getSourceCell(processSchema);
+        if (!sourceCell) {
+          throw new Error("Target charm has no source cell");
+        }
+        targetInputCell = sourceCell.key("argument").withTx(tx);
+      }
+
+      for (const segment of targetPath) {
+        targetInputCell = targetInputCell.key(segment);
+      }
+
+      targetInputCell.key(targetKey).set(sourceResultCell);
+    });
     await this.runtime.idle();
     await this.synced();
   }

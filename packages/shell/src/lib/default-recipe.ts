@@ -14,21 +14,22 @@ export async function create(cc: CharmsController): Promise<CharmController> {
   );
   const charm = await cc.create(recipeContent);
 
-  const tx = runtime.edit();
-  const charmCell = charm.getCell();
-  const sourceCell = charmCell.getSourceCell(processSchema);
-
-  if (!sourceCell) {
-    // Not sure how/when this happens
-    throw new Error("Could not create and link default recipe.");
-  }
-
-  // Get the well-known allCharms cell using its EntityId format
   const allCharmsCell = await manager.getCellById({ "/": ALL_CHARMS_ID });
-  sourceCell.withTx(tx).key("argument").key("allCharms").set(
-    allCharmsCell.withTx(tx),
-  );
-  await tx.commit();
+
+  await runtime.editWithRetry((tx) => {
+    const charmCell = charm.getCell();
+    const sourceCell = charmCell.getSourceCell(processSchema);
+
+    if (!sourceCell) {
+      // Not sure how/when this happens
+      throw new Error("Could not create and link default recipe.");
+    }
+
+    // Get the well-known allCharms cell using its EntityId format
+    sourceCell.withTx(tx).key("argument").key("allCharms").set(
+      allCharmsCell.withTx(tx),
+    );
+  });
 
   // Wait for the link to be processed
   await runtime.idle();

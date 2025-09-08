@@ -74,13 +74,13 @@ export class Runner implements IRunner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
 
   /**
    * Configure charm without running it. If the charm is already running and the
@@ -91,11 +91,19 @@ export class Runner implements IRunner {
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R> {
-    const tx = providedTx ?? this.runtime.edit();
-    this.setupInternal(tx, recipeOrModule, argument, resultCell);
-    if (!providedTx) tx.commit();
-    return resultCell;
+  ): Promise<Cell<R>> {
+    if (providedTx) {
+      this.setupInternal(providedTx, recipeOrModule, argument, resultCell);
+      return Promise.resolve(resultCell);
+    } else {
+      // Ignore errors after retrying for now, as outside the tx, we'll see the
+      // latest true value, it just lost the ract against someone else changing
+      // the recipe or argument. Correct action is anyhow similar to what would
+      // have happened if the write succeeded and was immediately overwritten.
+      return this.runtime.editWithRetry((tx) => {
+        this.setupInternal(tx, recipeOrModule, argument, resultCell);
+      }).then(() => resultCell);
+    }
   }
 
   /**
@@ -461,37 +469,47 @@ export class Runner implements IRunner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
-    const tx = givenTx || this.runtime.edit();
-    const setupRes = this.setupInternal(
-      tx,
-      recipe,
-      inputs,
-      resultCell.withTx(tx),
-    );
+    let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    if (givenTx) {
+      // If tx is given, i.e. result cell was part of a tx that is still open,
+      // caller manages retries
+      setupRes = this.setupInternal(
+        givenTx,
+        recipe,
+        inputs,
+        resultCell.withTx(givenTx),
+      );
+    } else {
+      const error = await this.runtime.editWithRetry((tx) => {
+        setupRes = this.setupInternal(
+          tx,
+          recipe,
+          inputs,
+          resultCell.withTx(tx),
+        );
+      });
+      if (error) {
+        logger.error("Error setting up recipe", error);
+        setupRes = undefined;
+      }
+    }
 
     // If a new recipe was specified, make sure to sync any new cells
-    // TODO(seefeld): Possible race condition here with lifted functions running
-    // and using old data to update a value that arrives just between starting and
-    // finishing the computation. Should be fixed by changing conflict resolution
-    // for derived values to be based on what they are derived from.
     if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
+      await this.syncCellsForRunningRecipe(resultCell, recipe);
     }
 
-    if (setupRes.needsStart) {
+    if (setupRes?.needsStart) {
+      const tx = givenTx || this.runtime.edit();
       this.startWithTx(tx, resultCell.withTx(tx), setupRes.recipe);
-    }
-    const txPromise = givenTx ? undefined : tx.commit();
-
-    if (txPromise) {
-      const { error } = await txPromise;
-      if (error) {
-        console.error(
-          "Error committing transaction:",
-          error,
-          JSON.stringify((error as any).transaction?.args, null, 2),
-        );
-        throw error;
+      if (!givenTx) {
+        // Should be unnecessary as the start itself is read-only
+        // TODO(seefeld): Enforce this by adding a read-only flag for tx
+        await tx.commit().then((error) => {
+          if (error) {
+            logger.error("Error committing transaction", error);
+          }
+        });
       }
     }
 

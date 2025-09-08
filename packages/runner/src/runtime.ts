@@ -11,10 +11,10 @@ import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
-  IStorageSubscriptionCapability,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
@@ -109,7 +109,7 @@ export interface IRuntime {
   editWithRetry(
     fn: (tx: IExtendedStorageTransaction) => void,
     maxRetries?: number,
-  ): Promise<boolean>;
+  ): Promise<CommitError | undefined>;
   readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
@@ -171,13 +171,13 @@ export interface IRuntime {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   run<T, R>(
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
@@ -258,13 +258,13 @@ export interface IRunner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
 
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -436,17 +436,18 @@ export class Runtime implements IRuntime {
   editWithRetry(
     fn: (tx: IExtendedStorageTransaction) => void,
     maxRetries: number = DEFAULT_MAX_RETRIES,
-  ): Promise<boolean> {
+  ): Promise<CommitError | undefined> {
     const tx = this.edit();
     fn(tx);
     return tx.commit().then(({ error }) => {
       if (error) {
         if (maxRetries > 0) {
           return this.editWithRetry(fn, maxRetries - 1);
+        } else {
+          return error;
         }
-        return false;
       }
-      return true;
+      return undefined;
     });
   }
 
@@ -581,19 +582,19 @@ export class Runtime implements IRuntime {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R>;
+  ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): Cell<R> {
+  ): Promise<Cell<R>> {
     return this.runner.setup<T, R>(tx, recipeOrModule, argument, resultCell);
   }
   run<T, R>(

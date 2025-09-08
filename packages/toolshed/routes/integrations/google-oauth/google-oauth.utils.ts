@@ -1,9 +1,11 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
+import { getLogger } from "@commontools/utils/logger";
 import env from "@/env.ts";
 import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
 import { AuthSchema, Mutable, Schema } from "@commontools/runner";
-// Types
+
+const logger = getLogger("google-oauth.utils");
 
 export interface OAuth2Tokens {
   accessToken: string;
@@ -186,15 +188,14 @@ export async function persistTokens(
     };
 
     // Set the new tokens to the auth cell
-    const tx = authCell.runtime.edit();
-    authCell.withTx(tx).set(tokenData);
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
-
-    // Ensure the cell is synced
-    await runtime.storageManager.synced();
+    const error = await authCell.runtime.editWithRetry((tx) => {
+      authCell.withTx(tx).set(tokenData);
+    });
+    if (error) throw error;
 
     return tokenData;
   } catch (error) {
+    logger.error("Error persisting tokens", error);
     throw new Error(`Error persisting tokens: ${error}`);
   }
 }
@@ -302,15 +303,14 @@ export async function clearAuthData(authCellDocLink: string) {
     };
 
     // Set the empty data to the auth cell
-    const tx = authCell.runtime.edit();
-    authCell.withTx(tx).set(emptyAuthData);
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
-
-    // Ensure the cell is synced
-    await runtime.storageManager.synced();
+    const error = await authCell.runtime.editWithRetry((tx) => {
+      authCell.withTx(tx).set(emptyAuthData);
+    });
+    if (error) throw error;
 
     return emptyAuthData;
   } catch (error) {
+    logger.error("Error clearing auth data", error);
     throw new Error(`Error clearing auth data: ${error}`);
   }
 }

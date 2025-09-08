@@ -198,12 +198,12 @@ export class SpaceManager {
       this.failureTracking.delete(charmId);
     }
 
-    const tx = entry.runtime.edit();
-    entry.withTx(tx).update({
-      lastRun: Date.now(),
-      status: "Success",
+    entry.runtime.editWithRetry((tx) => {
+      entry.withTx(tx).update({
+        lastRun: Date.now(),
+        status: "Success",
+      });
     });
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     if (this.enabledCharms.has(charmId)) {
       this.pushTask(charmId, entry);
@@ -224,12 +224,12 @@ export class SpaceManager {
       this.disableCharm(charmId, entry, error);
     } else {
       this.failureTracking.set(charmId, failureCount);
-      const tx = entry.runtime.edit();
-      entry.withTx(tx).update({
-        lastRun: Date.now(),
-        status: error,
+      entry.runtime.editWithRetry((tx) => {
+        entry.withTx(tx).update({
+          lastRun: Date.now(),
+          status: error,
+        });
       });
-      tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
       if (this.enabledCharms.has(charmId)) {
         // Apply a linear backoff for the next attempts
@@ -247,13 +247,13 @@ export class SpaceManager {
     entry: Cell<BGCharmEntry>,
     error: string,
   ) {
-    const tx = entry.runtime.edit();
-    entry.withTx(tx).update({
-      disabledAt: Date.now(),
-      lastRun: Date.now(),
-      status: `Disabled: ${error}`,
+    entry.runtime.editWithRetry((tx) => {
+      entry.withTx(tx).update({
+        disabledAt: Date.now(),
+        lastRun: Date.now(),
+        status: `Disabled: ${error}`,
+      });
     });
-    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     this.enabledCharms.delete(charmId);
     this.pendingTasks = this.pendingTasks.filter((r) => r.charmId !== charmId);

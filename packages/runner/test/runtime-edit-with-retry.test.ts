@@ -35,11 +35,11 @@ describe("Runtime.editWithRetry", () => {
     cell.set(0);
     await tx.commit();
 
-    const ok = await runtime.editWithRetry((t) => {
+    const error = await runtime.editWithRetry((t) => {
       cell.withTx(t).send(1);
     });
 
-    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
     expect(cell.get()).toBe(1);
   });
 
@@ -56,7 +56,7 @@ describe("Runtime.editWithRetry", () => {
 
     // Track attempts and force early aborts to trigger retry
     let attempts = 0;
-    const ok = await runtime.editWithRetry((t) => {
+    const error = await runtime.editWithRetry((t) => {
       attempts++;
       // Abort the first few attempts to force retry
       if (attempts <= 2) {
@@ -66,7 +66,7 @@ describe("Runtime.editWithRetry", () => {
       cell.withTx(t).send(2);
     }, 5);
 
-    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
     expect(attempts).toBe(3); // initial + 2 retries
     expect(cell.get()).toBe(2);
   });
@@ -83,12 +83,12 @@ describe("Runtime.editWithRetry", () => {
 
     let attempts = 0;
     const max = 3;
-    const ok = await runtime.editWithRetry((t) => {
+    const error = await runtime.editWithRetry((t) => {
       attempts++;
       t.abort("always-fail");
     }, max);
 
-    expect(ok).toBe(false);
+    expect(error).toBeDefined();
     // initial + max retries
     expect(attempts).toBe(max + 1);
     // Value unchanged
@@ -106,12 +106,12 @@ describe("Runtime.editWithRetry", () => {
     await tx.commit();
 
     let attempts = 0;
-    const ok = await runtime.editWithRetry((t) => {
+    const error = await runtime.editWithRetry((t) => {
       attempts++;
       t.abort("always-fail");
     });
 
-    expect(ok).toBe(false);
+    expect(error).toBeDefined();
     expect(attempts).toBe(DEFAULT_MAX_RETRIES + 1);
     expect(cell.get()).toBe(0);
   });
