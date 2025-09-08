@@ -60,18 +60,8 @@ export class IntersectionFormatter implements TypeFormatter {
           return "index signature on constituent";
         }
 
-        // Reject types with call/construct signatures as they're not object properties
-        const callSigs = checker.getSignaturesOfType(
-          part,
-          ts.SignatureKind.Call,
-        );
-        const constructSigs = checker.getSignaturesOfType(
-          part,
-          ts.SignatureKind.Construct,
-        );
-        if (callSigs.length > 0 || constructSigs.length > 0) {
-          return "call/construct signatures on constituent";
-        }
+        // Note: Call/construct signatures are ignored (consistent with other formatters)
+        // They cannot be represented in JSON Schema, so we just extract regular properties
       } catch (error) {
         return `checker error while validating intersection: ${error}`;
       }

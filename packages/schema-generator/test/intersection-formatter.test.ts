@@ -76,6 +76,54 @@ describe("IntersectionFormatter", () => {
     });
   });
 
+  describe("intersections with call/construct signatures", () => {
+    it("should merge intersection with call signature", async () => {
+      const code = `
+        interface Base {
+          name: string;
+        }
+        
+        interface WithCallSig {
+          (): void;
+          prop: number;
+        }
+        
+        type IntersectionWithCall = Base & WithCallSig;
+      `;
+      const { type, checker } = await getTypeFromCode(code, "IntersectionWithCall");
+      const schema = transformer(type, checker);
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties?.name).toEqual({ type: "string" });
+      expect(schema.properties?.prop).toEqual({ type: "number" });
+      expect(schema.required).toEqual(["name", "prop"]);
+      // Call signature is ignored (can't be represented in JSON Schema)
+    });
+
+    it("should merge intersection with construct signature", async () => {
+      const code = `
+        interface Base {
+          name: string;
+        }
+        
+        interface WithConstructSig {
+          new (): string;
+          prop: number;
+        }
+        
+        type IntersectionWithConstruct = Base & WithConstructSig;
+      `;
+      const { type, checker } = await getTypeFromCode(code, "IntersectionWithConstruct");
+      const schema = transformer(type, checker);
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties?.name).toEqual({ type: "string" });
+      expect(schema.properties?.prop).toEqual({ type: "number" });
+      expect(schema.required).toEqual(["name", "prop"]);
+      // Construct signature is ignored (can't be represented in JSON Schema)
+    });
+  });
+
   describe("unsupported intersections", () => {
     it("should reject intersection with index signature", async () => {
       const code = `
@@ -95,29 +143,6 @@ describe("IntersectionFormatter", () => {
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
       expect(schema.$comment).toContain("index signature on constituent");
-    });
-
-    it("should reject intersection with call signature", async () => {
-      const code = `
-        interface Base {
-          name: string;
-        }
-        
-        interface WithCallSig {
-          (): void;
-          prop: number;
-        }
-        
-        type BadIntersection = Base & WithCallSig;
-      `;
-      const { type, checker } = await getTypeFromCode(code, "BadIntersection");
-      const schema = transformer(type, checker);
-
-      expect(schema.type).toBe("object");
-      expect(schema.additionalProperties).toBe(true);
-      expect(schema.$comment).toContain(
-        "call/construct signatures on constituent",
-      );
     });
 
     it("should reject intersection with non-object types", async () => {
