@@ -1,27 +1,11 @@
 import type ts from "typescript";
+import type { JSONSchema } from "@commontools/api";
+import { type Mutable } from "@commontools/utils/types";
 
 /**
- * JSON Schema object type
+ * JSON Schema object type - mutable version of the CommonTools JSONSchema interface
  */
-export interface SchemaDefinition {
-  type?: string;
-  properties?: Record<string, SchemaDefinition>;
-  required?: string[];
-  items?: SchemaDefinition;
-  additionalProperties?: boolean | SchemaDefinition;
-  $ref?: string;
-  $schema?: string;
-  definitions?: Record<string, SchemaDefinition>;
-  // Common JSON Schema (draft-07) keywords we use
-  default?: unknown;
-  enum?: unknown[];
-  oneOf?: SchemaDefinition[];
-  anyOf?: SchemaDefinition[];
-  format?: string;
-  $comment?: string;
-  // Allow extensions (e.g., asCell/asStream) and future keywords
-  [key: string]: unknown;
-}
+export type SchemaDefinition = Mutable<JSONSchema>;
 
 /**
  * Unified context for schema generation - contains all state in one place

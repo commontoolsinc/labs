@@ -595,7 +595,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
 
     if (defaultValue !== undefined) {
-      valueSchema.default = defaultValue;
+      valueSchema.default = defaultValue as any;
     }
 
     return this.processDefaultUnionTypes(

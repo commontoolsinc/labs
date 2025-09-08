@@ -214,6 +214,8 @@ export type JSONSchemaObj = {
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
   readonly examples?: readonly Readonly<JSONValue>[];
+  readonly $schema?: string;
+  readonly $comment?: string;
 
   // Common Tools extensions
   readonly [ID]?: unknown;
