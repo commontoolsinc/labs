@@ -48,7 +48,11 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   tools: z.record(z.object({
     description: z.string(),
     inputSchema: z.record(z.any()),
-    handler: z.function().optional(),
+    handler: z.function().optional().openapi({
+      type: "object",
+      description:
+        "Function handler for tool execution (not serialized in API)",
+    }),
   })).optional(),
 });
 

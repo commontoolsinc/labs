@@ -6,6 +6,7 @@ import {
   Default,
   derive,
   fetchData,
+  getRecipeEnvironment,
   h,
   handler,
   ifElse,
@@ -98,13 +99,141 @@ const clearChat = handler(
   },
 );
 
+const searchWeb = handler<
+  { query: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
+  async (args, state) => {
+    try {
+      state.result.set(`Searching: ${args.query}...`);
+
+      const env = getRecipeEnvironment();
+      const response = await fetch(
+        new URL("/api/agent-tools/web-search", env.apiUrl),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: args.query,
+            max_results: 5,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Format the search results
+      const formattedResults = data.results
+        .map((r: any, i: number) =>
+          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`
+        )
+        .join("\n\n");
+
+      state.result.set(formattedResults || "No results found");
+      args.result.set(formattedResults || "No results found");
+    } catch (error) {
+      const errorMsg = `Search error: ${
+        (error as any)?.message || "Unknown error"
+      }`;
+      state.result.set(errorMsg);
+      args.result.set(errorMsg);
+    }
+  },
+);
+
+const readWebpage = handler<
+  { url: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
+  async (args, state) => {
+    try {
+      state.result.set(`Reading: ${args.url}...`);
+
+      const env = getRecipeEnvironment();
+      const response = await fetch(
+        new URL("/api/agent-tools/web-read", env.apiUrl),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: args.url,
+            max_tokens: 4000,
+            include_code: true,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to read webpage: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Format the content with metadata
+      const formattedContent = `Title: ${data.metadata?.title || "Unknown"}\n` +
+        `Date: ${data.metadata?.date || "Unknown"}\n` +
+        `Word Count: ${data.metadata?.word_count || 0}\n\n` +
+        `Content:\n${data.content?.substring(0, 2000)}${
+          data.content?.length > 2000 ? "..." : ""
+        }`;
+
+      state.result.set(formattedContent);
+      args.result.set(formattedContent);
+    } catch (error) {
+      const errorMsg = `Read error: ${
+        (error as any)?.message || "Unknown error"
+      }`;
+      state.result.set(errorMsg);
+      args.result.set(errorMsg);
+    }
+  },
+);
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
     const calculatorResult = cell<string>("");
     const model = cell<string>("anthropic:claude-sonnet-4-20250514");
+    const searchWebResult = cell<string>("");
+    const readWebpageResult = cell<string>("");
 
     const tools = {
+      search_web: {
+        description: "Search the web for information.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The query to search the web for.",
+            },
+          },
+          required: ["query"],
+        } as JSONSchema,
+        handler: searchWeb({ result: searchWebResult }),
+      },
+      read_webpage: {
+        description: "Read and extract content from a specific webpage URL.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description:
+                "The URL of the webpage to read and extract content from.",
+            },
+          },
+          required: ["url"],
+        } as JSONSchema,
+        handler: readWebpage({ result: readWebpageResult }),
+      },
       calculator: {
         description:
           "Calculate the result of a mathematical expression. Supports +, -, *, /, and parentheses.",
@@ -235,6 +364,16 @@ export default recipe<LLMTestInput, LLMTestResult>(
             </ct-screen>
 
             <ct-vstack data-label="Tools">
+              <div>
+                <h3>Web Search</h3>
+                <pre>{searchWebResult}</pre>
+              </div>
+
+              <div>
+                <h3>Web Page Reader</h3>
+                <pre>{readWebpageResult}</pre>
+              </div>
+
               <div>
                 <h3>Calculator</h3>
                 <pre>{calculatorResult}</pre>
