@@ -219,16 +219,14 @@ export class CharmManager {
     await this.syncCharms(this.trashedCharms);
     await this.syncCharms(this.charms);
 
-    let trashedCharm: Cell<Charm> | undefined;
-
-    this.runtime.editWithRetry((tx) => {
+    const error = await this.runtime.editWithRetry((tx) => {
       const trashedCharms = this.trashedCharms.withTx(tx);
 
       const id = getEntityId(idOrCharm);
       if (!id) return false;
 
       // Find the charm in trash
-      trashedCharm = trashedCharms.get().find((charm) =>
+      const trashedCharm = trashedCharms.get().find((charm) =>
         isSameEntity(charm, id)
       );
 
@@ -243,7 +241,8 @@ export class CharmManager {
     });
 
     await this.runtime.idle();
-    return true;
+
+    return !error;
   }
 
   async emptyTrash() {
@@ -808,35 +807,33 @@ export class CharmManager {
     await this.unpin(idOrCharm);
 
     return (!await this.runtime.editWithRetry((tx) => {
+      const charms = this.charms.withTx(tx);
+      const trashedCharms = this.trashedCharms.withTx(tx);
+
       // Find the charm in the main list
-      const charm = this.charms.withTx(tx).get().find((c) =>
-        isSameEntity(c, id)
-      );
+      const charm = charms.get().find((c) => isSameEntity(c, id));
       if (!charm) {
         success = false;
-        return;
-      }
+      } else {
+        // Move to trash if not already there
+        if (!trashedCharms.get().some((c) => isSameEntity(c, id))) {
+          trashedCharms.push(charm);
+        }
 
-      // Move to trash if not already there
-      if (
-        !this.trashedCharms.withTx(tx).get().some((c) => isSameEntity(c, id))
-      ) {
-        this.trashedCharms.withTx(tx).push(charm);
-      }
+        // Remove from main list
+        const newCharms = filterOutEntity(charms, id);
+        if (newCharms.length !== charms.get().length) {
+          charms.set(newCharms);
+        }
 
-      // Remove from main list
-      const newCharms = filterOutEntity(this.charms.withTx(tx), id);
-      if (newCharms.length !== this.charms.get().length) {
-        this.charms.withTx(tx).set(newCharms);
+        success = true;
       }
-
-      success = true;
     })) && success;
   }
 
   // Permanently delete a charm (from trash or directly)
   async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
-    let success = false;
+    let success;
 
     await this.syncCharms(this.trashedCharms);
 
@@ -845,13 +842,13 @@ export class CharmManager {
 
     return (!await this.runtime.editWithRetry((tx) => {
       // Remove from trash if present
-      const newTrashedCharms = filterOutEntity(
-        this.trashedCharms.withTx(tx),
-        id,
-      );
-      if (newTrashedCharms.length !== this.trashedCharms.get().length) {
-        this.trashedCharms.withTx(tx).set(newTrashedCharms);
+      const trashedCharms = this.trashedCharms.withTx(tx);
+      const newTrashedCharms = filterOutEntity(trashedCharms, id);
+      if (newTrashedCharms.length !== trashedCharms.get().length) {
+        trashedCharms.set(newTrashedCharms);
         success = true;
+      } else {
+        success = false;
       }
     })) && success;
   }
