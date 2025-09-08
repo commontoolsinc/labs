@@ -68,7 +68,7 @@ export class PrimitiveFormatter implements TypeFormatter {
       return {};
     }
     if (flags & ts.TypeFlags.Void) {
-      // void cannot occur in JSON - return {} which matches anything  
+      // void cannot occur in JSON - return {} which matches anything
       return {};
     }
     if (flags & ts.TypeFlags.Never) {
