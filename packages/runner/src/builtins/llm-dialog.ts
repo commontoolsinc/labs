@@ -284,7 +284,7 @@ function mainLogic(
 
           const success = perform(runtime, pending, (tx) => {
             messagesCell.withTx(tx).set([
-              ...(messagesCell.withTx(tx).get() ?? []),
+              ...(messagesCell.get() ?? []),
               ...newMessages,
             ]);
             pending.withTx(tx).set(false);
@@ -314,7 +314,7 @@ function mainLogic(
 
         const tx = runtime.edit();
         messagesCell.withTx(tx).set([
-          ...(messagesCell.withTx(tx).get() ?? []),
+          ...(messagesCell.get() ?? []),
           assistantMessage,
         ]);
         pending.withTx(tx).set(false);

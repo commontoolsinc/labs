@@ -11,31 +11,6 @@ import {
 
 type PartialCallback = (text: string) => void;
 
-function toJSON(obj: any): string {
-  return JSON.stringify(obj, (key, value) => {
-    // If it's a proxy, try to get the underlying target
-    if (value && typeof value === "object") {
-      try {
-        // Common proxy implementations store the target in a property
-        // You might need to adjust based on your proxy implementation
-        const target = value.__target || value._target || value;
-
-        // Test if it's actually a proxy by checking for trap behavior
-        const descriptors = Object.getOwnPropertyDescriptors(target);
-        if (descriptors.args && !descriptors.args.configurable) {
-          // Return the actual target value for non-configurable properties
-          return target;
-        }
-
-        return value;
-      } catch {
-        return value;
-      }
-    }
-    return value;
-  });
-}
-
 let llmApiUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
     "/api/ai/llm"
@@ -92,12 +67,10 @@ export class LLMClient {
       );
     }
 
-    request.messages = request.messages.map(processMessage);
-
     const response = await fetch(llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: toJSON(request),
+      body: JSON.stringify(request),
     });
 
     if (!response.ok) {
@@ -211,19 +184,4 @@ export class LLMClient {
       toolResults: toolResults.length > 0 ? toolResults : undefined,
     };
   }
-}
-
-// FIXME(ja): we should either make message always a LLMMessage or update the types that
-// iframes/recipes can generate
-function processMessage(
-  m: LLMMessage | string,
-  idx: number,
-): LLMMessage {
-  if (typeof m === "string" || Array.isArray(m)) {
-    return {
-      role: idx % 2 === 0 ? "user" : "assistant",
-      content: m,
-    };
-  }
-  return m;
 }
