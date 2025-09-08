@@ -151,7 +151,7 @@ export async function generateText(
   // Handle the new content array format with tool calls and results
   // TODO(bf): instead of transforming into this format here, maybe we should just align our types completely
   // with vercel?
-  const coreMessages = params.messages.map((message): CoreMessage | null => {
+  const messages = params.messages.map((message): CoreMessage | null => {
     // Handle user messages
     if (message.role === "user") {
       if (typeof message.content === "string") {
