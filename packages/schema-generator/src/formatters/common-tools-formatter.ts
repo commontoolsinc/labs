@@ -96,19 +96,28 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Type safety: ensure we have an object type with reference for interface cases
     if (!(type.flags & ts.TypeFlags.Object)) {
-      return { type: "object", additionalProperties: true }; // throw error probably
+      throw new Error(
+        `CommonToolsFormatter received non-object type: ${context.typeChecker.typeToString(type)} (flags: ${type.flags}). ` +
+        `This should not happen if supportsType() is working correctly.`
+      );
     }
 
     const objectType = type as ts.ObjectType;
     if (!(objectType.objectFlags & ts.ObjectFlags.Reference)) {
-      return { type: "object", additionalProperties: true };
+      throw new Error(
+        `CommonToolsFormatter received Object type without Reference flags: ${context.typeChecker.typeToString(type)} (objectFlags: ${objectType.objectFlags}). ` +
+        `This should not happen if supportsType() is working correctly.`
+      );
     }
 
     const typeRef = objectType as ts.TypeReference;
     const symbol = typeRef.target?.symbol;
 
     if (!symbol) {
-      return { type: "object", additionalProperties: true };
+      throw new Error(
+        `CommonToolsFormatter found TypeReference without symbol: ${context.typeChecker.typeToString(type)}. ` +
+        `This should not happen if supportsType() is working correctly.`
+      );
     }
 
     const name = symbol.getName();
@@ -121,7 +130,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       case "Default":
         return this.formatDefaultType(typeRef, checker, context);
       default:
-        return { type: "object", additionalProperties: true };
+        throw new Error(
+          `CommonToolsFormatter received unexpected type name: "${name}". ` +
+          `Expected Cell, Stream, or Default. This should not happen if supportsType() is working correctly.`
+        );
     }
   }
 
@@ -427,11 +439,11 @@ export class CommonToolsFormatter implements TypeFormatter {
         );
         return this.inlineIfRef(raw, context);
       } catch (error) {
-        console.warn(
-          "Failed to generate schema for Default<T,V> value type:",
-          error,
+        // Re-throw with better context - don't mask schema generation failures
+        throw new Error(
+          `Failed to generate schema for Default<T,V> value type: ${context.typeChecker.typeToString(valueType)}. ` +
+          `Original error: ${error instanceof Error ? error.message : String(error)}`
         );
-        return { type: "object", additionalProperties: true };
       }
     } else {
       const raw = this.schemaGenerator.formatChildType(
@@ -577,7 +589,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       checker,
     );
     if (!typeArgs) {
-      return { type: "object", additionalProperties: true };
+      throw new Error(
+        `Failed to extract type arguments from Default<T,V> type: ${context.typeChecker.typeToString(typeRef as ts.Type)}. ` +
+        `Default types must have exactly 2 type arguments.`
+      );
     }
 
     const { valueType, defaultType, valueTypeNode, defaultTypeNode } = typeArgs;

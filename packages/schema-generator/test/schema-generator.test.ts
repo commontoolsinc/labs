@@ -46,8 +46,7 @@ describe("SchemaGenerator", () => {
   describe("error handling", () => {
     it("should handle unknown types gracefully", async () => {
       const generator = new SchemaGenerator();
-      // Use a real TypeScript 'unknown' type which the engine doesn't
-      // specialize and should therefore fall back safely.
+      // TypeScript 'unknown' type is handled by PrimitiveFormatter
       const { type, checker, typeNode } = await getTypeFromCode(
         "type T = unknown;",
         "T",

@@ -147,7 +147,12 @@ export class SchemaGenerator implements ISchemaGenerator {
         context.emittedRefs.add(namedKey);
         return { "$ref": `#/definitions/${namedKey}` };
       }
-      return { type: "object", additionalProperties: true };
+      // Anonymous recursive type - can't create $ref, use permissive fallback to break cycle
+      return { 
+        type: "object", 
+        additionalProperties: true,
+        $comment: "Anonymous recursive type - cannot create named reference to break cycle"
+      };
     }
 
     // Push current type onto the stack
@@ -181,11 +186,17 @@ export class SchemaGenerator implements ISchemaGenerator {
       }
     }
 
-    // If no formatter supports this type, return a fallback
+    // If no formatter supports this type, this is an error - we should have complete coverage
     context.definitionStack.delete(
       this.createStackKey(type, context.typeNode, context.typeChecker),
     );
-    return { type: "object", additionalProperties: true };
+    
+    const typeName = context.typeChecker.typeToString(type);
+    const typeFlags = type.flags;
+    throw new Error(
+      `No formatter found for type: ${typeName} (flags: ${typeFlags}). ` +
+      `This indicates incomplete formatter coverage - every TypeScript type should be handled by a formatter.`
+    );
   }
 
   /**
