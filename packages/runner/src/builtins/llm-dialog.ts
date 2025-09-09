@@ -227,7 +227,7 @@ export function llmDialog(
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    abortController?.abort();
+    abortController?.abort("Recipe stopped");
 
     const tx = runtime.edit();
 
@@ -251,7 +251,7 @@ export function llmDialog(
       // (but this if branch will be skipped then).
       result = runtime.getCell(
         parentCell.space,
-        { llmDialog: cause },
+        { llmDialog: { result: cause } },
         resultSchema,
         tx,
       );
@@ -261,7 +261,7 @@ export function llmDialog(
       // to the same input cells will coordinate via the same cell.
       internal = runtime.getCell(
         parentCell.space,
-        { llmDialog: cause },
+        { llmDialog: { internal: cause } },
         internalSchema,
         tx,
       );
@@ -306,7 +306,7 @@ export function llmDialog(
 
           // Set up new request (abort existing ones just in case) by allocating
           // a new request Id and setting up a new abort controller.
-          abortController?.abort();
+          abortController?.abort("New request started");
           abortController = new AbortController();
           requestId = crypto.randomUUID();
           internal.withTx(tx).set({
@@ -357,7 +357,7 @@ export function llmDialog(
     ) {
       // We have a pending request and either something set pending to false or
       // another request started, so we have to abort this one.
-      abortController?.abort();
+      abortController?.abort("Another request started");
       requestId = undefined;
     }
   };
