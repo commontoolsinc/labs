@@ -60,7 +60,12 @@ const LLMToolSchema = {
   properties: {
     description: { type: "string" },
     inputSchema: { type: "object" },
-    handler: { asStream: true },
+    handler: {
+      type: "object",
+      properties: { result: { type: "object" } },
+      additionalProperties: true,
+      asStream: true,
+    },
   },
   required: ["description", "inputSchema", "handler"],
 } as const satisfies JSONSchema;
@@ -72,7 +77,7 @@ const LLMParamsSchema = {
     model: { type: "string" },
     maxTokens: { type: "number" },
     system: { type: "string" },
-    tools: { type: "array", items: LLMToolSchema, default: [] },
+    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
   },
   required: ["messages"],
 } as const satisfies JSONSchema;
@@ -125,6 +130,9 @@ async function safelyPerformUpdate(
       internal.withTx(tx).key("lastActivity").set(Date.now());
       success = true;
     } else {
+      // We might have flagged success as true in a previous call, but if the
+      // retry flow lands us here, it means it wasn't written and that now
+      // the requestId has changed.
       success = false;
     }
   });
@@ -133,9 +141,9 @@ async function safelyPerformUpdate(
 }
 
 /**
- * Executes a tool call by invoking its handler function and returning the result.
- * Creates a new transaction, sends the tool call arguments to the handler, and waits
- * for the result to be available before returning it.
+ * Executes a tool call by invoking its handler function and returning the
+ * result. Creates a new transaction, sends the tool call arguments to the
+ * handler, and waits for the result to be available before returning it.
  *
  * @param runtime - The runtime instance for creating transactions and cells
  * @param parentCell - The parent cell context for the tool execution
@@ -146,7 +154,7 @@ async function safelyPerformUpdate(
 async function invokeHandlerAsToolCall(
   runtime: IRuntime,
   space: MemorySpace,
-  toolDef: Cell<BuiltInLLMTool>,
+  toolDef: Cell<Schema<typeof LLMToolSchema>>,
   toolCall: LLMToolCall,
 ) {
   const handlerTx = runtime.edit();
@@ -359,16 +367,16 @@ function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
-  inputsCell: Cell<Schema<typeof LLMParamsSchema>>,
+  inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
-  const { system, maxTokens, model } = inputsCell.get();
+  const { system, maxTokens, model } = inputs.get();
 
-  const messagesCell = inputsCell.key("messages");
-  const toolsCell = inputsCell.key("tools");
+  const messagesCell = inputs.key("messages");
+  const toolsCell = inputs.key("tools");
 
   // Strip handlers from tool definitions to send them to the server
   // We keep the handlers locally and execute them here
@@ -442,9 +450,7 @@ function startRequest(
           // Execute each tool call and collect results
           const toolResults: any[] = [];
           for (const toolCall of toolCalls) {
-            const toolDef = toolsCell.key(toolCall.toolName) as Cell<
-              BuiltInLLMTool
-            >;
+            const toolDef = toolsCell.key(toolCall.toolName);
 
             try {
               const resultValue = await invokeHandlerAsToolCall(
@@ -509,7 +515,7 @@ function startRequest(
               continueTx,
               runtime,
               space,
-              inputsCell,
+              inputs,
               pending,
               internal,
               requestId,
