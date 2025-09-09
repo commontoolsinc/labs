@@ -5,7 +5,7 @@ import { WorkflowForm } from "@commontools/charm";
 import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import { JSONSchemaObj } from "@commontools/api";
 import { isObject } from "@commontools/utils/types";
 
@@ -272,9 +272,17 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response.content, "title") || "New Charm";
-  const description = parseTagFromResponse(response.content, "description");
-  const sourceCode = parseTagFromResponse(response.content, "source_code");
+  const title =
+    parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
+    "New Charm";
+  const description = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "description",
+  );
+  const sourceCode = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "source_code",
+  );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;
@@ -282,7 +290,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const resultSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "result_schema",
     );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
@@ -294,7 +302,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};

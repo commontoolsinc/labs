@@ -1,9 +1,11 @@
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
+  extractTextFromLLMResponse,
   LLMClient,
   LLMGenerateObjectRequest,
   LLMRequest,
+  LLMResponse,
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
@@ -52,8 +54,8 @@ export function llm(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
-  let result: Cell<string | undefined>;
-  let partial: Cell<string | undefined>;
+  let result: Cell<LLMResponse["content"] | undefined>;
+  let partial: Cell<LLMResponse["content"] | undefined>;
   let requestHash: Cell<string | undefined>;
 
   return (tx: IExtendedStorageTransaction) => {
@@ -150,16 +152,14 @@ export function llm(
 
     resultPromise
       .then(async (llmResult) => {
-        const text = llmResult.content;
         if (thisRun !== currentRun) return;
 
-        //normalizeToCells(text, undefined, log);
         await runtime.idle();
 
         await runtime.editWithRetry((tx) => {
           pending.withTx(tx).set(false);
-          result.withTx(tx).set(text);
-          partial.withTx(tx).set(text);
+          result.withTx(tx).set(llmResult.content);
+          partial.withTx(tx).set(extractTextFromLLMResponse(llmResult));
           requestHash.withTx(tx).set(hash);
         });
       })

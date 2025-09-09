@@ -2,12 +2,12 @@ import {
   LLMContent,
   LLMGenerateObjectRequest,
   LLMGenerateObjectResponse,
-  LLMMessage,
   LLMRequest,
   LLMResponse,
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import { type BuiltInLLMMessage } from "@commontools/api";
 
 type PartialCallback = (text: string) => void;
 
@@ -67,8 +67,6 @@ export class LLMClient {
       );
     }
 
-    request.messages = request.messages.map(processMessage);
-
     const response = await fetch(llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -90,11 +88,12 @@ export class LLMClient {
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      const data = (await response.json()) as LLMMessage;
+      const data = await response.json();
       return {
-        content: data.content as string,
+        role: "assistant" as const,
+        content: data.content,
         id,
-      };
+      } as LLMResponse;
     }
     return await this.stream(response.body, id, callback);
   }
@@ -143,7 +142,7 @@ export class LLMClient {
                 const toolCall: LLMToolCall = {
                   id: event.toolCallId,
                   name: event.toolName,
-                  arguments: event.args,
+                  input: event.args,
                 };
                 toolCalls.push(toolCall);
               } else if (event.type === "tool-result") {
@@ -179,26 +178,27 @@ export class LLMClient {
       }
     }
 
-    return {
-      content: text,
-      id,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      toolResults: toolResults.length > 0 ? toolResults : undefined,
-    };
-  }
-}
+    // Build content array with text and tool calls
+    const content: any[] = [];
 
-// FIXME(ja): we should either make message always a LLMMessage or update the types that
-// iframes/recipes can generate
-function processMessage(
-  m: LLMMessage | string,
-  idx: number,
-): LLMMessage {
-  if (typeof m === "string" || Array.isArray(m)) {
+    if (text.trim()) {
+      content.push({ type: "text", text });
+    }
+
+    // Add tool calls as content parts
+    for (const toolCall of toolCalls) {
+      content.push({
+        type: "tool-call",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        input: toolCall.input,
+      });
+    }
+
     return {
-      role: idx % 2 === 0 ? "user" : "assistant",
-      content: m,
+      role: "assistant",
+      content: content.length > 0 ? content : text,
+      id,
     };
   }
-  return m;
 }

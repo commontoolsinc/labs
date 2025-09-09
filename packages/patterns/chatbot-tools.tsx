@@ -81,7 +81,10 @@ const sendMessage = handler<
     addMessage: Stream<BuiltInLLMMessage>;
   }
 >((event, { addMessage }) => {
-  addMessage.send({ role: "user", content: event.detail.message });
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text", text: event.detail.message }],
+  });
 });
 
 const clearChat = handler(
@@ -337,8 +340,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
                       role={msg.role}
                       content={msg.content}
                       tools={tools}
-                      toolCalls={msg.toolCalls}
-                      toolResults={msg.toolResults}
                     />
                   );
                 })}

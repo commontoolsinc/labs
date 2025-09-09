@@ -3,9 +3,9 @@ import {
   applyDefaults,
   type GenerationOptions,
   hydratePrompt,
-  type LLMMessage,
   type LLMRequest,
 } from "@commontools/llm";
+import { type BuiltInLLMMessage } from "@commontools/api";
 import { extractUserCode, staticSystemMd } from "./static.ts";
 import { type StaticCache } from "@commontools/static";
 
@@ -28,7 +28,7 @@ export const buildPrompt = async ({
 }, options: GenerationOptions): Promise<LLMRequest> => {
   const { model, cache, space, generationId } = applyDefaults(options);
 
-  const messages: LLMMessage[] = [];
+  const messages: BuiltInLLMMessage[] = [];
   if (spec && src) {
     messages.push({
       role: "user",

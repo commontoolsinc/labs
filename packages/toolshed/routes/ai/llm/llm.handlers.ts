@@ -13,7 +13,8 @@ import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
-import { isLLMRequest, type LLMMessage } from "@commontools/llm/types";
+import { isLLMRequest } from "@commontools/llm/types";
+import { type BuiltInLLMMessage } from "@commontools/api";
 
 const removeNonCacheableFields = (
   obj: object,
@@ -148,7 +149,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   }
 
   const persistCache = async (
-    messages: LLMMessage[],
+    messages: BuiltInLLMMessage[],
   ) => {
     if (!shouldCache || !cacheKey) {
       return;

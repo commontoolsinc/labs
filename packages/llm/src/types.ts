@@ -1,6 +1,11 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
-import type { JSONSchema } from "@commontools/api";
+import type {
+  BuiltInLLMContent,
+  BuiltInLLMContentPart,
+  BuiltInLLMMessage,
+  JSONSchema,
+} from "@commontools/api";
 
 export const DEFAULT_MODEL_NAME: ModelName =
   "anthropic:claude-3-7-sonnet-latest";
@@ -10,23 +15,15 @@ export const DEFAULT_MODEL_NAME: ModelName =
 export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-4.1-nano";
 export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-4.1-nano";
 
-export type LLMResponse = {
-  content: string;
+export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID
   id: string;
-  // Tool calls made during generation
-  toolCalls?: LLMToolCall[];
-  // Results of completed tool calls
-  toolResults?: LLMToolResult[];
 };
 
 export type ModelName = string;
 export type LLMPrompt = LlmPrompt;
-export interface LLMTypedContent {
-  type: "text" | "image";
-  data: string;
-}
-export type LLMContent = string | LLMTypedContent[];
+// Use BuiltIn types directly
+export type LLMContent = BuiltInLLMContent;
 
 export interface LLMTool {
   description: string;
@@ -37,7 +34,7 @@ export interface LLMTool {
 export interface LLMToolCall {
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  input: Record<string, any>;
 }
 
 export interface LLMToolResult {
@@ -46,16 +43,10 @@ export interface LLMToolResult {
   error?: string;
 }
 
-export type LLMMessage = {
-  role: "user" | "assistant" | "tool";
-  content: LLMContent;
-  toolCalls?: LLMToolCall[];
-  toolCallId?: string; // for tool result messages
-};
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
 export interface LLMRequest {
   cache?: boolean;
-  messages: LLMMessage[];
+  messages: BuiltInLLMMessage[];
   model: ModelName;
   system?: string;
   maxTokens?: number;
@@ -99,16 +90,15 @@ export function isLLMRequestMetadata(
     );
 }
 
-export function isLLMTypedContent(input: unknown): input is LLMTypedContent {
-  return isRecord(input) && !Array.isArray(input) &&
-    (input.type === "text" || input.type === "image") &&
-    typeof input.data === "string";
-}
+// Validator functions removed - use BuiltInLLM types directly
 
 export function isLLMContent(input: unknown): input is LLMContent {
-  return typeof input === "string"
-    ? true
-    : isArrayOf<LLMTypedContent>(isLLMTypedContent, input);
+  return typeof input === "string" || (Array.isArray(input) && input.every(
+    (item) =>
+      isRecord(item) &&
+      (item.type === "text" || item.type === "image" ||
+        item.type === "tool-call" || item.type === "tool-result"),
+  ));
 }
 
 export function isLLMToolCall(input: unknown): input is LLMToolCall {
@@ -131,7 +121,7 @@ export function isLLMTool(input: unknown): input is LLMTool {
     (!("handler" in input) || typeof input.handler === "function");
 }
 
-export function isLLMMessage(input: unknown): input is LLMMessage {
+export function isLLMMessage(input: unknown): input is BuiltInLLMMessage {
   return isRecord(input) && !Array.isArray(input) &&
     (input.role === "user" || input.role === "assistant" ||
       input.role === "tool") &&
@@ -141,7 +131,29 @@ export function isLLMMessage(input: unknown): input is LLMMessage {
     (!("toolCallId" in input) || typeof input.toolCallId === "string");
 }
 
-export const isLLMMessages = (isArrayOf<LLMMessage>).bind(null, isLLMMessage);
+export const isLLMMessages = (isArrayOf<BuiltInLLMMessage>).bind(
+  null,
+  isLLMMessage,
+);
+
+/**
+ * Extract text content from LLMResponse, handling both string and content parts array
+ */
+export function extractTextFromLLMResponse(response: LLMResponse): string {
+  if (typeof response.content === "string") {
+    return response.content;
+  }
+
+  if (Array.isArray(response.content)) {
+    // Extract text from all text parts and join them
+    return response.content
+      .filter((part) => part.type === "text")
+      .map((part) => (part as any).text)
+      .join(" ");
+  }
+
+  return "";
+}
 
 export function isLLMRequest(input: unknown): input is LLMRequest {
   return isRecord(input) && !Array.isArray(input) &&

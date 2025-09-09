@@ -3,7 +3,7 @@ import { LLMClient } from "../client.ts";
 import JSON5 from "json5";
 import { describeCharm } from "./charm-describe.ts";
 import { applyDefaults, llmPrompt } from "../index.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import { GenerationOptions } from "../options.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
@@ -137,7 +137,10 @@ export async function generateCharmSuggestions(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(response.content, "output");
+  const jsonString = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "output",
+  );
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

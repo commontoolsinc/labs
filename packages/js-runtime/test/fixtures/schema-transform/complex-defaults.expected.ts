@@ -151,7 +151,7 @@ export const nullDefaultsSchema = {
     type: "object",
     properties: {
         nullable: {
-            oneOf: [{
+            anyOf: [{
                     type: "null"
                 }, {
                     type: "string"

@@ -226,36 +226,49 @@ export type JSONSchemaObj = {
   readonly ifc?: { classification?: string[]; integrity?: string[] };
 };
 
-export interface BuiltInLLMTypedContent {
-  type: "text" | "image";
-  data: string;
-}
-export type BuiltInLLMContent = string | BuiltInLLMTypedContent[];
+// LLM types matching Vercel AI SDK structure
+export type BuiltInLLMTextPart = {
+  type: "text";
+  text: string;
+};
+
+export type BuiltInLLMImagePart = {
+  type: "image";
+  image: string | Uint8Array | ArrayBuffer | URL;
+};
+
+export type BuiltInLLMToolCallPart = {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, any>;
+};
+
+export type BuiltInLLMToolResultPart = {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  output: any;
+};
+
+export type BuiltInLLMContentPart =
+  | BuiltInLLMTextPart
+  | BuiltInLLMImagePart
+  | BuiltInLLMToolCallPart
+  | BuiltInLLMToolResultPart;
+
+export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
+
+export type BuiltInLLMMessage = {
+  role: "user" | "assistant" | "system" | "tool";
+  content: BuiltInLLMContent;
+};
 
 export interface BuiltInLLMTool {
   description: string;
   inputSchema: JSONSchema;
   handler?: (args: any) => any | Promise<any>; // Client-side only
 }
-
-export interface BuiltInLLMToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, any>;
-}
-
-export interface BuiltInLLMToolResult {
-  toolCallId: string;
-  result: any;
-  error?: string;
-}
-
-export type BuiltInLLMMessage = {
-  role: "user" | "assistant" | "tool";
-  content: BuiltInLLMContent;
-  toolCalls?: BuiltInLLMToolCall[];
-  toolResults?: BuiltInLLMToolResult[];
-};
 
 // Built-in types
 export interface BuiltInLLMParams {

@@ -355,10 +355,16 @@ export function validateAndTransform(
   if (
     isObject(schema) &&
     ((schema.asCell || schema.asStream) ||
-      (isObject(resolvedSchema) && Array.isArray(resolvedSchema?.anyOf) &&
-        resolvedSchema.anyOf.every((
-          option,
-        ) => (option.asCell || option.asStream))))
+      (isObject(resolvedSchema) && (
+        (Array.isArray(resolvedSchema?.anyOf) &&
+          resolvedSchema.anyOf.every((
+            option,
+          ) => (option.asCell || option.asStream))) ||
+        (Array.isArray(resolvedSchema?.oneOf) &&
+          resolvedSchema.oneOf.every((
+            option,
+          ) => (option.asCell || option.asStream)))
+      )))
   ) {
     // The reference should reflect the current _value_. So if it's a reference,
     // read the reference and return a cell based on it.
@@ -442,15 +448,22 @@ export function validateAndTransform(
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
-  if (isObject(resolvedSchema) && Array.isArray(resolvedSchema.anyOf)) {
-    const options = resolvedSchema.anyOf
+  if (
+    isObject(resolvedSchema) &&
+    (Array.isArray(resolvedSchema.anyOf) || Array.isArray(resolvedSchema.oneOf))
+  ) {
+    const options = ((resolvedSchema.anyOf ?? resolvedSchema.oneOf)!)
       .map((option) => {
         const resolved = resolveSchema(option, rootSchema);
-        const resolvedObj = isObject(resolved) ? resolved : {};
-        // Copy `asCell` over, necessary for $ref case.
-        if (option.asCell) return { ...resolvedObj, asCell: true };
-        if (option.asStream) return { ...resolvedObj, asStream: true };
-        else return resolved;
+        // Copy `asCell` and `asStream` over, necessary for $ref case.
+        if (isObject(option) && (option.asCell || option.asStream)) {
+          return {
+            ...ContextualFlowControl.toSchemaObj(resolved),
+            ...(option.asCell ? { asCell: true } : {}),
+            ...(option.asStream ? { asStream: true } : {}),
+          };
+        }
+        return resolved;
       })
       .filter((option) => option !== undefined);
 
@@ -475,10 +488,14 @@ export function validateAndTransform(
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
         if (
-          isObject(option.items) && option.items.anyOf &&
-          Array.isArray(option.items.anyOf)
+          isObject(option.items) && (
+            (option.items?.anyOf && Array.isArray(option.items.anyOf)) ||
+            (option.items?.oneOf && Array.isArray(option.items.oneOf))
+          )
         ) {
-          merged.push(...option.items.anyOf);
+          merged.push(
+            ...((option.items.anyOf ?? option.items.oneOf)!),
+          );
         } else if (option.items) merged.push(option.items);
       }
       return validateAndTransform(
@@ -501,7 +518,7 @@ export function validateAndTransform(
         const asCellRemoved = objectCandidates
           .filter((option) => option.asCell)
           .map((option) =>
-            (option.anyOf ?? [option]).map((branch) => {
+            (option.anyOf ?? option.oneOf ?? [option]).map((branch) => {
               const { asCell: _filteredOut, asStream: _filteredOut2, ...rest } =
                 branch as any;
               return rest;

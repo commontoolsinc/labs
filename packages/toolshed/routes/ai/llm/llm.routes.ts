@@ -5,36 +5,50 @@ import { z } from "zod";
 import { toZod } from "@commontools/utils/zod-utils";
 import {
   type LLMGenerateObjectRequest,
-  type LLMMessage,
   type LLMRequest,
-  LLMTypedContent,
 } from "@commontools/llm/types";
 
 const tags = ["AI Language Models"];
 
-const TypedMessageSchema = toZod<LLMTypedContent>().with({
-  type: z.enum(["text", "image"]),
-  data: z.string(),
+const TextPartSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
 });
 
-export const MessageSchema = toZod<LLMMessage>().with({
-  role: z.enum(["user", "assistant", "tool"]),
-  content: z.union([
-    z.string(),
-    z.array(TypedMessageSchema),
-  ]),
-  toolCalls: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    arguments: z.record(z.any()),
-  })).optional(),
-  toolCallId: z.string().optional(),
+const ImagePartSchema = z.object({
+  type: z.literal("image"),
+  image: z.string(),
 });
 
-export type LLMResponseMessage = z.infer<typeof MessageSchema>;
+const ToolCallPartSchema = z.object({
+  type: z.literal("tool-call"),
+  toolCallId: z.string(),
+  toolName: z.string(),
+  input: z.record(z.any()),
+});
+
+const ToolResultPartSchema = z.object({
+  type: z.literal("tool-result"),
+  toolCallId: z.string(),
+  toolName: z.string(),
+  output: z.any(),
+  error: z.string().optional(),
+});
+
+const MessageContentSchema = z.discriminatedUnion("type", [
+  TextPartSchema,
+  ImagePartSchema,
+  ToolCallPartSchema,
+  ToolResultPartSchema,
+]);
+
+export const MessageSchema = z.object({
+  role: z.enum(["system", "user", "assistant", "tool"]),
+  content: z.union([z.string(), z.array(MessageContentSchema)]),
+});
 
 export const LLMRequestSchema = toZod<LLMRequest>().with({
-  messages: z.array(MessageSchema),
+  messages: z.array(MessageSchema) as any, // Trust our BuiltInLLMMessage = CoreMessage alignment
   system: z.string().optional(),
   model: z.string().openapi({
     example: "claude-3-7-sonnet",
