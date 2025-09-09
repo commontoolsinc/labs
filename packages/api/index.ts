@@ -224,33 +224,43 @@ export type JSONSchema = {
   readonly ifc?: { classification?: string[]; integrity?: string[] };
 };
 
-// Re-export Vercel AI SDK types to ensure perfect alignment
-import type { ModelMessage } from "ai";
+// LLM types matching Vercel AI SDK structure
+export type BuiltInLLMTextPart = {
+  type: "text";
+  text: string;
+};
 
-export type BuiltInLLMMessage = ModelMessage;
-export type BuiltInLLMContent = ModelMessage["content"];
-export type BuiltInLLMContentPart = Extract<
-  ModelMessage["content"],
-  any[]
->[number];
+export type BuiltInLLMImagePart = {
+  type: "image";
+  image: string | Uint8Array | ArrayBuffer | URL;
+};
 
-// Extract specific content part types from the union
-export type BuiltInLLMTextPart = Extract<
-  BuiltInLLMContentPart,
-  { type: "text" }
->;
-export type BuiltInLLMImagePart = Extract<
-  BuiltInLLMContentPart,
-  { type: "image" }
->;
-export type BuiltInLLMToolCallPart = Extract<
-  BuiltInLLMContentPart,
-  { type: "tool-call" }
->;
-export type BuiltInLLMToolResultPart = Extract<
-  BuiltInLLMContentPart,
-  { type: "tool-result" }
->;
+export type BuiltInLLMToolCallPart = {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, any>;
+};
+
+export type BuiltInLLMToolResultPart = {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  output: any;
+};
+
+export type BuiltInLLMContentPart = 
+  | BuiltInLLMTextPart
+  | BuiltInLLMImagePart
+  | BuiltInLLMToolCallPart
+  | BuiltInLLMToolResultPart;
+
+export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
+
+export type BuiltInLLMMessage = {
+  role: "user" | "assistant" | "system" | "tool";
+  content: BuiltInLLMContent;
+};
 
 export interface BuiltInLLMTool {
   description: string;

@@ -122,59 +122,37 @@ export type JSONSchema = {
         integrity?: string[];
     };
 };
-export interface BuiltInLLMTextPart {
+export type BuiltInLLMTextPart = {
     type: "text";
     text: string;
-}
-export interface BuiltInLLMImagePart {
+};
+export type BuiltInLLMImagePart = {
     type: "image";
-    url: string;
-}
-export interface BuiltInLLMToolCallPart {
+    image: string | Uint8Array | ArrayBuffer | URL;
+};
+export type BuiltInLLMToolCallPart = {
     type: "tool-call";
     toolCallId: string;
     toolName: string;
-    args: Record<string, any>;
-}
-export interface BuiltInLLMToolResultPart {
+    input: Record<string, any>;
+};
+export type BuiltInLLMToolResultPart = {
     type: "tool-result";
     toolCallId: string;
     toolName: string;
-    result: any;
-    error?: string;
-}
-export type BuiltInLLMContentPart = {
-    type: "text" | "image" | "tool-call" | "tool-result";
-    text?: string;
-    image?: string;
-    toolCallId?: string;
-    toolName?: string;
-    args?: Record<string, any>;
-    result?: any;
-    error?: string;
+    output: any;
 };
-export type BuiltInLLMContent = string | Array<BuiltInLLMContentPart>;
+export type BuiltInLLMContentPart = BuiltInLLMTextPart | BuiltInLLMImagePart | BuiltInLLMToolCallPart | BuiltInLLMToolResultPart;
+export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
+export type BuiltInLLMMessage = {
+    role: "user" | "assistant" | "system" | "tool";
+    content: BuiltInLLMContent;
+};
 export interface BuiltInLLMTool {
     description: string;
     inputSchema: JSONSchema;
     handler?: (args: any) => any | Promise<any>;
 }
-export interface BuiltInLLMToolCall {
-    id: string;
-    name: string;
-    arguments: Record<string, any>;
-}
-export interface BuiltInLLMToolResult {
-    toolCallId: string;
-    result: any;
-    error?: string;
-}
-export type BuiltInLLMMessage = {
-    role: "user" | "assistant" | "tool" | "system";
-    content: BuiltInLLMContent;
-    toolCalls?: BuiltInLLMToolCall[];
-    toolResults?: BuiltInLLMToolResult[];
-};
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];
     model?: string;

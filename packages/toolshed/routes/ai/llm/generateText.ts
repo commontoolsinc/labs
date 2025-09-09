@@ -267,7 +267,7 @@ export async function generateText(
     configureJsonMode(
       streamParams,
       params.model,
-      messages,
+      messages as BuiltInLLMMessage[],
       params.stream || false,
     );
   }
@@ -362,8 +362,8 @@ export async function generateText(
     }
 
     return {
-      message: messages[messages.length - 1],
-      messages: [...messages],
+      message: messages[messages.length - 1] as BuiltInLLMMessage,
+      messages: [...messages] as BuiltInLLMMessage[],
       spanId,
     };
   }
@@ -459,8 +459,8 @@ export async function generateText(
       // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {
         params.onStreamComplete({
-          message: messages[messages.length - 1],
-          messages: [...messages],
+          message: messages[messages.length - 1] as BuiltInLLMMessage,
+          messages: [...messages] as BuiltInLLMMessage[],
           originalRequest: params,
         });
       }
@@ -470,8 +470,8 @@ export async function generateText(
   });
 
   return {
-    message: messages[messages.length - 1],
-    messages: [...messages],
+    message: messages[messages.length - 1] as BuiltInLLMMessage,
+    messages: [...messages] as BuiltInLLMMessage[],
     stream,
     spanId,
   };

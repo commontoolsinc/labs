@@ -303,7 +303,7 @@ function mainLogic(
                 toolName: matchingToolCall?.toolName || "unknown",
                 output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
-                  : toolResult.result,
+                  : { type: "text", value: toolResult.result },
               }],
             });
           }
