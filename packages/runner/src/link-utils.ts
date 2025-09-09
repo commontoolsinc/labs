@@ -1,6 +1,12 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
-import { type Cell, isCell, type MemorySpace } from "./cell.ts";
+import {
+  type Cell,
+  isCell,
+  isStream,
+  type MemorySpace,
+  type Stream,
+} from "./cell.ts";
 import {
   type LegacyAlias,
   type LegacyJSONCellLink,
@@ -48,6 +54,7 @@ export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
  */
 export type CellLink =
   | Cell<any>
+  | Stream<any>
   | SigilLink
   | QueryResultInternals
   | LegacyJSONCellLink // @deprecated
@@ -198,7 +205,7 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: Cell<any>,
+  value: Cell<any> | Stream<any>,
   base?: Cell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
@@ -225,7 +232,7 @@ export function parseLink(
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  if (isCell(value)) return value.getAsNormalizedFullLink();
+  if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
 
   // Handle new sigil format
   if (isSigilLink(value)) {
