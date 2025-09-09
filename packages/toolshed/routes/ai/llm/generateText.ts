@@ -156,84 +156,12 @@ export async function generateText(
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
-  // Convert messages to Vercel AI SDK format
-  // Handle the new content array format with tool calls and results
-  // TODO(bf): instead of transforming into this format here, maybe we should just align our types completely
-  // with vercel?
-  const messages = params.messages.map((message): ModelMessage | null => {
-    // Handle user messages
-    if (message.role === "user") {
-      if (typeof message.content === "string") {
-        return { role: "user", content: message.content };
-      }
-      // If content is an array, extract text parts
-      if (Array.isArray(message.content)) {
-        const textParts = message.content
-          .filter((part): part is BuiltInLLMTextPart =>
-            typeof part === "object" && "type" in part && part.type === "text"
-          )
-          .map((part) => part.text)
-          .join("\n");
-        return { role: "user", content: textParts || "" };
-      }
-    }
-
-    // Handle assistant messages with content arrays
-    if (message.role === "assistant") {
-      // Handle string content
-      if (typeof message.content === "string") {
-        return { role: "assistant", content: message.content };
-      }
-
-      // Handle content array with tool calls
-      if (Array.isArray(message.content)) {
-        const parts: any[] = [];
-
-        for (const contentPart of message.content) {
-          if (contentPart.type === "text") {
-            parts.push(contentPart);
-          } else if (contentPart.type === "tool-call") {
-            parts.push(contentPart);
-          }
-        }
-
-        return { role: "assistant", content: parts };
-      }
-
-      return { role: "assistant", content: String(message.content || "") };
-    }
-
-    // Handle tool messages
-    if (message.role === "tool") {
-      if (Array.isArray(message.content)) {
-        const toolResults = message.content
-          .filter((part): part is BuiltInLLMToolResultPart =>
-            typeof part === "object" && "type" in part &&
-            part.type === "tool-result"
-          );
-
-        if (toolResults.length > 0) {
-          const toolResult = toolResults[0]; // Vercel AI SDK expects one result per message
-          return {
-            role: "tool",
-            content: [{
-              type: "tool-result",
-              toolCallId: toolResult.toolCallId,
-              toolName: toolResult.toolName,
-              output: toolResult.output,
-            }], // Cast to any due to SDK v5 type differences
-          };
-        }
-      }
-    }
-
-    // Filter out unhandled message types
-    return null;
-  }).filter((msg): msg is ModelMessage => msg !== null);
+  // Since our BuiltInLLMMessage types are now aligned with Vercel AI SDK, no conversion needed
+  const messages = params.messages as ModelMessage[];
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
-    messages: messages as ModelMessage[],
+    messages,
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
