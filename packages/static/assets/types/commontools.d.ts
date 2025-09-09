@@ -172,7 +172,7 @@ export interface BuiltInLLMParams {
     tools?: Record<string, {
         description: string;
         inputSchema: JSONSchema;
-        handler?: (args: any) => any | Promise<any>;
+        handler: Stream<any> | OpaqueRef<any>;
     }>;
 }
 export interface BuiltInLLMState<T> {
