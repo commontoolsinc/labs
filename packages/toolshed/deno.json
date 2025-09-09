@@ -2,7 +2,8 @@
   "tasks": {
     "dev": "deno run --unstable-otel -A --watch --env-file=.env index.ts",
     "production": "deno run --unstable-otel -A --env-file=.env index.ts",
-    "test": "deno test -A --env-file=.env.test"
+    "test": "deno test -A --env-file=.env.test",
+    "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts"
   },
   "fmt": {
     "exclude": ["./llm_documentation/*"]
