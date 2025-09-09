@@ -92,9 +92,6 @@ async function invokeHandlerAsToolCall(
   return resultValue;
 }
 
-// Default token limits
-const DEFAULT_LLM_MAX_TOKENS = 4096;
-
 /**
  * Run a (tool using) dialog with an LLM.
  *
@@ -202,7 +199,7 @@ function mainLogic(
     system: system ?? "",
     messages: messagesCell.getAsQueryResult([], tx) ?? [],
     stop: stop ?? "",
-    maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
+    maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
     metadata: {
