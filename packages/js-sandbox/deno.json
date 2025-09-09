@@ -1,0 +1,20 @@
+{
+  "name": "@commontools/js-sandbox",
+  "tasks": {
+    "test": {
+      "dependencies": [
+        "deno-test",
+        "browser-test"
+      ]
+    },
+    "deno-test": "deno test --unstable-raw-imports --allow-env --allow-read test/*.test.ts",
+    "browser-test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"
+  },
+  "imports": {
+    "quickjs-emscripten-core": "npm:quickjs-emscripten-core",
+    "@jitl/quickjs-singlefile-mjs-debug-sync": "npm:@jitl/quickjs-singlefile-mjs-debug-sync"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}
