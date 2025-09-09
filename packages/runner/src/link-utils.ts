@@ -145,6 +145,7 @@ export function isLink(
     isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
+    isStream(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
