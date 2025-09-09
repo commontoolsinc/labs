@@ -296,8 +296,10 @@ export class CTChatMessage extends BaseElement {
   private _renderToolAttachments() {
     // Extract tool calls and results from content array
     const contentArray = Array.isArray(this.content) ? this.content : [];
-    const toolCalls = contentArray.filter(part => part.type === "tool-call");
-    const toolResults = contentArray.filter(part => part.type === "tool-result");
+    const toolCalls = contentArray.filter((part) => part.type === "tool-call");
+    const toolResults = contentArray.filter((part) =>
+      part.type === "tool-result"
+    );
 
     if (toolCalls.length === 0 && toolResults.length === 0) {
       return null;
@@ -340,16 +342,16 @@ export class CTChatMessage extends BaseElement {
     const messageClass = `message message-${this.role}${
       this.streaming ? " streaming" : ""
     }`;
-    
+
     // Extract text content from content array or use string directly
     let textContent = "";
     if (typeof this.content === "string") {
       textContent = this.content;
     } else if (Array.isArray(this.content)) {
-      const textParts = this.content.filter(part => part.type === "text");
-      textContent = textParts.map(part => part.text).join(" ");
+      const textParts = this.content.filter((part) => part.type === "text");
+      textContent = textParts.map((part) => part.text).join(" ");
     }
-    
+
     const renderedContent = this._renderMarkdown(textContent);
 
     return html`

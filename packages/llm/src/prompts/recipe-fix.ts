@@ -122,5 +122,8 @@ export async function fixRecipePrompt(
   });
 
   // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));
-  return parseTagFromResponse(extractTextFromLLMResponse(response), "fixed_code");
+  return parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "fixed_code",
+  );
 }

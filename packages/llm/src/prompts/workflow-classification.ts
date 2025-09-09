@@ -268,12 +268,18 @@ export async function classifyWorkflow(
   });
 
   try {
-    const workflow = parseTagFromResponse(extractTextFromLLMResponse(response), "workflow")
+    const workflow = parseTagFromResponse(
+      extractTextFromLLMResponse(response),
+      "workflow",
+    )
       .toLowerCase() as WorkflowType;
     const confidence = parseFloat(
       parseTagFromResponse(extractTextFromLLMResponse(response), "confidence"),
     );
-    const reasoning = parseTagFromResponse(extractTextFromLLMResponse(response), "reasoning");
+    const reasoning = parseTagFromResponse(
+      extractTextFromLLMResponse(response),
+      "reasoning",
+    );
 
     let enhancedPrompt: string | undefined;
     try {
@@ -386,13 +392,19 @@ export async function generateWorkflowPlan(
     let features: string[] = [];
 
     try {
-      autocompletion = parseTagFromResponse(extractTextFromLLMResponse(response), "autocomplete");
+      autocompletion = parseTagFromResponse(
+        extractTextFromLLMResponse(response),
+        "autocomplete",
+      );
     } catch (e) {
       // Specification might not be available
     }
 
     try {
-      const body = parseTagFromResponse(extractTextFromLLMResponse(response), "features");
+      const body = parseTagFromResponse(
+        extractTextFromLLMResponse(response),
+        "features",
+      );
       features = parseTagListFromResponse(body, "feature");
     } catch (e) {
       // Specification might not be available

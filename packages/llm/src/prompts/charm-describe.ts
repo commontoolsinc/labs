@@ -87,5 +87,8 @@ export async function describeCharm(
     "RESPONSE",
     parseTagFromResponse(extractTextFromLLMResponse(response), "description"),
   );
-  return parseTagFromResponse(extractTextFromLLMResponse(response), "description");
+  return parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "description",
+  );
 }

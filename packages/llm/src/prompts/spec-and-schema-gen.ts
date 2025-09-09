@@ -314,10 +314,21 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(extractTextFromLLMResponse(response), "title") || "New Charm";
-  const description = parseTagFromResponse(extractTextFromLLMResponse(response), "description");
-  const spec = parseTagFromResponse(extractTextFromLLMResponse(response), "spec");
-  const plan = parseTagFromResponse(extractTextFromLLMResponse(response), "plan");
+  const title =
+    parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
+    "New Charm";
+  const description = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "description",
+  );
+  const spec = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "spec",
+  );
+  const plan = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "plan",
+  );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;
@@ -444,10 +455,21 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(extractTextFromLLMResponse(response), "title") || "New Charm";
-  const description = parseTagFromResponse(extractTextFromLLMResponse(response), "description");
-  const spec = parseTagFromResponse(extractTextFromLLMResponse(response), "spec");
-  const plan = parseTagFromResponse(extractTextFromLLMResponse(response), "plan");
+  const title =
+    parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
+    "New Charm";
+  const description = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "description",
+  );
+  const spec = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "spec",
+  );
+  const plan = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "plan",
+  );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;

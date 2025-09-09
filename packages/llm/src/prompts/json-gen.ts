@@ -79,7 +79,10 @@ export async function generateJSON(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(extractTextFromLLMResponse(response), "json_blob");
+  const jsonString = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "json_blob",
+  );
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

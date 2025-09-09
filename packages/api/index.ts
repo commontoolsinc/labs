@@ -249,7 +249,7 @@ export type BuiltInLLMToolResultPart = {
   output: any;
 };
 
-export type BuiltInLLMContentPart = 
+export type BuiltInLLMContentPart =
   | BuiltInLLMTextPart
   | BuiltInLLMImagePart
   | BuiltInLLMToolCallPart

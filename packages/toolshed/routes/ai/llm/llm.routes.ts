@@ -47,7 +47,6 @@ export const MessageSchema = z.object({
   content: z.union([z.string(), z.array(MessageContentSchema)]),
 });
 
-
 export const LLMRequestSchema = toZod<LLMRequest>().with({
   messages: z.array(MessageSchema) as any, // Trust our BuiltInLLMMessage = CoreMessage alignment
   system: z.string().optional(),

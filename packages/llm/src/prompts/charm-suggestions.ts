@@ -137,7 +137,10 @@ export async function generateCharmSuggestions(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(extractTextFromLLMResponse(response), "output");
+  const jsonString = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "output",
+  );
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

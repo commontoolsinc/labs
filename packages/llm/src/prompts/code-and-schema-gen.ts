@@ -268,9 +268,17 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(extractTextFromLLMResponse(response), "title") || "New Charm";
-  const description = parseTagFromResponse(extractTextFromLLMResponse(response), "description");
-  const sourceCode = parseTagFromResponse(extractTextFromLLMResponse(response), "source_code");
+  const title =
+    parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
+    "New Charm";
+  const description = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "description",
+  );
+  const sourceCode = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "source_code",
+  );
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;
