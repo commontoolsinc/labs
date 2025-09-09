@@ -16,6 +16,7 @@ import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
   applyDefaults,
+  extractTextFromLLMResponse,
   formatForm,
   generateCodeAndSchema,
   generateSpecAndSchema,
@@ -85,12 +86,15 @@ export const genSrc = async (
   });
 
   // FIXME(ja): this is a hack to get the prefill to work
-  if (!response.content.startsWith(RESPONSE_PREFILL)) {
-    response.content = RESPONSE_PREFILL + response.content;
+  // TODO(bf): this probably doesn't work properly when the response.content is an array
+  const responseText = extractTextFromLLMResponse(response);
+  if (!responseText.startsWith(RESPONSE_PREFILL)) {
+    response.content = RESPONSE_PREFILL + responseText;
   }
 
+  const finalContent = extractTextFromLLMResponse(response);
   const source = injectUserCode(
-    response.content.split(RESPONSE_PREFILL)[1].split("\n```")[0],
+    finalContent.split(RESPONSE_PREFILL)[1].split("\n```")[0],
   );
   return { content: source, llmRequestId: response.id };
 };

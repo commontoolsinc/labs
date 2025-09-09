@@ -7,7 +7,7 @@ import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commontools/runner";
 import { WorkflowForm, WorkflowType } from "@commontools/charm";
 import { llmPrompt } from "../index.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 
 /**
  * Basic prompt for classifying user intent into a workflow type
@@ -268,17 +268,17 @@ export async function classifyWorkflow(
   });
 
   try {
-    const workflow = parseTagFromResponse(response.content, "workflow")
+    const workflow = parseTagFromResponse(extractTextFromLLMResponse(response), "workflow")
       .toLowerCase() as WorkflowType;
     const confidence = parseFloat(
-      parseTagFromResponse(response.content, "confidence"),
+      parseTagFromResponse(extractTextFromLLMResponse(response), "confidence"),
     );
-    const reasoning = parseTagFromResponse(response.content, "reasoning");
+    const reasoning = parseTagFromResponse(extractTextFromLLMResponse(response), "reasoning");
 
     let enhancedPrompt: string | undefined;
     try {
       enhancedPrompt = parseTagFromResponse(
-        response.content,
+        extractTextFromLLMResponse(response),
         "enhanced_prompt",
       );
     } catch (e) {
@@ -386,13 +386,13 @@ export async function generateWorkflowPlan(
     let features: string[] = [];
 
     try {
-      autocompletion = parseTagFromResponse(response.content, "autocomplete");
+      autocompletion = parseTagFromResponse(extractTextFromLLMResponse(response), "autocomplete");
     } catch (e) {
       // Specification might not be available
     }
 
     try {
-      const body = parseTagFromResponse(response.content, "features");
+      const body = parseTagFromResponse(extractTextFromLLMResponse(response), "features");
       features = parseTagListFromResponse(body, "feature");
     } catch (e) {
       // Specification might not be available

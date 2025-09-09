@@ -1,7 +1,7 @@
 import { LLMClient } from "../client.ts";
 import { GenerationOptions, llmPrompt } from "../index.ts";
 import { applyDefaults } from "../options.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
 
@@ -122,5 +122,5 @@ export async function fixRecipePrompt(
   });
 
   // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));
-  return parseTagFromResponse(response.content, "fixed_code");
+  return parseTagFromResponse(extractTextFromLLMResponse(response), "fixed_code");
 }

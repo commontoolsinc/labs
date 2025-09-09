@@ -1,6 +1,6 @@
 import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import type { JSONSchema, JSONSchemaMutable } from "@commontools/runner";
 import { WorkflowForm } from "@commontools/charm";
 
@@ -314,10 +314,10 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response.content, "title") || "New Charm";
-  const description = parseTagFromResponse(response.content, "description");
-  const spec = parseTagFromResponse(response.content, "spec");
-  const plan = parseTagFromResponse(response.content, "plan");
+  const title = parseTagFromResponse(extractTextFromLLMResponse(response), "title") || "New Charm";
+  const description = parseTagFromResponse(extractTextFromLLMResponse(response), "description");
+  const spec = parseTagFromResponse(extractTextFromLLMResponse(response), "spec");
+  const plan = parseTagFromResponse(extractTextFromLLMResponse(response), "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;
@@ -325,7 +325,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const resultSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "result_schema",
     );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
@@ -337,7 +337,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};
@@ -444,10 +444,10 @@ Based on this goal and the existing schema, please provide a title, description,
   });
 
   // Extract sections from the response
-  const title = parseTagFromResponse(response.content, "title") || "New Charm";
-  const description = parseTagFromResponse(response.content, "description");
-  const spec = parseTagFromResponse(response.content, "spec");
-  const plan = parseTagFromResponse(response.content, "plan");
+  const title = parseTagFromResponse(extractTextFromLLMResponse(response), "title") || "New Charm";
+  const description = parseTagFromResponse(extractTextFromLLMResponse(response), "description");
+  const spec = parseTagFromResponse(extractTextFromLLMResponse(response), "spec");
+  const plan = parseTagFromResponse(extractTextFromLLMResponse(response), "plan");
 
   // If we have an existing schema, use it; otherwise parse the generated schema
   let resultSchema: JSONSchemaMutable;
@@ -455,7 +455,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const resultSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "result_schema",
     );
     resultSchema = resultSchemaJson ? JSON.parse(resultSchemaJson) : {};
@@ -467,7 +467,7 @@ Based on this goal and the existing schema, please provide a title, description,
 
   try {
     const argumentSchemaJson = parseTagFromResponse(
-      response.content,
+      extractTextFromLLMResponse(response),
       "argument_schema",
     );
     argumentSchema = argumentSchemaJson ? JSON.parse(argumentSchemaJson) : {};

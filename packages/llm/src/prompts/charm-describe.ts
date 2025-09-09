@@ -1,7 +1,7 @@
 import { LLMClient } from "../client.ts";
 import { applyDefaults, GenerationOptions, llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { DEFAULT_MODEL_NAME } from "../types.ts";
+import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "charm-describe-system",
@@ -85,7 +85,7 @@ export async function describeCharm(
 
   console.log(
     "RESPONSE",
-    parseTagFromResponse(response.content, "description"),
+    parseTagFromResponse(extractTextFromLLMResponse(response), "description"),
   );
-  return parseTagFromResponse(response.content, "description");
+  return parseTagFromResponse(extractTextFromLLMResponse(response), "description");
 }

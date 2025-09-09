@@ -5,7 +5,7 @@ import {
   DEFAULT_MODEL,
 } from "@commontools/charm";
 import { NAME, Recipe } from "@commontools/runner";
-import { LLMClient } from "@commontools/llm";
+import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 
@@ -87,13 +87,13 @@ export async function searchCharms(
     });
 
     // Parse the thinking tag content
-    const thinkingMatch = response.content?.match(
+    const thinkingMatch = extractTextFromLLMResponse(response).match(
       /<thinking>([\s\S]*?)<\/thinking>/,
     );
     const thinking = thinkingMatch ? thinkingMatch[1].trim() : "";
 
     // Parse all charm tags
-    const charmMatches = response.content?.matchAll(
+    const charmMatches = extractTextFromLLMResponse(response).matchAll(
       /<charm id="([^"]+)" name="([^"]+)">([\s\S]*?)<\/charm>/g,
     );
 
