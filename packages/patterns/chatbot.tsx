@@ -64,7 +64,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
     const calculatorResult = cell<string>("");
-    const model = cell<string>("anthropic:claude-sonnet-4-20250514");
+    const model = cell<string>("anthropic:claude-sonnet-4-0");
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
