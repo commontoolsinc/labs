@@ -273,6 +273,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       system: "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools,
+      model,
     });
 
     // Debug logging
