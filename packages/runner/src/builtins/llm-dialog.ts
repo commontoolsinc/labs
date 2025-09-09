@@ -41,7 +41,6 @@ function perform(
   const tx = runtime.edit();
   if (pending.withTx(tx).get()) {
     action(tx);
-    // TODO(bf): [CT-859] when we support continuations, call mainLogc() again here
     tx.commit();
     return true;
   }
@@ -120,6 +119,30 @@ export function llmDialog(
   let addMessage: Cell<BuiltInLLMMessage | undefined>;
   const messagesCell = inputsCell.key("messages");
 
+  // Helper function to create and register handlers
+  const createHandler = <T>(
+    tx: IExtendedStorageTransaction,
+    handlerKey: string,
+    handler: (tx: IExtendedStorageTransaction, event: T) => void,
+  ): Cell<T | undefined> => {
+    const cell = runtime.getCell<T | undefined>(
+      parentCell.space,
+      {
+        llm: { [handlerKey]: cause },
+      },
+      undefined,
+      tx,
+    );
+    cell.setRaw({ $stream: true });
+
+    const streamLink = parseLink(cell);
+    addCancel(
+      runtime.scheduler.addEventHandler(handler, streamLink),
+    );
+
+    return cell;
+  };
+
   return (tx: IExtendedStorageTransaction) => {
     // SETUP CODE
     if (!cellsInitialized) {
@@ -132,42 +155,38 @@ export function llmDialog(
       pending.send(false);
 
       // Declare `addMessage` handler and register
-      addMessage = runtime.getCell<BuiltInLLMMessage | undefined>(
-        parentCell.space,
-        {
-          llm: { addMessage: cause },
-        },
-        undefined,
+      addMessage = createHandler<BuiltInLLMMessage>(
         tx,
+        "addMessage",
+        (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
+          if (pending.withTx(tx).get()) {
+            // ignore
+            return;
+          }
+
+          pending.withTx(tx).set(true);
+          messagesCell.withTx(tx).set([
+            ...(messagesCell.get() ?? []),
+            event,
+          ]);
+
+          mainLogic(tx, runtime, parentCell, inputsCell, pending);
+        },
       );
-      addMessage.setRaw({ $stream: true });
 
-      const addMessageStreamLink = parseLink(addMessage);
-      const handler = (
-        tx: IExtendedStorageTransaction,
-        event: BuiltInLLMMessage,
-      ) => {
-        if (pending.withTx(tx).get()) {
-          // ignore
-          return;
-        }
-
-        pending.withTx(tx).set(true);
-        messagesCell.withTx(tx).set([
-          ...(messagesCell.get() ?? []),
-          event,
-        ]);
-
-        mainLogic(tx, runtime, parentCell, inputsCell, pending);
-      };
-
-      addCancel(
-        runtime.scheduler.addEventHandler(handler, addMessageStreamLink),
+      // Declare `cancelGeneration` handler and register
+      const cancelGeneration = createHandler<void>(
+        tx,
+        "cancelGeneration",
+        (tx: IExtendedStorageTransaction, event: void) => {
+          pending.withTx(tx).set(false);
+        },
       );
 
       sendResult(tx, {
         pending,
         addMessage,
+        cancelGeneration,
       });
       cellsInitialized = true;
     }
@@ -313,15 +332,11 @@ function mainLogic(
               ...(messagesCell.get() ?? []),
               ...newMessages,
             ]);
-            pending.withTx(tx).set(false);
           });
 
           if (success) {
-            // Support continuations - call mainLogic() again for chained tool calls
-            // The LLM will see the tool results and can make additional tool calls
             console.log("Continuing conversation after tool calls...");
 
-            // Create a new transaction for the continuation
             const continueTx = runtime.edit();
             mainLogic(continueTx, runtime, parentCell, inputsCell, pending);
             continueTx.commit();
