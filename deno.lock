@@ -2030,6 +2030,11 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
+      "packages/api": {
+        "dependencies": [
+          "npm:ai@^5.0.27"
+        ]
+      },
       "packages/cli": {
         "dependencies": [
           "jsr:@cliffy/table@^1.0.0-rc.8"

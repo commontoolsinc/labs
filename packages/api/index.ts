@@ -224,49 +224,18 @@ export type JSONSchema = {
   readonly ifc?: { classification?: string[]; integrity?: string[] };
 };
 
-// New content part types matching Vercel AI SDK
-export interface BuiltInLLMTextPart {
-  type: "text";
-  text: string;
-}
+// Re-export Vercel AI SDK types to ensure perfect alignment
+import type { CoreMessage } from "ai";
 
-export interface BuiltInLLMImagePart {
-  type: "image";
-  url: string;
-}
+export type BuiltInLLMMessage = CoreMessage;
+export type BuiltInLLMContent = CoreMessage["content"];
+export type BuiltInLLMContentPart = Extract<CoreMessage["content"], any[]>[number];
 
-export interface BuiltInLLMToolCallPart {
-  type: "tool-call";
-  toolCallId: string;
-  toolName: string;
-  args: Record<string, any>;
-}
-
-export interface BuiltInLLMToolResultPart {
-  type: "tool-result";
-  toolCallId: string;
-  toolName: string;
-  result: any;
-  error?: string;
-}
-
-export type BuiltInLLMContentPart = {
-  type: "text" | "image" | "tool-call" | "tool-result";
-  text?: string;
-  image?: string;
-  toolCallId?: string;
-  toolName?: string;
-  args?: Record<string, any>;
-  result?: any;
-  error?: string;
-};
-
-// Update message content to support arrays with new part types
-export type BuiltInLLMContent =
-  | string
-  | Array<
-    BuiltInLLMContentPart
-  >;
+// Extract specific content part types from the union
+export type BuiltInLLMTextPart = Extract<BuiltInLLMContentPart, { type: "text" }>;
+export type BuiltInLLMImagePart = Extract<BuiltInLLMContentPart, { type: "image" }>;
+export type BuiltInLLMToolCallPart = Extract<BuiltInLLMContentPart, { type: "tool-call" }>;
+export type BuiltInLLMToolResultPart = Extract<BuiltInLLMContentPart, { type: "tool-result" }>;
 
 export interface BuiltInLLMTool {
   description: string;
@@ -274,24 +243,7 @@ export interface BuiltInLLMTool {
   handler?: (args: any) => any | Promise<any>; // Client-side only
 }
 
-export interface BuiltInLLMToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, any>;
-}
 
-export interface BuiltInLLMToolResult {
-  toolCallId: string;
-  result: any;
-  error?: string;
-}
-
-export type BuiltInLLMMessage = {
-  role: "user" | "assistant" | "tool" | "system";
-  content: BuiltInLLMContent;
-  toolCalls?: BuiltInLLMToolCall[];
-  toolResults?: BuiltInLLMToolResult[];
-};
 
 // Built-in types
 export interface BuiltInLLMParams {

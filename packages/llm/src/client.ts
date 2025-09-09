@@ -2,12 +2,12 @@ import {
   LLMContent,
   LLMGenerateObjectRequest,
   LLMGenerateObjectResponse,
-  LLMMessage,
   LLMRequest,
   LLMResponse,
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import { type BuiltInLLMMessage } from "@commontools/api";
 
 type PartialCallback = (text: string) => void;
 
@@ -88,7 +88,7 @@ export class LLMClient {
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      const data = (await response.json()) as LLMMessage;
+      const data = (await response.json()) as BuiltInLLMMessage;
       return {
         content: data.content as string,
         id,
@@ -177,11 +177,27 @@ export class LLMClient {
       }
     }
 
+    // Build content array with text and tool calls
+    const content: any[] = [];
+    
+    if (text.trim()) {
+      content.push({ type: "text", text });
+    }
+    
+    // Add tool calls as content parts
+    for (const toolCall of toolCalls) {
+      content.push({
+        type: "tool-call",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        input: toolCall.arguments,
+      });
+    }
+
     return {
-      content: text,
+      role: "assistant",
+      content: content.length > 0 ? content : text,
       id,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      toolResults: toolResults.length > 0 ? toolResults : undefined,
     };
   }
 }

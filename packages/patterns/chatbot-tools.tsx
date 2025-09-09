@@ -337,8 +337,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
                       role={msg.role}
                       content={msg.content}
                       tools={tools}
-                      toolCalls={msg.toolCalls}
-                      toolResults={msg.toolResults}
                     />
                   );
                 })}

@@ -12,6 +12,8 @@ import {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTool,
+  BuiltInLLMTextPart,
+  BuiltInLLMToolCallPart,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
@@ -76,7 +78,7 @@ async function invokeHandlerAsToolCall(
 
   const handlerCell = toolDef.key("handler");
   handlerCell.withTx(handlerTx).send({
-    ...toolCall.arguments,
+    ...toolCall.input,
     result,
   } as any); // TODO(bf): why any needed?
 
@@ -216,7 +218,11 @@ function mainLogic(
 
   resultPromise
     .then(async (llmResult) => {
-      if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
+      // Extract tool calls from content if it's an array
+      const hasToolCalls = Array.isArray(llmResult.content) && 
+        llmResult.content.some(part => part.type === "tool-call");
+      
+      if (hasToolCalls) {
         try {
           const newMessages: BuiltInLLMMessage[] = [];
 
@@ -226,33 +232,32 @@ function mainLogic(
           > = [];
 
           // Add text content if present
-          if (llmResult.content) {
+          if (typeof llmResult.content === "string" && llmResult.content) {
             assistantContentParts.push({
               type: "text",
               text: llmResult.content,
             });
+          } else if (Array.isArray(llmResult.content)) {
+            // Content is already an array of parts, use it directly
+            assistantContentParts.push(...llmResult.content.filter(part => part.type === "text"));
           }
 
-          // Add tool call parts
-          for (const toolCall of llmResult.toolCalls) {
-            assistantContentParts.push({
-              type: "tool-call",
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              args: toolCall.arguments,
-            });
+          // Extract tool calls from content parts
+          const toolCalls = (llmResult.content as any[]).filter(part => part.type === "tool-call");
+          
+          for (const toolCall of toolCalls) {
+            assistantContentParts.push(toolCall);
           }
 
           const assistantMessage: BuiltInLLMMessage = {
             role: "assistant",
-            content: llmResult.content,
-            toolCalls: llmResult.toolCalls,
+            content: assistantContentParts,
           };
 
           // Execute each tool call and collect results
           const toolResults: any[] = [];
-          for (const toolCall of llmResult.toolCalls) {
-            const toolDef = toolsCell.key(toolCall.name) as Cell<
+          for (const toolCall of toolCalls) {
+            const toolDef = toolsCell.key(toolCall.toolName) as Cell<
               BuiltInLLMTool
             >;
 
@@ -266,21 +271,36 @@ function mainLogic(
               // this is probably a proxy, so it may still update in the conversation history reactively later
               // but we intend this to be a static / snapshot at this stage
               toolResults.push({
-                id: toolCall.id,
+                id: toolCall.toolCallId,
                 result: resultValue,
               });
             } catch (error) {
-              console.error(`Tool ${toolCall.name} failed:`, error);
+              console.error(`Tool ${toolCall.toolName} failed:`, error);
               toolResults.push({
-                id: toolCall.id,
+                id: toolCall.toolCallId,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
           }
 
-          // Update the assistant message to include tool results
-          assistantMessage.toolResults = toolResults;
+          // Add assistant message with tool calls
           newMessages.push(assistantMessage);
+          
+          // Add tool result messages
+          for (const toolResult of toolResults) {
+            const matchingToolCall = toolCalls.find(tc => tc.toolCallId === toolResult.id);
+            newMessages.push({
+              role: "tool",
+              content: [{
+                type: "tool-result",
+                toolCallId: toolResult.id,
+                toolName: matchingToolCall?.toolName || "unknown",
+                output: toolResult.error 
+                  ? { type: "error-text", value: toolResult.error }
+                  : toolResult.result,
+              }],
+            });
+          }
 
           const success = perform(runtime, pending, (tx) => {
             messagesCell.withTx(tx).set([

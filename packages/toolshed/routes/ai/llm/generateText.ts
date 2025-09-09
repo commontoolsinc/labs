@@ -1,10 +1,15 @@
 import { CoreMessage, jsonSchema, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
 import {
-  type LLMMessage,
   type LLMRequest,
   type LLMTool,
 } from "@commontools/llm/types";
+import {
+  type BuiltInLLMMessage,
+  type BuiltInLLMTextPart,
+  type BuiltInLLMToolCallPart,
+  type BuiltInLLMToolResultPart,
+} from "@commontools/api";
 import { findModel } from "./models.ts";
 
 import { provider as otelProvider } from "@/lib/otel.ts";
@@ -27,15 +32,15 @@ export interface GenerateTextParams extends LLMRequest {
   abortSignal?: AbortSignal;
   // Updated callback to receive complete data for caching
   onStreamComplete?: (result: {
-    message: LLMMessage;
-    messages: LLMMessage[];
+    message: BuiltInLLMMessage;
+    messages: BuiltInLLMMessage[];
     originalRequest: GenerateTextParams;
   }) => void;
 }
 
 export interface GenerateTextResult {
-  message: LLMMessage;
-  messages: LLMMessage[];
+  message: BuiltInLLMMessage;
+  messages: BuiltInLLMMessage[];
   stream?: ReadableStream;
   spanId?: string;
 }
@@ -44,7 +49,7 @@ export interface GenerateTextResult {
 export function configureJsonMode(
   streamParams: Record<string, unknown>,
   modelName: string,
-  messages: LLMMessage[],
+  messages: BuiltInLLMMessage[],
   isStreaming: boolean,
 ): void {
   // Default to using the generic JSON mode
@@ -160,7 +165,7 @@ export async function generateText(
       // If content is an array, extract text parts
       if (Array.isArray(message.content)) {
         const textParts = message.content
-          .filter((part): part is LLMTextPart =>
+          .filter((part): part is BuiltInLLMTextPart =>
             typeof part === "object" && "type" in part && part.type === "text"
           )
           .map((part) => part.text)
@@ -182,40 +187,15 @@ export async function generateText(
 
         for (const contentPart of message.content) {
           if (contentPart.type === "text") {
-            parts.push({
-              type: "text",
-              text: (contentPart as LLMTextPart).text,
-            });
+            parts.push(contentPart);
           } else if (contentPart.type === "tool-call") {
-            const toolCall = contentPart as LLMToolCallPart;
-            parts.push({
-              type: "tool-call",
-              toolCallId: toolCall.toolCallId,
-              toolName: toolCall.toolName,
-              input: toolCall.args,
-            });
+            parts.push(contentPart);
           }
         }
 
         return { role: "assistant", content: parts };
       }
 
-      // Handle legacy format with toolCalls/toolResults (backward compatibility)
-      if (message.toolCalls && message.toolCalls.length > 0) {
-        const parts: any[] = [];
-        if (message.content) {
-          parts.push({ type: "text", text: String(message.content) });
-        }
-        for (const toolCall of message.toolCalls) {
-          parts.push({
-            type: "tool-call",
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            input: toolCall.arguments,
-          });
-        }
-        return { role: "assistant", content: parts };
-      }
 
       return { role: "assistant", content: String(message.content || "") };
     }
@@ -224,7 +204,7 @@ export async function generateText(
     if (message.role === "tool") {
       if (Array.isArray(message.content)) {
         const toolResults = message.content
-          .filter((part): part is LLMToolResultPart =>
+          .filter((part): part is BuiltInLLMToolResultPart =>
             typeof part === "object" && "type" in part &&
             part.type === "tool-result"
           );
@@ -239,9 +219,9 @@ export async function generateText(
               toolName: toolResult.toolName,
               output: toolResult.error
                 ? { type: "error-text", value: toolResult.error }
-                : (typeof toolResult.result === "string"
-                  ? { type: "text", value: toolResult.result }
-                  : { type: "json", value: toolResult.result }),
+                : (typeof toolResult.output === "string"
+                  ? { type: "text", value: toolResult.output }
+                  : { type: "json", value: toolResult.output }),
             } as any], // Cast to any due to SDK v5 type differences
           } as CoreMessage;
         }
@@ -396,9 +376,9 @@ export async function generateText(
       // If last message was from assistant, send it first
       if (messages[messages.length - 1].role === "assistant") {
         const content = messages[messages.length - 1].content;
-        // This `content` could be a `LLMTypedContent`, which isn't supported here.
+        // This `content` could be a structured content array, which isn't supported here.
         if (typeof content !== "string") {
-          throw new Error("LLMTypedContent not supported in responses.");
+          throw new Error("Structured content not supported in responses.");
         }
         result = content;
         controller.enqueue(
