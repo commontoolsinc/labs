@@ -7,6 +7,7 @@ import { isBrowser, isDeno } from "@commontools/utils/env";
 // is shimmed, causing a fail to access `os` from `undefined`.
 import { toFileUrl } from "@std/path/posix/to-file-url";
 import { join } from "@std/path/posix/join";
+import { generateETag } from "./etag.ts";
 
 const DEFAULT_BASE: URL = (() => {
   // Deno base URL is an absolute path to the `./assets/` directory
@@ -28,8 +29,16 @@ export interface StaticCacheConfig {
   baseUrl: URL;
 }
 
+/**
+ * Represents a cached static asset with its content and ETag.
+ */
+export interface CachedAsset {
+  buffer: Uint8Array;
+  etag: string;
+}
+
 export class StaticCache {
-  private cache: Map<string, Promise<Uint8Array>> = new Map();
+  private cache: Map<string, Promise<CachedAsset>> = new Map();
   private config: StaticCacheConfig;
   constructor(config: StaticCacheConfig = {
     baseUrl: new URL(DEFAULT_BASE),
@@ -37,12 +46,25 @@ export class StaticCache {
     this.config = config;
   }
 
-  get(assetName: string): Promise<Uint8Array> {
+  /**
+   * Get the content buffer of a static asset.
+   * Backward compatible method that returns only the buffer.
+   */
+  async get(assetName: string): Promise<Uint8Array> {
+    const cached = await this.getWithETag(assetName);
+    return cached.buffer;
+  }
+
+  /**
+   * Get a static asset with its ETag for cache validation.
+   * Returns both the content buffer and the generated ETag.
+   */
+  getWithETag(assetName: string): Promise<CachedAsset> {
     const currentValue = this.cache.get(assetName);
     if (currentValue) {
       return currentValue;
     }
-    const promise = this.request(assetName);
+    const promise = this.requestWithETag(assetName);
     this.cache.set(assetName, promise);
     return promise;
   }
@@ -65,13 +87,19 @@ export class StaticCache {
     return new URL(this.config.baseUrl);
   }
 
-  private async request(assetName: string): Promise<Uint8Array> {
+  /**
+   * Fetch an asset and generate its ETag.
+   * Handles both Deno (file system) and browser (HTTP) environments.
+   */
+  private async requestWithETag(assetName: string): Promise<CachedAsset> {
     const url = this.getUrl(assetName);
+    let buffer: Uint8Array;
+
     if (isDeno()) {
       // In Deno, use readFile rather than `fetch`, as
       // `fetch` doesn't seem to play well with included assets
       // in "compiled" builds
-      return Deno.readFile(url);
+      buffer = await Deno.readFile(url);
     } else {
       const res = await fetch(url);
       if (!res.ok) {
@@ -79,7 +107,10 @@ export class StaticCache {
           `Could not retrieve "${assetName}" at "${url.toString()}".`,
         );
       }
-      return new Uint8Array(await res.arrayBuffer());
+      buffer = new Uint8Array(await res.arrayBuffer());
     }
+
+    const etag = await generateETag(buffer);
+    return { buffer, etag };
   }
 }

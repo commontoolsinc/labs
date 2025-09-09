@@ -13,6 +13,7 @@
     "compile-api-types": "./scripts/compile-api-types.sh"
   },
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./etag": "./etag.ts"
   }
 }
