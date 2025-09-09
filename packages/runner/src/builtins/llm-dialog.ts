@@ -545,6 +545,7 @@ function startRequest(
             messagesCell.withTx(tx).push(
               assistantMessage as Schema<typeof LLMMessageSchema>,
             );
+            pending.withTx(tx).set(false);
           },
         );
       }
