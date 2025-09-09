@@ -203,7 +203,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
     const calculatorResult = cell<string>("");
-    const model = cell<string>("anthropic:claude-sonnet-4-20250514");
+    const model = cell<string>("anthropic:claude-sonnet-4-0");
     const searchWebResult = cell<string>("");
     const readWebpageResult = cell<string>("");
 
