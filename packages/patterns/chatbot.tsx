@@ -39,7 +39,10 @@ const sendMessage = handler<
     addMessage: Stream<BuiltInLLMMessage>;
   }
 >((event, { addMessage }) => {
-  addMessage.send({ role: "user", content: event.detail.message });
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text", text: event.detail.message }],
+  });
 });
 
 const clearChat = handler(
@@ -63,7 +66,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const calculatorResult = cell<string>("");
     const model = cell<string>("anthropic:claude-sonnet-4-20250514");
 
-    const { addMessage, pending } = llmDialog({
+    const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
       model,
       messages: chat,
@@ -150,13 +153,17 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </ct-vscroll>
 
           <div slot="footer">
-            <ct-message-input
-              name="Ask"
-              placeholder="Ask the LLM a question..."
-              appearance="rounded"
-              disabled={pending}
-              onct-send={sendMessage({ addMessage })}
-            />
+            {ifElse(
+              pending,
+              <ct-button onClick={cancelGeneration}>Cancel</ct-button>,
+              <ct-message-input
+                name="Ask"
+                placeholder="Ask the LLM a question..."
+                appearance="rounded"
+                disabled={pending}
+                onct-send={sendMessage({ addMessage })}
+              />,
+            )}
           </div>
         </ct-screen>
       ),

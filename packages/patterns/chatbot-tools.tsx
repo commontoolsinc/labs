@@ -269,7 +269,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const { addMessage, pending } = llmDialog({
+    const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools,
@@ -354,37 +354,43 @@ export default recipe<LLMTestInput, LLMTestResult>(
               </ct-vscroll>
 
               <div slot="footer">
-                <ct-message-input
-                  name="Ask"
-                  placeholder="Ask the LLM a question..."
-                  appearance="rounded"
-                  disabled={pending}
-                  onct-send={sendMessage({ addMessage })}
-                />
+                {ifElse(
+                  pending,
+                  <ct-button onClick={cancelGeneration}>Cancel</ct-button>,
+                  <ct-message-input
+                    name="Ask"
+                    placeholder="Ask the LLM a question..."
+                    appearance="rounded"
+                    disabled={pending}
+                    onct-send={sendMessage({ addMessage })}
+                  />,
+                )}
               </div>
             </ct-screen>
 
-            <ct-vstack data-label="Tools">
-              <div>
-                <h3>Web Search</h3>
-                <pre>{searchWebResult}</pre>
-              </div>
+            <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+              <ct-vstack data-label="Tools">
+                <div>
+                  <h3>Web Search</h3>
+                  <pre>{searchWebResult}</pre>
+                </div>
 
-              <div>
-                <h3>Web Page Reader</h3>
-                <pre>{readWebpageResult}</pre>
-              </div>
+                <div>
+                  <h3>Web Page Reader</h3>
+                  <pre>{readWebpageResult}</pre>
+                </div>
 
-              <div>
-                <h3>Calculator</h3>
-                <pre>{calculatorResult}</pre>
-              </div>
+                <div>
+                  <h3>Calculator</h3>
+                  <pre>{calculatorResult}</pre>
+                </div>
 
-              <div>
-                <h3>Items</h3>
-                <ct-list $value={list} />
-              </div>
-            </ct-vstack>
+                <div>
+                  <h3>Items</h3>
+                  <ct-list $value={list} />
+                </div>
+              </ct-vstack>
+            </ct-vscroll>
           </ct-autolayout>
         </ct-screen>
       ),
