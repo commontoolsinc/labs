@@ -44,6 +44,7 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 
 /**
  * This is the regular Cell interface.
@@ -468,9 +469,10 @@ export class RegularCell<T> implements Cell<T> {
 
     // If there's no current value, initialize based on schema
     if (currentValue === undefined) {
-      if (this.schema) {
+      if (isObject(this.schema)) {
         // Check if schema allows objects
-        const allowsObject = this.schema.type === "object" ||
+        const allowsObject = ContextualFlowControl.isTrueSchema(this.schema) ||
+          this.schema.type === "object" ||
           (Array.isArray(this.schema.type) &&
             this.schema.type.includes("object")) ||
           (this.schema.anyOf &&
@@ -483,6 +485,10 @@ export class RegularCell<T> implements Cell<T> {
             "Cannot update with object value - schema does not allow objects",
           );
         }
+      } else if (this.schema === false) {
+        throw new Error(
+          "Cannot update with object value - schema does not allow objects",
+        );
       }
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
@@ -540,7 +546,9 @@ export class RegularCell<T> implements Cell<T> {
         [],
         cause,
       );
-      array = Array.isArray(this.schema?.default) ? this.schema.default : [];
+      array = isObject(this.schema) && Array.isArray(this.schema?.default)
+        ? this.schema.default
+        : [];
     }
 
     // Append the new values to the array.

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { JSONSchemaObj } from "@commontools/api";
 import {
   type Frame,
   isModule,
@@ -88,8 +89,12 @@ describe("module", () => {
       const module = greet as unknown as Module;
       expect(module.argumentSchema).toBeDefined();
       expect(module.resultSchema).toBeDefined();
-      expect(module.argumentSchema?.description).toBe("Person information");
-      expect(module.resultSchema?.description).toBe("Greeting message");
+      expect((module.argumentSchema as JSONSchemaObj).description).toBe(
+        "Person information",
+      );
+      expect((module.resultSchema as JSONSchemaObj).description).toBe(
+        "Greeting message",
+      );
     });
   });
 
@@ -155,7 +160,8 @@ describe("module", () => {
       expect(isModule(mouseHandler)).toBe(true);
       const module = mouseHandler as unknown as Module;
       expect(module.argumentSchema).toBeDefined();
-      expect(module.argumentSchema?.properties?.$event).toEqual(eventSchema);
+      expect((module.argumentSchema as JSONSchemaObj).properties?.$event)
+        .toEqual(eventSchema);
     });
 
     it("supports schema validation for events and state with enums", () => {

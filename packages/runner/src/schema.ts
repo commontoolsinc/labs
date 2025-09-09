@@ -1,4 +1,6 @@
-import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
+import { JSONSchemaObj } from "@commontools/api";
+import { isObject, isRecord } from "@commontools/utils/types";
+import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
@@ -108,12 +110,15 @@ function processDefaultValue(
   const resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // If schema indicates this should be a cell
-  if (schema.asCell) {
-    // If the cell itself has a default value, make it it's own (immutable)
+  if (isObject(schema) && schema.asCell) {
+    // If the cell itself has a default value, make it its own (immutable)
     // doc, to emulate the behavior of .get() returning a different underlying
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
-    if (!defaultValue && resolvedSchema?.default !== undefined) {
+    if (
+      !defaultValue && isObject(resolvedSchema) &&
+      resolvedSchema.default !== undefined
+    ) {
       return runtime.getImmutableCell(
         link.space,
         resolvedSchema.default,
@@ -133,7 +138,7 @@ function processDefaultValue(
     }
   }
 
-  if (schema.asStream) {
+  if (isObject(schema) && schema.asStream) {
     console.warn(
       "Created asStream as a default value, but this is likely unintentional",
     );
@@ -149,7 +154,8 @@ function processDefaultValue(
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && isObject(defaultValue)
+    isObject(resolvedSchema) && resolvedSchema?.type === "object" &&
+    isObject(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -167,31 +173,33 @@ function processDefaultValue(
             defaultValue[key as keyof typeof defaultValue],
           );
           processedKeys.add(key);
-        } else if (propSchema.asCell) {
-          // asCell are always created, it's their value that can be `undefined`
-          result[key] = processDefaultValue(
-            runtime,
-            tx,
-            { ...link, schema: propSchema, path: [...link.path, key] },
-            undefined,
-          );
-        } else if (propSchema.default !== undefined) {
-          result[key] = processDefaultValue(
-            runtime,
-            tx,
-            { ...link, schema: propSchema, path: [...link.path, key] },
-            propSchema.default,
-          );
-        } else if (
-          resolvedSchema?.required?.includes(key) &&
-          (propSchema.type === "object" || propSchema.type === "array")
-        ) {
-          result[key] = processDefaultValue(
-            runtime,
-            tx,
-            { ...link, schema: propSchema, path: [...link.path, key] },
-            propSchema.type === "object" ? {} : [],
-          );
+        } else if (isObject(propSchema)) {
+          if (propSchema.asCell) {
+            // asCell are always created, it's their value that can be `undefined`
+            result[key] = processDefaultValue(
+              runtime,
+              tx,
+              { ...link, schema: propSchema, path: [...link.path, key] },
+              undefined,
+            );
+          } else if (propSchema.default !== undefined) {
+            result[key] = processDefaultValue(
+              runtime,
+              tx,
+              { ...link, schema: propSchema, path: [...link.path, key] },
+              propSchema.default,
+            );
+          } else if (
+            resolvedSchema?.required?.includes(key) &&
+            (propSchema.type === "object" || propSchema.type === "array")
+          ) {
+            result[key] = processDefaultValue(
+              runtime,
+              tx,
+              { ...link, schema: propSchema, path: [...link.path, key] },
+              propSchema.type === "object" ? {} : [],
+            );
+          }
         }
       }
     }
@@ -225,7 +233,8 @@ function processDefaultValue(
 
   // Handle array type defaults
   if (
-    resolvedSchema?.type === "array" && Array.isArray(defaultValue) &&
+    isObject(resolvedSchema) && resolvedSchema?.type === "array" &&
+    Array.isArray(defaultValue) &&
     resolvedSchema.items
   ) {
     const result = defaultValue.map((item, i) =>
@@ -251,7 +260,9 @@ function mergeDefaults(
   schema: JSONSchema | undefined,
   defaultValue: Readonly<JSONValue>,
 ): JSONSchema {
-  const result: Mutable<JSONSchema> = { ...(schema as Mutable<JSONSchema>) };
+  const result: JSONSchemaMutable = {
+    ...(isObject(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
+  };
 
   // TODO(seefeld): What's the right thing to do for arrays?
   if (
@@ -311,7 +322,7 @@ export function validateAndTransform(
   const resolvedLink = resolveLink(tx ?? runtime.edit(), link, "writeRedirect");
 
   // Use schema from alias if provided and no explicit schema was set
-  if (!resolvedSchema && resolvedLink.schema) {
+  if (resolvedSchema === undefined && resolvedLink.schema) {
     // Call resolveSchema to strip asCell/asStream here as well. It's still the
     // initial `schema` that says whether this should be a cell, not the
     // resolved schema.
@@ -342,9 +353,9 @@ export function validateAndTransform(
   // anyOf gets handled here if all options are cells, so we don't read the
   // data. Below we handle the case where some options are meant to be cells.
   if (
-    isRecord(schema) &&
+    isObject(schema) &&
     ((schema.asCell || schema.asStream) ||
-      (Array.isArray(resolvedSchema?.anyOf) &&
+      (isObject(resolvedSchema) && Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((
           option,
         ) => (option.asCell || option.asStream))))
@@ -415,7 +426,10 @@ export function validateAndTransform(
   const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
-  if (value === undefined && resolvedSchema?.default !== undefined) {
+  if (
+    value === undefined && isObject(resolvedSchema) &&
+    resolvedSchema.default !== undefined
+  ) {
     const result = processDefaultValue(
       runtime,
       tx,
@@ -428,19 +442,24 @@ export function validateAndTransform(
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
-  if (Array.isArray(resolvedSchema.anyOf)) {
+  if (isObject(resolvedSchema) && Array.isArray(resolvedSchema.anyOf)) {
     const options = resolvedSchema.anyOf
       .map((option) => {
         const resolved = resolveSchema(option, rootSchema);
+        const resolvedObj = isObject(resolved) ? resolved : {};
         // Copy `asCell` over, necessary for $ref case.
-        if (option.asCell) return { ...resolved, asCell: true };
-        if (option.asStream) return { ...resolved, asStream: true };
+        if (option.asCell) return { ...resolvedObj, asCell: true };
+        if (option.asStream) return { ...resolvedObj, asStream: true };
         else return resolved;
       })
       .filter((option) => option !== undefined);
 
+    // TODO(@ubik2): We should support boolean and empty entries in the anyOf
+    const objOptions: JSONSchemaObj[] = options.filter(isObject);
     if (Array.isArray(value)) {
-      const arrayOptions = options.filter((option) => option.type === "array");
+      const arrayOptions = objOptions.filter((option) =>
+        option.type === "array"
+      );
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1) {
         return validateAndTransform(
@@ -455,7 +474,10 @@ export function validateAndTransform(
       // TODO(seefeld): Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
-        if (option.items?.anyOf && Array.isArray(option.items.anyOf)) {
+        if (
+          isObject(option.items) && option.items.anyOf &&
+          Array.isArray(option.items.anyOf)
+        ) {
           merged.push(...option.items.anyOf);
         } else if (option.items) merged.push(option.items);
       }
@@ -466,8 +488,8 @@ export function validateAndTransform(
         synced,
         seen,
       );
-    } else if (isRecord(value)) {
-      let objectCandidates = options.filter((option) =>
+    } else if (isObject(value)) {
+      let objectCandidates = objOptions.filter((option) =>
         option.type === "object"
       );
       const numAsCells = objectCandidates.filter((option) =>
@@ -491,7 +513,7 @@ export function validateAndTransform(
       }
 
       // Run extraction for each union branch.
-      const candidates = options
+      const candidates = objOptions
         .filter((option) => option.type === "object")
         .map((option) => {
           const candidateSeen = [...seen];
@@ -531,7 +553,7 @@ export function validateAndTransform(
       return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
       // For primitive types, try each option that matches the type
-      const candidates = options
+      const candidates = objOptions
         .filter((option) =>
           (option.type === "integer" ? "number" : option.type) ===
             typeof value as string
@@ -554,7 +576,9 @@ export function validateAndTransform(
       if (candidates.length === 1) return candidates[0].result;
 
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
-      const anyTypeOption = options.find((option) => option.type === undefined);
+      const anyTypeOption = objOptions.find((option) =>
+        option.type === undefined
+      );
       if (anyTypeOption) {
         return validateAndTransform(
           runtime,
@@ -574,7 +598,7 @@ export function validateAndTransform(
     }
   }
 
-  if (resolvedSchema.type === "object") {
+  if (isObject(resolvedSchema) && resolvedSchema.type === "object") {
     const keys = isRecord(value) ? Object.keys(value) : [];
 
     const result: Record<string, any> = {};
@@ -594,8 +618,11 @@ export function validateAndTransform(
           continue;
         }
         if (
-          (childSchema.asCell || childSchema.asStream || keys.includes(key)) &&
-          (isRecord(value) || childSchema.default !== undefined)
+          (keys.includes(key) ||
+            (isObject(childSchema) &&
+              (childSchema.asCell || childSchema.asStream))) &&
+          (isRecord(value) ||
+            (isObject(childSchema) && childSchema.default !== undefined))
         ) {
           result[key] = validateAndTransform(
             runtime,
@@ -604,7 +631,7 @@ export function validateAndTransform(
             synced,
             seen,
           );
-        } else if (childSchema.default !== undefined) {
+        } else if (isObject(childSchema) && childSchema.default !== undefined) {
           // Process default value for missing properties that have defaults
           result[key] = processDefaultValue(
             runtime,
@@ -643,7 +670,7 @@ export function validateAndTransform(
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
-  if (resolvedSchema.type === "array") {
+  if (isObject(resolvedSchema) && resolvedSchema.type === "array") {
     if (!Array.isArray(value)) {
       const result: any[] = [];
       seen.push([seenKey, result]);
@@ -694,7 +721,10 @@ export function validateAndTransform(
   }
 
   // For primitive types, return as is
-  if (value === undefined && resolvedSchema.default !== undefined) {
+  if (
+    value === undefined && isObject(resolvedSchema) &&
+    resolvedSchema.default !== undefined
+  ) {
     const result = processDefaultValue(
       runtime,
       tx,
@@ -724,14 +754,14 @@ export function generateHandlerSchema(
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
-  if (eventSchema) {
+  if (isObject(eventSchema)) {
     // extract $defs and definitions and remove them from eventSchema
     const { $defs, definitions, ...rest } = eventSchema;
     eventSchema = rest;
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  if (stateSchema) {
+  if (isObject(stateSchema)) {
     // extract $defs and definitions and remove them from stateSchema
     const { $defs, definitions, ...rest } = stateSchema;
     stateSchema = rest;
@@ -743,8 +773,8 @@ export function generateHandlerSchema(
   return {
     type: "object",
     properties: {
-      "$event": eventSchema ?? {},
-      "$ctx": stateSchema ?? {},
+      "$event": eventSchema ?? true,
+      "$ctx": stateSchema ?? true,
     },
     ...(Object.keys(mergedDefs).length ? { $defs: mergedDefs } : {}),
     ...(Object.keys(mergedDefinitions).length

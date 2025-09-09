@@ -39,7 +39,10 @@ export const createDataCharm = (
   const argumentSchema = schema ?? createJsonSchema(data);
 
   const schemaString = JSON.stringify(argumentSchema, null, 2);
-  const result = Object.keys(argumentSchema.properties ?? {}).map((key) =>
+  const properties = typeof argumentSchema === "boolean"
+    ? undefined
+    : argumentSchema.properties;
+  const result = Object.keys(properties ?? {}).map((key) =>
     `    ${key}: data.${key},\n`
   ).join("\n");
 

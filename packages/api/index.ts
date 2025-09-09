@@ -145,31 +145,33 @@ export type JSONSchemaTypes =
 // TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
 // This is particularly useful for specifying the schema of a property.
 // That will require reworking some things, so for now, I'm not doing it
-export type JSONSchema = {
+export type JSONSchema = JSONSchemaObj | boolean;
+
+export type JSONSchemaObj = {
   readonly $ref?: string;
-  readonly $defs?: Readonly<Record<string, JSONSchema | boolean>>;
+  readonly $defs?: Readonly<Record<string, JSONSchema>>;
   /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
-  readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
+  readonly definitions?: Readonly<Record<string, JSONSchema>>;
 
   // Subschema logic
-  readonly allOf?: readonly (JSONSchema | boolean)[]; // not validated
-  readonly anyOf?: readonly (JSONSchema | boolean)[]; // not always validated
-  readonly oneOf?: readonly (JSONSchema | boolean)[]; // not validated
-  readonly not?: JSONSchema | boolean;
+  readonly allOf?: readonly (JSONSchema)[]; // not validated
+  readonly anyOf?: readonly (JSONSchema)[]; // not always validated
+  readonly oneOf?: readonly (JSONSchema)[]; // not validated
+  readonly not?: JSONSchema;
   // Subschema conditionally - none applied
-  readonly if?: JSONSchema | boolean;
-  readonly then?: JSONSchema | boolean;
-  readonly else?: JSONSchema | boolean;
-  readonly dependentSchemas?: Readonly<Record<string, JSONSchema | boolean>>;
+  readonly if?: JSONSchema;
+  readonly then?: JSONSchema;
+  readonly else?: JSONSchema;
+  readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
   // Subschema for array
-  readonly prefixItems?: (JSONSchema | boolean)[]; // not validated
+  readonly prefixItems?: (JSONSchema)[]; // not validated
   readonly items?: Readonly<JSONSchema>;
-  readonly contains?: JSONSchema | boolean; // not validated
+  readonly contains?: JSONSchema; // not validated
   // Subschema for object
   readonly properties?: Readonly<Record<string, JSONSchema>>;
-  readonly patternProperties?: Readonly<Record<string, JSONSchema | boolean>>; // not validated
-  readonly additionalProperties?: JSONSchema | boolean;
-  readonly propertyNames?: JSONSchema | boolean; // not validated
+  readonly patternProperties?: Readonly<Record<string, JSONSchema>>; // not validated
+  readonly additionalProperties?: JSONSchema;
+  readonly propertyNames?: JSONSchema; // not validated
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
@@ -203,7 +205,7 @@ export type JSONSchema = {
   // Contents - none applied
   readonly contentEncoding?: string;
   readonly contentMediaType?: string;
-  readonly contentSchema?: JSONSchema | boolean;
+  readonly contentSchema?: JSONSchema;
 
   // Meta-Data
   readonly title?: string;
@@ -619,9 +621,7 @@ export type Schema<
             T extends { required: readonly string[] } ? T["required"] : [],
             Root,
             Depth,
-            T extends
-              { additionalProperties: infer AP extends boolean | JSONSchema }
-              ? AP
+            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
               : false,
             GetDefaultKeys<T>
           >
@@ -652,7 +652,7 @@ type ObjectFromProperties<
   R extends readonly string[] | never,
   Root extends JSONSchema,
   Depth extends DepthLevel,
-  AP extends boolean | JSONSchema = false,
+  AP extends JSONSchema = false,
   DK extends string = never,
 > =
   // Required properties (either explicitly required or has a default value)
@@ -774,9 +774,7 @@ export type SchemaWithoutCell<
             T extends { required: readonly string[] } ? T["required"] : [],
             Root,
             Depth,
-            T extends
-              { additionalProperties: infer AP extends boolean | JSONSchema }
-              ? AP
+            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
               : false,
             GetDefaultKeys<T>
           >
@@ -800,7 +798,7 @@ type ObjectFromPropertiesWithoutCell<
   R extends readonly string[] | never,
   Root extends JSONSchema,
   Depth extends DepthLevel,
-  AP extends boolean | JSONSchema = false,
+  AP extends JSONSchema = false,
   DK extends string = never,
 > =
   // Required properties (either explicitly required or has a default value)

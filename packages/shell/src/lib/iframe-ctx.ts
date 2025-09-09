@@ -60,33 +60,39 @@ export const setupIframe = (runtime: Runtime) =>
       setPreviousValue(context, key, JSON.stringify(value));
 
       if (isCell(context)) {
-        const currentValue = context.key(key).get();
-        const currentValueType = currentValue !== undefined
-          ? Array.isArray(currentValue) ? "array" : typeof currentValue
-          : undefined;
-        const type = context.key(key).schema?.type ??
-          currentValueType ?? typeof value;
-
-        if (type === "object" && isObject(value)) {
+        const schema = context.key(key).schema;
+        if (schema === true && isObject(value)) {
           context.key(key).update(value);
-        } else if (
-          (type === "array" && Array.isArray(value)) ||
-          (type === "integer" && typeof value === "number") ||
-          (type === typeof value as string)
-        ) {
-          const tx = context.runtime.edit();
-          context.withTx(tx).key(key).set(value);
-          // No retry, since if there is a conflict, the iframe will by the time
-          // this promise resolves have already gotten the base-line truth (In
-          // other words: It's correct to ignore this edit)
-          tx.commit();
-        } else {
-          console.warn(
-            "write skipped due to type",
-            type,
-            value,
-            context.key(key).schema,
-          );
+        } else if (schema === false) {
+          console.warn("write skipped due to false schema", value);
+        } else if (schema === undefined || isObject(schema)) {
+          const currentValue = context.key(key).get();
+          const currentValueType = currentValue !== undefined
+            ? Array.isArray(currentValue) ? "array" : typeof currentValue
+            : undefined;
+          const type = schema?.type ?? currentValueType ?? typeof value;
+
+          if (type === "object" && isObject(value)) {
+            context.key(key).update(value);
+          } else if (
+            (type === "array" && Array.isArray(value)) ||
+            (type === "integer" && typeof value === "number") ||
+            (type === typeof value as string)
+          ) {
+            const tx = context.runtime.edit();
+            context.withTx(tx).key(key).set(value);
+            // No retry, since if there is a conflict, the iframe will by the time
+            // this promise resolves have already gotten the base-line truth (In
+            // other words: It's correct to ignore this edit)
+            tx.commit();
+          } else {
+            console.warn(
+              "write skipped due to type",
+              type,
+              value,
+              context.key(key).schema,
+            );
+          }
         }
       } else if (isRecord(context)) {
         context[key] = value;

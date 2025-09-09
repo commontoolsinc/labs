@@ -513,8 +513,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // schemaString.
   // If the anyOf items are `$ref` items, resolve them, then check.
   static checkAnyOf(
-    schema: boolean | JSONSchema,
-    rootSchema: boolean | JSONSchema | undefined,
+    schema: JSONSchema,
+    rootSchema: JSONSchema | undefined,
     schemaString: string,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
@@ -536,7 +536,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   }
 
   // Despite the name, we will still include any "ifc" properties
-  static getStandardSchema(schema: JSONSchema | boolean): JSONSchema | boolean {
+  static getStandardSchema(schema: JSONSchema): JSONSchema {
     if (typeof schema === "boolean") {
       return schema;
     }
@@ -561,7 +561,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     return traverse(schema) as JSONSchema;
   }
 
-  static hasRefs(schema: JSONSchema | boolean): boolean {
+  static hasRefs(schema: JSONSchema): boolean {
     const traverse = (value: Immutable<any>): boolean => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {

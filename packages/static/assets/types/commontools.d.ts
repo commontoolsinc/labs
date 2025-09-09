@@ -63,26 +63,27 @@ export interface IDFields {
     [ID_FIELD]?: unknown;
 }
 export type JSONSchemaTypes = "object" | "array" | "string" | "integer" | "number" | "boolean" | "null";
-export type JSONSchema = {
+export type JSONSchema = JSONSchemaObj | boolean;
+export type JSONSchemaObj = {
     readonly $ref?: string;
-    readonly $defs?: Readonly<Record<string, JSONSchema | boolean>>;
+    readonly $defs?: Readonly<Record<string, JSONSchema>>;
     /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
-    readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
-    readonly allOf?: readonly (JSONSchema | boolean)[];
-    readonly anyOf?: readonly (JSONSchema | boolean)[];
-    readonly oneOf?: readonly (JSONSchema | boolean)[];
-    readonly not?: JSONSchema | boolean;
-    readonly if?: JSONSchema | boolean;
-    readonly then?: JSONSchema | boolean;
-    readonly else?: JSONSchema | boolean;
-    readonly dependentSchemas?: Readonly<Record<string, JSONSchema | boolean>>;
-    readonly prefixItems?: (JSONSchema | boolean)[];
+    readonly definitions?: Readonly<Record<string, JSONSchema>>;
+    readonly allOf?: readonly (JSONSchema)[];
+    readonly anyOf?: readonly (JSONSchema)[];
+    readonly oneOf?: readonly (JSONSchema)[];
+    readonly not?: JSONSchema;
+    readonly if?: JSONSchema;
+    readonly then?: JSONSchema;
+    readonly else?: JSONSchema;
+    readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
+    readonly prefixItems?: (JSONSchema)[];
     readonly items?: Readonly<JSONSchema>;
-    readonly contains?: JSONSchema | boolean;
+    readonly contains?: JSONSchema;
     readonly properties?: Readonly<Record<string, JSONSchema>>;
-    readonly patternProperties?: Readonly<Record<string, JSONSchema | boolean>>;
-    readonly additionalProperties?: JSONSchema | boolean;
-    readonly propertyNames?: JSONSchema | boolean;
+    readonly patternProperties?: Readonly<Record<string, JSONSchema>>;
+    readonly additionalProperties?: JSONSchema;
+    readonly propertyNames?: JSONSchema;
     readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
     readonly enum?: readonly Readonly<JSONValue>[];
     readonly const?: Readonly<JSONValue>;
@@ -106,7 +107,7 @@ export type JSONSchema = {
     readonly format?: string;
     readonly contentEncoding?: string;
     readonly contentMediaType?: string;
-    readonly contentSchema?: JSONSchema | boolean;
+    readonly contentSchema?: JSONSchema;
     readonly title?: string;
     readonly description?: string;
     readonly default?: Readonly<JSONValue>;
@@ -347,14 +348,14 @@ export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth exte
 } ? P extends Record<string, JSONSchema> ? ObjectFromProperties<P, T extends {
     required: readonly string[];
 } ? T["required"] : [], Root, Depth, T extends {
-    additionalProperties: infer AP extends boolean | JSONSchema;
+    additionalProperties: infer AP extends JSONSchema;
 } ? AP : false, GetDefaultKeys<T>> : Record<string, unknown> : T extends {
     additionalProperties: infer AP;
 } ? AP extends false ? Record<string | number | symbol, never> : AP extends true ? Record<string | number | symbol, unknown> : AP extends JSONSchema ? Record<string | number | symbol, Schema<AP, Root, DecrementDepth<Depth>>> : Record<string | number | symbol, unknown> : Record<string, unknown> : any;
 type GetDefaultKeys<T extends JSONSchema> = T extends {
     default: infer D;
 } ? D extends Record<string, any> ? keyof D & string : never : never;
-type ObjectFromProperties<P extends Record<string, JSONSchema>, R extends readonly string[] | never, Root extends JSONSchema, Depth extends DepthLevel, AP extends boolean | JSONSchema = false, DK extends string = never> = {
+type ObjectFromProperties<P extends Record<string, JSONSchema>, R extends readonly string[] | never, Root extends JSONSchema, Depth extends DepthLevel, AP extends JSONSchema = false, DK extends string = never> = {
     [K in keyof P as K extends string ? K extends R[number] | DK ? K : never : never]: Schema<P[K], Root, DecrementDepth<Depth>>;
 } & {
     [K in keyof P as K extends string ? K extends R[number] | DK ? never : K : never]?: Schema<P[K], Root, DecrementDepth<Depth>>;
@@ -410,11 +411,11 @@ export type SchemaWithoutCell<T extends JSONSchema, Root extends JSONSchema = T,
 } ? P extends Record<string, JSONSchema> ? ObjectFromPropertiesWithoutCell<P, T extends {
     required: readonly string[];
 } ? T["required"] : [], Root, Depth, T extends {
-    additionalProperties: infer AP extends boolean | JSONSchema;
+    additionalProperties: infer AP extends JSONSchema;
 } ? AP : false, GetDefaultKeys<T>> : Record<string, unknown> : T extends {
     additionalProperties: infer AP;
 } ? AP extends false ? Record<string | number | symbol, never> : AP extends true ? Record<string | number | symbol, unknown> : AP extends JSONSchema ? Record<string | number | symbol, SchemaWithoutCell<AP, Root, DecrementDepth<Depth>>> : Record<string | number | symbol, unknown> : Record<string, unknown> : any;
-type ObjectFromPropertiesWithoutCell<P extends Record<string, JSONSchema>, R extends readonly string[] | never, Root extends JSONSchema, Depth extends DepthLevel, AP extends boolean | JSONSchema = false, DK extends string = never> = {
+type ObjectFromPropertiesWithoutCell<P extends Record<string, JSONSchema>, R extends readonly string[] | never, Root extends JSONSchema, Depth extends DepthLevel, AP extends JSONSchema = false, DK extends string = never> = {
     [K in keyof P as K extends string ? K extends R[number] | DK ? K : never : never]: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
 } & {
     [K in keyof P as K extends string ? K extends R[number] | DK ? never : K : never]?: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;

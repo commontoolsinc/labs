@@ -83,8 +83,8 @@ export function lift<T, R>(
   return createNodeFactory({
     type: "javascript",
     implementation,
-    ...(argumentSchema ? { argumentSchema } : {}),
-    ...(resultSchema ? { resultSchema } : {}),
+    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
+    ...(resultSchema !== undefined ? { resultSchema } : {}),
   });
 }
 

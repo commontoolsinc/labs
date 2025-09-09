@@ -3,6 +3,8 @@ import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME } from "../types.ts";
 import type { JSONSchema, JSONSchemaMutable } from "@commontools/runner";
 import { WorkflowForm } from "@commontools/charm";
+import { JSONSchemaObj } from "@commontools/api";
+import { isObject } from "@commontools/utils/types";
 
 // Prompt for generating schema and specification from a goal
 export const SCHEMA_FROM_GOAL_PROMPT = llmPrompt(
@@ -239,7 +241,7 @@ ${
 /**
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
- * @param existingSchema Optional existing schema to use as a basis
+ * @param existingSchema Optional existing schema to use as a basis.
  * @param model Optional model identifier to use (defaults to claude-3-7-sonnet)
  * @returns Object containing title, description, specification, schema
  */
@@ -252,15 +254,16 @@ export async function generateSpecAndSchema(
   plan: string;
   title: string;
   description: string;
-  resultSchema: JSONSchema;
-  argumentSchema: JSONSchema;
+  resultSchema: JSONSchemaObj;
+  argumentSchema: JSONSchemaObj;
 }> {
   let systemPrompt, userContent;
   if (!form.plan) {
     throw new Error("Plan is required");
   }
-
-  if (existingSchema && Object.keys(existingSchema).length > 0) {
+  // If the existing schema is boolean, pretend it doesn't exist, since a
+  // boolean schema isn't useful to the llm.
+  if (isObject(existingSchema) && Object.keys(existingSchema).length > 0) {
     // When we have an existing schema, focus on generating specification
     systemPrompt = SPEC_FROM_SCHEMA_PROMPT;
     userContent = hydratePrompt(

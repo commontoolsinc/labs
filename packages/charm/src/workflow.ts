@@ -23,7 +23,7 @@ import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { CharmSearchResult, searchCharms } from "./search.ts";
 import { console } from "./conditional-console.ts";
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -775,7 +775,13 @@ export async function processWorkflow(
         );
 
         for (const [key, charm] of Object.entries(form.input.references)) {
-          const schema = charm.schema?.properties;
+          // if we have a boolean schema, we can't really search with it, so
+          // just treat that the same as undefined
+          // I'm just passing the properties, since that's how it was built,
+          // but it's a slightly odd api.
+          const schemaProperties = isObject(charm.schema)
+            ? charm.schema.properties
+            : undefined;
           const id = charmId(charm as Cell<Charm>);
           if (!id) continue;
 
@@ -786,7 +792,7 @@ export async function processWorkflow(
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              schema,
+              schemaProperties,
             }),
           });
 
