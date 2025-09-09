@@ -82,7 +82,7 @@ const resultSchema = {
   properties: {
     pending: { type: "boolean", default: false },
     addMessage: { ...LLMMessageSchema, asStream: true },
-    cancelGeneration: { ...LLMMessageSchema, asStream: true },
+    cancelGeneration: { asStream: true },
   },
   required: ["pending", "addMessage", "cancelGeneration"],
 } as const satisfies JSONSchema;
