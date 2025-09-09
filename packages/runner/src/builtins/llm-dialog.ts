@@ -216,22 +216,31 @@ export function llmDialog(
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
+  // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
+    // Abort the request if it's still pending.
     abortController?.abort();
 
     const tx = runtime.edit();
+
+    // If the pending request is ours, set pending to false and clear the requestId.
     if (internal.withTx(tx).key("requestId").get() === requestId) {
       result.withTx(tx).key("pending").set(false);
       internal.withTx(tx).key("requestId").set("");
     }
+
     // Since we're aborting, don't retry. If the above fails, it's because the
     // requestId was already changing under us.
     tx.commit();
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    // SETUP CODE
+    // Setup cells on first run.
     if (!cellsInitialized) {
+      // Create result cell. The predictable cause means that it'll map to
+      // previously existing results. Note that we might not yet have it loaded
+      // and that this function will be called again once the data is loaded
+      // (but this if branch will be skipped then).
       result = runtime.getCell(
         parentCell.space,
         { llmDialog: cause },
@@ -239,6 +248,9 @@ export function llmDialog(
         tx,
       );
 
+      // Create another cell to store the internal state. This isn't returned to
+      // the caller. But again, the predictable cause means all instances tied
+      // to the same input cells will coordinate via the same cell.
       internal = runtime.getCell(
         parentCell.space,
         { llmDialog: cause },
@@ -248,6 +260,12 @@ export function llmDialog(
 
       const pending = result.key("pending");
 
+      // Write the stream markers into the result cell. This write might fail
+      // (since the original data wasn't loaded yet), but that's ok, since in
+      // that case another instance already wrote these.
+      //
+      // We are carrying the existing pending state over, in case the result
+      // cell was already loaded. We don't want to overwrite it.
       result.setRaw({
         ...result.getRaw(),
         addMessage: { $stream: true },
@@ -265,9 +283,9 @@ export function llmDialog(
                 Date.now() - REQUEST_TIMEOUT
             )
           ) {
-            // For now, let's drop messages added while request is pending. Add
-            // message UI should either be disabled or change the send button to
-            // be a stop button.
+            // For now, let's drop messages added while request is pending for
+            // less than five minutes. Add message UI should either be disabled
+            // or change the send button to be a stop button.
             return;
           }
 
@@ -278,6 +296,8 @@ export function llmDialog(
             event as Schema<typeof LLMMessageSchema>,
           );
 
+          // Set up new request (abort existing ones just in case) by allocating
+          // a new request Id and setting up a new abort controller.
           abortController?.abort();
           abortController = new AbortController();
           requestId = crypto.randomUUID();
@@ -286,7 +306,8 @@ export function llmDialog(
             lastActivity: Date.now(),
           });
 
-          // Start a new request.
+          // Start a new request. This will start an async operation that will
+          // outlive this handler call.
           startRequest(
             tx,
             runtime,
