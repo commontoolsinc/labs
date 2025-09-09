@@ -4,6 +4,7 @@ import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
 import { createXai, xai } from "@ai-sdk/xai";
+import { createPerplexity, perplexity } from "@ai-sdk/perplexity";
 import type { LanguageModel } from "ai";
 
 import env from "@/env.ts";
@@ -34,9 +35,9 @@ export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
 export const TASK_MODELS = {
-  coding: "anthropic:claude-3-5-sonnet-20241022", // Best for code
-  json: "anthropic:claude-3-5-sonnet-20241022", // Fast & good at structured output
-  creative: "openai:gpt-4o-2024-08-06", // Best for creative tasks
+  coding: "anthropic:claude-sonnet-4-0", // Best for code
+  json: "anthropic:claude-sonnet-4-0", // Fast & good at structured output
+  creative: "openai:gpt-5", // Best for creative tasks
   vision: "google:gemini-2.5-pro", // Best for vision tasks
 } as const;
 
@@ -54,7 +55,8 @@ const addModel = ({
     | typeof groq
     | typeof openai
     | typeof vertex
-    | typeof xai;
+    | typeof xai
+    | typeof perplexity;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -98,104 +100,8 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-3-5-sonnet-20241022",
-    aliases: ["anthropic:claude-3-5-sonnet-latest", "claude-3-5-sonnet"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-3-7-sonnet-20250219",
-    aliases: ["anthropic:claude-3-7-sonnet-latest", "claude-3-7-sonnet"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-3-7-sonnet-20250219-thinking",
-    aliases: [
-      "anthropic:claude-3-7-sonnet-thinking-latest",
-      "claude-3-7-sonnet-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-20250514",
-    aliases: ["anthropic:claude-4-sonnet-latest", "claude-4-sonnet"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-20250514-thinking",
-    aliases: [
-      "anthropic:claude-4-sonnet-thinking-latest",
-      "claude-4-sonnet-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-opus-4-20250514",
-    aliases: ["anthropic:claude-4-opus-latest", "claude-4-opus"],
+    name: "anthropic:claude-opus-4-1",
+    aliases: ["anthropic:claude-opus-4-1-latest", "claude-opus-4-1"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 32000,
@@ -210,10 +116,10 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-opus-4-20250514-thinking",
+    name: "anthropic:claude-opus-4-1-thinking",
     aliases: [
-      "anthropic:claude-4-opus-thinking-latest",
-      "claude-4-opus-thinking",
+      "anthropic:claude-opus-4-1-thinking-latest",
+      "claude-opus-4-1-thinking",
     ],
     capabilities: {
       contextWindow: 200_000,
@@ -231,6 +137,46 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       },
     },
   });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-0",
+    aliases: ["anthropic:claude-sonnet-4-0-latest", "claude-sonnet-4-0"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-0-thinking",
+    aliases: [
+      "anthropic:claude-sonnet-4-0-thinking-latest",
+      "claude-sonnet-4-0-thinking",
+    ],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 64000 },
+      },
+    },
+  });
 }
 
 if (env.CTTS_AI_LLM_GROQ_API_KEY) {
@@ -241,79 +187,32 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
 
   addModel({
     provider: groqProvider,
-    name: "groq:deepseek-r1-distill-llama-70b",
-    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
+    name: "groq:moonshotai/kimi-k2-instruct",
+    aliases: ["groq:kimi-k2-instruct", "kimi-k2-instruct"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 32768,
+      contextWindow: 131_072,
+      maxOutputTokens: 16384,
       images: false,
       prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
+      systemPrompt: true,
+      stopSequences: true,
       streaming: true,
-      reasoning: true,
+      reasoning: false,
     },
   });
 
   addModel({
     provider: groqProvider,
-    name: "groq:meta-llama/llama-4-maverick-17b-128e-instruct",
-    aliases: ["groq:llama-4-maverick", "llama-4-maverick"],
+    name: "groq:openai/gpt-oss-120b",
+    aliases: ["groq:gpt-oss-120b", "gpt-oss-120b"],
     capabilities: {
       contextWindow: 131_072,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 65536,
       images: false,
-      prefill: true,
+      prefill: false,
       systemPrompt: true,
       stopSequences: true,
-      streaming: false,
-      reasoning: false,
-    },
-  });
-  addModel({
-    provider: groqProvider,
-    name: "groq:meta-llama/llama-4-scout-17b-16e-instruct",
-    aliases: ["groq:llama-4-scout", "llama-4-scout"],
-    capabilities: {
-      contextWindow: 131_072,
-      maxOutputTokens: 8192,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: groqProvider,
-    name: "groq:llama-3.3-70b-versatile",
-    aliases: ["groq:llama-3.3-70b"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 32768,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: groqProvider,
-    name: "groq:llama-3.3-70b-specdec",
-    aliases: ["groq:llama-3.3-70b-specdec"],
-    capabilities: {
-      contextWindow: 8192,
-      maxOutputTokens: 8192,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
+      streaming: true,
       reasoning: false,
     },
   });
@@ -326,11 +225,11 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   console.log(" Adding 🤖 openai");
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-4o",
-    aliases: ["openai:gpt-4o", "openai:gpt-4o-latest", "gpt-4o"],
+    name: "openai:gpt-5",
+    aliases: ["openai:gpt-5-latest", "gpt-5"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 16384,
+      contextWindow: 400_000,
+      maxOutputTokens: 128_000,
       images: true,
       prefill: false,
       systemPrompt: true,
@@ -342,78 +241,30 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o3-2025-04-16",
-    aliases: ["openai:o3", "o3"],
+    name: "openai:gpt-5-thinking",
+    aliases: ["openai:gpt-5-thinking-latest", "gpt-5-thinking"],
     capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
+      contextWindow: 400_000,
+      maxOutputTokens: 128_000,
       images: true,
       prefill: false,
-      reasoning: true,
       systemPrompt: false,
       stopSequences: false,
       streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      reasoningEffort: "high",
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o4-mini-2025-04-16",
-    aliases: ["openai:o4-mini-low", "o4-mini-low"],
+    name: "openai:gpt-5-mini",
+    aliases: ["openai:gpt-5-mini-latest", "gpt-5-mini"],
     capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
-      images: true,
-      prefill: false,
-      reasoning: true,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-    providerOptions: { reasoningEffort: "low" },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:o4-mini-2025-04-16",
-    aliases: ["openai:o4-mini-medium", "o4-mini-medium"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
-      images: true,
-      prefill: false,
-      reasoning: true,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-    providerOptions: { reasoningEffort: "medium" },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:o4-mini-2025-04-16",
-    aliases: ["openai:o4-mini-high", "o4-mini-high"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 100_000,
-      images: true,
-      prefill: false,
-      reasoning: true,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-    },
-    providerOptions: { reasoningEffort: "high" },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:gpt-4.1-2025-04-14",
-    aliases: ["openai:gpt-4.1", "gpt-4.1"],
-    capabilities: {
-      contextWindow: 1_047_575,
-      maxOutputTokens: 32_767,
+      contextWindow: 400_000,
+      maxOutputTokens: 128_000,
       images: true,
       prefill: false,
       systemPrompt: true,
@@ -425,33 +276,20 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-4.1-mini-2025-04-14",
-    aliases: ["openai:gpt-4.1-mini", "gpt-4.1-mini"],
+    name: "openai:gpt-5-mini-thinking",
+    aliases: ["openai:gpt-5-mini-thinking-latest", "gpt-5-mini-thinking"],
     capabilities: {
-      contextWindow: 1_047_575,
-      maxOutputTokens: 32_767,
+      contextWindow: 400_000,
+      maxOutputTokens: 128_000,
       images: true,
       prefill: false,
-      systemPrompt: true,
-      stopSequences: true,
+      systemPrompt: false,
+      stopSequences: false,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
     },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:gpt-4.1-nano-2025-04-14", // gpt-4.1-2025-04-14
-    aliases: ["openai:gpt-4.1-nano", "gpt-4.1-nano"],
-    capabilities: {
-      contextWindow: 1_047_575,
-      maxOutputTokens: 32_767,
-      images: true,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: false,
+    providerOptions: {
+      reasoningEffort: "high",
     },
   });
 }
@@ -471,11 +309,11 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.5-pro-preview-05-06",
-    aliases: ["google:gemini-2.5-pro", "gemini-2.5-pro"],
+    name: "google:gemini-2.5-pro",
+    aliases: ["google:gemini-2.5-pro-latest", "gemini-2.5-pro"],
     capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 65_535,
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
       images: true,
       prefill: true,
       systemPrompt: true,
@@ -487,15 +325,14 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.5-flash-preview-05-20",
+    name: "google:gemini-2.5-pro-thinking",
     aliases: [
-      "google:gemini-2.5-flash-preview",
-      "gemini-2.5-flash",
-      "google:gemini-2.5-flash",
+      "google:gemini-2.5-pro-thinking-latest",
+      "gemini-2.5-pro-thinking",
     ],
     capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 8_191,
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
       images: true,
       prefill: true,
       systemPrompt: true,
@@ -507,42 +344,43 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.0-flash-001",
-    aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
+    name: "google:gemini-2.5-flash",
+    aliases: ["google:gemini-2.5-flash-latest", "gemini-2.5-flash"],
     capabilities: {
-      contextWindow: 1_048_576,
-      maxOutputTokens: 8_191,
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
       images: true,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
     },
   });
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.0-flash-lite",
-    aliases: ["google:gemini-2.0-flash-lite-001", "gemini-2.0-flash-lite"],
+    name: "google:gemini-2.5-flash-thinking",
+    aliases: [
+      "google:gemini-2.5-flash-thinking-latest",
+      "gemini-2.5-flash-thinking",
+    ],
     capabilities: {
-      contextWindow: 1_048_575,
-      maxOutputTokens: 8_191,
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
       images: true,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
     },
   });
 }
 
 if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
-  const perplexityProvider = createOpenAI({
-    name: "perplexity",
+  const perplexityProvider = createPerplexity({
     apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
-    baseURL: "https://api.perplexity.ai/",
   });
   console.log(" Adding 🤖 perplexity");
   addModel({
@@ -550,7 +388,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
     name: "perplexity:sonar-reasoning-pro",
     aliases: ["sonar-reasoning-pro"],
     capabilities: {
-      contextWindow: 127_000,
+      contextWindow: 128_000,
       maxOutputTokens: 8000,
       images: false,
       prefill: false,
@@ -563,17 +401,17 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
 
   addModel({
     provider: perplexityProvider,
-    name: "perplexity:sonar-pro",
-    aliases: ["sonar-pro"],
+    name: "perplexity:sonar-deep-research",
+    aliases: ["sonar-deep-research"],
     capabilities: {
-      contextWindow: 200_000,
+      contextWindow: 128_000,
       maxOutputTokens: 8000,
       images: false,
       prefill: false,
       systemPrompt: false,
       stopSequences: true,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
     },
   });
 }
@@ -585,33 +423,33 @@ if (env.CTTS_AI_LLM_XAI_API_KEY) {
   console.log(" Adding 🤖 Xai");
   addModel({
     provider: xaiProvider,
-    name: "xai:grok-3-mini-latest",
-    aliases: ["grok-3-mini", "grok-3-mini-latest"],
+    name: "xai:grok-4",
+    aliases: ["grok-4", "grok-4-latest"],
     capabilities: {
-      contextWindow: 131_071,
-      maxOutputTokens: 8192,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
-
-  addModel({
-    provider: xaiProvider,
-    name: "xai:grok-3-latest",
-    aliases: ["grok-3", "grok-3-latest"],
-    capabilities: {
-      contextWindow: 131_071,
-      maxOutputTokens: 8192,
-      images: false,
+      contextWindow: 256_000,
+      maxOutputTokens: 128_000,
+      images: true,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
       reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: xaiProvider,
+    name: "xai:grok-4-thinking",
+    aliases: ["grok-4-thinking", "grok-4-thinking-latest"],
+    capabilities: {
+      contextWindow: 256_000,
+      maxOutputTokens: 128_000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
     },
   });
 }

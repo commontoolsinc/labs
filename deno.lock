@@ -62,6 +62,8 @@
     "npm:@ai-sdk/groq@^2.0.16": "2.0.16_zod@3.25.76",
     "npm:@ai-sdk/openai@^1.1.9": "1.3.24_zod@3.25.76",
     "npm:@ai-sdk/openai@^2.0.22": "2.0.22_zod@3.25.76",
+    "npm:@ai-sdk/perplexity@*": "2.0.8_zod@3.25.76",
+    "npm:@ai-sdk/perplexity@^2.0.8": "2.0.8_zod@3.25.76",
     "npm:@ai-sdk/xai@^2.0.13": "2.0.13_zod@3.25.76",
     "npm:@arizeai/openinference-semantic-conventions@^1.1.0": "1.1.0",
     "npm:@arizeai/openinference-vercel@^2.0.1": "2.3.1_@opentelemetry+api@1.9.0",
@@ -392,6 +394,14 @@
         "zod"
       ]
     },
+    "@ai-sdk/perplexity@2.0.8_zod@3.25.76": {
+      "integrity": "sha512-e24PUYXMoXPFhglzO17FEafr2+NljKS8ivHP5Tk0R+aiElfOSqDEjSDsxyL6aBFKzX+Bnrlr33FwfVwz8Ozt2Q==",
+      "dependencies": [
+        "@ai-sdk/provider@2.0.0",
+        "@ai-sdk/provider-utils@3.0.8_zod@3.25.76",
+        "zod"
+      ]
+    },
     "@ai-sdk/provider-utils@2.2.8_zod@3.25.76": {
       "integrity": "sha512-fqhG+4sCVv8x7nFzYnFo19ryhAa3w096Kmc3hWxMQfW/TubPOmt3A6tYZhl4mUfQWWQMsuSkLrtjlWuXBVSGQA==",
       "dependencies": [
@@ -403,6 +413,15 @@
     },
     "@ai-sdk/provider-utils@3.0.7_zod@3.25.76": {
       "integrity": "sha512-o3BS5/t8KnBL3ubP8k3w77AByOypLm+pkIL/DCw0qKkhDbvhCy+L3hRTGPikpdb8WHcylAeKsjgwOxhj4cqTUA==",
+      "dependencies": [
+        "@ai-sdk/provider@2.0.0",
+        "@standard-schema/spec",
+        "eventsource-parser@3.0.5",
+        "zod"
+      ]
+    },
+    "@ai-sdk/provider-utils@3.0.8_zod@3.25.76": {
+      "integrity": "sha512-cDj1iigu7MW2tgAQeBzOiLhjHOUM9vENsgh4oAVitek0d//WdgfPCsKO3euP7m7LyO/j9a1vr/So+BGNdpFXYw==",
       "dependencies": [
         "@ai-sdk/provider@2.0.0",
         "@standard-schema/spec",
@@ -2085,6 +2104,7 @@
           "npm:@ai-sdk/google-vertex@^3.0.16",
           "npm:@ai-sdk/groq@^2.0.16",
           "npm:@ai-sdk/openai@^2.0.22",
+          "npm:@ai-sdk/perplexity@^2.0.8",
           "npm:@ai-sdk/xai@^2.0.13",
           "npm:@arizeai/openinference-semantic-conventions@^1.1.0",
           "npm:@arizeai/openinference-vercel@^2.0.1",
