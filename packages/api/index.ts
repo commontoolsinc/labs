@@ -225,25 +225,38 @@ export type JSONSchema = {
 };
 
 // Re-export Vercel AI SDK types to ensure perfect alignment
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 
-export type BuiltInLLMMessage = CoreMessage;
-export type BuiltInLLMContent = CoreMessage["content"];
-export type BuiltInLLMContentPart = Extract<CoreMessage["content"], any[]>[number];
+export type BuiltInLLMMessage = ModelMessage;
+export type BuiltInLLMContent = ModelMessage["content"];
+export type BuiltInLLMContentPart = Extract<
+  ModelMessage["content"],
+  any[]
+>[number];
 
 // Extract specific content part types from the union
-export type BuiltInLLMTextPart = Extract<BuiltInLLMContentPart, { type: "text" }>;
-export type BuiltInLLMImagePart = Extract<BuiltInLLMContentPart, { type: "image" }>;
-export type BuiltInLLMToolCallPart = Extract<BuiltInLLMContentPart, { type: "tool-call" }>;
-export type BuiltInLLMToolResultPart = Extract<BuiltInLLMContentPart, { type: "tool-result" }>;
+export type BuiltInLLMTextPart = Extract<
+  BuiltInLLMContentPart,
+  { type: "text" }
+>;
+export type BuiltInLLMImagePart = Extract<
+  BuiltInLLMContentPart,
+  { type: "image" }
+>;
+export type BuiltInLLMToolCallPart = Extract<
+  BuiltInLLMContentPart,
+  { type: "tool-call" }
+>;
+export type BuiltInLLMToolResultPart = Extract<
+  BuiltInLLMContentPart,
+  { type: "tool-result" }
+>;
 
 export interface BuiltInLLMTool {
   description: string;
   inputSchema: JSONSchema;
   handler?: (args: any) => any | Promise<any>; // Client-side only
 }
-
-
 
 // Built-in types
 export interface BuiltInLLMParams {

@@ -34,7 +34,7 @@ export interface LLMTool {
 export interface LLMToolCall {
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  input: Record<string, any>;
 }
 
 export interface LLMToolResult {
@@ -94,8 +94,10 @@ export function isLLMRequestMetadata(
 
 export function isLLMContent(input: unknown): input is LLMContent {
   return typeof input === "string" || (Array.isArray(input) && input.every(
-    item => isRecord(item) && 
-      (item.type === "text" || item.type === "image" || item.type === "tool-call" || item.type === "tool-result")
+    (item) =>
+      isRecord(item) &&
+      (item.type === "text" || item.type === "image" ||
+        item.type === "tool-call" || item.type === "tool-result"),
   ));
 }
 
@@ -129,7 +131,10 @@ export function isLLMMessage(input: unknown): input is BuiltInLLMMessage {
     (!("toolCallId" in input) || typeof input.toolCallId === "string");
 }
 
-export const isLLMMessages = (isArrayOf<BuiltInLLMMessage>).bind(null, isLLMMessage);
+export const isLLMMessages = (isArrayOf<BuiltInLLMMessage>).bind(
+  null,
+  isLLMMessage,
+);
 
 /**
  * Extract text content from LLMResponse, handling both string and content parts array
@@ -138,15 +143,15 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
   if (typeof response.content === "string") {
     return response.content;
   }
-  
+
   if (Array.isArray(response.content)) {
     // Extract text from all text parts and join them
     return response.content
-      .filter(part => part.type === "text")
-      .map(part => (part as any).text)
+      .filter((part) => part.type === "text")
+      .map((part) => (part as any).text)
       .join(" ");
   }
-  
+
   return "";
 }
 

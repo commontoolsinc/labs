@@ -88,11 +88,12 @@ export class LLMClient {
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      const data = (await response.json()) as BuiltInLLMMessage;
+      const data = await response.json();
       return {
-        content: data.content as string,
+        role: "assistant" as const,
+        content: data.content,
         id,
-      };
+      } as LLMResponse;
     }
     return await this.stream(response.body, id, callback);
   }
@@ -141,7 +142,7 @@ export class LLMClient {
                 const toolCall: LLMToolCall = {
                   id: event.toolCallId,
                   name: event.toolName,
-                  arguments: event.args,
+                  input: event.args,
                 };
                 toolCalls.push(toolCall);
               } else if (event.type === "tool-result") {
@@ -179,18 +180,18 @@ export class LLMClient {
 
     // Build content array with text and tool calls
     const content: any[] = [];
-    
+
     if (text.trim()) {
       content.push({ type: "text", text });
     }
-    
+
     // Add tool calls as content parts
     for (const toolCall of toolCalls) {
       content.push({
         type: "tool-call",
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        input: toolCall.arguments,
+        input: toolCall.input,
       });
     }
 

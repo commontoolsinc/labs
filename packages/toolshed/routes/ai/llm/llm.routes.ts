@@ -49,7 +49,7 @@ export const MessageSchema = z.object({
 
 
 export const LLMRequestSchema = toZod<LLMRequest>().with({
-  messages: z.array(MessageSchema),
+  messages: z.array(MessageSchema) as any, // Trust our BuiltInLLMMessage = CoreMessage alignment
   system: z.string().optional(),
   model: z.string().openapi({
     example: "claude-3-7-sonnet",

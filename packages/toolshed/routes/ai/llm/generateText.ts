@@ -1,9 +1,13 @@
-import { CoreMessage, jsonSchema, stepCountIs, streamText, tool } from "ai";
-import { AttributeValue, trace } from "@opentelemetry/api";
 import {
-  type LLMRequest,
-  type LLMTool,
-} from "@commontools/llm/types";
+  CoreMessage,
+  jsonSchema,
+  ModelMessage,
+  stepCountIs,
+  streamText,
+  tool,
+} from "ai";
+import { AttributeValue, trace } from "@opentelemetry/api";
+import { type LLMRequest, type LLMTool } from "@commontools/llm/types";
 import {
   type BuiltInLLMMessage,
   type BuiltInLLMTextPart,
@@ -156,7 +160,7 @@ export async function generateText(
   // Handle the new content array format with tool calls and results
   // TODO(bf): instead of transforming into this format here, maybe we should just align our types completely
   // with vercel?
-  const messages = params.messages.map((message): CoreMessage | null => {
+  const messages = params.messages.map((message): ModelMessage | null => {
     // Handle user messages
     if (message.role === "user") {
       if (typeof message.content === "string") {
@@ -196,7 +200,6 @@ export async function generateText(
         return { role: "assistant", content: parts };
       }
 
-
       return { role: "assistant", content: String(message.content || "") };
     }
 
@@ -217,24 +220,20 @@ export async function generateText(
               type: "tool-result",
               toolCallId: toolResult.toolCallId,
               toolName: toolResult.toolName,
-              output: toolResult.error
-                ? { type: "error-text", value: toolResult.error }
-                : (typeof toolResult.output === "string"
-                  ? { type: "text", value: toolResult.output }
-                  : { type: "json", value: toolResult.output }),
-            } as any], // Cast to any due to SDK v5 type differences
-          } as CoreMessage;
+              output: toolResult.output,
+            }], // Cast to any due to SDK v5 type differences
+          };
         }
       }
     }
 
     // Filter out unhandled message types
     return null;
-  }).filter((msg): msg is CoreMessage => msg !== null);
+  }).filter((msg): msg is ModelMessage => msg !== null);
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
-    messages: messages as CoreMessage[],
+    messages: messages as ModelMessage[],
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,

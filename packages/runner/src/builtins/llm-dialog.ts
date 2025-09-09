@@ -11,8 +11,8 @@ import {
   BuiltInLLMDialogState,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  BuiltInLLMTool,
   BuiltInLLMTextPart,
+  BuiltInLLMTool,
   BuiltInLLMToolCallPart,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
@@ -219,9 +219,9 @@ function mainLogic(
   resultPromise
     .then(async (llmResult) => {
       // Extract tool calls from content if it's an array
-      const hasToolCalls = Array.isArray(llmResult.content) && 
-        llmResult.content.some(part => part.type === "tool-call");
-      
+      const hasToolCalls = Array.isArray(llmResult.content) &&
+        llmResult.content.some((part) => part.type === "tool-call");
+
       if (hasToolCalls) {
         try {
           const newMessages: BuiltInLLMMessage[] = [];
@@ -239,12 +239,16 @@ function mainLogic(
             });
           } else if (Array.isArray(llmResult.content)) {
             // Content is already an array of parts, use it directly
-            assistantContentParts.push(...llmResult.content.filter(part => part.type === "text"));
+            assistantContentParts.push(
+              ...llmResult.content.filter((part) => part.type === "text"),
+            );
           }
 
           // Extract tool calls from content parts
-          const toolCalls = (llmResult.content as any[]).filter(part => part.type === "tool-call");
-          
+          const toolCalls = (llmResult.content as any[]).filter((part) =>
+            part.type === "tool-call"
+          );
+
           for (const toolCall of toolCalls) {
             assistantContentParts.push(toolCall);
           }
@@ -285,17 +289,19 @@ function mainLogic(
 
           // Add assistant message with tool calls
           newMessages.push(assistantMessage);
-          
+
           // Add tool result messages
           for (const toolResult of toolResults) {
-            const matchingToolCall = toolCalls.find(tc => tc.toolCallId === toolResult.id);
+            const matchingToolCall = toolCalls.find((tc) =>
+              tc.toolCallId === toolResult.id
+            );
             newMessages.push({
               role: "tool",
               content: [{
                 type: "tool-result",
                 toolCallId: toolResult.id,
                 toolName: matchingToolCall?.toolName || "unknown",
-                output: toolResult.error 
+                output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
                   : toolResult.result,
               }],
@@ -327,10 +333,10 @@ function mainLogic(
         }
       } else {
         // No tool calls, just add the assistant message
-        const assistantMessage: BuiltInLLMMessage = {
+        const assistantMessage = {
           role: "assistant",
           content: llmResult.content,
-        };
+        } as BuiltInLLMMessage;
 
         const tx = runtime.edit();
         messagesCell.withTx(tx).set([
