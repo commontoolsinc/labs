@@ -29,7 +29,6 @@ export class CTChat extends BaseElement {
       :host {
         display: flex;
         flex-direction: column;
-        padding: var(--ct-spacing-4, 1rem);
       }
 
       .message-item {
@@ -73,7 +72,6 @@ export class CTChat extends BaseElement {
         gap: var(--ct-spacing-1, 0.25rem);
       }
 
-
       .typing-dots {
         display: flex;
         gap: 4px;
@@ -114,10 +112,12 @@ export class CTChat extends BaseElement {
     onChange: () => {
       this.requestUpdate();
       // Emit event for parent scroll containers
-      this.dispatchEvent(new CustomEvent('ct-chat-updated', {
-        bubbles: true,
-        composed: true
-      }));
+      this.dispatchEvent(
+        new CustomEvent("ct-chat-updated", {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     },
   });
 
@@ -143,7 +143,6 @@ export class CTChat extends BaseElement {
     this._cellController.bind(this.messages);
   }
 
-
   override willUpdate(changedProperties: Map<string, any>) {
     super.willUpdate(changedProperties);
     // If the messages property itself changed (e.g., switched to a different cell)
@@ -155,7 +154,7 @@ export class CTChat extends BaseElement {
 
   private _buildToolResultMap(): Map<string, BuiltInLLMToolResultPart> {
     const resultMap = new Map<string, BuiltInLLMToolResultPart>();
-    
+
     this._messagesArray.forEach((message) => {
       if (message.role === "tool" && Array.isArray(message.content)) {
         message.content.forEach((part) => {
@@ -165,7 +164,7 @@ export class CTChat extends BaseElement {
         });
       }
     });
-    
+
     return resultMap;
   }
 
@@ -174,49 +173,53 @@ export class CTChat extends BaseElement {
     const currentMessage = messages[messageIndex];
     const prevMessage = messages[messageIndex - 1];
     const nextMessage = messages[messageIndex + 1];
-    
-    const classes = ['message-item'];
-    
+
+    const classes = ["message-item"];
+
     // System messages are never grouped
-    if (currentMessage.role === 'system') {
-      classes.push('system');
-      return classes.join(' ');
+    if (currentMessage.role === "system") {
+      classes.push("system");
+      return classes.join(" ");
     }
-    
+
     // Check if this message should be grouped with the previous one
-    const shouldGroupWithPrev = prevMessage && 
-      prevMessage.role !== 'system' && 
+    const shouldGroupWithPrev = prevMessage &&
+      prevMessage.role !== "system" &&
       this._isSameGroup(prevMessage.role, currentMessage.role);
-      
-    // Check if this message should be grouped with the next one  
-    const shouldGroupWithNext = nextMessage && 
-      nextMessage.role !== 'system' && 
+
+    // Check if this message should be grouped with the next one
+    const shouldGroupWithNext = nextMessage &&
+      nextMessage.role !== "system" &&
       this._isSameGroup(currentMessage.role, nextMessage.role);
-    
+
     if (shouldGroupWithPrev || shouldGroupWithNext) {
-      classes.push('grouped');
+      classes.push("grouped");
     }
-    
+
     // Mark as last in group if not grouping with next message
     if (!shouldGroupWithNext) {
-      classes.push('last-in-group');
+      classes.push("last-in-group");
     }
-    
-    return classes.join(' ');
+
+    return classes.join(" ");
   }
-  
+
   private _isSameGroup(role1: string, role2: string): boolean {
     // User messages only group with other user messages
-    if (role1 === 'user') return role2 === 'user';
-    
+    if (role1 === "user") return role2 === "user";
+
     // Assistant and tool messages group together
-    if (role1 === 'assistant') return role2 === 'assistant' || role2 === 'tool';
-    if (role1 === 'tool') return role2 === 'assistant' || role2 === 'tool';
-    
+    if (role1 === "assistant") return role2 === "assistant" || role2 === "tool";
+    if (role1 === "tool") return role2 === "assistant" || role2 === "tool";
+
     return false;
   }
 
-  private _renderMessage(message: BuiltInLLMMessage, toolResultMap: Map<string, BuiltInLLMToolResultPart>, messageIndex: number) {
+  private _renderMessage(
+    message: BuiltInLLMMessage,
+    toolResultMap: Map<string, BuiltInLLMToolResultPart>,
+    messageIndex: number,
+  ) {
     if (message.role === "tool") {
       // Don't render tool messages directly, they're handled as part of tool calls
       return null;
@@ -225,16 +228,16 @@ export class CTChat extends BaseElement {
     // For assistant messages with tool calls, we need to inject the results
     if (message.role === "assistant" && Array.isArray(message.content)) {
       const toolCalls = message.content.filter(
-        (part): part is BuiltInLLMToolCallPart => part.type === "tool-call"
+        (part): part is BuiltInLLMToolCallPart => part.type === "tool-call",
       );
       const textParts = message.content.filter(
-        (part) => part.type === "text"
+        (part) => part.type === "text",
       );
 
       if (toolCalls.length > 0) {
         // Create enhanced content with tool results
         const enhancedContent = [...message.content];
-        
+
         toolCalls.forEach((toolCall) => {
           const result = toolResultMap.get(toolCall.toolCallId);
           if (result) {
@@ -251,8 +254,8 @@ export class CTChat extends BaseElement {
                   const toolResult = toolResultMap.get(toolCall.toolCallId);
                   return html`
                     <ct-tool-call
-                      .call=${toolCall}
-                      .result=${toolResult}
+                      .call="${toolCall}"
+                      .result="${toolResult}"
                     ></ct-tool-call>
                   `;
                 })}
@@ -264,8 +267,8 @@ export class CTChat extends BaseElement {
         return html`
           <div class="${this._getMessageGroupClasses(messageIndex)}">
             <ct-chat-message
-              .role=${message.role}
-              .content=${enhancedContent}
+              .role="${message.role}"
+              .content="${enhancedContent}"
             ></ct-chat-message>
           </div>
         `;
@@ -275,8 +278,8 @@ export class CTChat extends BaseElement {
     return html`
       <div class="${this._getMessageGroupClasses(messageIndex)}">
         <ct-chat-message
-          .role=${message.role}
-          .content=${message.content}
+          .role="${message.role}"
+          .content="${message.content}"
         ></ct-chat-message>
       </div>
     `;
@@ -284,7 +287,7 @@ export class CTChat extends BaseElement {
 
   private _renderPendingMessage() {
     if (!this.pending) return null;
-    
+
     return html`
       <div class="pending-message">
         <div class="pending-bubble">
@@ -298,16 +301,17 @@ export class CTChat extends BaseElement {
     `;
   }
 
-
   override updated(changed: Map<string | number | symbol, unknown>) {
     super.updated(changed);
-    
+
     // Emit event when pending state changes
-    if (changed.has('pending')) {
-      this.dispatchEvent(new CustomEvent('ct-chat-updated', {
-        bubbles: true,
-        composed: true
-      }));
+    if (changed.has("pending")) {
+      this.dispatchEvent(
+        new CustomEvent("ct-chat-updated", {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     }
   }
 
@@ -315,8 +319,9 @@ export class CTChat extends BaseElement {
     const toolResultMap = this._buildToolResultMap();
 
     return html`
-      ${this._messagesArray.map((message, index) => this._renderMessage(message, toolResultMap, index))}
-      ${this._renderPendingMessage()}
+      ${this._messagesArray.map((message, index) =>
+        this._renderMessage(message, toolResultMap, index)
+      )} ${this._renderPendingMessage()}
     `;
   }
 }

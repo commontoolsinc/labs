@@ -48,6 +48,16 @@ export class CTToolCall extends BaseElement {
         cursor: pointer;
         user-select: none;
         font-size: 0.875rem;
+        font-family: var(
+          --ct-font-mono,
+          ui-monospace,
+          "Cascadia Code",
+          "Source Code Pro",
+          Menlo,
+          Consolas,
+          "DejaVu Sans Mono",
+          monospace
+        );
         color: var(--ct-color-gray-700, #374151);
         background: transparent;
         border: none;
@@ -66,7 +76,7 @@ export class CTToolCall extends BaseElement {
       }
 
       .tool-call-name {
-        font-weight: 600;
+        font-weight: 400;
         flex-grow: 1;
       }
 
@@ -75,6 +85,16 @@ export class CTToolCall extends BaseElement {
         align-items: center;
         gap: var(--ct-spacing-1, 0.25rem);
         font-size: 0.75rem;
+        font-family: var(
+          --ct-font-mono,
+          ui-monospace,
+          "Cascadia Code",
+          "Source Code Pro",
+          Menlo,
+          Consolas,
+          "DejaVu Sans Mono",
+          monospace
+        );
       }
 
       .chevron {

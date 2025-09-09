@@ -41,7 +41,6 @@ export class CTChatMessage extends BaseElement {
         display: flex;
         flex-direction: column;
         width: 100%;
-        margin-bottom: var(--ct-spacing-2, 0.5rem);
       }
 
       .message-wrapper {
@@ -158,7 +157,7 @@ export class CTChatMessage extends BaseElement {
       .message-bubble {
         display: flex;
         flex-direction: column;
-        max-width: 70%;
+        max-width: 90%;
         width: fit-content;
       }
 
@@ -306,8 +305,8 @@ export class CTChatMessage extends BaseElement {
           const toolResult = resultMap.get(toolCall.toolCallId);
           return html`
             <ct-tool-call
-              .call=${toolCall}
-              .result=${toolResult}
+              .call="${toolCall}"
+              .result="${toolResult}"
             ></ct-tool-call>
           `;
         })}
