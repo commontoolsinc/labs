@@ -265,7 +265,7 @@ export type BuiltInLLMMessage = {
 export interface BuiltInLLMTool {
   description: string;
   inputSchema: JSONSchema;
-  handler?: (args: any) => any | Promise<any>; // Client-side only
+  handler?: OpaqueRef<any> | Stream<any>; // Client-side only
 }
 
 // Built-in types
