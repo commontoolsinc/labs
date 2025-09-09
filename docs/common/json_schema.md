@@ -22,8 +22,9 @@ We add several custom fields to the schema that are meaningful to our system:
 - **`asCell`**: Indicates that instead of storing data directly in the object,
   the containing object will have a link to a cell, and that linked cell will
   contain the actual data
-- **`asStream`**: Creates a special cell that can be used to easily connect
-  events to their listeners
+- **`asStream`**: Indicates that this object should be treated as a stream
+  interface for easily connecting events to their listeners, rather than as a
+  traditional cell
 - **`ifc`**: Allows us to specify additional properties, such as the list of
   `classification` properties associated with the data
 
