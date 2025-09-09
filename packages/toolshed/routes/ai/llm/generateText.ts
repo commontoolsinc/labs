@@ -1,10 +1,19 @@
-import { CoreMessage, jsonSchema, stepCountIs, streamText, tool } from "ai";
-import { AttributeValue, trace } from "@opentelemetry/api";
 import {
-  type LLMMessage,
-  type LLMRequest,
-  type LLMTool,
-} from "@commontools/llm/types";
+  CoreMessage,
+  jsonSchema,
+  ModelMessage,
+  stepCountIs,
+  streamText,
+  tool,
+} from "ai";
+import { AttributeValue, trace } from "@opentelemetry/api";
+import { type LLMRequest, type LLMTool } from "@commontools/llm/types";
+import {
+  type BuiltInLLMMessage,
+  type BuiltInLLMTextPart,
+  type BuiltInLLMToolCallPart,
+  type BuiltInLLMToolResultPart,
+} from "@commontools/api";
 import { findModel } from "./models.ts";
 
 import { provider as otelProvider } from "@/lib/otel.ts";
@@ -27,15 +36,15 @@ export interface GenerateTextParams extends LLMRequest {
   abortSignal?: AbortSignal;
   // Updated callback to receive complete data for caching
   onStreamComplete?: (result: {
-    message: LLMMessage;
-    messages: LLMMessage[];
+    message: BuiltInLLMMessage;
+    messages: BuiltInLLMMessage[];
     originalRequest: GenerateTextParams;
   }) => void;
 }
 
 export interface GenerateTextResult {
-  message: LLMMessage;
-  messages: LLMMessage[];
+  message: BuiltInLLMMessage;
+  messages: BuiltInLLMMessage[];
   stream?: ReadableStream;
   spanId?: string;
 }
@@ -44,7 +53,7 @@ export interface GenerateTextResult {
 export function configureJsonMode(
   streamParams: Record<string, unknown>,
   modelName: string,
-  messages: LLMMessage[],
+  messages: BuiltInLLMMessage[],
   isStreaming: boolean,
 ): void {
   // Default to using the generic JSON mode
@@ -147,16 +156,12 @@ export async function generateText(
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
-  // `streamText` messages only support "user", "assistant" roles
-  // and string content.
-  const messages = params.messages.filter((message) => {
-    return (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string";
-  });
+  // Since our BuiltInLLMMessage types are now aligned with Vercel AI SDK, no conversion needed
+  const messages = params.messages as ModelMessage[];
 
   const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
-    messages: messages as CoreMessage[],
+    messages,
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
@@ -190,7 +195,7 @@ export async function generateText(
     configureJsonMode(
       streamParams,
       params.model,
-      messages,
+      messages as BuiltInLLMMessage[],
       params.stream || false,
     );
   }
@@ -285,8 +290,8 @@ export async function generateText(
     }
 
     return {
-      message: messages[messages.length - 1],
-      messages: [...messages],
+      message: messages[messages.length - 1] as BuiltInLLMMessage,
+      messages: [...messages] as BuiltInLLMMessage[],
       spanId,
     };
   }
@@ -298,9 +303,9 @@ export async function generateText(
       // If last message was from assistant, send it first
       if (messages[messages.length - 1].role === "assistant") {
         const content = messages[messages.length - 1].content;
-        // This `content` could be a `LLMTypedContent`, which isn't supported here.
+        // This `content` could be a structured content array, which isn't supported here.
         if (typeof content !== "string") {
-          throw new Error("LLMTypedContent not supported in responses.");
+          throw new Error("Structured content not supported in responses.");
         }
         result = content;
         controller.enqueue(
@@ -382,8 +387,8 @@ export async function generateText(
       // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {
         params.onStreamComplete({
-          message: messages[messages.length - 1],
-          messages: [...messages],
+          message: messages[messages.length - 1] as BuiltInLLMMessage,
+          messages: [...messages] as BuiltInLLMMessage[],
           originalRequest: params,
         });
       }
@@ -393,8 +398,8 @@ export async function generateText(
   });
 
   return {
-    message: messages[messages.length - 1],
-    messages: [...messages],
+    message: messages[messages.length - 1] as BuiltInLLMMessage,
+    messages: [...messages] as BuiltInLLMMessage[],
     stream,
     spanId,
   };

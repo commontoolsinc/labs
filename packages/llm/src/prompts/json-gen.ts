@@ -2,6 +2,7 @@ import JSON5 from "json5";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { llmPrompt } from "../index.ts";
+import { extractTextFromLLMResponse } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "json-gen-system",
@@ -78,7 +79,10 @@ export async function generateJSON(
     cache,
   });
 
-  const jsonString = parseTagFromResponse(response.content, "json_blob");
+  const jsonString = parseTagFromResponse(
+    extractTextFromLLMResponse(response),
+    "json_blob",
+  );
 
   if (!jsonString) {
     throw new Error("No JSON blob found in response");

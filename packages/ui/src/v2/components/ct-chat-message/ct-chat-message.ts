@@ -257,16 +257,12 @@ export class CTChatMessage extends BaseElement {
     content: { type: String },
     streaming: { type: Boolean, reflect: true },
     tools: { type: Object },
-    toolCalls: { type: Object },
-    toolResults: { type: Object },
   };
 
   declare role: "user" | "assistant";
-  declare content: string;
+  declare content: string | any[];
   declare streaming: boolean;
   declare tools: { [id: string]: Tool };
-  declare toolCalls: ToolCall[];
-  declare toolResults: ToolResult[];
 
   constructor() {
     super();
@@ -274,8 +270,6 @@ export class CTChatMessage extends BaseElement {
     this.content = "";
     this.streaming = false;
     this.tools = {};
-    this.toolCalls = [];
-    this.toolResults = [];
   }
 
   private _parseJSON<T>(jsonString: string): T[] {
@@ -300,14 +294,14 @@ export class CTChatMessage extends BaseElement {
   }
 
   private _renderToolAttachments() {
-    const toolCalls = this.toolCalls;
-    const toolResults = this.toolResults;
-    const tools = this.tools;
+    // Extract tool calls and results from content array
+    const contentArray = Array.isArray(this.content) ? this.content : [];
+    const toolCalls = contentArray.filter((part) => part.type === "tool-call");
+    const toolResults = contentArray.filter((part) =>
+      part.type === "tool-result"
+    );
 
-    if (
-      !toolCalls && !toolResults ||
-      (toolCalls.length === 0 && toolResults.length === 0)
-    ) {
+    if (toolCalls.length === 0 && toolResults.length === 0) {
       return null;
     }
 
@@ -319,10 +313,10 @@ export class CTChatMessage extends BaseElement {
               <div class="tool-item tool-call">
                 <div class="tool-header">
                   <span class="tool-icon">🔧</span>
-                  <span>Tool Call: ${call.name}</span>
+                  <span>Tool Call: ${call.toolName}</span>
                 </div>
                 <pre class="tool-content">${JSON.stringify(
-                  call.arguments,
+                  call.input,
                   null,
                   2,
                 )}</pre>
@@ -336,7 +330,7 @@ export class CTChatMessage extends BaseElement {
                   <span class="tool-icon">✓</span>
                   <span>Tool Result</span>
                 </div>
-                <pre class="tool-content">${result.result}</pre>
+                <pre class="tool-content">${result.output}</pre>
               </div>
             `,
         )}
@@ -348,7 +342,17 @@ export class CTChatMessage extends BaseElement {
     const messageClass = `message message-${this.role}${
       this.streaming ? " streaming" : ""
     }`;
-    const renderedContent = this._renderMarkdown(this.content);
+
+    // Extract text content from content array or use string directly
+    let textContent = "";
+    if (typeof this.content === "string") {
+      textContent = this.content;
+    } else if (Array.isArray(this.content)) {
+      const textParts = this.content.filter((part) => part.type === "text");
+      textContent = textParts.map((part) => part.text).join(" ");
+    }
+
+    const renderedContent = this._renderMarkdown(textContent);
 
     return html`
       <div class="message-wrapper">
