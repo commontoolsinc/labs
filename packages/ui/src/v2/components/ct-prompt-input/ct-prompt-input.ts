@@ -35,7 +35,7 @@ export class CTPromptInput extends BaseElement {
       :host {
         display: block;
         width: 100%;
-        
+
         /* CSS variables for customization */
         --ct-prompt-input-gap: var(--ct-spacing-2, 0.5rem);
         --ct-prompt-input-padding: var(--ct-spacing-3, 0.75rem);
@@ -242,7 +242,7 @@ export class CTPromptInput extends BaseElement {
 
   private _handleInput(event: CustomEvent) {
     this.value = event.detail.value;
-    
+
     // Emit input event for external listeners
     this.emit("ct-input", { value: this.value });
   }
@@ -263,31 +263,41 @@ export class CTPromptInput extends BaseElement {
             part="textarea"
           ></ct-textarea>
         </div>
-        
+
         <div class="actions">
-          ${this.pending ? html`
-            <ct-button
-              id="ct-prompt-input-stop-button"
-              variant="secondary"
-              size="${this.size === 'sm' ? 'sm' : this.size === 'lg' ? 'lg' : 'md'}"
-              ?disabled="${this.disabled}"
-              @click="${this._handleStop}"
-              part="stop-button"
-            >
-              Stop
-            </ct-button>
-          ` : html`
-            <ct-button
-              id="ct-prompt-input-send-button"
-              variant="primary"
-              size="${this.size === 'sm' ? 'sm' : this.size === 'lg' ? 'lg' : 'md'}"
-              ?disabled="${this.disabled || !this.value?.trim()}"
-              @click="${this._handleSend}"
-              part="send-button"
-            >
-              ${this.buttonText}
-            </ct-button>
-          `}
+          ${this.pending
+            ? html`
+              <ct-button
+                id="ct-prompt-input-stop-button"
+                variant="secondary"
+                size="${this.size === "sm"
+                  ? "sm"
+                  : this.size === "lg"
+                  ? "lg"
+                  : "md"}"
+                ?disabled="${this.disabled}"
+                @click="${this._handleStop}"
+                part="stop-button"
+              >
+                Stop
+              </ct-button>
+            `
+            : html`
+              <ct-button
+                id="ct-prompt-input-send-button"
+                variant="primary"
+                size="${this.size === "sm"
+                  ? "sm"
+                  : this.size === "lg"
+                  ? "lg"
+                  : "md"}"
+                ?disabled="${this.disabled || !this.value?.trim()}"
+                @click="${this._handleSend}"
+                part="send-button"
+              >
+                ${this.buttonText}
+              </ct-button>
+            `}
         </div>
       </div>
     `;

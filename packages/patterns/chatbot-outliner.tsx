@@ -35,7 +35,10 @@ type Outliner = {
 };
 
 type PageResult = {
-  outline: Default<Outliner, { root: { body: ""; children: []; attachments: [] } }>
+  outline: Default<
+    Outliner,
+    { root: { body: ""; children: []; attachments: [] } }
+  >;
 };
 
 export type PageInput = {
@@ -56,11 +59,10 @@ export const Page = recipe<PageInput>(
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   chat: Default<Array<BuiltInLLMMessage>, []>;
-  outline:
-    Default<
-      Outliner,
-      { root: { body: "Untitled Page"; children: []; attachments: [] } }
-    >;
+  outline: Default<
+    Outliner,
+    { root: { body: "Untitled Page"; children: []; attachments: [] } }
+  >;
 };
 
 type LLMTestResult = {
@@ -74,12 +76,17 @@ const appendOutlinerNode = handler<
 >(
   (args, state) => {
     try {
-      state.outline.key('root').key('children').set([...state.outline.key('root').key('children').get(), {
-        body: args.body,
-        children: [],
-        attachments: [],
-      }]);
-      args.result.set(`${state.outline.key('root').key('children').get().length} nodes`);
+      state.outline.key("root").key("children").set([
+        ...state.outline.key("root").key("children").get(),
+        {
+          body: args.body,
+          children: [],
+          attachments: [],
+        },
+      ]);
+      args.result.set(
+        `${state.outline.key("root").key("children").get().length} nodes`,
+      );
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
