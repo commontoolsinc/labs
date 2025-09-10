@@ -236,6 +236,13 @@ export class Scheduler implements IScheduler {
           }
         } finally {
           // Set up new reactive subscriptions after the action runs
+
+          // Commit the transaction. The code continues synchronously after
+          // kicking off the commit, i.e. it assumes the commit will be
+          // successful. If it isn't, the data will be rolled back and all other
+          // reactive functions based on it will be retriggered. But also, the
+          // retry logic below will have re-scheduled this action, so
+          // topological sorting should move it before the dependencies.
           tx.commit().then(({ error }) => {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
             // on every attempt we still call the re-subscribe below, so that
@@ -244,9 +251,7 @@ export class Scheduler implements IScheduler {
             if (error) {
               logger.info("Error committing transaction", error);
 
-              if (!this.retries.has(action)) this.retries.set(action, 1);
-              else this.retries.set(action, this.retries.get(action)! + 1);
-
+              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
                 // (Empty dependencies are fine, since it's already being
