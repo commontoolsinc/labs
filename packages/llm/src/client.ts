@@ -25,11 +25,13 @@ export const setLLMUrl = (toolshedUrl: string) => {
 export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
+    abortSignal?: AbortSignal,
   ): Promise<LLMGenerateObjectResponse> {
     const response = await fetch(llmApiUrl + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+      signal: abortSignal,
     });
 
     if (!response.ok) {
@@ -55,6 +57,7 @@ export class LLMClient {
   async sendRequest(
     request: LLMRequest,
     callback?: PartialCallback,
+    abortSignal?: AbortSignal,
   ): Promise<LLMResponse> {
     if (request.stream && !callback) {
       throw new Error(
@@ -71,6 +74,7 @@ export class LLMClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+      signal: abortSignal,
     });
 
     if (!response.ok) {

@@ -335,23 +335,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             <ct-screen>
               <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                {chat.map((msg) => {
-                  return (
-                    <ct-chat-message
-                      role={msg.role}
-                      content={msg.content}
-                      tools={tools}
-                    />
-                  );
-                })}
-                {ifElse(
-                  pending,
-                  <ct-chat-message
-                    role="assistant"
-                    content="..."
-                  />,
-                  null,
-                )}
+                <ct-chat $messages={chat} pending={pending} tools={tools} />
               </ct-vscroll>
 
               <div slot="footer">

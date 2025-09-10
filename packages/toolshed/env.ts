@@ -70,6 +70,8 @@ const EnvSchema = z.object({
   //   * /routes/integration/discord
   // ===========================================================================
   DISCORD_WEBHOOK_URL: z.string().default(""),
+  LLM_HEALTH_DISCORD_WEBHOOK: z.string().default(""),
+  HOSTNAME: z.string().default(""),
   // ===========================================================================
   // Memory Store
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory

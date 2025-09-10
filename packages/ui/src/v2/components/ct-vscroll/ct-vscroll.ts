@@ -216,6 +216,8 @@ export class CTVScroll extends BaseElement {
       }
       this.setupMutationObserver();
     });
+    // Listen for ct-chat-updated events
+    this.addEventListener("ct-chat-updated", this._handleChatUpdate);
   }
 
   override disconnectedCallback() {
@@ -227,7 +229,17 @@ export class CTVScroll extends BaseElement {
       );
     }
     this.cleanupMutationObserver();
+    this.removeEventListener("ct-chat-updated", this._handleChatUpdate);
   }
+
+  private _handleChatUpdate = () => {
+    if (this.snapToBottom && this._wasAtBottom) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        this.scrollToBottom();
+      });
+    }
+  };
 
   private handleScroll = () => {
     this.updateScrollState();

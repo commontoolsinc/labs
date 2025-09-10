@@ -17,7 +17,7 @@ const {
   "no-cache": noCache,
   "no-verify": noVerify,
   "no-report": noReport,
-  model = "anthropic:claude-3-7-sonnet-20250219",
+  model = "anthropic:claude-sonnet-4-0",
 } = parseArgs(
   Deno.args,
   {

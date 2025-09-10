@@ -51,7 +51,7 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   messages: z.array(MessageSchema) as any, // Trust our BuiltInLLMMessage = CoreMessage alignment
   system: z.string().optional(),
   model: z.string().openapi({
-    example: "claude-3-7-sonnet",
+    example: "claude-sonnet-4-0",
   }),
   maxTokens: z.number().optional(),
   stop: z.string().optional(),
@@ -181,7 +181,7 @@ export const generateText = createRoute({
         "application/json": {
           schema: LLMRequestSchema.openapi({
             example: {
-              model: "anthropic:claude-3-7-sonnet-latest",
+              model: "anthropic:claude-sonnet-4-0",
               system: "You are a pirate, make sure you talk like one.",
               stream: false,
               cache: true,

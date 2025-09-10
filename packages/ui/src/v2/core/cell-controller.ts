@@ -246,7 +246,7 @@ export class CellController<T> implements ReactiveController {
   // Private methods
   private defaultGetValue(value: Cell<T> | T): T {
     if (isCell(value)) {
-      return value.get?.() || (undefined as T);
+      return value.getAsQueryResult?.() || (undefined as T);
     }
     return value || (undefined as T);
   }

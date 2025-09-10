@@ -20,6 +20,7 @@ export async function generateETag(content: Uint8Array): Promise<string> {
 /**
  * Compare ETags for equality.
  * Supports comma-separated lists of ETags from If-None-Match headers.
+ * Handles weak ETags (W/ prefix) that nginx adds when compression is applied.
  */
 export function compareETags(
   etag: string,
@@ -30,10 +31,18 @@ export function compareETags(
   // Handle comma-separated list of ETags
   const clientETags = ifNoneMatch.split(",").map((tag) => tag.trim());
 
+  // Strip W/ prefix for weak ETag comparison
+  // Nginx adds W/ when compression is applied
+  const normalizeETag = (tag: string) => {
+    return tag.replace(/^W\//, "");
+  };
+
+  const serverETag = normalizeETag(etag);
+
   return clientETags.some((clientETag) => {
     // Handle wildcard
     if (clientETag === "*") return true;
-    return clientETag === etag;
+    return normalizeETag(clientETag) === serverETag;
   });
 }
 
