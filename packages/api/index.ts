@@ -291,8 +291,9 @@ export interface BuiltInLLMParams {
    */
   tools?: Record<string, {
     description: string;
-    inputSchema: JSONSchema;
-    handler: Stream<any> | OpaqueRef<any>;
+    inputSchema?: JSONSchema;
+    handler?: Stream<any> | OpaqueRef<any>;
+    pattern?: Recipe;
   }>;
 }
 

@@ -35,7 +35,18 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<
+const calculator = recipe<
+  { expression: string; result: Cell<string> },
+  { result: Cell<string> }
+>("Calculator", ({ expression }) => {
+  return derive(expression, (expr) => {
+    const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
+    const result = Function(`"use strict"; return (${sanitized})`)();
+    return result;
+  });
+});
+
+const calculator_old = handler<
   { expression: string; result: Cell<string> },
   { result: Cell<string> }
 >(
@@ -199,6 +210,7 @@ const readWebpage = handler<
     }
   },
 );
+
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
@@ -251,7 +263,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
           },
           required: ["expression"],
         } as JSONSchema,
-        handler: calculator({ result: calculatorResult }),
+        // handler: calculator({ result: calculatorResult }),
+        pattern: calculator,
       },
       addListItem: {
         description: "Add an item to the list.",
