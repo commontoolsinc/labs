@@ -145,4 +145,19 @@ describe("Caching Behavior", () => {
     });
     expect(response2.status).toBe(304);
   });
+
+  it("returns 304 for weak ETag match", async () => {
+    // First request to get the ETag
+    const response1 = await app.request("/static/prompts/system.md");
+    const etag = response1.headers.get("ETag");
+    expect(etag).toBeTruthy();
+
+    // Second request with weak ETag (W/ prefix)
+    const response2 = await app.request("/static/prompts/system.md", {
+      headers: {
+        "If-None-Match": `W/${etag}`,
+      },
+    });
+    expect(response2.status).toBe(304);
+  });
 });

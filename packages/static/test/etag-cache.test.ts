@@ -79,6 +79,24 @@ Deno.test("ETag Comparison - handles empty string If-None-Match", () => {
   assertEquals(compareETags(etag, ""), false);
 });
 
+Deno.test("ETag Comparison - handles weak ETags (W/ prefix)", () => {
+  const etag = '"abc123"';
+  const ifNoneMatch = 'W/"abc123"';
+  assertEquals(compareETags(etag, ifNoneMatch), true);
+});
+
+Deno.test("ETag Comparison - handles weak ETags in server response", () => {
+  const etag = 'W/"abc123"';
+  const ifNoneMatch = '"abc123"';
+  assertEquals(compareETags(etag, ifNoneMatch), true);
+});
+
+Deno.test("ETag Comparison - handles both weak ETags", () => {
+  const etag = 'W/"abc123"';
+  const ifNoneMatch = 'W/"abc123"';
+  assertEquals(compareETags(etag, ifNoneMatch), true);
+});
+
 Deno.test("Cache Headers - generates 'public, no-cache' by default", () => {
   const etag = '"abc123"';
   const headers = createCacheHeaders(etag);
