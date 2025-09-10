@@ -291,6 +291,47 @@ export class CTChatMessage extends BaseElement {
       .message-user .action-button {}
 
       .message-user .action-button:hover {}
+
+      /* Code block copy button styles */
+      .code-block-container {
+        position: relative;
+      }
+
+      .code-copy-button {
+        position: absolute;
+        top: var(--ct-spacing-2, 0.5rem);
+        right: var(--ct-spacing-2, 0.5rem);
+        background: rgba(0, 0, 0, 0.1);
+        color: white;
+        border: none;
+        border-radius: var(--ct-border-radius, 0.25rem);
+        padding: var(--ct-spacing-1, 0.25rem) var(--ct-spacing-2, 0.33rem);
+        cursor: pointer;
+        font-size: 0.75rem;
+        opacity: 0;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: var(--ct-spacing-1, 0.25rem);
+        z-index: 1;
+      }
+
+      .code-block-container:hover .code-copy-button {
+        opacity: 1;
+      }
+
+      .code-copy-button:hover {
+        background: rgba(0, 0, 0, 0.2);
+        transform: scale(1.05);
+      }
+
+      .code-copy-button:active {
+        transform: scale(0.95);
+      }
+
+      .code-copy-button.copied {
+        background: var(--ct-color-green-600, #059669);
+      }
     `,
   ];
 
@@ -312,6 +353,8 @@ export class CTChatMessage extends BaseElement {
   @property({ type: Boolean })
   private _copied = false;
 
+  private _codeBlockCopiedStates = new Map<string, boolean>();
+
   constructor() {
     super();
     this.role = "user";
@@ -328,7 +371,51 @@ export class CTChatMessage extends BaseElement {
       gfm: true,
     });
 
-    return marked(content) as string;
+    let renderedHtml = marked(content) as string;
+
+    // Wrap code blocks with copy buttons
+    renderedHtml = this._wrapCodeBlocksWithCopyButtons(renderedHtml);
+
+    return renderedHtml;
+  }
+
+  private _wrapCodeBlocksWithCopyButtons(html: string): string {
+    // Use a regex to find <pre><code>...</code></pre> blocks and wrap them
+    return html.replace(
+      /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
+      (match, codeAttrs, codeContent) => {
+        const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
+        // Decode HTML entities for the copy content
+        const decodedContent = this._decodeHtmlEntities(codeContent);
+
+        return `<div class="code-block-container">
+          <pre><code${codeAttrs}>${codeContent}</code></pre>
+          <button
+            class="code-copy-button"
+            data-block-id="${blockId}"
+            data-copy-content="${this._escapeForAttribute(decodedContent)}"
+            title="Copy code"
+          >
+            📋
+          </button>
+        </div>`;
+      },
+    );
+  }
+
+  private _decodeHtmlEntities(text: string): string {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = text;
+    return textarea.value;
+  }
+
+  private _escapeForAttribute(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   private async _copyMessage() {
@@ -348,6 +435,43 @@ export class CTChatMessage extends BaseElement {
       this.requestUpdate();
     } catch (err) {
       console.error("Failed to copy message:", err);
+    }
+  }
+
+  private async _copyCodeBlock(blockId: string, content: string) {
+    try {
+      // Decode the content from the attribute
+      const decodedContent = content
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+
+      await navigator.clipboard.writeText(decodedContent);
+      this._codeBlockCopiedStates.set(blockId, true);
+
+      // Update the button to show copied state
+      const button = this.shadowRoot?.querySelector(
+        `[data-block-id="${blockId}"]`,
+      ) as HTMLButtonElement;
+      if (button) {
+        button.textContent = "✓";
+        button.classList.add("copied");
+        button.title = "Copied!";
+      }
+
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        this._codeBlockCopiedStates.set(blockId, false);
+        if (button) {
+          button.textContent = "📋";
+          button.classList.remove("copied");
+          button.title = "Copy code";
+        }
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy code block:", err);
     }
   }
 
@@ -443,6 +567,31 @@ export class CTChatMessage extends BaseElement {
           : null}
       </div>
     `;
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+
+    // Add event listeners to code copy buttons after render
+    if (changedProperties.has("content")) {
+      this._setupCodeCopyButtons();
+    }
+  }
+
+  private _setupCodeCopyButtons() {
+    const copyButtons = this.shadowRoot?.querySelectorAll(".code-copy-button");
+    copyButtons?.forEach((button) => {
+      button.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = e.target as HTMLButtonElement;
+        const blockId = target.getAttribute("data-block-id");
+        const content = target.getAttribute("data-copy-content");
+        if (blockId && content) {
+          this._copyCodeBlock(blockId, content);
+        }
+      });
+    });
   }
 
   override render() {
