@@ -17,6 +17,7 @@ import {
   safeGetIndexTypeOfType,
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
+import { extractDocFromSymbolAndDecls } from "./doc-utils.ts";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -61,7 +62,10 @@ export class SchemaGenerator implements ISchemaGenerator {
     };
 
     // Generate the root schema
-    const rootSchema = this.formatType(type, context, true);
+    let rootSchema = this.formatType(type, context, true);
+
+    // Attach root-level description from JSDoc if available
+    rootSchema = this.attachRootDescription(rootSchema, type, context);
 
     // Build final schema with definitions if needed
     return this.buildFinalSchema(rootSchema, type, context, typeNode);
@@ -341,5 +345,40 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     if (checker) visit(type);
     return { types: cycles, names: cycleNames };
+  }
+
+  /**
+   * Attach a root-level description from JSDoc on the type symbol when
+   * available and when the root schema is an object that does not already have
+   * a description.
+   */
+  private attachRootDescription(
+    schema: SchemaDefinition,
+    type: ts.Type,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    try {
+      if (typeof schema !== "object" || !schema) return schema;
+
+      const sym = (type as any).aliasSymbol || type.getSymbol?.() ||
+        (type as any).symbol;
+
+      const hasUserDecl = (sym?.declarations ?? []).some((d: ts.Declaration) =>
+        !d.getSourceFile().isDeclarationFile
+      );
+      if (!hasUserDecl) return schema;
+
+      const { text } = extractDocFromSymbolAndDecls(
+        sym,
+        context.typeChecker,
+      );
+      if (text && !("description" in (schema as any))) {
+        (schema as any).description = text;
+      }
+      return schema;
+    } catch (_e) {
+      // Swallow doc extraction failures
+      return schema;
+    }
   }
 }

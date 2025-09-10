@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "name": {
+      "description": "Name doc",
+      "type": "string"
+    }
+  },
+  "additionalProperties": {
+    "description": "arbitrary value",
+    "type": "number"
+  },
+  "required": [
+    "name"
+  ],
+  "description": "Root doc",
+  "type": "object"
+}
+

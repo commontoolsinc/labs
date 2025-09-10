@@ -6,6 +6,7 @@ import type {
 } from "../interface.ts";
 import { safeGetPropertyType } from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 
 /**
  * Formatter for object types (interfaces, type literals, etc.)
@@ -75,10 +76,59 @@ export class ObjectFormatter implements TypeFormatter {
         context,
         propTypeNode,
       );
+      // Attach property description from JSDoc (if any)
+      try {
+        const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+        if (text && typeof generated === "object" && generated) {
+          const hasConflicts = all.filter((s) => s && s !== text).length > 0;
+          (generated as any).description = hasConflicts
+            ? `${text} (Consolidated from intersection constituents)`
+            : text;
+        }
+      } catch (_e) {
+        // Swallow doc extraction errors for robustness
+      }
       properties[propName] = generated;
     }
 
     const schema: SchemaDefinition = { type: "object", properties };
+
+    // Handle string index signature → additionalProperties with description
+    try {
+      const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
+      if (stringIndex) {
+        const apSchema = this.schemaGenerator.formatChildType(
+          stringIndex,
+          context,
+          undefined,
+        );
+        // Attempt to read JSDoc from index signature declarations
+        const sym = (type as ts.Type).getSymbol?.();
+        let indexDoc: string | undefined;
+        if (sym) {
+          for (const decl of sym.declarations ?? []) {
+            if (ts.isInterfaceDeclaration(decl) || ts.isTypeLiteralNode(decl)) {
+              for (const member of decl.members) {
+                if (ts.isIndexSignatureDeclaration(member)) {
+                  const docs = getDeclDocs(member);
+                  if (docs.length > 0) {
+                    indexDoc = docs[0];
+                    break;
+                  }
+                }
+              }
+            }
+            if (indexDoc) break;
+          }
+        }
+        if (indexDoc && typeof apSchema === "object" && apSchema) {
+          (apSchema as any).description = indexDoc;
+        }
+        (schema as any).additionalProperties = apSchema as any;
+      }
+    } catch (_e) {
+      // Ignore index signature doc extraction errors
+    }
     if (required.length > 0) schema.required = required;
 
     return schema;
