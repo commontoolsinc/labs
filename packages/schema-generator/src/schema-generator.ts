@@ -238,7 +238,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Handle case where rootSchema might be boolean (per JSON Schema spec)
     if (typeof rootSchema === "boolean") {
       return rootSchema === false
-        ? { $schema: "https://json-schema.org/draft-07/schema#", not: true, definitions }
+        ? {
+          $schema: "https://json-schema.org/draft-07/schema#",
+          not: true,
+          definitions,
+        }
         : { $schema: "https://json-schema.org/draft-07/schema#", definitions };
     }
     return {

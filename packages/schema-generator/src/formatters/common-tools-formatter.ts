@@ -135,9 +135,9 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Handle case where innerSchema might be boolean (per JSON Schema spec)
     if (typeof innerSchema === "boolean") {
-      return innerSchema === false 
-        ? { asCell: true, not: true }  // false = "no value is valid"
-        : { asCell: true };            // true = "any value is valid"
+      return innerSchema === false
+        ? { asCell: true, not: true } // false = "no value is valid"
+        : { asCell: true }; // true = "any value is valid"
     }
     return { ...innerSchema, asCell: true };
   }

@@ -156,7 +156,6 @@ export function normalizeSchema<T extends Record<string, unknown>>(
   return deepCanonicalize(clone) as T;
 }
 
-
 function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {
   const sorted: Record<string, unknown> = {};
   for (const k of Object.keys(obj).sort()) sorted[k] = obj[k];
