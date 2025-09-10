@@ -133,8 +133,8 @@ export class CTChat extends BaseElement {
     this.pending = false;
   }
 
-  private get _messagesArray(): BuiltInLLMMessage[] {
-    return [...(this._cellController.getValue() || [])];
+  private get _messagesArray(): readonly BuiltInLLMMessage[] {
+    return this._cellController.getValue() || [];
   }
 
   override firstUpdated(changedProperties: Map<string, any>) {

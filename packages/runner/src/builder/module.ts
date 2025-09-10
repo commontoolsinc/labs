@@ -157,8 +157,10 @@ export function handler<E, T>(
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
-    const stream = opaqueRef();
-    stream.set({ $stream: true });
+    const stream = opaqueRef<E>(undefined, eventSchema);
+
+    // Set stream marker (cast to E as stream is typed for the events it accepts)
+    stream.set({ $stream: true } as E);
     const node: NodeRef = {
       module,
       inputs: { $ctx: props, $event: stream },
@@ -169,7 +171,7 @@ export function handler<E, T>(
     connectInputAndOutputs(node);
     stream.connect(node);
 
-    return stream as unknown as OpaqueRef<E>;
+    return stream;
   }, module);
 
   return factory;
