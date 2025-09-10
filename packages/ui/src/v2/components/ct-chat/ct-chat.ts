@@ -108,7 +108,7 @@ export class CTChat extends BaseElement {
 
   /* ---------- Cell controller for messages binding ---------- */
   private _cellController = createCellController<BuiltInLLMMessage[]>(this, {
-    timing: { strategy: "microtask" },
+    timing: { strategy: "immediate" },
     onChange: () => {
       this.requestUpdate();
       // Emit event for parent scroll containers
@@ -134,11 +134,11 @@ export class CTChat extends BaseElement {
   }
 
   private get _messagesArray(): BuiltInLLMMessage[] {
-    return this._cellController.getValue() || [];
+    return [...(this._cellController.getValue() || [])];
   }
 
-  override firstUpdated() {
-    super.firstUpdated();
+  override firstUpdated(changedProperties: Map<string, any>) {
+    super.firstUpdated(changedProperties);
     // Initialize cell controller binding
     this._cellController.bind(this.messages);
   }

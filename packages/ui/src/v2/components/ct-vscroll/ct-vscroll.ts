@@ -217,7 +217,7 @@ export class CTVScroll extends BaseElement {
       this.setupMutationObserver();
     });
     // Listen for ct-chat-updated events
-    this.addEventListener('ct-chat-updated', this._handleChatUpdate);
+    this.addEventListener("ct-chat-updated", this._handleChatUpdate);
   }
 
   override disconnectedCallback() {
@@ -229,7 +229,7 @@ export class CTVScroll extends BaseElement {
       );
     }
     this.cleanupMutationObserver();
-    this.removeEventListener('ct-chat-updated', this._handleChatUpdate);
+    this.removeEventListener("ct-chat-updated", this._handleChatUpdate);
   }
 
   private _handleChatUpdate = () => {

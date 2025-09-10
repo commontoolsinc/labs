@@ -107,7 +107,7 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-assistant {
-        background-color: var(--ct-color-gray-100, #f3f4f6);
+        padding: 0;
         color: var(--ct-color-gray-900, #111827);
       }
 
@@ -242,6 +242,55 @@ export class CTChatMessage extends BaseElement {
       .message-user .message-content blockquote {
         border-left-color: rgba(255, 255, 255, 0.4);
       }
+
+      /* Message actions */
+      .message-actions {
+        display: flex;
+        gap: var(--ct-spacing-1, 0.25rem);
+        margin-top: var(--ct-spacing-1, 0.25rem);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      .message-bubble:hover .message-actions {
+        opacity: 1;
+      }
+
+      .action-button {
+        background: transparent;
+        border: none;
+        border-radius: var(--ct-border-radius, 0.25rem);
+        padding: var(--ct-spacing-1, 0.25rem);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s ease;
+        color: inherit;
+        font-size: 0.75rem;
+        min-width: 24px;
+        min-height: 24px;
+
+        transition: transform 0.2s ease;
+      }
+
+      .action-button:hover {
+        transform: scale(1.05);
+      }
+
+      .action-button:active {
+        transform: scale(0.95);
+      }
+
+      .action-button.copied {
+        background: var(--ct-color-green-500, #10b981);
+        color: white;
+      }
+
+      /* User message action button styling */
+      .message-user .action-button {}
+
+      .message-user .action-button:hover {}
     `,
   ];
 
@@ -260,6 +309,9 @@ export class CTChatMessage extends BaseElement {
   @property({ type: String })
   declare name?: string;
 
+  @property({ type: Boolean })
+  private _copied = false;
+
   constructor() {
     super();
     this.role = "user";
@@ -277,6 +329,26 @@ export class CTChatMessage extends BaseElement {
     });
 
     return marked(content) as string;
+  }
+
+  private async _copyMessage() {
+    const textContent = this._extractTextContent();
+    if (!textContent) return;
+
+    try {
+      await navigator.clipboard.writeText(textContent);
+      this._copied = true;
+
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        this._copied = false;
+        this.requestUpdate();
+      }, 2000);
+
+      this.requestUpdate();
+    } catch (err) {
+      console.error("Failed to copy message:", err);
+    }
   }
 
   private _renderToolAttachments() {
@@ -352,6 +424,27 @@ export class CTChatMessage extends BaseElement {
     `;
   }
 
+  private _renderMessageActions() {
+    const textContent = this._extractTextContent();
+    if (!textContent) return null;
+
+    return html`
+      <div class="message-actions">
+        ${this.role === "assistant"
+          ? html`
+            <button
+              class="action-button ${this._copied ? "copied" : ""}"
+              @click="${this._copyMessage}"
+              title="${this._copied ? "Copied!" : "Copy message"}"
+            >
+              ${this._copied ? "✓" : "📋"}
+            </button>
+          `
+          : null}
+      </div>
+    `;
+  }
+
   override render() {
     const messageClass = `message message-${this.role}${
       this.streaming ? " streaming" : ""
@@ -369,7 +462,7 @@ export class CTChatMessage extends BaseElement {
               ${unsafeHTML(renderedContent)}
             </div>
           </div>
-          ${this._renderToolAttachments()}
+          ${this._renderToolAttachments()} ${this._renderMessageActions()}
         </div>
       </div>
     `;
