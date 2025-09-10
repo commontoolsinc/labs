@@ -91,13 +91,15 @@ export function safeGetPropertyType(
   }
 
   // Last resort: use symbol location
-  const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
-    checker,
-    prop,
-    prop.valueDeclaration!,
-    "property symbol location",
-  );
-  if (typeFromSymbol) return typeFromSymbol;
+  if (decl) {
+    const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
+      checker,
+      prop,
+      decl,
+      "property symbol location",
+    );
+    if (typeFromSymbol) return typeFromSymbol;
+  }
 
   // If all else fails, return any
   return checker.getAnyType();

@@ -27,7 +27,7 @@ export interface GenerationContext {
 
   // Stack state (push/pop during recursion)
   /** Current recursion path for cycle detection */
-  definitionStack: Set<any>;
+  definitionStack: Set<string | ts.Type>;
   /** Currently building these named types */
   inProgressNames: Set<string>;
 

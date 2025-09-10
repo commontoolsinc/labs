@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { StaticCache } from "@commontools/static";
+import { isObject } from "@commontools/utils/types";
 
 // Cache for TypeScript library definitions
 let typeLibsCache: Record<string, string> | undefined;
@@ -155,9 +156,6 @@ export function normalizeSchema<T extends Record<string, unknown>>(
   return deepCanonicalize(clone) as T;
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
 
 function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {
   const sorted: Record<string, unknown> = {};
@@ -171,7 +169,7 @@ function normalizeAnyOf(node: any): any {
   if (node.anyOf.length === 2) {
     const a = node.anyOf[0];
     const b = node.anyOf[1];
-    const isNull = (x: any) => isPlainObject(x) && x.type === "null";
+    const isNull = (x: any) => isObject(x) && x.type === "null";
     if (isNull(b) && !isNull(a)) {
       node.anyOf = [b, a];
     }
@@ -184,7 +182,7 @@ function deepCanonicalize(node: unknown): unknown {
     // Sort specific arrays we know should be order-insensitive
     return (node as unknown[]).map(deepCanonicalize);
   }
-  if (!isPlainObject(node)) return node;
+  if (!isObject(node)) return node;
 
   // Clone and canonicalize children first
   const out: Record<string, unknown> = {};
@@ -201,7 +199,7 @@ function deepCanonicalize(node: unknown): unknown {
   }
 
   // Sort definitions keys deterministically
-  if (isPlainObject(out.definitions)) {
+  if (isObject(out.definitions)) {
     out.definitions = sortObjectKeys(
       out.definitions as Record<string, unknown>,
     );
