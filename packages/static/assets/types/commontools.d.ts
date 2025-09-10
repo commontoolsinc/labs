@@ -181,11 +181,13 @@ export interface BuiltInLLMState<T> {
     result?: T;
     partial?: string;
     error: unknown;
+    cancelGeneration: Stream<void>;
     addMessage: Stream<BuiltInLLMMessage>;
 }
 export interface BuiltInLLMDialogState {
     pending: boolean;
     error: unknown;
+    cancelGeneration: Stream<void>;
     addMessage: Stream<BuiltInLLMMessage>;
 }
 export interface BuiltInGenerateObjectParams {

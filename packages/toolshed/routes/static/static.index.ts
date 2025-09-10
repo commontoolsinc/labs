@@ -2,14 +2,12 @@ import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
 import { StaticCache } from "@commontools/static";
 import { getMimeType } from "@/lib/mime-type.ts";
+import { compareETags, createCacheHeaders } from "@commontools/static/etag";
 
 const router = createRouter();
 
-const STATIC_CACHE_DURATION = 60 * 60 * 1; // 1 hour
-
-// Notably this uses a different cache
-// than the runtime that runs in this context, negigible
-// cost of not incorporating the runtime here.
+// Static cache instance - separate from runtime cache
+// for isolation and performance
 const cache = new StaticCache();
 
 router.use(
@@ -25,13 +23,31 @@ router.use(
 
 router.get("/static/*", async (c) => {
   const reqPath = c.req.path.substring("/static/".length);
-  const buffer = await cache.get(reqPath);
+  const ifNoneMatch = c.req.header("If-None-Match");
+
+  // Get the asset with its ETag
+  const { buffer, etag } = await cache.getWithETag(reqPath);
+
+  // Check if client has matching ETag
+  if (ifNoneMatch && compareETags(etag, ifNoneMatch)) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        "ETag": etag,
+      },
+    });
+  }
+
   const mimeType = getMimeType(reqPath);
+
+  // Simple caching: always validate with ETag
+  const cacheHeaders = createCacheHeaders(etag);
+
   return new Response(buffer, {
     status: 200,
     headers: {
       "Content-Type": mimeType,
-      "Cache-Control": `max-age=${STATIC_CACHE_DURATION}`,
+      ...cacheHeaders,
     },
   });
 });

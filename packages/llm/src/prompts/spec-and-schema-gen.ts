@@ -248,7 +248,7 @@ ${
 export async function generateSpecAndSchema(
   form: WorkflowForm,
   existingSchema?: JSONSchema,
-  model: string = "anthropic:claude-3-7-sonnet-latest",
+  model: string = "anthropic:claude-sonnet-4-0",
 ): Promise<{
   spec: string;
   plan: string;

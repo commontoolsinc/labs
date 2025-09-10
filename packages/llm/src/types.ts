@@ -1,14 +1,12 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
-  BuiltInLLMContentPart,
   BuiltInLLMMessage,
   JSONSchema,
 } from "@commontools/api";
 
-export const DEFAULT_MODEL_NAME: ModelName =
-  "anthropic:claude-3-7-sonnet-latest";
+export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-0";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.

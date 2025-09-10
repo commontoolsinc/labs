@@ -2,13 +2,15 @@
   "tasks": {
     "dev": "deno run --unstable-otel -A --watch --env-file=.env index.ts",
     "production": "deno run --unstable-otel -A --env-file=.env index.ts",
-    "test": "deno test -A --env-file=.env.test"
+    "test": "deno test -A --env-file=.env.test",
+    "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts"
   },
   "fmt": {
     "exclude": ["./llm_documentation/*"]
   },
   "imports": {
     "@/": "./",
+    "@ai-sdk/perplexity": "npm:@ai-sdk/perplexity@^2.0.8",
     "ai": "npm:ai@^5.0.27",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^2.0.9",
