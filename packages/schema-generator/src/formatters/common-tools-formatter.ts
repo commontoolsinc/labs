@@ -1,668 +1,349 @@
-import ts from "typescript";
+import ts, { TypeReferenceNode } from "typescript";
 import type {
   GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import {
-  getAliasElementNodeForCellArray,
-  getArrayElementInfo,
-  getContainerArrayElementInfoForWrapper,
-  isDefaultTypeRef,
-  safeGetTypeFromTypeNode,
-  TypeWithInternals,
-} from "../type-utils.ts";
-import { SchemaGenerator } from "../plugin.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
+ *
+ * TypeScript handles alias resolution automatically and we don't need to
+ * manually traverse alias chains.
  */
 export class CommonToolsFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {
     if (!schemaGenerator) {
       throw new Error(
-        "CommonToolsFormatter requires a schemaGenerator instance",
+        "CommonToolsFormatter requires a SchemaGenerator instance",
       );
     }
   }
 
-  private isNamedTypeRef(type: ts.Type, name: string): boolean {
-    return !!(type && (type.flags & ts.TypeFlags.Object) !== 0 &&
-      (((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !==
-        0) &&
-      ((type as ts.TypeReference).target?.symbol?.name === name));
-  }
-
-  private getContainerArg(
-    typeRef: ts.TypeReference,
-    index = 0,
-  ): ts.Type | undefined {
-    return (typeRef.typeArguments && typeRef.typeArguments.length > index)
-      ? typeRef.typeArguments[index]
-      : undefined;
-  }
-
-  private getInnerTypeNode(
-    context: GenerationContext,
-  ): ts.TypeNode | undefined {
-    if (
-      context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
-      context.typeNode.typeArguments &&
-      context.typeNode.typeArguments.length > 0
-    ) {
-      return context.typeNode.typeArguments[0];
-    }
-    return undefined;
-  }
-
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Prefer node-driven detection to handle aliases where Default<T,V> erases to T
-    const n = context.typeNode;
-    if (n && ts.isTypeReferenceNode(n)) {
-      const tn = n.typeName;
-      if (ts.isIdentifier(tn)) {
-        if (tn.text === "Cell" || tn.text === "Stream") return true;
-      }
-      // Default<T,V> may be an alias; use helper to detect
-      if (isDefaultTypeRef(n, context.typeChecker)) return true;
-    }
-
-    // Fallback: detect by type identity when wrappers are interfaces/classes
+    // Handle Cell/Stream via resolved type (works for direct and aliased)
     if (type.flags & ts.TypeFlags.Object) {
       const objectType = type as ts.ObjectType;
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
         const typeRef = objectType as ts.TypeReference;
-        const name = typeRef.target?.symbol?.name;
-        if (name === "Cell" || name === "Stream" || name === "Default") {
+        const resolvedName = typeRef.target?.symbol?.name;
+        if (resolvedName === "Cell" || resolvedName === "Stream") {
           return true;
         }
       }
     }
+    
+    // Handle Default via TypeNode analysis (because Default erases)
+    const n = context.typeNode;
+    if (n && ts.isTypeReferenceNode(n)) {
+      const nodeName = ts.isIdentifier(n.typeName) ? n.typeName.text : undefined;
+      if (nodeName === "Default" || this.isAliasToDefault(n, context.typeChecker)) {
+        return true;
+      }
+    }
+    
     return false;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
-    const checker = context.typeChecker;
+    let nodeTypename: string | undefined;
+    let resolvedTypename: string | undefined;
+
+    // Path 1: Extract type name from TypeNode (handles direct usage)
     const n = context.typeNode;
-
-    // First priority: check if node indicates Default<T,V> (handles type aliases)
-    if (n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
-      // For type aliases, create a mock typeRef for processing
-      const mockTypeRef = {
-        typeArguments: undefined,
-      } as unknown as ts.TypeReference;
-      return this.formatDefaultType(mockTypeRef, checker, context);
+    if (n && ts.isTypeReferenceNode(n) && ts.isIdentifier(n.typeName)) {
+      nodeTypename = n.typeName.text;
     }
 
-    // Type safety: ensure we have an object type with reference for interface cases
-    if (!(type.flags & ts.TypeFlags.Object)) {
-      throw new Error(
-        `CommonToolsFormatter received non-object type: ${
-          context.typeChecker.typeToString(type)
-        } (flags: ${type.flags}). ` +
-          `This should not happen if supportsType() is working correctly.`,
-      );
+    // Path 2: Extract type name from resolved type (handles interface aliases)
+    if (type.flags & ts.TypeFlags.Object) {
+      const objectType = type as ts.ObjectType;
+      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+        const typeRef = objectType as ts.TypeReference;
+        resolvedTypename = typeRef.target?.symbol?.name;
+      }
     }
 
-    const objectType = type as ts.ObjectType;
-    if (!(objectType.objectFlags & ts.ObjectFlags.Reference)) {
-      throw new Error(
-        `CommonToolsFormatter received Object type without Reference flags: ${
-          context.typeChecker.typeToString(type)
-        } (objectFlags: ${objectType.objectFlags}). ` +
-          `This should not happen if supportsType() is working correctly.`,
-      );
+    // Handle direct TypeNode usage first (supports aliases and default extraction)
+    if (n && ts.isTypeReferenceNode(n)) {
+      switch (nodeTypename) {
+        case "Cell":
+          return this.formatCellTypeFromNode(n, context);
+        case "Stream":
+          return this.formatStreamTypeFromNode(n, context);
+        case "Default":
+          return this.formatDefaultTypeFromNode(n, context);
+        default:
+          // Handle Default aliases
+          if (this.isAliasToDefault(n, context.typeChecker)) {
+            return this.formatDefaultTypeFromNode(n, context);
+          }
+      }
     }
 
-    const typeRef = objectType as ts.TypeReference;
-    const symbol = typeRef.target?.symbol;
-
-    if (!symbol) {
-      throw new Error(
-        `CommonToolsFormatter found TypeReference without symbol: ${
-          context.typeChecker.typeToString(type)
-        }. ` +
-          `This should not happen if supportsType() is working correctly.`,
-      );
-    }
-
-    const name = symbol.getName();
-
-    switch (name) {
+    // Fallback to resolved type for interface/class cases
+    switch (resolvedTypename) {
       case "Cell":
-        return this.formatCellType(typeRef, checker, context);
+        return this.formatCellType(type as ts.TypeReference, context);
       case "Stream":
-        return this.formatStreamType(typeRef, checker, context);
+        return this.formatStreamType(type as ts.TypeReference, context);
       case "Default":
-        return this.formatDefaultType(typeRef, checker, context);
-      default:
-        throw new Error(
-          `CommonToolsFormatter received unexpected type name: "${name}". ` +
-            `Expected Cell, Stream, or Default. This should not happen if supportsType() is working correctly.`,
-        );
+        return this.formatDefaultType(type as ts.TypeReference, context);
     }
+
+    throw new Error(`Unexpected CommonTools type: ${nodeTypename || resolvedTypename}`);
   }
 
   private formatCellType(
     typeRef: ts.TypeReference,
-    checker: ts.TypeChecker,
     context: GenerationContext,
   ): SchemaDefinition {
-    // Get the typeNode from context (like the old system did)
-    const innerTypeNode = this.getInnerTypeNode(context);
-
-    // Use the old system's approach: extract inner type AND pass typeNode for recursive processing
-    // Do not unwrap Array<T> here; let downstream logic inspect array-ness
-    const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
-
-    // Alias like type CellArray<T> = Cell<T[]>; synthesize array from alias mapping
-    const aliasElemNode = getAliasElementNodeForCellArray(
-      context.typeNode,
-      checker,
-    );
-    if (aliasElemNode) {
-      const elemType = checker.getTypeFromTypeNode(aliasElemNode);
-      const items = this.schemaGenerator.formatChildType(
-        elemType,
-        context,
-        aliasElemNode,
-      );
-      return { type: "array", items, asCell: true } as SchemaDefinition;
-    }
-    // Array detection with alias awareness and Default<T,V> preservation
-    const containerArg = this.getContainerArg(typeRef, 0);
-    const arrInfo = getContainerArrayElementInfoForWrapper(
-      containerArg,
-      innerType,
-      innerTypeNode,
-      checker,
-      { skipIfInnerLooksLikeDefault: true },
-    );
-    if (arrInfo) {
-      const items = this.schemaGenerator.formatChildType(
-        arrInfo.elementType,
-        context,
-        arrInfo.elementNode,
-      );
-      return { type: "array", items, asCell: true } as SchemaDefinition;
+    // Get first type argument, let TypeScript resolve aliases
+    const innerType = typeRef.typeArguments?.[0];
+    if (!innerType) {
+      throw new Error("Cell<T> requires type argument");
     }
 
-    const nodeDrivenType = innerTypeNode
-      ? context.typeChecker.getTypeFromTypeNode(innerTypeNode)
-      : innerType;
+    // Get the TypeNode for the inner type from the Cell's type arguments
+    const innerTypeNode =
+      context.typeNode && ts.isTypeReferenceNode(context.typeNode)
+        ? context.typeNode.typeArguments?.[0]
+        : undefined;
+
+    const innerContext = innerTypeNode
+      ? { ...context, typeNode: innerTypeNode }
+      : context;
     const innerSchema = this.schemaGenerator.formatChildType(
-      nodeDrivenType,
-      context,
-      innerTypeNode,
+      innerType,
+      innerContext,
     );
     return { ...innerSchema, asCell: true };
   }
 
   private formatStreamType(
     typeRef: ts.TypeReference,
-    checker: ts.TypeChecker,
     context: GenerationContext,
   ): SchemaDefinition {
-    // Centralize Cell detection and Stream flag application
-    const isCellNode = (node?: ts.TypeNode): boolean => {
-      return !!(
-        node && ts.isTypeReferenceNode(node) &&
-        ts.isIdentifier(node.typeName) &&
-        node.typeName.text === "Cell"
-      );
-    };
-    const isCellType = (t: ts.Type): boolean => this.isNamedTypeRef(t, "Cell");
-    const withStreamFlags = (
-      base: SchemaDefinition,
-      innerT: ts.Type,
-      innerN: ts.TypeNode | undefined,
-      containerArgIsCell: boolean,
-    ): SchemaDefinition => {
-      const innerIsCell = containerArgIsCell || isCellNode(innerN) ||
-        isCellType(innerT);
-      return innerIsCell
-        ? { ...base, asCell: true, asStream: true }
-        : { ...base, asStream: true };
-    };
-    // Mirror Cell<T> robustness: resolve via alias/resolved arguments and carry node
-    const innerTypeNode = this.getInnerTypeNode(context);
-
-    // Do not unwrap Array<T> here; let downstream logic inspect array-ness
-    const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
-
-    // Process Stream type
-    const containerArg = this.getContainerArg(typeRef, 0);
-    const containerArgIsCell =
-      !!(containerArg && this.isNamedTypeRef(containerArg, "Cell"));
-    const innerLooksLikeDefault = !!(
-      innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-      isDefaultTypeRef(innerTypeNode, checker)
-    );
-    const arrInfo = getContainerArrayElementInfoForWrapper(
-      containerArg,
-      innerType,
-      innerTypeNode,
-      checker,
-      { skipIfInnerLooksLikeDefault: true },
-    );
-    if (arrInfo) {
-      const items = this.schemaGenerator.formatChildType(
-        arrInfo.elementType,
-        context,
-        arrInfo.elementNode,
-      );
-      return { type: "array", items, asStream: true } as SchemaDefinition;
-    }
-    // If Stream<Default<T,V>> is encountered, Default handles default/union.
-    // Generate child schema and apply Stream/Cell flags based on inner shape.
-    if (innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
-      const child = this.schemaGenerator.formatChildType(
-        innerType,
-        context,
-        innerTypeNode,
-      );
-      return withStreamFlags(
-        child,
-        innerType,
-        innerTypeNode,
-        containerArgIsCell,
-      );
+    const innerType = typeRef.typeArguments?.[0];
+    if (!innerType) {
+      throw new Error("Stream<T> requires type argument");
     }
 
-    // Handle Stream<Array<T>> and Stream<T[]>
-    const arr = this.arrayItemsSchema(innerType, innerTypeNode, context);
-    if (arr) return { ...arr, asStream: true } as SchemaDefinition;
+    // Check if inner is Cell by looking at resolved type
+    const isCellType = this.isCellType(innerType);
 
-    const nodeDrivenType = innerTypeNode
-      ? context.typeChecker.getTypeFromTypeNode(innerTypeNode)
-      : innerType;
+    // Get the TypeNode for the inner type from the Stream's type arguments
+    const innerTypeNode =
+      context.typeNode && ts.isTypeReferenceNode(context.typeNode)
+        ? context.typeNode.typeArguments?.[0]
+        : undefined;
+
+    const innerContext = innerTypeNode
+      ? { ...context, typeNode: innerTypeNode }
+      : context;
     const innerSchema = this.schemaGenerator.formatChildType(
-      nodeDrivenType,
-      context,
-      innerTypeNode,
-    );
-    return withStreamFlags(
-      innerSchema,
       innerType,
-      innerTypeNode,
-      containerArgIsCell,
+      innerContext,
     );
+
+    return isCellType
+      ? { ...innerSchema, asCell: true, asStream: true }
+      : { ...innerSchema, asStream: true };
   }
 
-  private arrayItemsSchema(
-    valueType: ts.Type,
-    valueNode: ts.TypeNode | undefined,
-    context: GenerationContext,
-  ): SchemaDefinition | undefined {
-    const info = getArrayElementInfo(valueType, context.typeChecker, valueNode);
-    if (!info) return undefined;
-    const items = this.schemaGenerator.formatChildType(
-      info.elementType,
-      context,
-      info.elementNode,
-    );
-    return { type: "array", items } as SchemaDefinition;
-  }
-
-  private extractDefaultTypeArguments(
-    typeRef: ts.TypeReference,
-    context: GenerationContext,
-    checker: ts.TypeChecker,
-  ): {
-    valueType: ts.Type;
-    defaultType: ts.Type;
-    valueTypeNode?: ts.TypeNode;
-    defaultTypeNode?: ts.TypeNode;
-  } | null {
-    let valueType: ts.Type | undefined;
-    let defaultType: ts.Type | undefined;
-    let valueTypeNode: ts.TypeNode | undefined;
-    let defaultTypeNode: ts.TypeNode | undefined;
-
-    // First priority: extract from node syntax (handles type aliases)
-    if (
-      context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
-      context.typeNode.typeArguments &&
-      context.typeNode.typeArguments.length >= 2
-    ) {
-      valueTypeNode = context.typeNode.typeArguments[0];
-      defaultTypeNode = context.typeNode.typeArguments[1];
-
-      // Always derive types from nodes for type aliases
-      if (valueTypeNode) {
-        valueType = safeGetTypeFromTypeNode(
-          checker,
-          valueTypeNode,
-          "Default<T,V> value type",
-        );
-      }
-      if (defaultTypeNode) {
-        defaultType = safeGetTypeFromTypeNode(
-          checker,
-          defaultTypeNode,
-          "Default<T,V> default type",
-        );
-      }
-    }
-
-    // Second priority: try to extract from resolved type arguments (handles interfaces)
-    if (!valueType || !defaultType) {
-      const typeArguments = (typeRef as TypeWithInternals).aliasTypeArguments ??
-        (typeRef as TypeWithInternals).resolvedTypeArguments ??
-        typeRef.typeArguments;
-
-      if (typeArguments && typeArguments.length >= 2) {
-        valueType = typeArguments[0]!;
-        defaultType = typeArguments[1]!;
-      }
-    }
-
-    if (!valueType || !defaultType) {
-      return null;
-    }
-
-    const result: {
-      valueType: ts.Type;
-      defaultType: ts.Type;
-      valueTypeNode?: ts.TypeNode;
-      defaultTypeNode?: ts.TypeNode;
-    } = {
-      valueType,
-      defaultType,
-    };
-
-    if (valueTypeNode) {
-      result.valueTypeNode = valueTypeNode;
-    }
-    if (defaultTypeNode) {
-      result.defaultTypeNode = defaultTypeNode;
-    }
-
-    return result;
-  }
-
-  private inlineIfRef(
-    schema: SchemaDefinition,
+  private formatDefaultTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
   ): SchemaDefinition {
-    /*
-     * Draft-07 $ref constraint:
-     * In JSON Schema draft-07, when a schema object contains $ref, validators
-     * ignore all sibling keywords of that object. To attach keywords like
-     * `default` (e.g., from Default<T,V>) to the effective schema, we inline
-     * local #/definitions targets here. Only the immediate $ref is inlined;
-     * we do not recursively inline nested $refs to avoid expanding cycles.
-     */
-    const ref = schema?.$ref as string | undefined;
-    if (ref && ref.startsWith("#/definitions/") && context.definitions) {
-      const name = ref.replace("#/definitions/", "");
-      const def = context.definitions[name];
-      if (def) return def;
-    }
-    return schema;
-  }
-
-  private generateValueSchema(
-    valueType: ts.Type,
-    valueTypeNode: ts.TypeNode | undefined,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    // Handle array types first
-    if (valueTypeNode && ts.isArrayTypeNode(valueTypeNode)) {
-      const elemNode = valueTypeNode.elementType;
-      const elemType = context.typeChecker.getTypeFromTypeNode(elemNode);
-      const itemsRaw = this.schemaGenerator.formatChildType(
-        elemType,
-        context,
-        elemNode,
-      );
-      return { type: "array", items: this.inlineIfRef(itemsRaw, context) };
+    const typeArgs = typeRefNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 2) {
+      throw new Error("Default<T,V> requires exactly 2 type arguments");
     }
 
-    // Detect arrays via type analysis
-    const elemInfo = getArrayElementInfo(
+    const valueTypeNode = typeArgs[0];
+    const defaultTypeNode = typeArgs[1];
+
+    if (!valueTypeNode || !defaultTypeNode) {
+      throw new Error("Default<T,V> type arguments cannot be undefined");
+    }
+
+    // Get the actual types from the type nodes
+    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    const defaultType = context.typeChecker.getTypeFromTypeNode(
+      defaultTypeNode,
+    );
+
+    // Generate schema for the value type
+    const valueSchema = this.generateValueSchemaFromNode(
       valueType,
-      context.typeChecker,
       valueTypeNode,
+      context,
     );
-    if (elemInfo) {
-      const itemsRaw = this.schemaGenerator.formatChildType(
-        elemInfo.elementType,
-        context,
-        elemInfo.elementNode,
-      );
-      return { type: "array", items: this.inlineIfRef(itemsRaw, context) };
-    }
 
-    // Generate schema for other types
-    if (valueTypeNode) {
-      try {
-        const nodeType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
-        const raw = this.schemaGenerator.formatChildType(
-          nodeType,
-          context,
-          valueTypeNode,
-        );
-        return this.inlineIfRef(raw, context);
-      } catch (error) {
-        // Re-throw with better context - don't mask schema generation failures
-        throw new Error(
-          `Failed to generate schema for Default<T,V> value type: ${
-            context.typeChecker.typeToString(valueType)
-          }. ` +
-            `Original error: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-        );
-      }
-    } else {
-      const raw = this.schemaGenerator.formatChildType(
-        valueType,
-        context,
-        valueTypeNode,
-      );
-      return this.inlineIfRef(raw, context);
-    }
-  }
-
-  private extractDefaultValue(
-    defaultType: ts.Type,
-    defaultTypeNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
-  ): unknown {
-    // Try complex extraction first (from node)
-    if (defaultTypeNode) {
-      const complex = this.extractComplexDefaultValue(defaultTypeNode, checker);
-      if (complex !== undefined) {
-        return complex;
-      }
-    }
-
-    // Fall back to literal extraction (from type)
-    return this.extractLiteralDefaultValue(defaultType, checker);
-  }
-
-  private processDefaultUnionTypes(
-    valueType: ts.Type,
-    valueTypeNode: ts.TypeNode | undefined,
-    valueSchema: SchemaDefinition,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    // Handle node-based union types (syntax-driven detection)
-    if (valueTypeNode && ts.isUnionTypeNode(valueTypeNode)) {
-      const result = this.processNodeBasedUnion(
-        valueTypeNode,
-        valueSchema,
-        context,
-      );
-      if (result) return result;
-    }
-
-    // Handle type-based union types
-    if ((valueType.flags & ts.TypeFlags.Union) !== 0) {
-      const result = this.processTypeBasedUnion(
-        valueType,
-        valueTypeNode,
-        valueSchema,
-        context,
-      );
-      if (result) return result;
+    // Extract default value from the default type node (this can handle complex literals)
+    const defaultValue = this.extractDefaultValueFromNode(
+      defaultTypeNode,
+      context,
+    );
+    if (defaultValue !== undefined) {
+      (valueSchema as any).default = defaultValue;
     }
 
     return valueSchema;
   }
 
-  private processNodeBasedUnion(
-    unionNode: ts.UnionTypeNode,
-    valueSchema: SchemaDefinition,
-    context: GenerationContext,
-  ): SchemaDefinition | null {
-    const parts = unionNode.types ?? [] as ts.TypeNode[];
-    const isNullNode = (p: ts.TypeNode) =>
-      p.kind === ts.SyntaxKind.NullKeyword ||
-      (ts.isLiteralTypeNode(p) && p.literal.kind === ts.SyntaxKind.NullKeyword);
-
-    const hasNullNode = parts.some(isNullNode);
-    const nonNullNodes = parts.filter((p) => !isNullNode(p));
-
-    if (hasNullNode && nonNullNodes.length === 1) {
-      const nn = nonNullNodes[0]!;
-      const nnType = context.typeChecker.getTypeFromTypeNode(nn);
-      const nnSchema = this.schemaGenerator.formatChildType(
-        nnType,
-        context,
-        nn,
-      );
-
-      const out: SchemaDefinition = { anyOf: [{ type: "null" }, nnSchema] };
-      if (valueSchema.default !== undefined) {
-        out.default = valueSchema.default;
-      }
-      return out;
-    }
-
-    return null;
-  }
-
-  private processTypeBasedUnion(
-    valueType: ts.Type,
-    valueTypeNode: ts.TypeNode | undefined,
-    valueSchema: SchemaDefinition,
-    context: GenerationContext,
-  ): SchemaDefinition | null {
-    const union = valueType as ts.UnionType;
-    const members = union.types ?? [] as ts.Type[];
-
-    const hasNull = members.some((t) => (t.flags & ts.TypeFlags.Null) !== 0);
-    const hasUndef = members.some((t) =>
-      (t.flags & ts.TypeFlags.Undefined) !== 0
-    );
-    const nonNull = members.filter((t) => (t.flags & ts.TypeFlags.Null) === 0);
-    const nonUndef = members.filter((t) =>
-      (t.flags & ts.TypeFlags.Undefined) === 0
-    );
-
-    if (hasNull && nonNull.length === 1) {
-      const nonNullSchema = this.schemaGenerator.formatChildType(
-        nonNull[0]!,
-        context,
-        valueTypeNode,
-      );
-
-      const out: SchemaDefinition = {
-        anyOf: [nonNullSchema, { type: "null" }],
-      };
-      if (valueSchema.default !== undefined) {
-        out.default = valueSchema.default;
-      }
-      return out;
-    } else if (hasUndef && nonUndef.length === 1) {
-      const s = this.schemaGenerator.formatChildType(
-        nonUndef[0]!,
-        context,
-        valueTypeNode,
-      );
-      return this.inlineIfRef(s, context);
-    }
-
-    return null;
-  }
-
   private formatDefaultType(
     typeRef: ts.TypeReference,
-    checker: ts.TypeChecker,
     context: GenerationContext,
   ): SchemaDefinition {
-    const typeArgs = this.extractDefaultTypeArguments(
-      typeRef,
-      context,
-      checker,
+    const valueType = typeRef.typeArguments?.[0];
+    const defaultType = typeRef.typeArguments?.[1];
+
+    if (!valueType || !defaultType) {
+      throw new Error("Default<T,V> requires exactly 2 type arguments");
+    }
+
+    // Generate schema for the value type - need to handle arrays properly
+    const valueSchema = this.generateValueSchema(valueType, context);
+
+    // Extract default value from literal type - need to handle complex values
+    const defaultValue = this.extractDefaultValue(defaultType, context);
+    if (defaultValue !== undefined) {
+      (valueSchema as any).default = defaultValue;
+    }
+
+    return valueSchema;
+  }
+
+  private formatCellTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const typeArgs = typeRefNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 1) {
+      throw new Error("Cell<T> requires type argument");
+    }
+
+    const innerTypeNode = typeArgs[0];
+    if (!innerTypeNode) {
+      throw new Error("Cell<T> type argument cannot be undefined");
+    }
+
+    const innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+
+    const innerContext = { ...context, typeNode: innerTypeNode };
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      innerContext,
     );
-    if (!typeArgs) {
-      throw new Error(
-        `Failed to extract type arguments from Default<T,V> type: ${
-          context.typeChecker.typeToString(typeRef as ts.Type)
-        }. ` +
-          `Default types must have exactly 2 type arguments.`,
+    return { ...innerSchema, asCell: true };
+  }
+
+  private formatStreamTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const typeArgs = typeRefNode.typeArguments;
+    if (!typeArgs || typeArgs.length < 1) {
+      throw new Error("Stream<T> requires type argument");
+    }
+
+    const innerTypeNode = typeArgs[0];
+    if (!innerTypeNode) {
+      throw new Error("Stream<T> type argument cannot be undefined");
+    }
+
+    const innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+
+    // Check if inner is Cell by looking at resolved type
+    const isCellType = this.isCellType(innerType);
+
+    const innerContext = { ...context, typeNode: innerTypeNode };
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      innerContext,
+    );
+
+    return isCellType
+      ? { ...innerSchema, asCell: true, asStream: true }
+      : { ...innerSchema, asStream: true };
+  }
+
+  private generateValueSchemaFromNode(
+    valueType: ts.Type,
+    valueTypeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    // Let the schema generator handle any type using the type node
+    return this.schemaGenerator.formatChildType(
+      valueType,
+      context,
+      valueTypeNode,
+    );
+  }
+
+  private generateValueSchema(
+    valueType: ts.Type,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    // Let the schema generator handle any type
+    return this.schemaGenerator.formatChildType(valueType, context);
+  }
+
+  private extractDefaultValueFromNode(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): unknown {
+    // Handle literal types
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) return literal.text;
+      if (ts.isNumericLiteral(literal)) return Number(literal.text);
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (literal.kind === ts.SyntaxKind.NullKeyword) return null;
+    }
+
+    // Handle array literals (tuples) like [1, 2] or ["item1", "item2"]
+    if (ts.isTupleTypeNode(typeNode)) {
+      return typeNode.elements.map((element) =>
+        this.extractDefaultValueFromNode(element, context)
       );
     }
 
-    const { valueType, defaultType, valueTypeNode, defaultTypeNode } = typeArgs;
-
-    const valueSchema = this.generateValueSchema(
-      valueType,
-      valueTypeNode,
-      context,
-    );
-
-    const defaultValue = this.extractDefaultValue(
-      defaultType,
-      defaultTypeNode,
-      checker,
-    );
-
-    if (defaultValue !== undefined) {
-      valueSchema.default = defaultValue as any;
+    // Handle object literals like { theme: "dark", count: 10 }
+    if (ts.isTypeLiteralNode(typeNode)) {
+      const obj: Record<string, unknown> = {};
+      for (const member of typeNode.members) {
+        if (
+          ts.isPropertySignature(member) && member.name &&
+          ts.isIdentifier(member.name) && member.type
+        ) {
+          const propName = member.name.text;
+          obj[propName] = this.extractDefaultValueFromNode(
+            member.type,
+            context,
+          );
+        }
+      }
+      return obj;
     }
 
-    return this.processDefaultUnionTypes(
-      valueType,
-      valueTypeNode,
-      valueSchema,
-      context,
-    );
+    // Handle keywords
+    if (typeNode.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+
+    // Fallback: try to get the type and extract from it
+    const type = context.typeChecker.getTypeFromTypeNode(typeNode);
+    return this.extractDefaultValue(type, context);
   }
 
-  /**
-   * Get type argument at the specified index, handling both typeArguments and resolvedTypeArguments
-   * This is the same logic as the old system's getTypeArgument function
-   */
-  private getTypeArgument(type: ts.Type, index: number): ts.Type | undefined {
-    const typeRef = type as ts.TypeReference;
-
-    const aliasArgs = (type as TypeWithInternals).aliasTypeArguments;
-    const resolvedArgs = (type as TypeWithInternals).resolvedTypeArguments;
-    const directArgs = typeRef.typeArguments as ts.Type[] | undefined;
-
-    let chosen: ts.Type | undefined = undefined;
-    if (aliasArgs && aliasArgs.length > index) chosen = aliasArgs[index];
-    if (!chosen && resolvedArgs && resolvedArgs.length > index) {
-      chosen = resolvedArgs[index];
-    }
-    if (!chosen && directArgs && directArgs.length > index) {
-      chosen = directArgs[index];
-    }
-
-    if (!chosen) return undefined;
-
-    return chosen;
-  }
-
-  private extractLiteralDefaultValue(
+  private extractDefaultValue(
     type: ts.Type,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
   ): unknown {
-    // Simple extraction of literal values (string, number, boolean) from types as fallback
+    // First try simple literal extraction
     if (type.flags & ts.TypeFlags.StringLiteral) {
       return (type as ts.StringLiteralType).value;
     }
@@ -670,68 +351,183 @@ export class CommonToolsFormatter implements TypeFormatter {
       return (type as ts.NumberLiteralType).value;
     }
     if (type.flags & ts.TypeFlags.BooleanLiteral) {
-      return (type as TypeWithInternals).intrinsicName === "true";
+      return (type as any).intrinsicName === "true";
     }
-
-    // Default fallback
-    return undefined;
-  }
-
-  /**
-   * Extract complex default values (objects, arrays, tuples) from AST syntax for Default<T,V> processing
-   */
-  private extractComplexDefaultValue(
-    node: ts.TypeNode,
-    checker: ts.TypeChecker,
-  ): unknown {
-    if (ts.isLiteralTypeNode(node)) {
-      const lit = node.literal;
-      if (ts.isStringLiteral(lit)) return lit.text;
-      if (ts.isNumericLiteral(lit)) return Number(lit.text);
-      if (lit.kind === ts.SyntaxKind.TrueKeyword) return true;
-      if (lit.kind === ts.SyntaxKind.FalseKeyword) return false;
-      if (lit.kind === ts.SyntaxKind.NullKeyword) return null;
-      if (lit.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
+    if (type.flags & ts.TypeFlags.Null) {
+      return null;
+    }
+    if (type.flags & ts.TypeFlags.Undefined) {
       return undefined;
     }
 
-    if (ts.isTypeLiteralNode(node)) {
-      const obj: Record<string, unknown> = {};
-      for (const member of node.members) {
-        if (
-          ts.isPropertySignature(member) && member.name &&
-          ts.isIdentifier(member.name)
-        ) {
-          const propName = member.name.text;
-          if (member.type) {
-            obj[propName] = this.extractComplexDefaultValue(
-              member.type,
-              checker,
-            );
-          }
-        }
-      }
-      return obj;
-    }
-
-    if (ts.isTupleTypeNode(node)) {
-      return node.elements.map((element: ts.TypeNode) =>
-        this.extractComplexDefaultValue(element, checker)
-      );
-    }
-
-    // For union defaults like null or undefined (Default<T|null, null>)
-    if (ts.isUnionTypeNode(node)) {
-      const nullType = node.types.find((t) =>
-        t.kind === ts.SyntaxKind.NullKeyword
-      );
-      const undefType = node.types.find((t) =>
-        t.kind === ts.SyntaxKind.UndefinedKeyword
-      );
-      if (nullType) return null;
-      if (undefType) return undefined;
+    // For complex values (arrays/objects), try to extract from the type's symbol
+    // This is a simplified approach that works for many cases
+    const symbol = type.getSymbol();
+    if (symbol && symbol.valueDeclaration) {
+      return this.extractComplexDefaultFromTypeSymbol(type, symbol, context);
     }
 
     return undefined;
+  }
+
+  private extractComplexDefaultFromTypeSymbol(
+    type: ts.Type,
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    // For now, try to extract from type string - this is a fallback approach
+    const typeString = context.typeChecker.typeToString(type);
+
+    // Handle array literals like ["item1", "item2"]
+    if (typeString.startsWith("[") && typeString.endsWith("]")) {
+      try {
+        return JSON.parse(typeString);
+      } catch {
+        // If JSON parsing fails, try simpler extraction
+        return this.parseArrayLiteral(typeString);
+      }
+    }
+
+    // Handle object literals like { theme: "dark", count: 10 }
+    if (typeString.startsWith("{") && typeString.endsWith("}")) {
+      try {
+        // Convert TS object syntax to JSON syntax
+        const jsonString = typeString
+          .replace(/(\w+):/g, '"$1":') // Quote property names
+          .replace(/'/g, '"'); // Convert single quotes to double quotes
+        return JSON.parse(jsonString);
+      } catch {
+        // If JSON parsing fails, return a simpler fallback
+        return this.parseObjectLiteral(typeString);
+      }
+    }
+
+    return undefined;
+  }
+
+  private parseArrayLiteral(str: string): unknown[] {
+    // Simple array parsing for basic cases
+    if (str === "[]") return [];
+
+    // Remove brackets and split by comma
+    const inner = str.slice(1, -1);
+    if (!inner.trim()) return [];
+
+    const items = inner.split(",").map((item) => {
+      const trimmed = item.trim();
+      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        return trimmed.slice(1, -1); // String literal
+      }
+      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+        return trimmed.slice(1, -1); // String literal
+      }
+      if (!isNaN(Number(trimmed))) {
+        return Number(trimmed); // Number literal
+      }
+      if (trimmed === "true") return true;
+      if (trimmed === "false") return false;
+      if (trimmed === "null") return null;
+      return trimmed; // Fallback
+    });
+
+    return items;
+  }
+
+  private parseObjectLiteral(str: string): Record<string, unknown> {
+    // Very basic object parsing - this is a fallback
+    const obj: Record<string, unknown> = {};
+
+    // Remove braces
+    const inner = str.slice(1, -1).trim();
+    if (!inner) return obj;
+
+    // This is a simplified parser - for more complex cases we'd need proper AST parsing
+    const pairs = inner.split(",");
+    for (const pair of pairs) {
+      const [key, ...valueParts] = pair.split(":");
+      if (key && valueParts.length > 0) {
+        const keyTrimmed = key.trim().replace(/"/g, "");
+        const valueStr = valueParts.join(":").trim();
+
+        // Parse simple values
+        if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
+          obj[keyTrimmed] = valueStr.slice(1, -1);
+        } else if (!isNaN(Number(valueStr))) {
+          obj[keyTrimmed] = Number(valueStr);
+        } else if (valueStr === "true") {
+          obj[keyTrimmed] = true;
+        } else if (valueStr === "false") {
+          obj[keyTrimmed] = false;
+        } else if (valueStr === "null") {
+          obj[keyTrimmed] = null;
+        } else {
+          obj[keyTrimmed] = valueStr;
+        }
+      }
+    }
+
+    return obj;
+  }
+
+  private isAliasToDefault(
+    typeNode: ts.TypeReferenceNode,
+    typeChecker: ts.TypeChecker,
+  ): boolean {
+    return this.followAliasChain(typeNode, typeChecker, new Set());
+  }
+
+  private followAliasChain(
+    typeNode: ts.TypeReferenceNode,
+    typeChecker: ts.TypeChecker,
+    visited: Set<string>,
+  ): boolean {
+    if (!ts.isIdentifier(typeNode.typeName)) {
+      return false;
+    }
+
+    const typeName = typeNode.typeName.text;
+
+    // Detect circular aliases and throw descriptive error
+    if (visited.has(typeName)) {
+      const aliasChain = Array.from(visited).join(" -> ");
+      throw new Error(
+        `Circular type alias detected: ${aliasChain} -> ${typeName}`,
+      );
+    }
+    visited.add(typeName);
+
+    // Check if we've reached "Default"
+    if (typeName === "Default") {
+      return true;
+    }
+
+    // Look up the symbol for this type name
+    const symbol = typeChecker.getSymbolAtLocation(typeNode.typeName);
+    if (!symbol || !(symbol.flags & ts.SymbolFlags.TypeAlias)) {
+      return false;
+    }
+
+    const aliasDeclaration = symbol.valueDeclaration ||
+      symbol.declarations?.[0];
+    if (!aliasDeclaration || !ts.isTypeAliasDeclaration(aliasDeclaration)) {
+      return false;
+    }
+
+    const aliasedType = aliasDeclaration.type;
+    if (
+      ts.isTypeReferenceNode(aliasedType) &&
+      ts.isIdentifier(aliasedType.typeName)
+    ) {
+      // Recursively follow the alias chain
+      return this.followAliasChain(aliasedType, typeChecker, visited);
+    }
+
+    return false;
+  }
+
+  private isCellType(type: ts.Type): boolean {
+    const objectType = type as ts.ObjectType;
+    return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
+      (type as ts.TypeReference).target?.symbol?.name === "Cell";
   }
 }

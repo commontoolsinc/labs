@@ -1,4 +1,4 @@
-type Default<T, V> = unknown;
+type Default<T, V extends T | string = T> = T;
 
 // Test Date type transformations
 interface UserProfile {

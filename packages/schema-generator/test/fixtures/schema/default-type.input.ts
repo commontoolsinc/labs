@@ -1,4 +1,4 @@
-type Default<T, V> = unknown;
+type Default<T, V extends T = T> = T;
 
 // Test basic Default type transformation
 interface UserSettings {
