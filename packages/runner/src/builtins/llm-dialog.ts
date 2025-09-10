@@ -1,27 +1,28 @@
 import {
-  DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
   LLMClient,
-  LLMGenerateObjectRequest,
   LLMRequest,
   LLMToolCall,
 } from "@commontools/llm";
 import type {
-  BuiltInGenerateObjectParams,
-  BuiltInLLMDialogState,
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTextPart,
-  BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
   Schema,
 } from "commontools";
-import { type Cell, type MemorySpace, type Stream } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { getLogger } from "@commontools/utils/logger";
+import type { Cell, MemorySpace, Stream } from "../cell.ts";
+import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { parseLink } from "../link-utils.ts";
+
+const logger = getLogger("llm-dialog", {
+  enabled: true,
+  level: "info",
+});
 
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
@@ -65,7 +66,7 @@ const LLMToolSchema = {
       asStream: true,
     },
   },
-  required: ["description", "inputSchema", "handler"],
+  required: ["description", "handler"],
 } as const satisfies JSONSchema;
 
 const LLMParamsSchema = {
@@ -376,12 +377,20 @@ function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // Strip handlers from tool definitions to send them to the server
-  // We keep the handlers locally and execute them here
-  const toolsWithoutHandlers = Object.fromEntries(
-    Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
-      const { handler, ...toolWithoutHandler } = tool;
-      return [name, toolWithoutHandler];
+  // Just send the schemas for each handler to the server
+  const toolsWithSchemas = Object.fromEntries(
+    Object.entries(toolsCell.get() ?? {}).filter(([name, tool]) => {
+      if (!tool.inputSchema && !tool.handler.schema) {
+        logger.error(`Tool ${name} has no schema`);
+        return false;
+      }
+      return true;
+    }).map(([name, tool]) => {
+      const { handler, description, inputSchema } = tool;
+      return [name, {
+        description,
+        inputSchema: inputSchema ?? handler.schema!,
+      }];
     }),
   );
 
@@ -397,7 +406,7 @@ function startRequest(
       context: "charm",
     },
     cache: true,
-    tools: toolsWithoutHandlers, // Pass through tools if provided
+    tools: toolsWithSchemas, // Pass through tools if provided
   };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
