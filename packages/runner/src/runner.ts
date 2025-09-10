@@ -505,7 +505,7 @@ export class Runner implements IRunner {
       if (!givenTx) {
         // Should be unnecessary as the start itself is read-only
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
-        await tx.commit().then((error) => {
+        await tx.commit().then(({ error }) => {
           if (error) {
             logger.error("Error committing transaction", error);
           }
