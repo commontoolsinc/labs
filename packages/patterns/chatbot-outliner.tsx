@@ -208,17 +208,12 @@ export default recipe<LLMTestInput, LLMTestResult>(
               </ct-vscroll>
 
               <div slot="footer">
-                {ifElse(
-                  pending,
-                  <ct-button onClick={cancelGeneration}>Cancel</ct-button>,
-                  <ct-message-input
-                    name="Ask"
-                    placeholder="Ask the LLM a question..."
-                    appearance="rounded"
-                    disabled={pending}
-                    onct-send={sendMessage({ addMessage })}
-                  />,
-                )}
+                <ct-prompt-input
+                  placeholder="Ask the LLM a question..."
+                  pending={pending}
+                  onct-send={sendMessage({ addMessage })}
+                  onct-stop={cancelGeneration}
+                />
               </div>
             </ct-screen>
 
