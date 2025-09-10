@@ -1,13 +1,13 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 
-import { scrub } from "../src/iterate.ts";
 import { Cell, type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
-import { isRecord } from "@commontools/utils/types";
+import { JSONSchemaObj } from "@commontools/api";
+import { scrub } from "../src/iterate.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -69,12 +69,12 @@ describe("scrub function", () => {
 
     // FIXME: types
     const result = scrub(cellWithSchema) as Cell<unknown>;
-
+    const schemaObj = result.schema as JSONSchemaObj;
     // Check that the result has the expected schema properties
-    expect(result.schema?.type).toEqualIgnoringSymbols("object");
+    expect(schemaObj.type).toEqualIgnoringSymbols("object");
 
     // The properties object should exist and have exactly name and age
-    const resultProperties = result.schema?.properties || {};
+    const resultProperties = schemaObj.properties || {};
     expect(Object.keys(resultProperties).length).toEqualIgnoringSymbols(2);
     expect("name" in resultProperties).toEqualIgnoringSymbols(true);
     expect("age" in resultProperties).toEqualIgnoringSymbols(true);

@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   canBeOpaqueRef,
   type Frame,
@@ -288,7 +288,10 @@ function factoryFromRecipe<T, R>(
     writableSchema.description = argumentSchemaArg;
 
     delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
-    if (writableSchema.properties?.internal?.properties) {
+    if (
+      isObject(writableSchema.properties?.internal) &&
+      writableSchema.properties.internal.properties
+    ) {
       for (
         const key of Object.keys(
           writableSchema.properties.internal.properties as any,

@@ -1,3 +1,4 @@
+import { JSONSchemaObj } from "@commontools/api";
 import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
@@ -173,8 +174,8 @@ export class ContextualFlowControl {
    */
   static joinSchema(
     joined: Set<string>,
-    schema: JSONSchema | boolean,
-    rootSchema: JSONSchema | boolean,
+    schema: JSONSchema,
+    rootSchema: JSONSchema,
     cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(true),
   ): Set<string> {
     if (typeof schema === "boolean") {
@@ -243,8 +244,8 @@ export class ContextualFlowControl {
 
   // Get the least upper bound classification from the schema.
   public lubSchema(
-    schema: JSONSchema | boolean,
-    rootSchema: JSONSchema | boolean = schema,
+    schema: JSONSchema,
+    rootSchema: JSONSchema = schema,
     extraClassifications?: Set<string>,
   ): string | undefined {
     const classifications = (extraClassifications !== undefined)
@@ -265,18 +266,38 @@ export class ContextualFlowControl {
     classification: string,
   ): JSONSchema {
     const joined = new Set<string>([classification]);
-    if (schema.ifc !== undefined) {
+    if (isObject(schema) && schema.ifc !== undefined) {
       if (schema.ifc.classification !== undefined) {
         for (const item of schema.ifc.classification) {
           joined.add(item);
         }
       }
     }
+    // If we have no classification, we can leave the schema
+    if (joined.size === 0) {
+      return schema;
+    }
+    // We don't really support "not" schemas, but it's the only good way we
+    // have to attach ifc to a `false` schema.
+    const schemaObj = ContextualFlowControl.toSchemaObj(schema);
     const restrictedSchema = {
-      ...schema,
+      ...schemaObj,
       ifc: { classification: [this.lub(joined)] },
     };
     return restrictedSchema;
+  }
+
+  /**
+   * Convert a schema that may be undefined or boolean to an object version.
+   *
+   * @param schema optional schema to convert
+   */
+  static toSchemaObj(schema?: JSONSchema): JSONSchemaObj {
+    return (schema === true || schema === undefined)
+      ? {}
+      : schema === false
+      ? { not: true }
+      : schema;
   }
 
   // Compute the transitive closure, which is the set of all nodes reachable from each node.
@@ -343,7 +364,7 @@ export class ContextualFlowControl {
   static resolveSchemaRef(
     rootSchema: JSONSchema,
     schemaRef: string,
-  ): JSONSchema | boolean | undefined {
+  ): JSONSchema | undefined {
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
       logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
@@ -369,11 +390,11 @@ export class ContextualFlowControl {
       }
       schemaCursor = schemaCursor[pathToDef[i]];
     }
-    return schemaCursor as JSONSchema | boolean;
+    return schemaCursor as JSONSchema;
   }
 
   static resolveSchemaRefOrThrow(
-    rootSchema: JSONSchema | boolean | undefined,
+    rootSchema: JSONSchema | undefined,
     schemaRef: string | undefined,
   ) {
     if (!isObject(rootSchema)) {
@@ -396,9 +417,9 @@ export class ContextualFlowControl {
   // This is a variant of schemaAtPath that allows for an undefined schema.
   // It will return the empty object instead of true and undefined instead of false.
   getSchemaAtPath(
-    schema: JSONSchema | boolean | undefined,
+    schema: JSONSchema | undefined,
     path: string[],
-    rootSchema: JSONSchema | boolean | undefined = schema,
+    rootSchema: JSONSchema | undefined = schema,
     extraClassifications?: Set<string>,
   ): JSONSchema | undefined {
     if (schema === undefined) {
@@ -431,11 +452,11 @@ export class ContextualFlowControl {
    * provide this method and use it.
    */
   schemaAtPath(
-    schema: JSONSchema | boolean,
+    schema: JSONSchema,
     path: string[],
-    rootSchema?: JSONSchema | boolean,
+    rootSchema?: JSONSchema,
     extraClassifications?: Set<string>,
-  ): JSONSchema | boolean {
+  ): JSONSchema {
     const joined = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
@@ -459,7 +480,7 @@ export class ContextualFlowControl {
           cursor.$ref,
         );
       }
-      if (isObject(cursor) && "anyOf" in cursor) {
+      if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
         const subSchemaStrings: string[] = [];
         for (const entry of cursor.anyOf!) {
@@ -504,20 +525,16 @@ export class ContextualFlowControl {
           }
         }
         if (cursor.properties && part in cursor.properties) {
-          const cursorObj = cursor.properties as Record<
-            string,
-            JSONSchema | boolean
-          >;
+          const cursorObj = cursor.properties as Record<string, JSONSchema>;
           cursor = cursorObj[part];
           if (typeof cursor === "boolean") {
             break;
           } else {
-            const schemaCursor = cursor as JSONSchema;
             if (
-              schemaCursor.ifc !== undefined &&
-              schemaCursor.ifc?.classification !== undefined
+              cursor.ifc !== undefined &&
+              cursor.ifc.classification !== undefined
             ) {
-              for (const classification of schemaCursor.ifc.classification) {
+              for (const classification of cursor.ifc.classification) {
                 joined.add(classification);
               }
             }
@@ -540,10 +557,10 @@ export class ContextualFlowControl {
       }
     }
     if (
-      typeof cursor === "object" && (cursor as JSONSchema).ifc !== undefined &&
-      (cursor as JSONSchema).ifc?.classification !== undefined
+      isObject(cursor) && cursor.ifc !== undefined &&
+      cursor.ifc?.classification !== undefined
     ) {
-      for (const classification of cursor.ifc!.classification!) {
+      for (const classification of cursor.ifc.classification!) {
         joined.add(classification);
       }
     }
@@ -595,7 +612,7 @@ export class ContextualFlowControl {
 
   // Check to see if the specified schema is one of the special values meaning
   // it should always validate.
-  static isTrueSchema(schema: JSONSchema | boolean): boolean {
+  static isTrueSchema(schema: JSONSchema): boolean {
     if (schema === true) {
       return true;
     }

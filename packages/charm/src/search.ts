@@ -4,7 +4,7 @@ import {
   CharmManager,
   DEFAULT_MODEL,
 } from "@commontools/charm";
-import { NAME, Recipe } from "@commontools/runner";
+import { NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
@@ -35,7 +35,9 @@ export async function searchCharms(
 
           return {
             title: title + ` (#${charmId(charm)!.slice(-4)})`,
-            description: (recipe as Recipe).argumentSchema.description,
+            description: isObject(recipe.argumentSchema)
+              ? recipe.argumentSchema.description
+              : undefined,
             id: charmId(charm)!,
             value: charm.entityId!,
           };

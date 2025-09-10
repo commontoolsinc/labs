@@ -826,14 +826,14 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     const schema = schemaContext.schema as Immutable<JSONObject>;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       const schemaProperties = schema["properties"] as
-        | Record<string, JSONSchema | boolean>
+        | Record<string, JSONSchema>
         | undefined;
       const propSchema =
         (isObject(schemaProperties) && propKey in schemaProperties)
           ? schemaProperties[propKey]
           : (isObject(schema["additionalProperties"]) ||
               typeof schema["additionalProperties"] === "boolean")
-          ? schema["additionalProperties"] as JSONSchema | boolean
+          ? schema["additionalProperties"] as JSONSchema
           : undefined;
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, we treat this specially, where we
@@ -917,8 +917,8 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
 // sophisticated matching. Break that out into a schema module so we can use
 // that logic here.
 export function isSchemaSuperset(
-  schemaA: JSONSchema | boolean,
-  schemaB: JSONSchema | boolean,
+  schemaA: JSONSchema,
+  schemaB: JSONSchema,
 ) {
   return (ContextualFlowControl.isTrueSchema(schemaA)) ||
     deepEqual(schemaA, schemaB) || (schemaB === false);

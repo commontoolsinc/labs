@@ -227,7 +227,10 @@ export const generateNewRecipeVersion = async (
 // FIXME(seefeld): might be able to use asSchema here...
 export function scrub(data: unknown): unknown {
   if (isCell(data)) {
-    if (data.schema?.type === "object" && data.schema.properties) {
+    if (
+      isObject(data.schema) && data.schema?.type === "object" &&
+      data.schema.properties
+    ) {
       // If there are properties, remove $UI and $NAME and any streams
       const scrubbed = Object.fromEntries(
         Object.entries(data.schema.properties).filter(([key, value]) =>
@@ -326,11 +329,13 @@ async function singlePhaseCodeGeneration(
 
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
-  const schema = {
-    ...existingSchema,
+  const schema: JSONSchemaMutable = {
+    ...(isObject(existingSchema)
+      ? (structuredClone(existingSchema) as JSONSchemaMutable)
+      : {}),
     title: title || "missing",
     description,
-  } as JSONSchemaMutable;
+  };
 
   if (!schema.type) {
     schema.type = "object";
@@ -347,8 +352,12 @@ async function singlePhaseCodeGeneration(
     Object.keys(props).forEach((key) => {
       if (schema.properties && schema.properties[key]) {
         console.error(`skipping ${key} already in the argument schema`);
+      } else if (typeof props[key] === "boolean") {
+        schema.properties![key] = props[key];
       } else {
-        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
+        schema.properties![key] = structuredClone(
+          props[key],
+        ) as JSONSchemaMutable;
       }
     });
   }
@@ -418,11 +427,13 @@ async function twoPhaseCodeGeneration(
 
   // NOTE(ja): we put the result schema in the argument schema
   // as a hack to work around iframes not supporting results schemas
-  const schema = {
-    ...existingSchema,
+  const schema: JSONSchemaMutable = {
+    ...(isObject(existingSchema)
+      ? (structuredClone(existingSchema) as JSONSchemaMutable)
+      : {}),
     title: title || "missing",
     description,
-  } as JSONSchemaMutable;
+  };
 
   if (!schema.type) {
     schema.type = "object";
@@ -439,8 +450,12 @@ async function twoPhaseCodeGeneration(
     Object.keys(props).forEach((key) => {
       if (schema.properties && schema.properties[key]) {
         console.error(`skipping ${key} already in the argument schema`);
+      } else if (typeof props[key] === "boolean") {
+        schema.properties![key] = props[key];
       } else {
-        (schema.properties as Record<string, JSONSchema>)[key] = props[key];
+        schema.properties![key] = structuredClone(
+          props[key],
+        ) as JSONSchemaMutable;
       }
     });
   }

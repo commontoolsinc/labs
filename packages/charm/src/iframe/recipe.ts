@@ -12,7 +12,10 @@ export type IFrameRecipe = {
 };
 
 export const buildFullRecipe = (iframe: IFrameRecipe) => {
-  const result = Object.keys(iframe.resultSchema.properties ?? {}).map((key) =>
+  const properties = typeof iframe.resultSchema === "boolean"
+    ? undefined
+    : iframe.resultSchema.properties;
+  const result = Object.keys(properties ?? {}).map((key) =>
     `    ${key}: data.${key},\n`
   ).join("\n");
 

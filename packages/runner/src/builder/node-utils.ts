@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   canBeOpaqueRef,
@@ -41,7 +41,7 @@ export function applyArgumentIfcToResult(
     const joined = new Set<string>();
     ContextualFlowControl.joinSchema(joined, argumentSchema, argumentSchema);
     return (joined.size !== 0)
-      ? cfc.schemaWithLub(resultSchema ?? {}, cfc.lub(joined))
+      ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
       : resultSchema;
   }
   return resultSchema;
@@ -81,13 +81,23 @@ function attachCfcToOutputs<T, R>(
 ) {
   if (isOpaqueRef(outputs)) {
     const exported = (outputs as OpaqueRef<T>).export();
-    const outputSchema = exported.schema ?? {};
+    const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<string>([lubClassification]);
     ContextualFlowControl.joinSchema(joined, outputSchema, outputSchema);
-    const ifc = (outputSchema.ifc !== undefined) ? { ...outputSchema.ifc } : {};
+    const ifc = (isObject(outputSchema) && outputSchema.ifc !== undefined)
+      ? { ...outputSchema.ifc }
+      : {};
     ifc.classification = [cfc.lub(joined)];
-    const cfcSchema: JSONSchema = { ...outputSchema, ifc };
+    const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
+      ? {}
+      : outputSchema === false
+      ? { not: true }
+      : outputSchema;
+    const cfcSchema: JSONSchema = {
+      ...outpuSchemaObj,
+      ifc,
+    };
     (outputs as OpaqueRef<T>).setSchema(cfcSchema);
     return;
   } else if (isRecord(outputs)) {

@@ -15,6 +15,7 @@ import type {
   HandlerFunction,
   IfElseFunction,
   JSONSchema,
+  JSONSchemaObj,
   JSONValue,
   LiftFunction,
   LLMDialogFunction,
@@ -84,7 +85,7 @@ import {
 } from "../storage/interface.ts";
 import { type RuntimeProgram } from "../harness/types.ts";
 
-export type JSONSchemaMutable = Mutable<JSONSchema>;
+export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 // Augment the public interface with the internal OpaqueRefMethods interface.
 // Deliberately repeating the original interface to catch any inconsistencies:
@@ -149,8 +150,8 @@ export type NodeRef = {
 
 // This is a schema, together with its rootSchema for resolving $ref entries
 export type SchemaContext = {
-  schema: JSONSchema | boolean;
-  rootSchema: JSONSchema | boolean;
+  schema: JSONSchema;
+  rootSchema: JSONSchema;
 };
 
 export type StreamValue = {
