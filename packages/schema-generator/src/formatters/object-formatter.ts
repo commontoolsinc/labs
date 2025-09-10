@@ -80,10 +80,19 @@ export class ObjectFormatter implements TypeFormatter {
       try {
         const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
         if (text && typeof generated === "object" && generated) {
-          const hasConflicts = all.filter((s) => s && s !== text).length > 0;
-          (generated as any).description = hasConflicts
-            ? `${text} (Consolidated from intersection constituents)`
-            : text;
+          const conflicts = all.filter((s) => s && s !== text);
+          (generated as any).description = text;
+          if (conflicts.length > 0) {
+            const comment = (generated as any).$comment as string | undefined;
+            (generated as any).$comment = comment
+              ? comment
+              : "Conflicting docs across declarations; using first";
+            // Do not throw; warning only
+            // deno-lint-ignore no-console
+            console.warn(
+              `JSDoc conflict for property '${propName}'; using first doc`,
+            );
+          }
         }
       } catch (_e) {
         // Swallow doc extraction errors for robustness
@@ -93,36 +102,46 @@ export class ObjectFormatter implements TypeFormatter {
 
     const schema: SchemaDefinition = { type: "object", properties };
 
-    // Handle string index signature → additionalProperties with description
+    // Handle string/number index signatures → additionalProperties with description
     try {
       const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
-      if (stringIndex) {
+      const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+      const chosenIndex = stringIndex ?? numberIndex;
+      if (chosenIndex) {
         const apSchema = this.schemaGenerator.formatChildType(
-          stringIndex,
+          chosenIndex,
           context,
           undefined,
         );
         // Attempt to read JSDoc from index signature declarations
         const sym = (type as ts.Type).getSymbol?.();
-        let indexDoc: string | undefined;
+        const foundDocs: string[] = [];
         if (sym) {
           for (const decl of sym.declarations ?? []) {
             if (ts.isInterfaceDeclaration(decl) || ts.isTypeLiteralNode(decl)) {
               for (const member of decl.members) {
                 if (ts.isIndexSignatureDeclaration(member)) {
                   const docs = getDeclDocs(member);
-                  if (docs.length > 0) {
-                    indexDoc = docs[0];
-                    break;
+                  for (const d of docs) {
+                    if (!foundDocs.includes(d)) foundDocs.push(d);
                   }
                 }
               }
             }
-            if (indexDoc) break;
           }
         }
-        if (indexDoc && typeof apSchema === "object" && apSchema) {
-          (apSchema as any).description = indexDoc;
+        if (foundDocs.length > 0 && typeof apSchema === "object" && apSchema) {
+          (apSchema as any).description = foundDocs[0]!;
+          if (foundDocs.length > 1) {
+            const comment = (apSchema as any).$comment as string | undefined;
+            (apSchema as any).$comment = comment
+              ? comment
+              : "Conflicting docs for index signatures; using first";
+            // deno-lint-ignore no-console
+            console.warn(
+              "JSDoc conflict for index signatures; using first doc",
+            );
+          }
         }
         (schema as any).additionalProperties = apSchema as any;
       }

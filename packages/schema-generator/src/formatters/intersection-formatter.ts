@@ -88,14 +88,34 @@ export class IntersectionFormatter implements TypeFormatter {
         // Merge properties from this part
         if (schema.properties) {
           for (const [key, value] of Object.entries(schema.properties)) {
-            if (mergedProps[key] && mergedProps[key] !== value) {
-              // Property conflict - could improve this with more sophisticated merging
-              console.warn(
-                `Intersection property conflict for key '${key}' - using first definition`,
-              );
-            } else {
-              mergedProps[key] = value;
+            const existing = mergedProps[key];
+            if (existing) {
+              // If both are object schemas, check description conflicts
+              if (
+                typeof existing === "object" && existing &&
+                typeof value === "object" && value
+              ) {
+                const aDesc = (existing as any).description as
+                  | string
+                  | undefined;
+                const bDesc = (value as any).description as string | undefined;
+                if (aDesc && bDesc && aDesc !== bDesc) {
+                  const comment = (existing as any).$comment as
+                    | string
+                    | undefined;
+                  (existing as any).$comment = comment
+                    ? comment
+                    : "Conflicting docs across intersection constituents; using first";
+                  // deno-lint-ignore no-console
+                  console.warn(
+                    `Intersection doc conflict for '${key}'; using first`,
+                  );
+                }
+              }
+              // Prefer the first definition by default
+              continue;
             }
+            mergedProps[key] = value as SchemaDefinition;
           }
         }
 

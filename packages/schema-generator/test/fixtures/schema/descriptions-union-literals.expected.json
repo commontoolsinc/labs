@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "status": {
+      "description": "status of item",
+      "enum": [
+        "closed",
+        "open",
+        "pending"
+      ]
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "type": "object"
+}

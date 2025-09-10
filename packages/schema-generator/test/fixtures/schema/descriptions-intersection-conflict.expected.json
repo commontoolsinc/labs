@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "name": {
+      "$comment": "Conflicting docs across intersection constituents; using first",
+      "description": "First name doc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+
