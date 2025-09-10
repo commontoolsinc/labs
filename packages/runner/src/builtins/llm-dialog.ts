@@ -61,9 +61,7 @@ const LLMToolSchema = {
     description: { type: "string" },
     inputSchema: { type: "object" },
     handler: {
-      type: "object",
-      properties: { result: { type: "object" } },
-      additionalProperties: true,
+      // Deliberately no schema, so it gets populated from the handler
       asStream: true,
     },
   },
