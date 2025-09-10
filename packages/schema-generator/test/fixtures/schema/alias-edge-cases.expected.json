@@ -1,0 +1,68 @@
+{
+  "properties": {
+    "veryDeepCell": {
+      "asCell": true,
+      "type": "string"
+    },
+    "deepStream": {
+      "asStream": true,
+      "type": "number"
+    },
+    "stringCellStream": {
+      "asStream": true,
+      "type": "string"
+    },
+    "deepNestedStream": {
+      "asStream": true,
+      "type": "number"
+    },
+    "indirectArray": {
+      "asCell": true,
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "numberListCell": {
+      "asCell": true,
+      "items": {
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "users": {
+      "asCell": true,
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "id"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "userStore": {
+      "asCell": true,
+      "type": "string"
+    }
+  },
+  "required": [
+    "veryDeepCell",
+    "deepStream",
+    "stringCellStream",
+    "deepNestedStream",
+    "indirectArray",
+    "numberListCell",
+    "users",
+    "userStore"
+  ],
+  "type": "object"
+}

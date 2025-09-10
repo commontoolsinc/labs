@@ -4,10 +4,7 @@ interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler({
-    type: "object",
-    additionalProperties: true
-} as const satisfies JSONSchema, {
+const myHandler = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
         value: {

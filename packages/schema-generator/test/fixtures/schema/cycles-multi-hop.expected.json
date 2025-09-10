@@ -1,0 +1,38 @@
+{
+  "$ref": "#/definitions/SchemaRoot",
+  "definitions": {
+    "B": {
+      "properties": {
+        "c": {
+          "$ref": "#/definitions/C"
+        }
+      },
+      "required": [
+        "c"
+      ],
+      "type": "object"
+    },
+    "C": {
+      "properties": {
+        "a": {
+          "$ref": "#/definitions/SchemaRoot"
+        }
+      },
+      "required": [
+        "a"
+      ],
+      "type": "object"
+    },
+    "SchemaRoot": {
+      "properties": {
+        "b": {
+          "$ref": "#/definitions/B"
+        }
+      },
+      "required": [
+        "b"
+      ],
+      "type": "object"
+    }
+  }
+}

@@ -11,6 +11,7 @@
     "./packages/iframe-sandbox",
     "./packages/integration",
     "./packages/js-runtime",
+    "./packages/schema-generator",
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",
@@ -85,6 +86,7 @@
       "packages/seeder/templates/",
       "packages/static/assets/",
       "packages/js-runtime/test/fixtures",
+      "packages/schema-generator/test/fixtures",
       "packages/vendor-astral"
     ]
   },

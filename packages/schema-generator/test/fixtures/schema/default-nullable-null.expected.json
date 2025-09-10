@@ -1,0 +1,19 @@
+{
+  "properties": {
+    "maybe": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "required": [
+    "maybe"
+  ],
+  "type": "object"
+}

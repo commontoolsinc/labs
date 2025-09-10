@@ -1,0 +1,18 @@
+{
+  "$ref": "#/definitions/SchemaRoot",
+  "definitions": {
+    "SchemaRoot": {
+      "properties": {
+        "child": {
+          "properties": {
+            "node": {
+              "$ref": "#/definitions/SchemaRoot"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  }
+}

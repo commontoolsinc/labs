@@ -1,0 +1,22 @@
+{
+  "properties": {
+    "a": {
+      "asCell": true,
+      "type": "number"
+    },
+    "b": {
+      "asStream": true,
+      "type": "string"
+    },
+    "c": {
+      "default": "x",
+      "type": "string"
+    }
+  },
+  "required": [
+    "a",
+    "b",
+    "c"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,12 @@
+{
+  "properties": {
+    "stream": {
+      "asStream": true,
+      "type": "number"
+    }
+  },
+  "required": [
+    "stream"
+  ],
+  "type": "object"
+}

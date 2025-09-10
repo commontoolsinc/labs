@@ -1,0 +1,19 @@
+{
+  "$ref": "#/definitions/SchemaRoot",
+  "definitions": {
+    "SchemaRoot": {
+      "properties": {
+        "next": {
+          "$ref": "#/definitions/SchemaRoot"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    }
+  }
+}

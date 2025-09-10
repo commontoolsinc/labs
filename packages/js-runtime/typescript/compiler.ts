@@ -275,6 +275,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
   compile(
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
+    // maybe optional 'transform' function taking tsProgram, from where you can get source files etc, and returns optional ts.customTransformers (based on cts-enable presence)
   ): JsScript {
     const filename = inputOptions.filename ?? "out.js";
     const noCheck = inputOptions.noCheck ?? false;
@@ -310,6 +311,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
+    // beginning of transformation related code
     // Check if the main source file has the /// <cts-enable /> directive
     const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
       const text = sourceFile.getFullText();
@@ -364,6 +366,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const transformers = beforeTransformers.length > 0
       ? { before: beforeTransformers }
       : undefined;
+    // end of transformation related code
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,

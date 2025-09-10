@@ -1,0 +1,22 @@
+{
+  "properties": {
+    "directDefault": {
+      "default": "direct",
+      "type": "string"
+    },
+    "singleAlias": {
+      "default": "single",
+      "type": "string"
+    },
+    "doubleAlias": {
+      "default": "double",
+      "type": "string"
+    }
+  },
+  "required": [
+    "directDefault",
+    "singleAlias",
+    "doubleAlias"
+  ],
+  "type": "object"
+}
