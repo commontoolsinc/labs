@@ -169,7 +169,7 @@ function normalizeAnyOf(node: any): any {
   if (node.anyOf.length === 2) {
     const a = node.anyOf[0];
     const b = node.anyOf[1];
-    const isNull = (x: any) => isObject(x) && x.type === "null";
+    const isNull = (x: any) => isObject(x) && (x as any).type === "null";
     if (isNull(b) && !isNull(a)) {
       node.anyOf = [b, a];
     }

@@ -13,7 +13,8 @@ describe("SchemaGenerator", () => {
       );
 
       const schema = generator.generateSchema(type, checker);
-      expect(schema.type).toBe("string");
+      expect(typeof schema).toBe("object");
+      expect((schema as any).type).toBe("string");
     });
 
     it("should route object types to ObjectFormatter", async () => {
@@ -24,10 +25,11 @@ describe("SchemaGenerator", () => {
       );
 
       const schema = generator.generateSchema(type, checker);
-      expect(schema.type).toBe("object");
-      expect(schema.properties).toBeDefined();
-      expect(schema.properties?.name).toEqual({ type: "string" });
-      expect(schema.properties?.age).toEqual({ type: "number" });
+      expect(typeof schema).toBe("object");
+      expect((schema as any).type).toBe("object");
+      expect((schema as any).properties).toBeDefined();
+      expect((schema as any).properties?.name).toEqual({ type: "string" });
+      expect((schema as any).properties?.age).toEqual({ type: "number" });
     });
 
     it("should route array types to ArrayFormatter", async () => {
@@ -38,8 +40,9 @@ describe("SchemaGenerator", () => {
       );
 
       const schema = generator.generateSchema(type, checker, typeNode);
-      expect(schema.type).toBe("array");
-      expect(schema.items).toBeDefined();
+      expect(typeof schema).toBe("object");
+      expect((schema as any).type).toBe("array");
+      expect((schema as any).items).toBeDefined();
     });
   });
 
