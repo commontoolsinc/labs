@@ -795,3 +795,76 @@ describe("event handling", () => {
     },
   );
 });
+
+describe("reactive retries", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it(
+    "should retry reactive actions when commit fails, up to limit",
+    async () => {
+      // Establish a source cell to create a read dependency
+      const source = runtime.getCell<number>(
+        space,
+        "should retry reactive actions when commit fails, up to limit 1",
+        undefined,
+        tx,
+      );
+      source.set(1);
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Count runs; force commit failure each time
+      let attempts = 0;
+      const reactiveAction: Action = (actionTx) => {
+        attempts++;
+        // Read to establish dependency so later changes re-trigger
+        source.withTx(actionTx).get();
+        // Force commit to fail so scheduler retries
+        actionTx.abort("force-abort-for-reactive-retry");
+      };
+
+      // Subscribe and run immediately
+      runtime.scheduler.subscribe(
+        reactiveAction,
+        { reads: [], writes: [] },
+        true,
+      );
+
+      // Allow retries to process. Idle may resolve before re-queue occurs,
+      // so loop a few times until attempts reach the expected amount.
+      for (let i = 0; i < 20 && attempts < 10; i++) {
+        await runtime.idle();
+      }
+
+      // MAX_RETRIES_FOR_REACTIVE is 10; expect initial + retries == 10 attempts
+      expect(attempts).toBe(10);
+
+      // After reaching retry limit, a subsequent input change should re-trigger
+      source.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Wait for the follow-up run
+      await runtime.idle();
+
+      expect(attempts).toBe(11);
+    },
+  );
+});

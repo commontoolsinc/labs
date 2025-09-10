@@ -78,7 +78,8 @@ export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
-const DEFAULT_RETRIES = 5;
+const DEFAULT_RETRIES_FOR_EVENTS = 5;
+const MAX_RETRIES_FOR_REACTIVE = 10;
 
 export class Scheduler implements IScheduler {
   private eventQueue: { action: Action; retriesLeft: number }[] = [];
@@ -88,6 +89,7 @@ export class Scheduler implements IScheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private retries = new WeakMap<Action, number>();
 
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
@@ -234,7 +236,33 @@ export class Scheduler implements IScheduler {
           }
         } finally {
           // Set up new reactive subscriptions after the action runs
-          tx.commit();
+
+          // Commit the transaction. The code continues synchronously after
+          // kicking off the commit, i.e. it assumes the commit will be
+          // successful. If it isn't, the data will be rolled back and all other
+          // reactive functions based on it will be retriggered. But also, the
+          // retry logic below will have re-scheduled this action, so
+          // topological sorting should move it before the dependencies.
+          tx.commit().then(({ error }) => {
+            // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
+            // on every attempt we still call the re-subscribe below, so that
+            // even after we run out of retries, this will be re-triggered when
+            // input data changes.
+            if (error) {
+              logger.info("Error committing transaction", error);
+
+              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
+              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
+                // Re-schedule the action to run again on conflict failure.
+                // (Empty dependencies are fine, since it's already being
+                // scheduled for execution.)
+                this.subscribe(action, { reads: [], writes: [] }, true);
+              }
+            } else {
+              // Clear retries after successful commit.
+              this.retries.delete(action);
+            }
+          });
           const log = txToReactivityLog(tx);
 
           logger.debug(() => [
@@ -283,7 +311,7 @@ export class Scheduler implements IScheduler {
   queueEvent(
     eventLink: NormalizedFullLink,
     event: any,
-    retries: number = DEFAULT_RETRIES,
+    retries: number = DEFAULT_RETRIES_FOR_EVENTS,
   ): void {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
