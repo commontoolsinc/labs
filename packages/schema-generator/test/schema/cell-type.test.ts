@@ -47,7 +47,21 @@ describe("Schema: Cell types", () => {
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("number");
-    expect(prop.asCell).toBe(true);
     expect(prop.asStream).toBe(true);
+    // No asCell marker for inner Cell when wrapped in Stream
+    expect((prop as any).asCell).toBeUndefined();
+  });
+
+  it("disallows Cell<Stream<T>> and suggests boxing", async () => {
+    const code = `
+      interface Cell<T> { get(): T; set(value: T): void; }
+      interface Stream<T> { subscribe(cb: (v: T) => void): void; }
+      interface X { invalid: Cell<Stream<number>>; }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    expect(() => gen(type, checker)).toThrow(
+      "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>",
+    );
   });
 });

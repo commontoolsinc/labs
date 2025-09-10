@@ -9,12 +9,10 @@
       "type": "number"
     },
     "stringCellStream": {
-      "asCell": true,
       "asStream": true,
       "type": "string"
     },
     "deepNestedStream": {
-      "asCell": true,
       "asStream": true,
       "type": "number"
     },

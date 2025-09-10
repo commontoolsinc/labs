@@ -1,7 +1,6 @@
 {
   "properties": {
     "stream": {
-      "asCell": true,
       "asStream": true,
       "type": "number"
     }

@@ -43,7 +43,7 @@ describe("Schema: Type aliases and shared types", () => {
     const soc = s.properties?.streamOfCells as any;
     expect(soc.type).toBe("string");
     expect(soc.asStream).toBe(true);
-    expect(soc.asCell).toBe(true);
+    expect(soc.asCell).toBeUndefined();
     const na = s.properties?.nestedAlias as any;
     expect(na.type).toBe("array");
     expect(na.items?.type).toBe("array");

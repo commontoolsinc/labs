@@ -1,4 +1,4 @@
-import ts, { TypeReferenceNode } from "typescript";
+import ts from "typescript";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -22,7 +22,18 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Handle Cell/Stream via resolved type (works for direct and aliased)
+    // Prefer Default via node (erased at type-level)
+    const n = context.typeNode;
+    if (n && ts.isTypeReferenceNode(n)) {
+      const nodeName = this.getTypeRefIdentifierName(n);
+      if (
+        nodeName === "Default" || this.isAliasToDefault(n, context.typeChecker)
+      ) {
+        return true;
+      }
+    }
+
+    // Then handle Cell/Stream via resolved type (works for direct and aliased)
     if (type.flags & ts.TypeFlags.Object) {
       const objectType = type as ts.ObjectType;
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
@@ -33,30 +44,25 @@ export class CommonToolsFormatter implements TypeFormatter {
         }
       }
     }
-    
-    // Handle Default via TypeNode analysis (because Default erases)
-    const n = context.typeNode;
-    if (n && ts.isTypeReferenceNode(n)) {
-      const nodeName = ts.isIdentifier(n.typeName) ? n.typeName.text : undefined;
-      if (nodeName === "Default" || this.isAliasToDefault(n, context.typeChecker)) {
-        return true;
-      }
-    }
-    
+
     return false;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
-    let nodeTypename: string | undefined;
-    let resolvedTypename: string | undefined;
-
-    // Path 1: Extract type name from TypeNode (handles direct usage)
     const n = context.typeNode;
-    if (n && ts.isTypeReferenceNode(n) && ts.isIdentifier(n.typeName)) {
-      nodeTypename = n.typeName.text;
+
+    // Handle Default via node (direct or alias)
+    if (n && ts.isTypeReferenceNode(n)) {
+      const isDefaultNode =
+        (ts.isIdentifier(n.typeName) && n.typeName.text === "Default") ||
+        this.isAliasToDefault(n, context.typeChecker);
+      if (isDefaultNode) {
+        return this.formatDefaultType(n, context);
+      }
     }
 
-    // Path 2: Extract type name from resolved type (handles interface aliases)
+    // Determine wrapper kind using resolved type for Cell/Stream
+    let resolvedTypename: string | undefined;
     if (type.flags & ts.TypeFlags.Object) {
       const objectType = type as ts.ObjectType;
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
@@ -65,94 +71,142 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Handle direct TypeNode usage first (supports aliases and default extraction)
-    if (n && ts.isTypeReferenceNode(n)) {
-      switch (nodeTypename) {
-        case "Cell":
-          return this.formatCellTypeFromNode(n, context);
-        case "Stream":
-          return this.formatStreamTypeFromNode(n, context);
-        case "Default":
-          return this.formatDefaultTypeFromNode(n, context);
-        default:
-          // Handle Default aliases
-          if (this.isAliasToDefault(n, context.typeChecker)) {
-            return this.formatDefaultTypeFromNode(n, context);
-          }
-      }
+    // Handle Cell/Stream using unified wrapper path
+    if (resolvedTypename === "Cell" || resolvedTypename === "Stream") {
+      return this.formatCellOrStream(
+        type as ts.TypeReference,
+        n,
+        context,
+        resolvedTypename === "Stream",
+      );
     }
 
-    // Fallback to resolved type for interface/class cases
-    switch (resolvedTypename) {
-      case "Cell":
-        return this.formatCellType(type as ts.TypeReference, context);
-      case "Stream":
-        return this.formatStreamType(type as ts.TypeReference, context);
-      case "Default":
-        return this.formatDefaultType(type as ts.TypeReference, context);
-    }
-
-    throw new Error(`Unexpected CommonTools type: ${nodeTypename || resolvedTypename}`);
+    const nodeName = this.getTypeRefIdentifierName(n);
+    throw new Error(
+      `Unexpected CommonTools type: ${nodeName || resolvedTypename}`,
+    );
   }
 
-  private formatCellType(
+  private formatCellOrStream(
     typeRef: ts.TypeReference,
+    typeRefNode: ts.TypeNode | undefined,
     context: GenerationContext,
+    asStream: boolean,
   ): SchemaDefinition {
-    // Get first type argument, let TypeScript resolve aliases
-    const innerType = typeRef.typeArguments?.[0];
+    const innerTypeFromType = typeRef.typeArguments?.[0];
+    const innerTypeNode = typeRefNode && ts.isTypeReferenceNode(typeRefNode)
+      ? typeRefNode.typeArguments?.[0]
+      : undefined;
+
+    // Resolve inner type, preferring type information; fall back to node if needed
+    let innerType: ts.Type | undefined = innerTypeFromType;
+    if (!innerType && innerTypeNode) {
+      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    }
     if (!innerType) {
-      throw new Error("Cell<T> requires type argument");
+      throw new Error(
+        `${asStream ? "Stream" : "Cell"}<T> requires type argument`,
+      );
     }
 
-    // Get the TypeNode for the inner type from the Cell's type arguments
-    const innerTypeNode =
-      context.typeNode && ts.isTypeReferenceNode(context.typeNode)
-        ? context.typeNode.typeArguments?.[0]
-        : undefined;
-
+    // Prepare inner context (preserve node when available)
     const innerContext = innerTypeNode
       ? { ...context, typeNode: innerTypeNode }
       : context;
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       innerContext,
+      innerTypeNode,
     );
+
+    // Stream<T>: do not reflect inner Cell-ness; only mark asStream
+    if (asStream) {
+      // Do not reflect inner Cell markers at stream level
+      const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
+      return { ...(rest as any), asStream: true } as SchemaDefinition;
+    }
+
+    // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
+    if (this.isStreamType(innerType)) {
+      throw new Error(
+        "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
+      );
+    }
+
     return { ...innerSchema, asCell: true };
   }
 
-  private formatStreamType(
-    typeRef: ts.TypeReference,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    const innerType = typeRef.typeArguments?.[0];
-    if (!innerType) {
-      throw new Error("Stream<T> requires type argument");
-    }
-
-    // Check if inner is Cell by looking at resolved type
-    const isCellType = this.isCellType(innerType);
-
-    // Get the TypeNode for the inner type from the Stream's type arguments
-    const innerTypeNode =
-      context.typeNode && ts.isTypeReferenceNode(context.typeNode)
-        ? context.typeNode.typeArguments?.[0]
-        : undefined;
-
-    const innerContext = innerTypeNode
-      ? { ...context, typeNode: innerTypeNode }
-      : context;
-    const innerSchema = this.schemaGenerator.formatChildType(
-      innerType,
-      innerContext,
-    );
-
-    return isCellType
-      ? { ...innerSchema, asCell: true, asStream: true }
-      : { ...innerSchema, asStream: true };
+  private getTypeRefIdentifierName(
+    node?: ts.TypeNode,
+  ): string | undefined {
+    if (!node || !ts.isTypeReferenceNode(node)) return undefined;
+    const tn = node.typeName;
+    return ts.isIdentifier(tn) ? tn.text : undefined;
   }
 
-  private formatDefaultTypeFromNode(
+  private isStreamType(type: ts.Type): boolean {
+    const objectType = type as ts.ObjectType;
+    return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
+      (type as ts.TypeReference).target?.symbol?.name === "Stream";
+  }
+
+  private isAliasToDefault(
+    typeNode: ts.TypeReferenceNode,
+    typeChecker: ts.TypeChecker,
+  ): boolean {
+    return this.followAliasChain(typeNode, typeChecker, new Set());
+  }
+
+  private followAliasChain(
+    typeNode: ts.TypeReferenceNode,
+    typeChecker: ts.TypeChecker,
+    visited: Set<string>,
+  ): boolean {
+    if (!ts.isIdentifier(typeNode.typeName)) {
+      return false;
+    }
+
+    const typeName = typeNode.typeName.text;
+
+    // Detect circular aliases and throw descriptive error
+    if (visited.has(typeName)) {
+      const aliasChain = Array.from(visited).join(" -> ");
+      throw new Error(
+        `Circular type alias detected: ${aliasChain} -> ${typeName}`,
+      );
+    }
+    visited.add(typeName);
+
+    // Check if we've reached "Default"
+    if (typeName === "Default") {
+      return true;
+    }
+
+    // Look up the symbol for this type name
+    const symbol = typeChecker.getSymbolAtLocation(typeNode.typeName);
+    if (!symbol || !(symbol.flags & ts.SymbolFlags.TypeAlias)) {
+      return false;
+    }
+
+    const aliasDeclaration = symbol.valueDeclaration ||
+      symbol.declarations?.[0];
+    if (!aliasDeclaration || !ts.isTypeAliasDeclaration(aliasDeclaration)) {
+      return false;
+    }
+
+    const aliasedType = aliasDeclaration.type;
+    if (
+      ts.isTypeReferenceNode(aliasedType) &&
+      ts.isIdentifier(aliasedType.typeName)
+    ) {
+      // Recursively follow the alias chain
+      return this.followAliasChain(aliasedType, typeChecker, visited);
+    }
+
+    return false;
+  }
+
+  private formatDefaultType(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
   ): SchemaDefinition {
@@ -168,17 +222,14 @@ export class CommonToolsFormatter implements TypeFormatter {
       throw new Error("Default<T,V> type arguments cannot be undefined");
     }
 
-    // Get the actual types from the type nodes
+    // Get the value type from the type nodes
     const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
-    const defaultType = context.typeChecker.getTypeFromTypeNode(
-      defaultTypeNode,
-    );
 
     // Generate schema for the value type
-    const valueSchema = this.generateValueSchemaFromNode(
+    const valueSchema = this.schemaGenerator.formatChildType(
       valueType,
-      valueTypeNode,
       context,
+      valueTypeNode,
     );
 
     // Extract default value from the default type node (this can handle complex literals)
@@ -191,104 +242,6 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     return valueSchema;
-  }
-
-  private formatDefaultType(
-    typeRef: ts.TypeReference,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    const valueType = typeRef.typeArguments?.[0];
-    const defaultType = typeRef.typeArguments?.[1];
-
-    if (!valueType || !defaultType) {
-      throw new Error("Default<T,V> requires exactly 2 type arguments");
-    }
-
-    // Generate schema for the value type - need to handle arrays properly
-    const valueSchema = this.generateValueSchema(valueType, context);
-
-    // Extract default value from literal type - need to handle complex values
-    const defaultValue = this.extractDefaultValue(defaultType, context);
-    if (defaultValue !== undefined) {
-      (valueSchema as any).default = defaultValue;
-    }
-
-    return valueSchema;
-  }
-
-  private formatCellTypeFromNode(
-    typeRefNode: ts.TypeReferenceNode,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    const typeArgs = typeRefNode.typeArguments;
-    if (!typeArgs || typeArgs.length < 1) {
-      throw new Error("Cell<T> requires type argument");
-    }
-
-    const innerTypeNode = typeArgs[0];
-    if (!innerTypeNode) {
-      throw new Error("Cell<T> type argument cannot be undefined");
-    }
-
-    const innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
-
-    const innerContext = { ...context, typeNode: innerTypeNode };
-    const innerSchema = this.schemaGenerator.formatChildType(
-      innerType,
-      innerContext,
-    );
-    return { ...innerSchema, asCell: true };
-  }
-
-  private formatStreamTypeFromNode(
-    typeRefNode: ts.TypeReferenceNode,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    const typeArgs = typeRefNode.typeArguments;
-    if (!typeArgs || typeArgs.length < 1) {
-      throw new Error("Stream<T> requires type argument");
-    }
-
-    const innerTypeNode = typeArgs[0];
-    if (!innerTypeNode) {
-      throw new Error("Stream<T> type argument cannot be undefined");
-    }
-
-    const innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
-
-    // Check if inner is Cell by looking at resolved type
-    const isCellType = this.isCellType(innerType);
-
-    const innerContext = { ...context, typeNode: innerTypeNode };
-    const innerSchema = this.schemaGenerator.formatChildType(
-      innerType,
-      innerContext,
-    );
-
-    return isCellType
-      ? { ...innerSchema, asCell: true, asStream: true }
-      : { ...innerSchema, asStream: true };
-  }
-
-  private generateValueSchemaFromNode(
-    valueType: ts.Type,
-    valueTypeNode: ts.TypeNode,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    // Let the schema generator handle any type using the type node
-    return this.schemaGenerator.formatChildType(
-      valueType,
-      context,
-      valueTypeNode,
-    );
-  }
-
-  private generateValueSchema(
-    valueType: ts.Type,
-    context: GenerationContext,
-  ): SchemaDefinition {
-    // Let the schema generator handle any type
-    return this.schemaGenerator.formatChildType(valueType, context);
   }
 
   private extractDefaultValueFromNode(
@@ -467,67 +420,5 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     return obj;
-  }
-
-  private isAliasToDefault(
-    typeNode: ts.TypeReferenceNode,
-    typeChecker: ts.TypeChecker,
-  ): boolean {
-    return this.followAliasChain(typeNode, typeChecker, new Set());
-  }
-
-  private followAliasChain(
-    typeNode: ts.TypeReferenceNode,
-    typeChecker: ts.TypeChecker,
-    visited: Set<string>,
-  ): boolean {
-    if (!ts.isIdentifier(typeNode.typeName)) {
-      return false;
-    }
-
-    const typeName = typeNode.typeName.text;
-
-    // Detect circular aliases and throw descriptive error
-    if (visited.has(typeName)) {
-      const aliasChain = Array.from(visited).join(" -> ");
-      throw new Error(
-        `Circular type alias detected: ${aliasChain} -> ${typeName}`,
-      );
-    }
-    visited.add(typeName);
-
-    // Check if we've reached "Default"
-    if (typeName === "Default") {
-      return true;
-    }
-
-    // Look up the symbol for this type name
-    const symbol = typeChecker.getSymbolAtLocation(typeNode.typeName);
-    if (!symbol || !(symbol.flags & ts.SymbolFlags.TypeAlias)) {
-      return false;
-    }
-
-    const aliasDeclaration = symbol.valueDeclaration ||
-      symbol.declarations?.[0];
-    if (!aliasDeclaration || !ts.isTypeAliasDeclaration(aliasDeclaration)) {
-      return false;
-    }
-
-    const aliasedType = aliasDeclaration.type;
-    if (
-      ts.isTypeReferenceNode(aliasedType) &&
-      ts.isIdentifier(aliasedType.typeName)
-    ) {
-      // Recursively follow the alias chain
-      return this.followAliasChain(aliasedType, typeChecker, visited);
-    }
-
-    return false;
-  }
-
-  private isCellType(type: ts.Type): boolean {
-    const objectType = type as ts.ObjectType;
-    return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
-      (type as ts.TypeReference).target?.symbol?.name === "Cell";
   }
 }

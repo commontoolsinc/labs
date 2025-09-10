@@ -5,7 +5,6 @@
       "type": "number"
     },
     "b": {
-      "asCell": true,
       "asStream": true,
       "type": "string"
     },
