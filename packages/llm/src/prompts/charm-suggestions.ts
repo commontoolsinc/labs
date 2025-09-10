@@ -81,7 +81,7 @@ export interface CharmSuggestion {
  * @param code - The code of the web app.
  * @param schema - The schema of the web app.
  * @param count - The number of charm suggestions to generate. (default: 3)
- * @param model - The model to use to generate the charm suggestions. (default: "anthropic:claude-3-7-sonnet-latest")
+ * @param model - The model to use to generate the charm suggestions. (default: "anthropic:claude-sonnet-4-0")
  * @returns The generated charm suggestions.
  */
 export async function generateCharmSuggestions(

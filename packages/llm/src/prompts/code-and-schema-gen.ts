@@ -194,7 +194,7 @@ Return ONLY the requested XML tags, no other commentary.
  * Generates a schema and code from a goal.
  * @param goal The user's goal or request
  * @param existingSchema Optional existing schema to use as a basis
- * @param model Optional model identifier to use (defaults to claude-3-7-sonnet)
+ * @param model Optional model identifier to use (defaults to claude-sonnet-4-0)
  * @returns Object containing title, description, specification, schema
  */
 export async function generateCodeAndSchema(

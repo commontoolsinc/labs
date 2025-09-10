@@ -151,7 +151,7 @@ export type BuiltInLLMMessage = {
 export interface BuiltInLLMTool {
     description: string;
     inputSchema: JSONSchema;
-    handler?: (args: any) => any | Promise<any>;
+    handler?: OpaqueRef<any> | Stream<any>;
 }
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];
@@ -172,7 +172,7 @@ export interface BuiltInLLMParams {
     tools?: Record<string, {
         description: string;
         inputSchema: JSONSchema;
-        handler?: (args: any) => any | Promise<any>;
+        handler: Stream<any> | OpaqueRef<any>;
     }>;
 }
 export interface BuiltInLLMState<T> {
