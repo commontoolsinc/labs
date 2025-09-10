@@ -6,7 +6,8 @@ const API_URL = Deno.env.get("API_URL") || "http://localhost:8000";
 const MODEL_URL = `${API_URL}/api/ai/llm`;
 const MODELS_URL = `${API_URL}/api/ai/llm/models`;
 const TEST_SYSTEM_PROMPT = "Be creative.";
-const TEST_PROMPT = `What's your favorite color?`;
+const TEST_PROMPT =
+  `What's your favorite color? Responses must be 1 word only.`;
 
 class LLMTest {
   static async getModels(): Promise<string[]> {
