@@ -45,7 +45,7 @@ export class CTToolCall extends BaseElement {
         border-radius: var(--ct-theme-border-radius, var(--ct-border-radius, 0.25rem));
         background-color: var(--ct-theme-surface, var(--ct-color-gray-50, #f9fafb));
         overflow: hidden;
-        transition: all 0.2s ease;
+        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
       }
 
       .tool-call-header {
@@ -108,7 +108,7 @@ export class CTToolCall extends BaseElement {
       .chevron {
         width: 16px;
         height: 16px;
-        transition: transform 0.2s ease;
+        transition: transform var(--ct-theme-animation-duration, 0.2s) ease;
         color: var(--ct-theme-text-muted, var(--ct-color-gray-400, #9ca3af));
       }
 

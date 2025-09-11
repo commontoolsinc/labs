@@ -240,13 +240,15 @@ export class CTChatMessage extends BaseElement {
       }
 
       /* Adjust colors for user messages */
-      .message-user .message-content code,
-      .message-user .message-content pre {
-        background-color: rgba(255, 255, 255, 0.2);
+      :host([role="user"]) .message-content code,
+      :host([role="user"]) .message-content pre {
+        background-color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+        opacity: 0.2;
       }
 
-      .message-user .message-content blockquote {
-        border-left-color: rgba(255, 255, 255, 0.4);
+      :host([role="user"]) .message-content blockquote {
+        border-left-color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+        opacity: 0.4;
       }
 
       /* Message actions */
@@ -255,7 +257,7 @@ export class CTChatMessage extends BaseElement {
         gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: opacity 0.2s ease;
+        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
       }
 
       .message-bubble:hover .message-actions {
@@ -271,7 +273,7 @@ export class CTChatMessage extends BaseElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.2s ease;
+        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
         color: var(--ct-theme-color-text-muted, #6b7280);
         font-size: 0.75rem;
         min-width: 32px;
@@ -316,7 +318,7 @@ export class CTChatMessage extends BaseElement {
         cursor: pointer;
         font-size: 0.75rem;
         opacity: 0;
-        transition: all 0.2s ease;
+        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
         display: flex;
         align-items: center;
         gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));

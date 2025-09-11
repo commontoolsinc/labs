@@ -27,6 +27,8 @@ export interface CTTheme {
   density: "compact" | "comfortable" | "spacious";
   /** Color scheme preference */
   colorScheme: ColorScheme;
+  /** Animation speed preference */
+  animationSpeed: "none" | "slow" | "normal" | "fast";
   /** Color palette with semantic tokens that adapt to light/dark */
   colors: {
     /** Primary brand color */
@@ -152,6 +154,7 @@ export const defaultTheme: CTTheme = {
   borderRadius: "0.5rem",
   density: "comfortable",
   colorScheme: "light",
+  animationSpeed: "normal",
   colors: {
     primary: {
       light: "#3b82f6",
@@ -304,6 +307,21 @@ export function createThemeVariant(
 }
 
 /**
+ * Get CSS animation duration based on theme animation speed
+ * @param speed - Theme animation speed setting
+ * @returns CSS duration value
+ */
+export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
+  switch (speed) {
+    case "none": return "0ms";
+    case "slow": return "500ms";
+    case "normal": return "200ms";
+    case "fast": return "100ms";
+    default: return "200ms";
+  }
+}
+
+/**
  * Apply theme properties to an element's style
  * @param element - Element to apply theme properties to
  * @param theme - Theme configuration
@@ -328,11 +346,12 @@ export function applyThemeToElement(
 
   const colorScheme = resolveColorScheme(theme.colorScheme);
 
-  // Typography
+  // Typography and base properties
   if (includeTypography) {
     element.style.setProperty("--ct-theme-font-family", theme.fontFamily);
     element.style.setProperty("--ct-theme-mono-font-family", theme.monoFontFamily);
     element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
+    element.style.setProperty("--ct-theme-animation-duration", getAnimationDuration(theme.animationSpeed));
   }
 
   // Colors - resolve all ColorTokens
