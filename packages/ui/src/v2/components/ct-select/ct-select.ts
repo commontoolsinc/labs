@@ -116,6 +116,9 @@ export class CTSelect extends BaseElement {
   private _cellController = createCellController<unknown | unknown[]>(this, {
     timing: { strategy: "immediate" }, // Select changes should be immediate
     onChange: (newValue, oldValue) => {
+      // Sync cell value changes to DOM
+      this.applyValueToDom();
+      
       // Emit change events
       this.emit("ct-change", {
         value: newValue,
