@@ -26,7 +26,7 @@ type Charm = any;
 
 type OutlinerNode = {
   body: Default<string, "">;
-  children: Default<OpaqueRef<any>[], []>;
+  children: Default<OutlinerNode[], []>;
   attachments: Default<OpaqueRef<any>[], []>;
 };
 
