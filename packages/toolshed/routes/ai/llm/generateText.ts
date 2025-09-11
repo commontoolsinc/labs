@@ -205,7 +205,24 @@ export async function generateText(
     !modelConfig.capabilities.systemPrompt && params.system &&
     messages.length > 0
   ) {
-    messages[0].content = `${params.system}\n\n${messages[0].content}`;
+    // Prepend system prompt to first message content
+    // Content can be a string or an array of content parts
+    const firstMessage = messages[0];
+    if (typeof firstMessage.content === "string") {
+      firstMessage.content = `${params.system}\n\n${firstMessage.content}`;
+    } else if (Array.isArray(firstMessage.content)) {
+      // Use type assertion to handle the union type properly
+      firstMessage.content = [
+        { type: "text" as const, text: params.system },
+        ...firstMessage.content,
+      ] as typeof firstMessage.content;
+    } else {
+      // Handle edge case: single object or unexpected type
+      firstMessage.content = [
+        { type: "text" as const, text: params.system },
+        firstMessage.content,
+      ] as typeof firstMessage.content;
+    }
     streamParams.system = undefined;
   }
 
