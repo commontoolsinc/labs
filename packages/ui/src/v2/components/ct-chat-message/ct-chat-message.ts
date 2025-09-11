@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
+import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
@@ -11,6 +12,7 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commontools/api";
+import { themeContext, type CTTheme, getSemanticSpacing, resolveColor, resolveColorScheme } from "../theme-context.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -41,6 +43,7 @@ export class CTChatMessage extends BaseElement {
         display: flex;
         flex-direction: column;
         width: 100%;
+        font-family: var(--ct-theme-font-family, system-ui, -apple-system, sans-serif);
       }
 
       .message-wrapper {
@@ -58,14 +61,25 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message {
-        padding: var(--ct-spacing-3, 0.75rem) var(--ct-spacing-4, 1rem);
-        border-radius: var(--ct-border-radius-lg, 0.5rem);
+        padding: var(--ct-theme-padding-message, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
         word-wrap: break-word;
         position: relative;
         width: fit-content;
         max-width: 100%;
         animation: messageSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         transform-origin: bottom;
+      }
+
+      /* Role-specific message styling */
+      :host([role="user"]) .message {
+        background-color: var(--ct-theme-color-accent, var(--ct-color-blue-500, #3b82f6));
+        color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+      }
+
+      :host([role="assistant"]) .message {
+        background-color: var(--ct-theme-color-surface, var(--ct-color-gray-100, #f3f4f6));
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       @keyframes messageSlideIn {
@@ -102,13 +116,12 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-user {
-        background-color: var(--ct-color-primary-500, #3b82f6);
-        color: var(--ct-color-primary-50, #eff6ff);
+        background-color: var(--ct-theme-color-primary, #3b82f6);
+        color: var(--ct-theme-color-primary-foreground, #ffffff);
       }
 
       .message-assistant {
-        padding: 0;
-        color: var(--ct-color-gray-900, #111827);
+        color: var(--ct-theme-color-text, #111827);
       }
 
       .message-content {
@@ -121,12 +134,12 @@ export class CTChatMessage extends BaseElement {
         width: 32px;
         height: 32px;
         flex-shrink: 0;
-        margin-right: var(--ct-spacing-2, 0.5rem);
+        margin-right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-avatar {
         margin-right: 0;
-        margin-left: var(--ct-spacing-2, 0.5rem);
+        margin-left: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-wrapper {
@@ -144,8 +157,8 @@ export class CTChatMessage extends BaseElement {
         width: 100%;
         height: 100%;
         border-radius: 50%;
-        background-color: var(--ct-color-primary-500, #3b82f6);
-        color: var(--ct-color-primary-50, #eff6ff);
+        background-color: var(--ct-theme-color-primary, #3b82f6);
+        color: var(--ct-theme-color-primary-foreground, #ffffff);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -173,10 +186,10 @@ export class CTChatMessage extends BaseElement {
 
       /* Tool attachments */
       .tool-attachments {
-        margin-top: var(--ct-spacing-2, 0.5rem);
+        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         display: flex;
         flex-direction: column;
-        gap: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         width: 100%;
         max-width: 500px;
       }
@@ -187,32 +200,24 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-content p:not(:last-child) {
-        margin-bottom: var(--ct-spacing-2, 0.5rem);
+        margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
       }
 
       .message-content code {
-        background-color: rgba(0, 0, 0, 0.1);
-        padding: 0.125rem 0.25rem;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        font-family: var(
-          --ct-font-mono,
-          ui-monospace,
-          "Cascadia Code",
-          "Source Code Pro",
-          Menlo,
-          Consolas,
-          "DejaVu Sans Mono",
-          monospace
-        );
+        background-color: var(--ct-theme-color-surface, #f9fafb);
+        padding: var(--ct-theme-padding-code, var(--ct-spacing-1, 0.25rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        font-family: var(--ct-theme-mono-font-family, ui-monospace, monospace);
         font-size: 0.875em;
       }
 
       .message-content pre {
-        background-color: rgba(0, 0, 0, 0.1);
-        padding: var(--ct-spacing-3, 0.75rem);
-        border-radius: var(--ct-border-radius, 0.25rem);
+        background-color: var(--ct-theme-color-surface, #f9fafb);
+        padding: var(--ct-theme-padding-block, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
         overflow-x: auto;
-        margin: var(--ct-spacing-2, 0.5rem) 0;
+        margin: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem)) 0;
       }
 
       .message-content pre code {
@@ -222,15 +227,16 @@ export class CTChatMessage extends BaseElement {
 
       .message-content ul,
       .message-content ol {
-        margin: var(--ct-spacing-2, 0.5rem) 0;
-        padding-left: var(--ct-spacing-4, 1rem);
+        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
+        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
       }
 
       .message-content blockquote {
-        border-left: 4px solid rgba(0, 0, 0, 0.2);
-        margin: var(--ct-spacing-2, 0.5rem) 0;
-        padding-left: var(--ct-spacing-3, 0.75rem);
+        border-left: 4px solid var(--ct-theme-color-border, #e5e7eb);
+        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
+        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
         font-style: italic;
+        color: var(--ct-theme-color-text-muted, #6b7280);
       }
 
       /* Adjust colors for user messages */
@@ -246,8 +252,8 @@ export class CTChatMessage extends BaseElement {
       /* Message actions */
       .message-actions {
         display: flex;
-        gap: var(--ct-spacing-1, 0.25rem);
-        margin-top: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
         transition: opacity 0.2s ease;
       }
@@ -258,24 +264,24 @@ export class CTChatMessage extends BaseElement {
 
       .action-button {
         background: transparent;
-        border: none;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        padding: var(--ct-spacing-1, 0.25rem);
+        border: 1px solid var(--ct-theme-color-border-muted, #f3f4f6);
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        padding: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background-color 0.2s ease;
-        color: inherit;
+        transition: all 0.2s ease;
+        color: var(--ct-theme-color-text-muted, #6b7280);
         font-size: 0.75rem;
-        min-width: 24px;
-        min-height: 24px;
-
-        transition: transform 0.2s ease;
+        min-width: 32px;
+        min-height: 32px;
       }
 
       .action-button:hover {
-        transform: scale(1.05);
+        background: var(--ct-theme-color-surface-hover, #f3f4f6);
+        border-color: var(--ct-theme-color-border, #e5e7eb);
+        color: var(--ct-theme-color-text, #111827);
       }
 
       .action-button:active {
@@ -283,8 +289,9 @@ export class CTChatMessage extends BaseElement {
       }
 
       .action-button.copied {
-        background: var(--ct-color-green-500, #10b981);
-        color: white;
+        background: var(--ct-theme-color-success, #16a34a);
+        border-color: var(--ct-theme-color-success, #16a34a);
+        color: var(--ct-theme-color-success-foreground, #ffffff);
       }
 
       /* User message action button styling */
@@ -299,20 +306,20 @@ export class CTChatMessage extends BaseElement {
 
       .code-copy-button {
         position: absolute;
-        top: var(--ct-spacing-2, 0.5rem);
-        right: var(--ct-spacing-2, 0.5rem);
-        background: rgba(0, 0, 0, 0.1);
-        color: white;
-        border: none;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        padding: var(--ct-spacing-1, 0.25rem) var(--ct-spacing-2, 0.33rem);
+        top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        right: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        background: var(--ct-theme-color-surface, #f9fafb);
+        color: var(--ct-theme-color-text, #111827);
+        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        padding: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         cursor: pointer;
         font-size: 0.75rem;
         opacity: 0;
-        transition: opacity 0.2s ease, transform 0.2s ease;
+        transition: all 0.2s ease;
         display: flex;
         align-items: center;
-        gap: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         z-index: 1;
       }
 
@@ -321,8 +328,8 @@ export class CTChatMessage extends BaseElement {
       }
 
       .code-copy-button:hover {
-        background: rgba(0, 0, 0, 0.2);
-        transform: scale(1.05);
+        background: var(--ct-theme-color-surface-hover, #f3f4f6);
+        border-color: var(--ct-theme-color-border, #e5e7eb);
       }
 
       .code-copy-button:active {
@@ -330,7 +337,9 @@ export class CTChatMessage extends BaseElement {
       }
 
       .code-copy-button.copied {
-        background: var(--ct-color-green-600, #059669);
+        background: var(--ct-theme-color-success, #16a34a);
+        border-color: var(--ct-theme-color-success, #16a34a);
+        color: var(--ct-theme-color-success-foreground, #ffffff);
       }
     `,
   ];
@@ -349,6 +358,10 @@ export class CTChatMessage extends BaseElement {
 
   @property({ type: String })
   declare name?: string;
+
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
 
   @property({ type: Boolean })
   private _copied = false;
@@ -569,13 +582,68 @@ export class CTChatMessage extends BaseElement {
     `;
   }
 
+  override firstUpdated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.firstUpdated(changedProperties);
+    // Set initial theme properties if theme is available
+    if (this.theme) {
+      this._updateThemeProperties();
+    }
+  }
+
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
+
+    // Update CSS custom properties when theme changes
+    if (changedProperties.has("theme") && this.theme) {
+      this._updateThemeProperties();
+    }
 
     // Add event listeners to code copy buttons after render
     if (changedProperties.has("content")) {
       this._setupCodeCopyButtons();
     }
+  }
+
+  private _updateThemeProperties() {
+    if (!this.theme) return;
+
+    const colorScheme = resolveColorScheme(this.theme.colorScheme);
+
+    // Typography
+    this.style.setProperty("--ct-theme-font-family", this.theme.fontFamily);
+    this.style.setProperty("--ct-theme-mono-font-family", this.theme.monoFontFamily);
+
+    // Spacing & Layout
+    this.style.setProperty("--ct-theme-border-radius", this.theme.borderRadius);
+
+    // Semantic spacing for chat messages
+    this.style.setProperty("--ct-theme-padding-message", getSemanticSpacing(this.theme.density, "lg", "normal"));
+    this.style.setProperty("--ct-theme-spacing-tight", getSemanticSpacing(this.theme.density, "sm", "tight"));
+    this.style.setProperty("--ct-theme-spacing-normal", getSemanticSpacing(this.theme.density, "md", "normal"));
+    this.style.setProperty("--ct-theme-spacing-loose", getSemanticSpacing(this.theme.density, "lg", "loose"));
+    this.style.setProperty("--ct-theme-padding-code", getSemanticSpacing(this.theme.density, "sm", "tight"));
+    this.style.setProperty("--ct-theme-padding-block", getSemanticSpacing(this.theme.density, "md", "normal"));
+
+    // Colors - properly resolve ColorTokens
+    this.style.setProperty("--ct-theme-color-primary", resolveColor(this.theme.colors.primary, colorScheme));
+    this.style.setProperty("--ct-theme-color-primary-foreground", resolveColor(this.theme.colors.primaryForeground, colorScheme));
+    this.style.setProperty("--ct-theme-color-secondary", resolveColor(this.theme.colors.secondary, colorScheme));
+    this.style.setProperty("--ct-theme-color-secondary-foreground", resolveColor(this.theme.colors.secondaryForeground, colorScheme));
+    this.style.setProperty("--ct-theme-color-background", resolveColor(this.theme.colors.background, colorScheme));
+    this.style.setProperty("--ct-theme-color-surface", resolveColor(this.theme.colors.surface, colorScheme));
+    this.style.setProperty("--ct-theme-color-surface-hover", resolveColor(this.theme.colors.surfaceHover, colorScheme));
+    this.style.setProperty("--ct-theme-color-text", resolveColor(this.theme.colors.text, colorScheme));
+    this.style.setProperty("--ct-theme-color-text-muted", resolveColor(this.theme.colors.textMuted, colorScheme));
+    this.style.setProperty("--ct-theme-color-border", resolveColor(this.theme.colors.border, colorScheme));
+    this.style.setProperty("--ct-theme-color-border-muted", resolveColor(this.theme.colors.borderMuted, colorScheme));
+    this.style.setProperty("--ct-theme-color-success", resolveColor(this.theme.colors.success, colorScheme));
+    this.style.setProperty("--ct-theme-color-success-foreground", resolveColor(this.theme.colors.successForeground, colorScheme));
+    this.style.setProperty("--ct-theme-color-error", resolveColor(this.theme.colors.error, colorScheme));
+    this.style.setProperty("--ct-theme-color-error-foreground", resolveColor(this.theme.colors.errorForeground, colorScheme));
+    this.style.setProperty("--ct-theme-color-warning", resolveColor(this.theme.colors.warning, colorScheme));
+    this.style.setProperty("--ct-theme-color-warning-foreground", resolveColor(this.theme.colors.warningForeground, colorScheme));
+    this.style.setProperty("--ct-theme-color-accent", resolveColor(this.theme.colors.accent, colorScheme));
+    this.style.setProperty("--ct-theme-color-accent-foreground", resolveColor(this.theme.colors.accentForeground, colorScheme));
   }
 
   private _setupCodeCopyButtons() {

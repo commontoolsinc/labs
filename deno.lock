@@ -80,6 +80,7 @@
     "npm:@hono/sentry@^1.2.0": "1.2.2_hono@4.8.10",
     "npm:@hono/zod-openapi@~0.18.3": "0.18.4_hono@4.8.10_zod@3.25.76",
     "npm:@hono/zod-validator@~0.4.2": "0.4.3_hono@4.8.10_zod@3.25.76",
+    "npm:@lit/context@^1.1.2": "1.1.6",
     "npm:@lit/context@^1.1.5": "1.1.6",
     "npm:@lit/task@^1.0.2": "1.0.3",
     "npm:@noble/ed25519@^2.2.3": "2.3.0",
@@ -2161,6 +2162,7 @@
           "npm:@codemirror/state@^6.5.1",
           "npm:@codemirror/theme-one-dark@^6.1.2",
           "npm:@codemirror/view@^6.26.0",
+          "npm:@lit/context@^1.1.2",
           "npm:@shoelace-style/shoelace@^2.19.1",
           "npm:codemirror@^6.0.1",
           "npm:marked@4"
