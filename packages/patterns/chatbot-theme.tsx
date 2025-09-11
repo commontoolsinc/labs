@@ -60,6 +60,47 @@ type LLMTestResult = {
 //   },
 // );
 
+const setTheme = handler<
+  {
+    accentColor?: string;
+    fontFace?: string;
+    borderRadius?: string;
+    result: Cell<string>;
+  },
+  {
+    theme: {
+      accentColor: Cell<string>;
+      fontFace: Cell<string>;
+      borderRadius: Cell<string>;
+    }
+  }
+>((params, { theme }) => {
+  try {
+    const changes = [];
+
+    if (params.accentColor) {
+      theme.accentColor.set(params.accentColor);
+      changes.push(`accent color to ${params.accentColor}`);
+    }
+    if (params.fontFace) {
+      theme.fontFace.set(params.fontFace);
+      changes.push(`font to ${params.fontFace}`);
+    }
+    if (params.borderRadius) {
+      theme.borderRadius.set(params.borderRadius);
+      changes.push(`border radius to ${params.borderRadius}`);
+    }
+
+    if (changes.length > 0) {
+      params.result.set(`✅ Successfully updated ${changes.join(", ")}`);
+    } else {
+      params.result.set("⚠️ No theme changes requested");
+    }
+  } catch (error) {
+    params.result.set(`❌ Error updating theme: ${(error as any)?.message || "Unknown error"}`);
+  }
+});
+
 const sendMessage = handler<
   { detail: { message: string } },
   {
@@ -96,20 +137,27 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const readWebpageResult = cell<string>("");
 
     const tools = {
-      // appendOutlinerNode: {
-      //   description: "Add a new outliner node.",
-      //   inputSchema: {
-      //     type: "object",
-      //     properties: {
-      //       body: {
-      //         type: "string",
-      //         description: "The title of the new node.",
-      //       },
-      //     },
-      //     required: ["body"],
-      //   } as JSONSchema,
-      //   handler: appendOutlinerNode({ outline }),
-      // },
+      setTheme: {
+        description: "Change the visual theme of the chat interface. You can modify the accent color, font family, and border radius.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            accentColor: {
+              type: "string",
+              description: "Hex color code for the accent color (e.g., '#3b82f6' for blue, '#10b981' for green, '#ef4444' for red)",
+            },
+            fontFace: {
+              type: "string",
+              description: "Font family string (e.g., 'system-ui, -apple-system, sans-serif', 'ui-monospace, Consolas, monospace')",
+            },
+            borderRadius: {
+              type: "string",
+              description: "Border radius value (e.g., '0px' for sharp, '0.5rem' for medium, '1rem' for rounded)",
+            },
+          },
+        } as JSONSchema,
+        handler: setTheme({ theme }),
+      },
     };
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
@@ -196,16 +244,16 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 <ct-vstack>
                   <ct-text>Font Family</ct-text>
                   <ct-select
-                    items={[ 
-                      { label: 'System', value: 'system-ui, -apple-system, sans-serif' }, 
-                      { label: 'Monospace', value: 'ui-monospace, Consolas, monospace' }, 
-                      { label: 'Serif', value: 'Georgia, Times, serif' }, 
+                    items={[
+                      { label: 'System', value: 'system-ui, -apple-system, sans-serif' },
+                      { label: 'Monospace', value: 'ui-monospace, Consolas, monospace' },
+                      { label: 'Serif', value: 'Georgia, Times, serif' },
                       { label: 'Sans Serif', value: 'Arial, Helvetica, sans-serif' }
                     ]}
                     $value={theme.fontFace}
                   />
                 </ct-vstack>
-                
+
                 <ct-vstack>
                   <ct-text>Accent Color</ct-text>
                   <ct-select
@@ -222,7 +270,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                     $value={theme.accentColor}
                   />
                 </ct-vstack>
-                
+
                 <ct-vstack>
                   <ct-text>Border Radius</ct-text>
                   <ct-select
