@@ -4,19 +4,19 @@
       "default": "direct",
       "type": "string"
     },
-    "singleAlias": {
-      "default": "single",
-      "type": "string"
-    },
     "doubleAlias": {
       "default": "double",
+      "type": "string"
+    },
+    "singleAlias": {
+      "default": "single",
       "type": "string"
     }
   },
   "required": [
     "directDefault",
-    "singleAlias",
-    "doubleAlias"
+    "doubleAlias",
+    "singleAlias"
   ],
   "type": "object"
 }

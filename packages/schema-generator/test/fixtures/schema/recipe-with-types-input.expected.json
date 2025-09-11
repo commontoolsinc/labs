@@ -1,29 +1,54 @@
 {
-  "type": "object",
-  "properties": {
-    "title": {
-      "type": "string",
-      "default": "untitled"
-    },
-    "items": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string",
-            "default": ""
-          }
+  "definitions": {
+    "InputSchemaInterface": {
+      "properties": {
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/Item"
+          },
+          "type": "array"
         },
-        "required": [
-          "text"
-        ]
+        "title": {
+          "default": "untitled",
+          "type": "string"
+        }
       },
-      "default": []
+      "required": [
+        "items",
+        "title"
+      ],
+      "type": "object"
+    },
+    "Item": {
+      "properties": {
+        "text": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/Item"
+      },
+      "type": "array"
+    },
+    "title": {
+      "default": "untitled",
+      "type": "string"
     }
   },
   "required": [
     "items",
     "title"
-  ]
+  ],
+  "type": "object"
 }

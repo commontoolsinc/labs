@@ -1,33 +1,62 @@
 {
-  "type": "object",
+  "definitions": {
+    "Item": {
+      "properties": {
+        "text": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "OutputSchemaInterface": {
+      "properties": {
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/Item"
+          },
+          "type": "array"
+        },
+        "items_count": {
+          "type": "number"
+        },
+        "title": {
+          "default": "untitled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "items_count",
+        "title"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/Item"
+      },
+      "type": "array"
+    },
     "items_count": {
       "type": "number"
     },
     "title": {
-      "type": "string",
-      "default": "untitled"
-    },
-    "items": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string",
-            "default": ""
-          }
-        },
-        "required": [
-          "text"
-        ]
-      },
-      "default": []
+      "default": "untitled",
+      "type": "string"
     }
   },
   "required": [
     "items",
     "items_count",
     "title"
-  ]
+  ],
+  "type": "object"
 }
