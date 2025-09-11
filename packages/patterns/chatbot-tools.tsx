@@ -127,54 +127,6 @@ const searchWeb = recipe<
   return ifElse(error, { error }, result);
 });
 
-const searchWeb_old = handler<
-  { query: string; result: Cell<string> },
-  { result: Cell<string> }
->(
-  async (args, state) => {
-    try {
-      state.result.set(`Searching: ${args.query}...`);
-
-      const env = getRecipeEnvironment();
-      const response = await fetch(
-        new URL("/api/agent-tools/web-search", env.apiUrl),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            query: args.query,
-            max_results: 5,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Format the search results
-      const formattedResults = data.results
-        .map((r: any, i: number) =>
-          `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description}`
-        )
-        .join("\n\n");
-
-      state.result.set(formattedResults || "No results found");
-      args.result.set(formattedResults || "No results found");
-    } catch (error) {
-      const errorMsg = `Search error: ${
-        (error as any)?.message || "Unknown error"
-      }`;
-      state.result.set(errorMsg);
-      args.result.set(errorMsg);
-    }
-  },
-);
-
 const readWebpage = handler<
   { url: string; result: Cell<string> },
   { result: Cell<string> }
