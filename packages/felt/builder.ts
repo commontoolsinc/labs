@@ -109,6 +109,22 @@ function resolveDefines(
   }, {} as Record<string, string>);
 }
 
+// Plugin to support Deno 2.4+ style text imports within esbuild:
+// `import file from "./module.ts" with { type: "text" }`
+function textLoaderPlugin(): esbuild.Plugin {
+  return {
+    name: "text-loader-plugin",
+    setup(build) {
+      build.onLoad({ filter: /.*/ }, async (args) => {
+        if (args.with.type !== "text") return undefined;
+        const contents = await Deno.readTextFile(args.path);
+        if (!contents) return undefined;
+        return { contents, loader: "text" };
+      });
+    },
+  };
+}
+
 // Exposes `esbuild`'s build functionality, applying
 // default deno resolution plugins, browser platform,
 // and ESM bundling format.
@@ -116,7 +132,7 @@ export async function build(
   config: Parameters<typeof esbuild.build>[0],
 ): Promise<ReturnType<typeof esbuild.build>> {
   const fullConfig = Object.assign({}, config, {
-    plugins: [denoPlugin()],
+    plugins: [textLoaderPlugin(), denoPlugin()],
     platform: "browser",
     bundle: true,
     format: "esm",
