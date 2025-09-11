@@ -144,10 +144,10 @@ export type BuiltInLLMToolResultPart = {
     toolCallId: string;
     toolName: string;
     output: {
-        type: 'text';
+        type: "text";
         value: string;
     } | {
-        type: 'json';
+        type: "json";
         value: any;
     };
 };
@@ -159,7 +159,7 @@ export type BuiltInLLMMessage = {
 };
 export interface BuiltInLLMTool {
     description: string;
-    inputSchema: JSONSchema;
+    inputSchema?: JSONSchema;
     handler?: OpaqueRef<any> | Stream<any>;
 }
 export interface BuiltInLLMParams {
