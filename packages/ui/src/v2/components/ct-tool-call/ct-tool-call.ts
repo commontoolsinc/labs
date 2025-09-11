@@ -301,6 +301,18 @@ export class CTToolCall extends BaseElement {
       this.expanded = !this.expanded;
     }
 
+    private _formatOutput(output: BuiltInLLMToolResultPart["output"]): string {
+      if (output.type === "text") {
+        return output.value;
+      } else {
+        try {
+          return JSON.stringify(output.value, null, 2);
+        } catch {
+          return String(output.value);
+        }
+      }
+    }
+
     private _formatJSON(data: any): string {
       try {
         return JSON.stringify(data, null, 2);
