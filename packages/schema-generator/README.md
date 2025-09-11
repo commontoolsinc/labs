@@ -25,4 +25,3 @@ Implementation: see `src/schema-generator.ts` (`formatType`) and
 
 - Check typings: `deno task check`
 - Run tests: `deno task test`
-
