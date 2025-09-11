@@ -201,7 +201,7 @@ async function invokeToolCall(
   // If this was a pattern, stop it now that we have the result
   if (pattern) runtime.runner.stop(result);
 
-  return { type: "text", result: resultValue.toString() }; // TODO(seefeld): This is wrong
+  return { type: "text", value: resultValue.toString() }; // TODO(seefeld): This is wrong
 }
 
 /**
