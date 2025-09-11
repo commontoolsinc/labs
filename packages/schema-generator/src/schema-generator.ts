@@ -357,39 +357,34 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
   ): SchemaDefinition {
-    try {
-      if (typeof schema !== "object" || !schema) return schema;
+    if (typeof schema !== "object" || !schema) return schema;
 
-      // Consider both alias symbol (for type aliases) and the underlying
-      // symbol (for interfaces/classes). Prefer alias doc when present; fall
-      // back to underlying.
-      const aliasSym = (type as any).aliasSymbol as ts.Symbol | undefined;
-      const directSym = type.getSymbol?.() || (type as any).symbol;
+    // Consider both alias symbol (for type aliases) and the underlying
+    // symbol (for interfaces/classes). Prefer alias doc when present; fall
+    // back to underlying.
+    const aliasSym = (type as any).aliasSymbol as ts.Symbol | undefined;
+    const directSym = type.getSymbol?.() || (type as any).symbol;
 
-      const pickDoc = (sym?: ts.Symbol): string | undefined => {
-        if (!sym) return undefined;
-        const hasUserDecl = (sym.declarations ?? []).some((d) =>
-          !d.getSourceFile().isDeclarationFile
-        );
-        if (!hasUserDecl) return undefined;
-        const { text } = extractDocFromSymbolAndDecls(
-          sym,
-          context.typeChecker,
-        );
-        return text;
-      };
+    const pickDoc = (sym?: ts.Symbol): string | undefined => {
+      if (!sym) return undefined;
+      const hasUserDecl = (sym.declarations ?? []).some((d) =>
+        !d.getSourceFile().isDeclarationFile
+      );
+      if (!hasUserDecl) return undefined;
+      const { text } = extractDocFromSymbolAndDecls(
+        sym,
+        context.typeChecker,
+      );
+      return text;
+    };
 
-      const aliasDoc = pickDoc(aliasSym);
-      const directDoc = pickDoc(directSym);
-      const chosen = aliasDoc ?? directDoc;
+    const aliasDoc = pickDoc(aliasSym);
+    const directDoc = pickDoc(directSym);
+    const chosen = aliasDoc ?? directDoc;
 
-      if (chosen && !("description" in (schema as any))) {
-        (schema as any).description = chosen;
-      }
-      return schema;
-    } catch (_e) {
-      // Swallow doc extraction failures
-      return schema;
+    if (chosen && !("description" in (schema as any))) {
+      (schema as any).description = chosen;
     }
+    return schema;
   }
 }

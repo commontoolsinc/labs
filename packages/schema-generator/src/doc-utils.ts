@@ -9,14 +9,9 @@ export function getSymbolDoc(
   checker: ts.TypeChecker,
 ): string | undefined {
   if (!symbol) return undefined;
-  let text = "";
-  try {
-    const parts = symbol.getDocumentationComment(checker);
-    // @ts-ignore - displayPartsToString exists on the TS namespace
-    text = ts.displayPartsToString(parts) || "";
-  } catch (_e) {
-    // Ignore symbol doc extraction failures
-  }
+  const parts = symbol.getDocumentationComment(checker);
+  // @ts-ignore - displayPartsToString exists on the TS namespace
+  const text = ts.displayPartsToString(parts) || "";
   if (!text) return undefined;
   const lines = text.split(/\r?\n/).filter((l) => !l.trim().startsWith("@"));
   const cleaned = lines.join("\n").trim();

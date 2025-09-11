@@ -5,6 +5,12 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("schema-generator.intersection", {
+  enabled: true,
+  level: "warn",
+});
 
 export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -106,9 +112,8 @@ export class IntersectionFormatter implements TypeFormatter {
                   (existing as any).$comment = comment
                     ? comment
                     : "Conflicting docs across intersection constituents; using first";
-                  // deno-lint-ignore no-console
-                  console.warn(
-                    `Intersection doc conflict for '${key}'; using first`,
+                  logger.warn(() =>
+                    `Intersection doc conflict for '${key}'; using first`
                   );
                 }
               }
