@@ -14,7 +14,9 @@ export function isRecord(
  * @param value - The value to check
  * @returns True if the value is an object (not array or null)
  */
-export function isObject(value: unknown): value is object {
+export function isObject(
+  value: unknown,
+): value is Record<string | number | symbol, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

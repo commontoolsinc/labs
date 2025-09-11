@@ -259,7 +259,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           return null;
         }
         return Object.fromEntries(
-          Object.entries(doc.value).map((
+          Object.entries<JSONValue>(doc.value).map((
             [k, value],
           ) => [
             k,
