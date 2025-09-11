@@ -5,6 +5,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
+import "../ct-button/ct-button.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
@@ -264,42 +265,7 @@ export class CTChatMessage extends BaseElement {
         opacity: 1;
       }
 
-      .action-button {
-        background: transparent;
-        border: 1px solid var(--ct-theme-color-border-muted, #f3f4f6);
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        padding: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
-        color: var(--ct-theme-color-text-muted, #6b7280);
-        font-size: 0.75rem;
-        min-width: 32px;
-        min-height: 32px;
-      }
 
-      .action-button:hover {
-        background: var(--ct-theme-color-surface-hover, #f3f4f6);
-        border-color: var(--ct-theme-color-border, #e5e7eb);
-        color: var(--ct-theme-color-text, #111827);
-      }
-
-      .action-button:active {
-        transform: scale(0.95);
-      }
-
-      .action-button.copied {
-        background: var(--ct-theme-color-success, #16a34a);
-        border-color: var(--ct-theme-color-success, #16a34a);
-        color: var(--ct-theme-color-success-foreground, #ffffff);
-      }
-
-      /* User message action button styling */
-      .message-user .action-button {}
-
-      .message-user .action-button:hover {}
 
       /* Code block copy button styles */
       .code-block-container {
@@ -308,40 +274,15 @@ export class CTChatMessage extends BaseElement {
 
       .code-copy-button {
         position: absolute;
-        top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-        right: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-        background: var(--ct-theme-color-surface, #f9fafb);
-        color: var(--ct-theme-color-text, #111827);
-        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-        border-radius: var(--ct-theme-border-radius, 0.5rem);
-        padding: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
-        cursor: pointer;
-        font-size: 0.75rem;
+        top: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
-        display: flex;
-        align-items: center;
-        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
         z-index: 1;
       }
 
       .code-block-container:hover .code-copy-button {
         opacity: 1;
-      }
-
-      .code-copy-button:hover {
-        background: var(--ct-theme-color-surface-hover, #f3f4f6);
-        border-color: var(--ct-theme-color-border, #e5e7eb);
-      }
-
-      .code-copy-button:active {
-        transform: scale(0.95);
-      }
-
-      .code-copy-button.copied {
-        background: var(--ct-theme-color-success, #16a34a);
-        border-color: var(--ct-theme-color-success, #16a34a);
-        color: var(--ct-theme-color-success-foreground, #ffffff);
       }
     `,
   ];
@@ -405,14 +346,16 @@ export class CTChatMessage extends BaseElement {
 
         return `<div class="code-block-container">
           <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <button
+          <ct-button
             class="code-copy-button"
+            variant="ghost"
+            size="sm"
             data-block-id="${blockId}"
             data-copy-content="${this._escapeForAttribute(decodedContent)}"
             title="Copy code"
           >
             📋
-          </button>
+          </ct-button>
         </div>`;
       },
     );
@@ -469,10 +412,9 @@ export class CTChatMessage extends BaseElement {
       // Update the button to show copied state
       const button = this.shadowRoot?.querySelector(
         `[data-block-id="${blockId}"]`,
-      ) as HTMLButtonElement;
+      ) as HTMLElement;
       if (button) {
         button.textContent = "✓";
-        button.classList.add("copied");
         button.title = "Copied!";
       }
 
@@ -481,7 +423,6 @@ export class CTChatMessage extends BaseElement {
         this._codeBlockCopiedStates.set(blockId, false);
         if (button) {
           button.textContent = "📋";
-          button.classList.remove("copied");
           button.title = "Copy code";
         }
       }, 2000);
@@ -571,13 +512,14 @@ export class CTChatMessage extends BaseElement {
       <div class="message-actions">
         ${this.role === "assistant"
           ? html`
-            <button
-              class="action-button ${this._copied ? "copied" : ""}"
+            <ct-button
+              variant="ghost"
+              size="sm"
               @click="${this._copyMessage}"
               title="${this._copied ? "Copied!" : "Copy message"}"
             >
               ${this._copied ? "✓" : "📋"}
-            </button>
+            </ct-button>
           `
           : null}
       </div>
@@ -617,7 +559,7 @@ export class CTChatMessage extends BaseElement {
       button.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const target = e.target as HTMLButtonElement;
+        const target = e.target as HTMLElement;
         const blockId = target.getAttribute("data-block-id");
         const content = target.getAttribute("data-copy-content");
         if (blockId && content) {

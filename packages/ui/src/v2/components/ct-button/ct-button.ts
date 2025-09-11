@@ -1,6 +1,14 @@
 import { css, html } from "lit";
+import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import { 
+  themeContext, 
+  type CTTheme, 
+  applyThemeToElement,
+  defaultTheme
+} from "../theme-context.ts";
 
 /**
  * CTButton - Interactive button element with multiple variants and sizes
@@ -19,10 +27,10 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 
 export type ButtonVariant =
-  | "default"
+  | "primary"
+  | "secondary"
   | "destructive"
   | "outline"
-  | "secondary"
   | "ghost"
   | "link";
 
@@ -49,12 +57,12 @@ export class CTButton extends BaseElement {
         align-items: center;
         justify-content: center;
         white-space: nowrap;
-        border-radius: var(--ct-border-radius-md);
-        font-size: var(--ct-font-size-sm);
-        font-weight: var(--ct-font-weight-medium);
+        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-md, 0.375rem));
+        font-size: 0.875rem;
+        font-weight: 500;
+        font-family: var(--ct-theme-font-family, inherit);
         line-height: 1.25rem;
-        transition: all var(--ct-transition-duration-fast)
-          var(--ct-transition-timing-ease);
+        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
         cursor: pointer;
         user-select: none;
         border: 1px solid transparent;
@@ -63,13 +71,12 @@ export class CTButton extends BaseElement {
         background-color: transparent;
         background-image: none;
         text-transform: none;
-        font-family: inherit;
         -webkit-appearance: button;
         text-decoration: none;
       }
 
       .button:focus-visible {
-        outline: 2px solid var(--ring, var(--ct-colors-primary-500));
+        outline: 2px solid var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
         outline-offset: 2px;
       }
 
@@ -82,18 +89,19 @@ export class CTButton extends BaseElement {
       /* Size variants */
       .button.default {
         height: 2.5rem;
-        padding: 0.5rem 1rem;
+        padding: var(--ct-theme-spacing-normal, 0.5rem) var(--ct-theme-spacing-loose, 1rem);
       }
 
       .button.sm {
         height: 2.25rem;
-        padding: 0.25rem 0.75rem;
+        padding: var(--ct-theme-spacing-tight, 0.25rem) var(--ct-theme-spacing-normal, 0.75rem);
+        font-size: 0.75rem;
       }
 
       .button.lg {
         height: 2.75rem;
-        padding: 0.5rem 2rem;
-        font-size: var(--ct-font-size-base);
+        padding: var(--ct-theme-spacing-normal, 0.5rem) var(--ct-theme-spacing-loose, 2rem);
+        font-size: 1rem;
         line-height: 1.5rem;
       }
 
@@ -103,60 +111,69 @@ export class CTButton extends BaseElement {
         padding: 0;
       }
 
-      /* Variant styles */
-      .button.default {
-        background-color: var(--primary, var(--ct-colors-primary-500));
-        color: var(--primary-foreground, #ffffff);
-        border-color: var(--primary, var(--ct-colors-primary-500));
+      .button.md {
+        height: 2rem;
+        padding: var(--ct-theme-spacing-tight, 0.25rem) var(--ct-theme-spacing-normal, 0.75rem);
+        font-size: 0.75rem;
       }
 
-      .button.default:hover:not(:disabled) {
-        background-color: var(--primary-hover, var(--ct-colors-primary-600));
-        border-color: var(--primary-hover, var(--ct-colors-primary-600));
+      /* Variant styles */
+      .button.primary {
+        background-color: var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
+        color: var(--ct-theme-color-primary-foreground, var(--ct-color-white, #ffffff));
+        border-color: var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
+      }
+
+      .button.primary:hover:not(:disabled) {
+        opacity: 0.9;
+        transform: translateY(-1px);
+      }
+
+      .button.primary:active:not(:disabled) {
+        transform: translateY(0);
       }
 
       .button.destructive {
-        background-color: var(--destructive, var(--ct-colors-error));
-        color: var(--destructive-foreground, #ffffff);
-        border-color: var(--destructive, var(--ct-colors-error));
+        background-color: var(--ct-theme-color-error, var(--ct-color-red-600, #dc2626));
+        color: var(--ct-theme-color-error-foreground, var(--ct-color-white, #ffffff));
+        border-color: var(--ct-theme-color-error, var(--ct-color-red-600, #dc2626));
       }
 
       .button.destructive:hover:not(:disabled) {
-        background-color: var(--destructive-hover, #dc2626);
-        border-color: var(--destructive-hover, #dc2626);
+        opacity: 0.9;
       }
 
       .button.outline {
-        border-color: var(--border, var(--ct-colors-gray-300));
+        border-color: var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
         background-color: transparent;
-        color: var(--foreground, var(--ct-colors-gray-900));
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .button.outline:hover:not(:disabled) {
-        background-color: var(--accent, var(--ct-colors-gray-100));
+        background-color: var(--ct-theme-color-surface, var(--ct-color-gray-50, #f9fafb));
       }
 
       .button.secondary {
-        background-color: var(--secondary, var(--ct-colors-gray-100));
-        color: var(--secondary-foreground, var(--ct-colors-gray-900));
-        border-color: var(--secondary, var(--ct-colors-gray-100));
+        background-color: var(--ct-theme-color-secondary, var(--ct-color-gray-100, #f3f4f6));
+        color: var(--ct-theme-color-secondary-foreground, var(--ct-color-gray-900, #111827));
+        border-color: var(--ct-theme-color-secondary, var(--ct-color-gray-100, #f3f4f6));
       }
 
       .button.secondary:hover:not(:disabled) {
-        background-color: var(--secondary-hover, var(--ct-colors-gray-200));
-        border-color: var(--secondary-hover, var(--ct-colors-gray-200));
+        background-color: var(--ct-theme-color-surface-hover, var(--ct-color-gray-200, #e5e7eb));
+        border-color: var(--ct-theme-color-surface-hover, var(--ct-color-gray-200, #e5e7eb));
       }
 
       .button.ghost {
-        color: var(--foreground, var(--ct-colors-gray-900));
+        color: var(--ct-theme-color-text, var(--ct-color-gray-700, #374151));
       }
 
       .button.ghost:hover:not(:disabled) {
-        background-color: var(--accent, var(--ct-colors-gray-100));
+        background-color: var(--ct-theme-color-surface-hover, var(--ct-color-gray-100, #f3f4f6));
       }
 
       .button.link {
-        color: var(--primary, var(--ct-colors-primary-500));
+        color: var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
         text-underline-offset: 4px;
       }
 
@@ -171,6 +188,7 @@ export class CTButton extends BaseElement {
     size: { type: String },
     disabled: { type: Boolean, reflect: true },
     type: { type: String },
+    theme: { type: Object, attribute: false },
   };
 
   declare variant: ButtonVariant;
@@ -178,12 +196,33 @@ export class CTButton extends BaseElement {
   declare disabled: boolean;
   declare type: "button" | "submit" | "reset";
 
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
   constructor() {
     super();
-    this.variant = "default";
+    this.variant = "primary";
     this.size = "default";
     this.disabled = false;
     this.type = "button";
+  }
+
+  override firstUpdated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.firstUpdated(changedProperties);
+    this._updateThemeProperties();
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("theme")) {
+      this._updateThemeProperties();
+    }
+  }
+
+  private _updateThemeProperties() {
+    const currentTheme = this.theme || defaultTheme;
+    applyThemeToElement(this, currentTheme);
   }
 
   override render() {

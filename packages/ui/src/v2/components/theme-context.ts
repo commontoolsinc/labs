@@ -307,6 +307,71 @@ export function createThemeVariant(
 }
 
 /**
+ * Merge a partial theme with the default theme, supporting recipe-style partial objects
+ * @param partialTheme - Partial theme object that may contain recipe-style properties
+ * @param baseTheme - Base theme to merge with (defaults to defaultTheme)
+ * @returns Full CTTheme with merged properties
+ */
+export function mergeWithDefaultTheme(
+  partialTheme: any,
+  baseTheme: CTTheme = defaultTheme
+): CTTheme {
+  if (!partialTheme || typeof partialTheme !== "object") {
+    return baseTheme;
+  }
+
+  // Handle recipe-style theme objects with specific properties
+  const mergedTheme = { ...baseTheme };
+  
+  // Map common recipe theme properties to CTTheme properties
+  if (partialTheme.accentColor) {
+    mergedTheme.colors = {
+      ...mergedTheme.colors,
+      primary: partialTheme.accentColor,
+      accent: partialTheme.accentColor,
+    };
+  }
+
+  if (partialTheme.fontFace) {
+    mergedTheme.fontFamily = partialTheme.fontFace;
+  }
+
+  if (partialTheme.borderRadius) {
+    mergedTheme.borderRadius = partialTheme.borderRadius;
+  }
+
+  // Also handle direct CTTheme properties
+  if (partialTheme.fontFamily) {
+    mergedTheme.fontFamily = partialTheme.fontFamily;
+  }
+
+  if (partialTheme.monoFontFamily) {
+    mergedTheme.monoFontFamily = partialTheme.monoFontFamily;
+  }
+
+  if (partialTheme.density) {
+    mergedTheme.density = partialTheme.density;
+  }
+
+  if (partialTheme.colorScheme) {
+    mergedTheme.colorScheme = partialTheme.colorScheme;
+  }
+
+  if (partialTheme.animationSpeed) {
+    mergedTheme.animationSpeed = partialTheme.animationSpeed;
+  }
+
+  if (partialTheme.colors) {
+    mergedTheme.colors = {
+      ...mergedTheme.colors,
+      ...partialTheme.colors,
+    };
+  }
+
+  return mergedTheme;
+}
+
+/**
  * Get CSS animation duration based on theme animation speed
  * @param speed - Theme animation speed setting
  * @returns CSS duration value

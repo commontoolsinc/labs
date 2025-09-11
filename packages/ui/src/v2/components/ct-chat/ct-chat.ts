@@ -16,7 +16,8 @@ import {
   defaultTheme, 
   type CTTheme, 
   applyThemeToElement,
-  getSemanticSpacing
+  getSemanticSpacing,
+  mergeWithDefaultTheme
 } from "../theme-context.ts";
 
 /**
@@ -137,15 +138,20 @@ export class CTChat extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare pending: boolean;
 
-  @provide({ context: themeContext })
   @property({ type: Object })
-  declare theme: CTTheme;
+  declare theme: any; // Accept any theme object (partial or full)
+
+  // Internal computed theme that gets provided to children
+  @provide({ context: themeContext })
+  @property({ type: Object, attribute: false })
+  declare _computedTheme: CTTheme;
 
   constructor() {
     super();
     this.messages = [];
     this.pending = false;
-    this.theme = defaultTheme;
+    this.theme = {};
+    this._computedTheme = defaultTheme;
   }
 
   private get _messagesArray(): readonly BuiltInLLMMessage[] {
@@ -161,24 +167,28 @@ export class CTChat extends BaseElement {
   }
 
   private _updateThemeProperties() {
-    if (!this.theme) return;
-    
     // Apply standard theme properties with custom spacing for chat-specific needs
-    applyThemeToElement(this, this.theme, {
+    applyThemeToElement(this, this._computedTheme, {
       additionalSpacing: {
-        "message-bottom": getSemanticSpacing(this.theme.density, 'sm', 'tight'),
-        "padding-bubble": getSemanticSpacing(this.theme.density, 'lg', 'normal'),
-        "padding-bubble-horizontal": getSemanticSpacing(this.theme.density, 'xl', 'normal'),
+        "message-bottom": getSemanticSpacing(this._computedTheme.density, 'sm', 'tight'),
+        "padding-bubble": getSemanticSpacing(this._computedTheme.density, 'lg', 'normal'),
+        "padding-bubble-horizontal": getSemanticSpacing(this._computedTheme.density, 'xl', 'normal'),
       }
     });
   }
 
   override willUpdate(changedProperties: Map<string, any>) {
     super.willUpdate(changedProperties);
+    
     // If the messages property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("messages")) {
       // Bind the new messages (Cell or plain array) to the controller
       this._cellController.bind(this.messages);
+    }
+    
+    // If the theme property changed, recompute the merged theme
+    if (changedProperties.has("theme")) {
+      this._computedTheme = mergeWithDefaultTheme(this.theme);
     }
   }
 
@@ -334,8 +344,8 @@ export class CTChat extends BaseElement {
   override updated(changed: Map<string | number | symbol, unknown>) {
     super.updated(changed);
 
-    // Update theme properties when theme changes
-    if (changed.has("theme")) {
+    // Update theme properties when computed theme changes
+    if (changed.has("_computedTheme")) {
       this._updateThemeProperties();
     }
 

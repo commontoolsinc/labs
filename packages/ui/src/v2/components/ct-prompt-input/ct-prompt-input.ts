@@ -1,6 +1,15 @@
 import { css, html } from "lit";
+import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import {
+  themeContext,
+  type CTTheme,
+  applyThemeToElement,
+  defaultTheme
+} from "../theme-context.ts";
+import "../ct-button/ct-button.ts";
 
 /**
  * CTPromptInput - Enhanced textarea input component with send button for prompts/chat interfaces
@@ -37,11 +46,11 @@ export class CTPromptInput extends BaseElement {
         width: 100%;
 
         /* CSS variables for customization */
-        --ct-prompt-input-gap: var(--ct-spacing-2, 0.5rem);
-        --ct-prompt-input-padding: var(--ct-spacing-3, 0.75rem);
-        --ct-prompt-input-border-radius: var(--ct-radius-md, 0.375rem);
-        --ct-prompt-input-border: var(--ct-border-color, #e2e8f0);
-        --ct-prompt-input-background: var(--ct-background, #ffffff);
+        --ct-prompt-input-gap: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        --ct-prompt-input-padding: var(--ct-theme-spacing-loose, var(--ct-spacing-3, 0.75rem));
+        --ct-prompt-input-border-radius: var(--ct-theme-border-radius, var(--ct-radius-md, 0.375rem));
+        --ct-prompt-input-border: var(--ct-theme-color-border, var(--ct-border-color, #e2e8f0));
+        --ct-prompt-input-background: var(--ct-theme-color-background, var(--ct-background, #ffffff));
         --ct-prompt-input-min-height: 2.5rem;
         --ct-prompt-input-max-height: 12rem;
       }
@@ -55,12 +64,12 @@ export class CTPromptInput extends BaseElement {
         background: var(--ct-prompt-input-background);
         border: 1px solid var(--ct-prompt-input-border);
         border-radius: var(--ct-prompt-input-border-radius);
-        transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all var(--ct-theme-animation-duration, 150ms) cubic-bezier(0.4, 0, 0.2, 1);
       }
 
       .container:focus-within {
-        border-color: var(--ct-color-primary, #3b82f6);
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--ct-theme-color-primary, var(--ct-color-primary, #3b82f6));
+        box-shadow: 0 0 0 0.5px var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
       }
 
       .textarea-wrapper {
@@ -80,9 +89,10 @@ export class CTPromptInput extends BaseElement {
         min-height: var(--ct-prompt-input-min-height);
         max-height: var(--ct-prompt-input-max-height);
         resize: none;
-        font-family: inherit;
+        font-family: var(--ct-theme-font-family, inherit);
         font-size: 0.875rem;
         line-height: 1.25rem;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       ct-textarea::part(textarea):focus {
@@ -94,7 +104,7 @@ export class CTPromptInput extends BaseElement {
       .actions {
         display: flex;
         align-items: center;
-        gap: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
         margin-bottom: 0.125rem; /* Slight adjustment for alignment */
       }
 
@@ -119,30 +129,19 @@ export class CTPromptInput extends BaseElement {
 
       /* Size variants */
       :host([size="sm"]) {
-        --ct-prompt-input-padding: var(--ct-spacing-2, 0.5rem);
+        --ct-prompt-input-padding: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
         --ct-prompt-input-min-height: 2rem;
       }
 
-      :host([size="sm"]) ct-button {
-        height: 1.75rem;
-        padding: 0 0.5rem;
-        font-size: 0.75rem;
-      }
-
       :host([size="lg"]) {
-        --ct-prompt-input-padding: var(--ct-spacing-4, 1rem);
+        --ct-prompt-input-padding: var(--ct-theme-spacing-loose, var(--ct-spacing-4, 1rem));
         --ct-prompt-input-min-height: 3rem;
-      }
-
-      :host([size="lg"]) ct-button {
-        height: 2.25rem;
-        padding: 0 1rem;
       }
 
       /* Compact variant - minimal padding */
       :host([variant="compact"]) {
-        --ct-prompt-input-padding: var(--ct-spacing-2, 0.5rem);
-        --ct-prompt-input-gap: var(--ct-spacing-1, 0.25rem);
+        --ct-prompt-input-padding: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        --ct-prompt-input-gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
       }
     `,
   ];
@@ -158,6 +157,7 @@ export class CTPromptInput extends BaseElement {
     maxRows: { type: Number, attribute: "max-rows" },
     size: { type: String, reflect: true },
     variant: { type: String, reflect: true },
+    theme: { type: Object, attribute: false },
   };
 
   declare placeholder: string;
@@ -170,6 +170,10 @@ export class CTPromptInput extends BaseElement {
   declare maxRows: number;
   declare size: string;
   declare variant: string;
+
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
 
   private _textareaElement?: HTMLElement;
 
@@ -187,10 +191,24 @@ export class CTPromptInput extends BaseElement {
     this.variant = "";
   }
 
-  override firstUpdated() {
+  override firstUpdated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.firstUpdated(changedProperties);
     this._textareaElement = this.shadowRoot?.querySelector(
       "ct-textarea",
     ) as HTMLElement;
+    this._updateThemeProperties();
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("theme")) {
+      this._updateThemeProperties();
+    }
+  }
+
+  private _updateThemeProperties() {
+    const currentTheme = this.theme || defaultTheme;
+    applyThemeToElement(this, currentTheme);
   }
 
   private _handleSend(event?: Event) {
