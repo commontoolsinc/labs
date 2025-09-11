@@ -36,30 +36,6 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-// put a node at the end of the outline (by appending to root.children)
-// const appendOutlinerNode = handler<
-//   { body: string; result: Cell<string> },
-//   { outline: Cell<Outliner> }
-// >(
-//   (args, state) => {
-//     try {
-//       state.outline.key("root").key("children").set([
-//         ...state.outline.key("root").key("children").get(),
-//         {
-//           body: args.body,
-//           children: [],
-//           attachments: [],
-//         },
-//       ]);
-//       args.result.set(
-//         `${state.outline.key("root").key("children").get().length} nodes`,
-//       );
-//     } catch (error) {
-//       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-//     }
-//   },
-// );
-
 const setTheme = handler<
   {
     accentColor?: string;
