@@ -266,12 +266,10 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
-export interface BuiltInLLMTool {
+export type BuiltInLLMTool = {
   description: string;
   inputSchema?: JSONSchema;
-  handler?: OpaqueRef<any> | Stream<any>; // Client-side only
-  pattern?: Recipe;
-}
+} & ({ handler: OpaqueRef<any> | Stream<any> } | { pattern: Recipe });
 
 // Built-in types
 export interface BuiltInLLMParams {

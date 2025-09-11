@@ -157,12 +157,14 @@ export type BuiltInLLMMessage = {
     role: "user" | "assistant" | "system" | "tool";
     content: BuiltInLLMContent;
 };
-export interface BuiltInLLMTool {
+export type BuiltInLLMTool = {
     description: string;
     inputSchema?: JSONSchema;
-    handler?: OpaqueRef<any> | Stream<any>;
-    pattern?: Recipe;
-}
+} & ({
+    handler: OpaqueRef<any> | Stream<any>;
+} | {
+    pattern: Recipe;
+});
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];
     model?: string;
