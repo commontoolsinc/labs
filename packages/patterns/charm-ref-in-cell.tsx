@@ -3,6 +3,7 @@ import {
   Cell,
   cell,
   createCell,
+  derive,
   h,
   handler,
   lift,
@@ -48,7 +49,7 @@ const createCellRef = lift(
     }
     // If already initialized, return the stored cellRef
     return {
-      cellRef: storedCellRef.get(),
+      cellRef: storedCellRef,
     };
   },
 );
@@ -57,15 +58,25 @@ const createCellRef = lift(
 // note: charm wont be undefined
 // we need to make sure that the charm is not already in the list
 // TODO: make the cellRef a list of charms
-const storeCharmInCell = lift(({ charm, cellRef }) => {
-  if (cellRef) {
-    console.log("storeCharmInCell storing charm:", JSON.stringify(charm));
-    cellRef.set(charm);
-  } else {
-    console.log("storeCharmInCell undefined cellRef");
+const storeCharmInCell = lift(
+  {
+    type: "object",
+    properties: {
+      charm: { type: "object" },
+      cellRef: { type: "object", asCell: true }
+    }
+  },
+  undefined,
+  ({ charm, cellRef }) => {
+    if (cellRef) {
+      console.log("storeCharmInCell storing charm:", JSON.stringify(charm));
+      cellRef.set(charm);
+    } else {
+      console.log("storeCharmInCell undefined cellRef");
+    }
+    return charm;
   }
-  return charm;
-});
+);
 
 // create a simple subrecipe
 // we will save a reference to it in a cell so make it as simple as
@@ -96,6 +107,10 @@ export default recipe("Launcher", () => {
     [NAME]: "Launcher",
     [UI]: (
       <div>
+        <div>Stored charm ID: {derive(cellRef, (innerCell) => {
+          if (!innerCell) return "undefined";
+          return innerCell[UI];
+        })}</div>
         <ct-button
           onClick={createCounter({ charm: SimpleRecipe({}), cellRef })}
         >
