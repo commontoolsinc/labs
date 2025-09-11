@@ -123,8 +123,6 @@ export default recipe("Launcher", () => {
     storedCellRef: cell(),
   });
 
-  // TODO: show the list of charms in a list
-  // TODO: allow user to navigate to a previously created charm
   return {
     [NAME]: "Launcher",
     [UI]: (
