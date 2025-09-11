@@ -2,6 +2,7 @@ import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
+import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
@@ -120,7 +121,10 @@ export function fetchData(
     const thisRun = ++currentRun;
     const abort = new AbortController();
 
-    fetch(url, { signal: abort.signal, ...options })
+    fetch(new URL(url, getRecipeEnvironment().apiUrl), {
+      signal: abort.signal,
+      ...options,
+    })
       .then(processResponse)
       .then(async (data) => {
         if (thisRun !== currentRun) return;
