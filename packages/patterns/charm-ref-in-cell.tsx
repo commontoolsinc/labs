@@ -73,7 +73,10 @@ const storeCharmAndNavigate = lift(
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
-        console.log("storeCharmAndNavigate storing charm:", JSON.stringify(charm));
+        console.log(
+          "storeCharmAndNavigate storing charm:",
+          JSON.stringify(charm),
+        );
         cellRef.set(charm);
         isInitialized.set(true);
         return navigateTo(charm);
