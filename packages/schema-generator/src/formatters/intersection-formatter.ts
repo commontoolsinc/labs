@@ -78,16 +78,13 @@ export class IntersectionFormatter implements TypeFormatter {
     const requiredSet: Set<string> = new Set();
 
     for (const part of parts) {
-      const schema = this.schemaGenerator.generateSchema(
-        part,
-        context.typeChecker,
-        undefined, // No specific type node for intersection parts
-      );
+      const schema = this.schemaGenerator.formatChildType(part, context);
 
-      if (this.isObjectSchema(schema)) {
+      const objSchema = this.resolveObjectSchema(schema, context);
+      if (objSchema) {
         // Merge properties from this part
-        if (schema.properties) {
-          for (const [key, value] of Object.entries(schema.properties)) {
+        if (objSchema.properties) {
+          for (const [key, value] of Object.entries(objSchema.properties)) {
             if (mergedProps[key] && mergedProps[key] !== value) {
               // Property conflict - could improve this with more sophisticated merging
               console.warn(
@@ -100,8 +97,8 @@ export class IntersectionFormatter implements TypeFormatter {
         }
 
         // Merge required properties
-        if (Array.isArray(schema.required)) {
-          for (const req of schema.required) {
+        if (Array.isArray(objSchema.required)) {
+          for (const req of objSchema.required) {
             if (typeof req === "string") {
               requiredSet.add(req);
             }
@@ -133,5 +130,30 @@ export class IntersectionFormatter implements TypeFormatter {
       schema !== null &&
       schema.type === "object"
     );
+  }
+
+  private resolveObjectSchema(
+    schema: SchemaDefinition,
+    context: GenerationContext,
+  ):
+    | (SchemaDefinition & {
+      properties?: Record<string, SchemaDefinition>;
+      required?: string[];
+    })
+    | undefined {
+    if (this.isObjectSchema(schema)) return schema;
+    if (
+      typeof schema === "object" && schema !== null &&
+      typeof (schema as any).$ref === "string"
+    ) {
+      const ref: string = (schema as any).$ref as string;
+      const prefix = "#/definitions/";
+      if (ref.startsWith(prefix)) {
+        const name = ref.slice(prefix.length);
+        const def = context.definitions[name];
+        if (def && this.isObjectSchema(def)) return def as any;
+      }
+    }
+    return undefined;
   }
 }

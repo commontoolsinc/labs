@@ -217,40 +217,46 @@ export class SchemaGenerator implements ISchemaGenerator {
       return rootSchema;
     }
 
-    // Check if root schema should be promoted to a definition
+    // Decide if we promote root to a $ref
     const namedKey = getNamedTypeKey(type);
     const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
+    let base: SchemaDefinition;
+
     if (shouldPromoteRoot && namedKey) {
-      // Add root schema to definitions if not already there
+      // Ensure root is present in definitions
       if (!definitions[namedKey]) {
         definitions[namedKey] = rootSchema;
       }
-
-      // Return schema with $ref to root and definitions
-      return {
-        $schema: "https://json-schema.org/draft-07/schema#",
-        $ref: `#/definitions/${namedKey}`,
-        definitions,
-      };
+      base = { $ref: `#/definitions/${namedKey}` } as SchemaDefinition;
+    } else {
+      base = rootSchema;
     }
 
-    // Return root schema with definitions
-    // Handle case where rootSchema might be boolean (per JSON Schema spec)
-    if (typeof rootSchema === "boolean") {
-      return rootSchema === false
+    // Handle boolean schemas (rare, but supported by JSON Schema)
+    if (typeof base === "boolean") {
+      const filtered = this.collectReferencedDefinitions(base, definitions);
+      if (Object.keys(filtered).length === 0) return base;
+      return base === false
         ? {
           $schema: "https://json-schema.org/draft-07/schema#",
           not: true,
-          definitions,
+          definitions: filtered,
         }
-        : { $schema: "https://json-schema.org/draft-07/schema#", definitions };
+        : {
+          $schema: "https://json-schema.org/draft-07/schema#",
+          definitions: filtered,
+        };
     }
-    return {
+
+    // Object schema: attach only the definitions actually referenced by the final output
+    const filtered = this.collectReferencedDefinitions(base, definitions);
+    const out: Record<string, unknown> = {
       $schema: "https://json-schema.org/draft-07/schema#",
-      ...rootSchema,
-      definitions,
+      ...(base as Record<string, unknown>),
     };
+    if (Object.keys(filtered).length > 0) out.definitions = filtered;
+    return out as SchemaDefinition;
   }
 
   /**
@@ -342,5 +348,70 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     if (checker) visit(type);
     return { types: cycles, names: cycleNames };
+  }
+
+  /**
+   * Recursively scan a schema fragment to collect referenced definition names
+   * and return the minimal subset of definitions required to resolve them,
+   * including transitive dependencies.
+   */
+  private collectReferencedDefinitions(
+    fragment: SchemaDefinition,
+    allDefs: Record<string, SchemaDefinition>,
+  ): Record<string, SchemaDefinition> {
+    const needed = new Set<string>();
+    const visited = new Set<string>();
+
+    const enqueueFromRef = (ref: string) => {
+      const prefix = "#/definitions/";
+      if (typeof ref === "string" && ref.startsWith(prefix)) {
+        const name = ref.slice(prefix.length);
+        if (name) needed.add(name);
+      }
+    };
+
+    const scan = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const item of node) scan(item);
+        return;
+      }
+      const obj = node as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === "$ref" && typeof v === "string") enqueueFromRef(v);
+        // Skip descending into existing definitions blocks to avoid pulling in
+        // already-attached subsets recursively
+        if (k === "definitions") continue;
+        scan(v);
+      }
+    };
+
+    // Find initial set of needed names from the fragment
+    scan(fragment);
+
+    // Compute transitive closure by following refs inside included definitions
+    const stack: string[] = Array.from(needed);
+    while (stack.length > 0) {
+      const name = stack.pop()!;
+      if (visited.has(name)) continue;
+      visited.add(name);
+      const def = allDefs[name];
+      if (!def) continue;
+      // Scan definition body for further refs
+      scan(def);
+      for (const n of Array.from(needed)) {
+        if (!visited.has(n)) {
+          // Only push newly discovered names
+          if (!stack.includes(n)) stack.push(n);
+        }
+      }
+    }
+
+    // Build the subset map
+    const subset: Record<string, SchemaDefinition> = {};
+    for (const name of visited) {
+      if (allDefs[name]) subset[name] = allDefs[name];
+    }
+    return subset;
   }
 }
