@@ -358,12 +358,12 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
   ): SchemaDefinition {
-    if (typeof schema !== "object" || !schema) return schema;
+    if (typeof schema !== "object") return schema;
 
     // Consider both alias symbol (for type aliases) and the underlying
     // symbol (for interfaces/classes). Prefer alias doc when present; fall
     // back to underlying.
-    const aliasSym = (type as any).aliasSymbol as ts.Symbol | undefined;
+    const aliasSym = type.aliasSymbol;
     const directSym = type.getSymbol?.() || (type as any).symbol;
 
     const pickDoc = (sym?: ts.Symbol): string | undefined => {

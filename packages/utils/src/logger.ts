@@ -159,10 +159,10 @@ export class Logger {
     // Default to false (enabled) if not specified
     this._disabled = options?.enabled === undefined ? false : !options.enabled;
 
-    // Set logger-specific level if provided. With exactOptionalPropertyTypes,
-    // avoid assigning undefined explicitly to optional properties.
-    const resolved = options?.level ?? getEnvLevel();
-    if (resolved !== undefined) this.level = resolved;
+    // Set logger-specific level if provided; default to "info" when unset.
+    // This keeps behavior consistent and avoids assigning undefined with
+    // exactOptionalPropertyTypes enabled.
+    this.level = options?.level ?? getEnvLevel() ?? "info";
   }
 
   /**

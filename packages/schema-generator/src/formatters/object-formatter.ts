@@ -22,11 +22,11 @@ export class ObjectFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Handle object types (interfaces, type literals, classes) and the
-    // TypeScript "object" type (non-primitive).
+    // Handle object types (interfaces, type literals, classes)
     const flags = type.flags;
-    return (flags & ts.TypeFlags.Object) !== 0 ||
-      (flags & (ts as any).TypeFlags.NonPrimitive) !== 0;
+    if ((flags & ts.TypeFlags.Object) !== 0) return true;
+    // Also claim the exact TypeScript `object` type via string check.
+    return context.typeChecker.typeToString(type) === "object";
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
@@ -128,7 +128,7 @@ export class ObjectFormatter implements TypeFormatter {
         undefined,
       );
       // Attempt to read JSDoc from index signature declarations
-      const sym = (type as ts.Type).getSymbol?.();
+      const sym = type.getSymbol?.();
       const foundDocs: string[] = [];
       if (sym) {
         for (const decl of sym.declarations ?? []) {
@@ -158,7 +158,8 @@ export class ObjectFormatter implements TypeFormatter {
           );
         }
       }
-      (schema as Record<string, unknown>).additionalProperties = apSchema as SchemaDefinition;
+      (schema as Record<string, unknown>).additionalProperties =
+        apSchema as SchemaDefinition;
     }
     if (required.length > 0) schema.required = required;
 
