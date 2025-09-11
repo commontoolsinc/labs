@@ -21,12 +21,23 @@ export class ObjectFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Handle object types (interfaces, type literals, classes)
-    return (type.flags & ts.TypeFlags.Object) !== 0;
+    // Handle object types (interfaces, type literals, classes) and the
+    // TypeScript "object" type (non-primitive).
+    const flags = type.flags;
+    return (flags & ts.TypeFlags.Object) !== 0 ||
+      (flags & (ts as any).TypeFlags.NonPrimitive) !== 0;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
+
+    // If this is the TS `object` type (unknown object shape), emit a permissive
+    // object schema instead of attempting to enumerate properties.
+    // This avoids false "no formatter" errors for unions containing `object`.
+    const typeName = checker.typeToString(type);
+    if (typeName === "object") {
+      return { type: "object", additionalProperties: true };
+    }
 
     // Special-case Date to a string with date-time format (match old behavior)
     if (type.symbol?.name === "Date" && type.symbol?.valueDeclaration) {

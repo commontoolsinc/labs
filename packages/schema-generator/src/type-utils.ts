@@ -274,14 +274,20 @@ export function getArrayElementInfo(
   // If the type also has a string index signature, prefer treating it as an
   // object map (not an array). This avoids misclassifying dictionary types
   // like `{ [k: string]: T; [n: number]: T }` as arrays.
-  try {
-    const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
-    const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    if (stringIndex && numberIndex) {
-      return undefined;
-    }
-  } catch (_) {
-    // ignore checker failures here; fall through to numeric index check
+  const stringIndex = safeGetIndexTypeOfType(
+    checker,
+    type,
+    ts.IndexKind.String,
+    "array/map disambiguation string index",
+  );
+  const numberIndex = safeGetIndexTypeOfType(
+    checker,
+    type,
+    ts.IndexKind.Number,
+    "array/map disambiguation number index",
+  );
+  if (stringIndex && numberIndex) {
+    return undefined;
   }
 
   // Use numeric index type as fallback (for tuples/array-like objects)
