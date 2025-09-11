@@ -4,25 +4,31 @@ interface TodoItem {
     done: boolean;
 }
 export default recipe({
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["title", "done"]
+                $ref: "#/definitions/TodoItem"
             }
         }
     },
-    required: ["items"]
+    required: ["items"],
+    definitions: {
+        TodoItem: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["title", "done"]
+        }
+    }
 } as const satisfies JSONSchema, ({ items }) => {
     // This should NOT be transformed to items.get().map()
     // because OpaqueRef has its own map method

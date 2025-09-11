@@ -56,12 +56,13 @@ export function applyInputIfcToOutput<T, R>(
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isOpaqueRef(item)) {
-      const { schema: inputSchema } = (item as OpaqueRef<T>).export();
+      const { schema: inputSchema, rootSchema } = (item as OpaqueRef<T>)
+        .export();
       if (inputSchema !== undefined) {
         ContextualFlowControl.joinSchema(
           collectedClassifications,
           inputSchema,
-          inputSchema,
+          rootSchema ?? inputSchema,
         );
       }
     }
