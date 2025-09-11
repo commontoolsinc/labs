@@ -57,31 +57,34 @@ const createCellRef = lift(
 // this will be called whenever charm or cellRef changes
 // pass isInitialized to make sure we dont call this each time
 // we change cellRef, otherwise creates a loop
-// note this is a separate isInitialized for each created charm
-const storeCharmInCell = lift(
+// also, we need to only navigateTo if not initialized so that
+// we know we have the charm ready
+// note there is a separate isInitialized for each created charm
+const storeCharmAndNavigate = lift(
   {
     type: "object",
     properties: {
       charm: { type: "object" },
       cellRef: { type: "object", asCell: true },
-      isInitialized: { type: "boolean", asCell: true }
-    }
+      isInitialized: { type: "boolean", asCell: true },
+    },
   },
   undefined,
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
-        console.log("storeCharmInCell storing charm:", JSON.stringify(charm));
+        console.log("storeCharmAndNavigate storing charm:", JSON.stringify(charm));
         cellRef.set(charm);
         isInitialized.set(true);
+        return navigateTo(charm);
       } else {
-        console.log("storeCharmInCell undefined cellRef");
+        console.log("storeCharmAndNavigate undefined cellRef");
       }
     } else {
-      console.log("storeCharmInCell already initialized, skipping");
+      console.log("storeCharmAndNavigate already initialized, skipping");
     }
-    return charm;
-  }
+    return undefined;
+  },
 );
 
 // create a simple subrecipe
@@ -89,18 +92,15 @@ const storeCharmInCell = lift(
 // possible.
 // we then call navigateTo() which will redirect the
 // browser to the newly created charm
-const createCounter = handler<unknown, { cellRef: Cell<any> }>(
+const createSimpleRecipe = handler<unknown, { cellRef: Cell<any> }>(
   (_, { cellRef }) => {
     const isInitialized = cell(false);
 
     // create the charm
     const charm = SimpleRecipe({});
-    
-    // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
-    storeCharmInCell({ charm, cellRef, isInitialized });
 
-    // navigate to the charm
-    return navigateTo(charm);
+    // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
+    return storeCharmAndNavigate({ charm, cellRef, isInitialized });
   },
 );
 
@@ -126,12 +126,14 @@ export default recipe("Launcher", () => {
     [NAME]: "Launcher",
     [UI]: (
       <div>
-        <div>Stored charm ID: {derive(cellRef, (innerCell) => {
-          if (!innerCell) return "undefined";
-          return innerCell[UI];
-        })}</div>
+        <div>
+          Stored charm ID: {derive(cellRef, (innerCell) => {
+            if (!innerCell) return "undefined";
+            return innerCell[UI];
+          })}
+        </div>
         <ct-button
-          onClick={createCounter({ cellRef })}
+          onClick={createSimpleRecipe({ cellRef })}
         >
           Create Sub Charm
         </ct-button>
