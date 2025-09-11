@@ -23,7 +23,7 @@ const SimpleRecipe = recipe("Simple Recipe", () => ({
 // - Default values
 // - cell()
 // - createCell within a lift or derive (we'll use this for now)
-const initState = lift(() => ({
+const createCellRef = lift(() => ({
   cellRef: createCell(undefined, "cellRef"),
 }));
 
@@ -57,14 +57,13 @@ const storeCharmInCell = lift(
 // possible.
 // we then call navigateTo() which will redirect the
 // browser to the newly created charm
-// TODO: rename state, decompose instead
 const createCounter = handler<unknown, { cellRef: Cell<any> }>(
-  (_, state) => {
+  (_, { cellRef }) => {
     // create the charm
     const charm = SimpleRecipe({});
 
     // store the charm ref in a cell
-    storeCharmInCell({ cellRef: state.cellRef, charm });
+    storeCharmInCell({ cellRef, charm });
 
     // navigate to the charm
     return navigateTo(charm);
@@ -74,8 +73,7 @@ const createCounter = handler<unknown, { cellRef: Cell<any> }>(
 // create the named cell inside the recipe body, so we do it just once
 export default recipe("Launcher", () => {
   // cell to store  to the last charm we created
-  // TODO: rename initState to better name
-  const { cellRef } = initState({});
+  const { cellRef } = createCellRef({});
 
   // TODO: show the list of charms in a list
   // TODO: allow user to navigate to a previously created charm
