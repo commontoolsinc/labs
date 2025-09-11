@@ -70,7 +70,12 @@ const calculator = recipe<
 >("Calculator", ({ expression }) => {
   return derive(expression, (expr) => {
     const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
-    const result = Function(`"use strict"; return (${sanitized})`)();
+    let result;
+    try {
+      result = Function(`"use strict"; return (${sanitized})`)();
+    } catch (error) {
+      result = { error: (error as any)?.message || "<error>" };
+    }
     return result;
   });
 });
