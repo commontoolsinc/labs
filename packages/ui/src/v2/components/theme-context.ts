@@ -304,6 +304,85 @@ export function createThemeVariant(
 }
 
 /**
+ * Apply theme properties to an element's style
+ * @param element - Element to apply theme properties to
+ * @param theme - Theme configuration
+ * @param options - Additional options for customization
+ */
+export function applyThemeToElement(
+  element: HTMLElement,
+  theme: CTTheme,
+  options: {
+    includeSpacing?: boolean;
+    includeColors?: boolean;
+    includeTypography?: boolean;
+    additionalSpacing?: Record<string, string>;
+  } = {}
+) {
+  const {
+    includeSpacing = true,
+    includeColors = true,
+    includeTypography = true,
+    additionalSpacing = {}
+  } = options;
+
+  const colorScheme = resolveColorScheme(theme.colorScheme);
+
+  // Typography
+  if (includeTypography) {
+    element.style.setProperty("--ct-theme-font-family", theme.fontFamily);
+    element.style.setProperty("--ct-theme-mono-font-family", theme.monoFontFamily);
+    element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
+  }
+
+  // Colors - resolve all ColorTokens
+  if (includeColors) {
+    const colorMap = {
+      "primary": theme.colors.primary,
+      "primary-foreground": theme.colors.primaryForeground,
+      "secondary": theme.colors.secondary,
+      "secondary-foreground": theme.colors.secondaryForeground,
+      "background": theme.colors.background,
+      "surface": theme.colors.surface,
+      "surface-hover": theme.colors.surfaceHover,
+      "text": theme.colors.text,
+      "text-muted": theme.colors.textMuted,
+      "border": theme.colors.border,
+      "border-muted": theme.colors.borderMuted,
+      "success": theme.colors.success,
+      "success-foreground": theme.colors.successForeground,
+      "error": theme.colors.error,
+      "error-foreground": theme.colors.errorForeground,
+      "warning": theme.colors.warning,
+      "warning-foreground": theme.colors.warningForeground,
+      "accent": theme.colors.accent,
+      "accent-foreground": theme.colors.accentForeground,
+    };
+
+    Object.entries(colorMap).forEach(([key, token]) => {
+      element.style.setProperty(`--ct-theme-color-${key}`, resolveColor(token, colorScheme));
+    });
+  }
+
+  // Semantic spacing
+  if (includeSpacing) {
+    const spacingMap = {
+      "tight": getSemanticSpacing(theme.density, 'xs', 'tight'),
+      "normal": getSemanticSpacing(theme.density, 'sm', 'normal'),
+      "loose": getSemanticSpacing(theme.density, 'md', 'loose'),
+      "padding-message": getSemanticSpacing(theme.density, 'lg', 'normal'),
+      "padding-code": getSemanticSpacing(theme.density, 'sm', 'tight'),
+      "padding-block": getSemanticSpacing(theme.density, 'md', 'normal'),
+      ...additionalSpacing
+    };
+
+    Object.entries(spacingMap).forEach(([key, value]) => {
+      element.style.setProperty(`--ct-theme-spacing-${key}`, value);
+    });
+  }
+}
+
+/**
  * Context for sharing theme across CT components
  */
 export const themeContext = createContext<CTTheme>("ct-theme");

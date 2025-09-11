@@ -15,9 +15,8 @@ import {
   themeContext, 
   defaultTheme, 
   type CTTheme, 
-  resolveColorScheme, 
-  resolveColor,
-  getSemanticSpacing 
+  applyThemeToElement,
+  getSemanticSpacing
 } from "../theme-context.ts";
 
 /**
@@ -163,32 +162,15 @@ export class CTChat extends BaseElement {
 
   private _updateThemeProperties() {
     if (!this.theme) return;
-
-    const colorScheme = resolveColorScheme(this.theme.colorScheme);
-
-    // Set color custom properties
-    this.style.setProperty('--ct-theme-background', resolveColor(this.theme.colors.background, colorScheme));
-    this.style.setProperty('--ct-theme-surface', resolveColor(this.theme.colors.surface, colorScheme));
-    this.style.setProperty('--ct-theme-surface-hover', resolveColor(this.theme.colors.surfaceHover, colorScheme));
-    this.style.setProperty('--ct-theme-text', resolveColor(this.theme.colors.text, colorScheme));
-    this.style.setProperty('--ct-theme-text-muted', resolveColor(this.theme.colors.textMuted, colorScheme));
-    this.style.setProperty('--ct-theme-border', resolveColor(this.theme.colors.border, colorScheme));
-    this.style.setProperty('--ct-theme-border-muted', resolveColor(this.theme.colors.borderMuted, colorScheme));
-    this.style.setProperty('--ct-theme-primary', resolveColor(this.theme.colors.primary, colorScheme));
-    this.style.setProperty('--ct-theme-primary-foreground', resolveColor(this.theme.colors.primaryForeground, colorScheme));
-
-    // Set spacing custom properties based on density
-    this.style.setProperty('--ct-theme-spacing-tight', getSemanticSpacing(this.theme.density, 'xs', 'tight'));
-    this.style.setProperty('--ct-theme-spacing-normal', getSemanticSpacing(this.theme.density, 'sm', 'normal'));
-    this.style.setProperty('--ct-theme-spacing-loose', getSemanticSpacing(this.theme.density, 'md', 'loose'));
-    this.style.setProperty('--ct-theme-spacing-message-bottom', getSemanticSpacing(this.theme.density, 'sm', 'tight'));
-    this.style.setProperty('--ct-theme-padding-bubble', getSemanticSpacing(this.theme.density, 'lg', 'normal'));
-    this.style.setProperty('--ct-theme-padding-bubble-horizontal', getSemanticSpacing(this.theme.density, 'xl', 'normal'));
-
-    // Set other theme properties
-    this.style.setProperty('--ct-theme-border-radius', this.theme.borderRadius);
-    this.style.setProperty('--ct-theme-font-family', this.theme.fontFamily);
-    this.style.setProperty('--ct-theme-mono-font-family', this.theme.monoFontFamily);
+    
+    // Apply standard theme properties with custom spacing for chat-specific needs
+    applyThemeToElement(this, this.theme, {
+      additionalSpacing: {
+        "message-bottom": getSemanticSpacing(this.theme.density, 'sm', 'tight'),
+        "padding-bubble": getSemanticSpacing(this.theme.density, 'lg', 'normal'),
+        "padding-bubble-horizontal": getSemanticSpacing(this.theme.density, 'xl', 'normal'),
+      }
+    });
   }
 
   override willUpdate(changedProperties: Map<string, any>) {

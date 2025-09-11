@@ -12,7 +12,7 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commontools/api";
-import { themeContext, type CTTheme, getSemanticSpacing, resolveColor, resolveColorScheme } from "../theme-context.ts";
+import { themeContext, type CTTheme, applyThemeToElement } from "../theme-context.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -606,44 +606,7 @@ export class CTChatMessage extends BaseElement {
 
   private _updateThemeProperties() {
     if (!this.theme) return;
-
-    const colorScheme = resolveColorScheme(this.theme.colorScheme);
-
-    // Typography
-    this.style.setProperty("--ct-theme-font-family", this.theme.fontFamily);
-    this.style.setProperty("--ct-theme-mono-font-family", this.theme.monoFontFamily);
-
-    // Spacing & Layout
-    this.style.setProperty("--ct-theme-border-radius", this.theme.borderRadius);
-
-    // Semantic spacing for chat messages
-    this.style.setProperty("--ct-theme-padding-message", getSemanticSpacing(this.theme.density, "lg", "normal"));
-    this.style.setProperty("--ct-theme-spacing-tight", getSemanticSpacing(this.theme.density, "sm", "tight"));
-    this.style.setProperty("--ct-theme-spacing-normal", getSemanticSpacing(this.theme.density, "md", "normal"));
-    this.style.setProperty("--ct-theme-spacing-loose", getSemanticSpacing(this.theme.density, "lg", "loose"));
-    this.style.setProperty("--ct-theme-padding-code", getSemanticSpacing(this.theme.density, "sm", "tight"));
-    this.style.setProperty("--ct-theme-padding-block", getSemanticSpacing(this.theme.density, "md", "normal"));
-
-    // Colors - properly resolve ColorTokens
-    this.style.setProperty("--ct-theme-color-primary", resolveColor(this.theme.colors.primary, colorScheme));
-    this.style.setProperty("--ct-theme-color-primary-foreground", resolveColor(this.theme.colors.primaryForeground, colorScheme));
-    this.style.setProperty("--ct-theme-color-secondary", resolveColor(this.theme.colors.secondary, colorScheme));
-    this.style.setProperty("--ct-theme-color-secondary-foreground", resolveColor(this.theme.colors.secondaryForeground, colorScheme));
-    this.style.setProperty("--ct-theme-color-background", resolveColor(this.theme.colors.background, colorScheme));
-    this.style.setProperty("--ct-theme-color-surface", resolveColor(this.theme.colors.surface, colorScheme));
-    this.style.setProperty("--ct-theme-color-surface-hover", resolveColor(this.theme.colors.surfaceHover, colorScheme));
-    this.style.setProperty("--ct-theme-color-text", resolveColor(this.theme.colors.text, colorScheme));
-    this.style.setProperty("--ct-theme-color-text-muted", resolveColor(this.theme.colors.textMuted, colorScheme));
-    this.style.setProperty("--ct-theme-color-border", resolveColor(this.theme.colors.border, colorScheme));
-    this.style.setProperty("--ct-theme-color-border-muted", resolveColor(this.theme.colors.borderMuted, colorScheme));
-    this.style.setProperty("--ct-theme-color-success", resolveColor(this.theme.colors.success, colorScheme));
-    this.style.setProperty("--ct-theme-color-success-foreground", resolveColor(this.theme.colors.successForeground, colorScheme));
-    this.style.setProperty("--ct-theme-color-error", resolveColor(this.theme.colors.error, colorScheme));
-    this.style.setProperty("--ct-theme-color-error-foreground", resolveColor(this.theme.colors.errorForeground, colorScheme));
-    this.style.setProperty("--ct-theme-color-warning", resolveColor(this.theme.colors.warning, colorScheme));
-    this.style.setProperty("--ct-theme-color-warning-foreground", resolveColor(this.theme.colors.warningForeground, colorScheme));
-    this.style.setProperty("--ct-theme-color-accent", resolveColor(this.theme.colors.accent, colorScheme));
-    this.style.setProperty("--ct-theme-color-accent-foreground", resolveColor(this.theme.colors.accentForeground, colorScheme));
+    applyThemeToElement(this, this.theme);
   }
 
   private _setupCodeCopyButtons() {

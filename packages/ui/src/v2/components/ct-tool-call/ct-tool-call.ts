@@ -9,9 +9,9 @@ import type {
 import { 
   themeContext, 
   type CTTheme, 
-  resolveColorScheme, 
-  resolveColor,
-  getSemanticSpacing 
+  applyThemeToElement,
+  resolveColorScheme,
+  resolveColor
 } from "../theme-context.ts";
 
 export type ToolCallState = "pending" | "success" | "error";
@@ -214,31 +214,12 @@ export class CTToolCall extends BaseElement {
 
   private _updateThemeProperties() {
     if (!this.theme) return;
-
+    
+    // Apply standard theme properties
+    applyThemeToElement(this, this.theme);
+    
+    // Add tool-call specific theme properties
     const colorScheme = resolveColorScheme(this.theme.colorScheme);
-
-    // Set color custom properties
-    this.style.setProperty('--ct-theme-background', resolveColor(this.theme.colors.background, colorScheme));
-    this.style.setProperty('--ct-theme-surface', resolveColor(this.theme.colors.surface, colorScheme));
-    this.style.setProperty('--ct-theme-surface-hover', resolveColor(this.theme.colors.surfaceHover, colorScheme));
-    this.style.setProperty('--ct-theme-text', resolveColor(this.theme.colors.text, colorScheme));
-    this.style.setProperty('--ct-theme-text-muted', resolveColor(this.theme.colors.textMuted, colorScheme));
-    this.style.setProperty('--ct-theme-border', resolveColor(this.theme.colors.border, colorScheme));
-    this.style.setProperty('--ct-theme-border-muted', resolveColor(this.theme.colors.borderMuted, colorScheme));
-    this.style.setProperty('--ct-theme-primary', resolveColor(this.theme.colors.primary, colorScheme));
-    this.style.setProperty('--ct-theme-success', resolveColor(this.theme.colors.success, colorScheme));
-    this.style.setProperty('--ct-theme-error', resolveColor(this.theme.colors.error, colorScheme));
-
-    // Set spacing custom properties based on density
-    this.style.setProperty('--ct-theme-spacing-tight', getSemanticSpacing(this.theme.density, 'xs', 'tight'));
-    this.style.setProperty('--ct-theme-spacing-normal', getSemanticSpacing(this.theme.density, 'sm', 'normal'));
-    this.style.setProperty('--ct-theme-spacing-loose', getSemanticSpacing(this.theme.density, 'lg', 'normal'));
-
-    // Set other theme properties
-    this.style.setProperty('--ct-theme-border-radius', this.theme.borderRadius);
-    this.style.setProperty('--ct-theme-mono-font-family', this.theme.monoFontFamily);
-
-    // Set error-specific colors (could be enhanced to use separate error tokens)
     this.style.setProperty('--ct-theme-error-background', resolveColor(this.theme.colors.background, colorScheme));
     this.style.setProperty('--ct-theme-error-border', resolveColor(this.theme.colors.border, colorScheme));
   }
