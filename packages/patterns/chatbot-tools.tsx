@@ -6,7 +6,6 @@ import {
   Default,
   derive,
   fetchData,
-  getRecipeEnvironment,
   h,
   handler,
   ifElse,
@@ -127,64 +126,43 @@ const searchWeb = recipe<
   return ifElse(error, { error }, result);
 });
 
-const readWebpage = handler<
-  { url: string; result: Cell<string> },
-  { result: Cell<string> }
->(
-  async (args, state) => {
-    try {
-      state.result.set(`Reading: ${args.url}...`);
+type ReadWebResult = {
+  content: string;
+  metadata: {
+    title?: string;
+    author?: string;
+    date?: string;
+    word_count: number;
+  };
+};
 
-      const env = getRecipeEnvironment();
-      const response = await fetch(
-        new URL("/api/agent-tools/web-read", env.apiUrl),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            url: args.url,
-            max_tokens: 4000,
-            include_code: true,
-          }),
-        },
-      );
+const readWebpage = recipe<
+  { url: string },
+  ReadWebResult | { error: string }
+>("Read Webpage", ({ url }) => {
+  const { result, error } = fetchData<ReadWebResult>({
+    url: "/api/agent-tools/web-read",
+    mode: "json",
+    options: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        max_tokens: 4000,
+        include_code: true,
+      }),
+    },
+  });
 
-      if (!response.ok) {
-        throw new Error(`Failed to read webpage: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      // Format the content with metadata
-      const formattedContent = `Title: ${data.metadata?.title || "Unknown"}\n` +
-        `Date: ${data.metadata?.date || "Unknown"}\n` +
-        `Word Count: ${data.metadata?.word_count || 0}\n\n` +
-        `Content:\n${data.content?.substring(0, 2000)}${
-          data.content?.length > 2000 ? "..." : ""
-        }`;
-
-      state.result.set(formattedContent);
-      args.result.set(formattedContent);
-    } catch (error) {
-      const errorMsg = `Read error: ${
-        (error as any)?.message || "Unknown error"
-      }`;
-      state.result.set(errorMsg);
-      args.result.set(errorMsg);
-    }
-  },
-);
+  return ifElse(error, { error }, result);
+});
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat, list }) => {
-    const calculatorResult = cell<string>("");
     const model = cell<string>("anthropic:claude-sonnet-4-0");
-    const searchWebResult = cell<string>("");
-    const readWebpageResult = cell<string>("");
-
     const tools = {
       search_web: {
         description: "Search the web for information.",
@@ -213,7 +191,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           },
           required: ["url"],
         } as JSONSchema,
-        handler: readWebpage({ result: readWebpageResult }),
+        pattern: readWebpage,
       },
       calculator: {
         description:
@@ -229,7 +207,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
           },
           required: ["expression"],
         } as JSONSchema,
-        // handler: calculator({ result: calculatorResult }),
         pattern: calculator,
       },
       addListItem: {
@@ -334,21 +311,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
             <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
               <ct-vstack data-label="Tools">
-                <div>
-                  <h3>Web Search</h3>
-                  <pre>{searchWebResult}</pre>
-                </div>
-
-                <div>
-                  <h3>Web Page Reader</h3>
-                  <pre>{readWebpageResult}</pre>
-                </div>
-
-                <div>
-                  <h3>Calculator</h3>
-                  <pre>{calculatorResult}</pre>
-                </div>
-
                 <div>
                   <h3>Items</h3>
                   <ct-list $value={list} />
