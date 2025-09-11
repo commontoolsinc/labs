@@ -6,6 +6,7 @@ import type {
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
 
 const logger = getLogger("schema-generator.intersection");
 
@@ -94,21 +95,20 @@ export class IntersectionFormatter implements TypeFormatter {
             const existing = mergedProps[key];
             if (existing) {
               // If both are object schemas, check description conflicts
-              if (
-                typeof existing === "object" && existing &&
-                typeof value === "object" && value
-              ) {
-                const aDesc = (existing as any).description as
-                  | string
-                  | undefined;
-                const bDesc = (value as any).description as string | undefined;
+              if (isRecord(existing) && isRecord(value)) {
+                const aDesc = typeof existing.description === "string"
+                  ? (existing.description as string)
+                  : undefined;
+                const bDesc = typeof value.description === "string"
+                  ? (value.description as string)
+                  : undefined;
                 if (aDesc && bDesc && aDesc !== bDesc) {
-                  const comment = (existing as any).$comment as
-                    | string
-                    | undefined;
-                  (existing as any).$comment = comment
-                    ? comment
-                    : "Conflicting docs across intersection constituents; using first";
+                  const priorComment = typeof existing.$comment === "string"
+                    ? (existing.$comment as string)
+                    : undefined;
+                  (existing as Record<string, unknown>).$comment =
+                    priorComment ??
+                      "Conflicting docs across intersection constituents; using first";
                   logger.warn(() =>
                     `Intersection doc conflict for '${key}'; using first`
                   );

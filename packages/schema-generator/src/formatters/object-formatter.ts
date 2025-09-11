@@ -8,6 +8,7 @@ import { safeGetPropertyType } from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -95,12 +96,14 @@ export class ObjectFormatter implements TypeFormatter {
       );
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
-      if (text && typeof generated === "object" && generated) {
+      if (text && isRecord(generated)) {
         const conflicts = all.filter((s) => s && s !== text);
-        (generated as any).description = text;
+        (generated as Record<string, unknown>).description = text;
         if (conflicts.length > 0) {
-          const comment = (generated as any).$comment as string | undefined;
-          (generated as any).$comment = comment
+          const comment = typeof generated.$comment === "string"
+            ? (generated.$comment as string)
+            : undefined;
+          (generated as Record<string, unknown>).$comment = comment
             ? comment
             : "Conflicting docs across declarations; using first";
           // Warning only
@@ -141,11 +144,13 @@ export class ObjectFormatter implements TypeFormatter {
           }
         }
       }
-      if (foundDocs.length > 0 && typeof apSchema === "object" && apSchema) {
-        (apSchema as any).description = foundDocs[0]!;
+      if (foundDocs.length > 0 && isRecord(apSchema)) {
+        (apSchema as Record<string, unknown>).description = foundDocs[0]!;
         if (foundDocs.length > 1) {
-          const comment = (apSchema as any).$comment as string | undefined;
-          (apSchema as any).$comment = comment
+          const comment = typeof apSchema.$comment === "string"
+            ? (apSchema.$comment as string)
+            : undefined;
+          (apSchema as Record<string, unknown>).$comment = comment
             ? comment
             : "Conflicting docs for index signatures; using first";
           logger.warn(() =>
@@ -153,7 +158,7 @@ export class ObjectFormatter implements TypeFormatter {
           );
         }
       }
-      (schema as any).additionalProperties = apSchema as any;
+      (schema as Record<string, unknown>).additionalProperties = apSchema as SchemaDefinition;
     }
     if (required.length > 0) schema.required = required;
 

@@ -18,6 +18,7 @@ import {
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
 import { extractDocFromSymbolAndDecls } from "./doc-utils.ts";
+import { isRecord } from "@commontools/utils/types";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -382,8 +383,8 @@ export class SchemaGenerator implements ISchemaGenerator {
     const directDoc = pickDoc(directSym);
     const chosen = aliasDoc ?? directDoc;
 
-    if (chosen && !("description" in (schema as any))) {
-      (schema as any).description = chosen;
+    if (chosen && isRecord(schema) && !("description" in schema)) {
+      (schema as Record<string, unknown>).description = chosen;
     }
     return schema;
   }
