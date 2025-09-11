@@ -270,6 +270,7 @@ export interface BuiltInLLMTool {
   description: string;
   inputSchema?: JSONSchema;
   handler?: OpaqueRef<any> | Stream<any>; // Client-side only
+  pattern?: Recipe;
 }
 
 // Built-in types

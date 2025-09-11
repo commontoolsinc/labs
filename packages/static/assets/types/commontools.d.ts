@@ -161,6 +161,7 @@ export interface BuiltInLLMTool {
     description: string;
     inputSchema?: JSONSchema;
     handler?: OpaqueRef<any> | Stream<any>;
+    pattern?: Recipe;
 }
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];
