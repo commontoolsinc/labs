@@ -1,5 +1,5 @@
 import * as esbuild from "esbuild";
-import { denoPlugins } from "@luca/esbuild-deno-loader";
+import { denoPlugin } from "@deno/esbuild-plugin";
 import { debounce } from "@std/async/debounce";
 import { ResolvedConfig } from "./interface.ts";
 import { blue, bold, dim, green, red, yellow } from "@std/fmt/colors";
@@ -116,7 +116,7 @@ export async function build(
   config: Parameters<typeof esbuild.build>[0],
 ): Promise<ReturnType<typeof esbuild.build>> {
   const fullConfig = Object.assign({}, config, {
-    plugins: [...denoPlugins()],
+    plugins: [denoPlugin()],
     platform: "browser",
     bundle: true,
     format: "esm",

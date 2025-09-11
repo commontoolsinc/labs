@@ -9,8 +9,8 @@
     "./cli": "./cli.ts"
   },
   "imports": {
-    "esbuild": "npm:esbuild@~0.23.1",
-    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
+    "esbuild": "npm:esbuild@^0.25.5",
+    "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin",
     "@std/fmt/colors": "jsr:@std/fmt@^1.0.3/colors"
   }
 }
