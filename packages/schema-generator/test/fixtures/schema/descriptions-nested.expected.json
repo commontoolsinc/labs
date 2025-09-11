@@ -1,0 +1,53 @@
+{
+  "description": "Outliner document",
+  "properties": {
+    "attachments": {
+      "description": "Attachments associated with this node",
+      "items": true,
+      "type": "array"
+    },
+    "body": {
+      "description": "The main text content of the node",
+      "type": "string"
+    },
+    "children": {
+      "description": "Child nodes of this node",
+      "items": {
+        "properties": {
+          "attachments": {
+            "description": "Attachments associated with the child node",
+            "items": true,
+            "type": "array"
+          },
+          "body": {
+            "description": "The main text content of the child node",
+            "type": "string"
+          },
+          "children": {
+            "description": "Children of the child node",
+            "items": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "body",
+          "children",
+          "attachments"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Version of document",
+      "type": "number"
+    }
+  },
+  "required": [
+    "body",
+    "children",
+    "attachments",
+    "version"
+  ],
+  "type": "object"
+}

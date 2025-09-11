@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "id": {
+      "description": "id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "description": "Root alias doc",
+  "type": "object"
+}
+

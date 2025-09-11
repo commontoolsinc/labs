@@ -360,20 +360,31 @@ export class SchemaGenerator implements ISchemaGenerator {
     try {
       if (typeof schema !== "object" || !schema) return schema;
 
-      const sym = (type as any).aliasSymbol || type.getSymbol?.() ||
-        (type as any).symbol;
+      // Consider both alias symbol (for type aliases) and the underlying
+      // symbol (for interfaces/classes). Prefer alias doc when present; fall
+      // back to underlying.
+      const aliasSym = (type as any).aliasSymbol as ts.Symbol | undefined;
+      const directSym = type.getSymbol?.() || (type as any).symbol;
 
-      const hasUserDecl = (sym?.declarations ?? []).some((d: ts.Declaration) =>
-        !d.getSourceFile().isDeclarationFile
-      );
-      if (!hasUserDecl) return schema;
+      const pickDoc = (sym?: ts.Symbol): string | undefined => {
+        if (!sym) return undefined;
+        const hasUserDecl = (sym.declarations ?? []).some((d) =>
+          !d.getSourceFile().isDeclarationFile
+        );
+        if (!hasUserDecl) return undefined;
+        const { text } = extractDocFromSymbolAndDecls(
+          sym,
+          context.typeChecker,
+        );
+        return text;
+      };
 
-      const { text } = extractDocFromSymbolAndDecls(
-        sym,
-        context.typeChecker,
-      );
-      if (text && !("description" in (schema as any))) {
-        (schema as any).description = text;
+      const aliasDoc = pickDoc(aliasSym);
+      const directDoc = pickDoc(directSym);
+      const chosen = aliasDoc ?? directDoc;
+
+      if (chosen && !("description" in (schema as any))) {
+        (schema as any).description = chosen;
       }
       return schema;
     } catch (_e) {
