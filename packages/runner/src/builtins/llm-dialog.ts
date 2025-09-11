@@ -173,7 +173,7 @@ async function invokeToolCall(
   const pattern = toolDef.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
     | undefined;
-  const handler = toolDef.key("handler").get();
+  const handler = toolDef.key("handler");
   const result = runtime.getCell<any>(space, toolCall.id);
 
   runtime.editWithRetry((tx) => {
@@ -183,7 +183,7 @@ async function invokeToolCall(
       handler.withTx(tx).send({
         ...toolCall.input,
         result, // doesn't need tx, since it's just a link
-      });
+      } as any); // TODO(bf): why any needed?
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
@@ -531,7 +531,7 @@ function startRequest(
                 toolName: matchingToolCall?.toolName || "unknown",
                 output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
-                  : { type: "text", value: toolResult.result },
+                  : toolResult.result,
               }],
             });
           }
