@@ -11,13 +11,13 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commontools/api";
-import { 
-  themeContext, 
-  defaultTheme, 
-  type CTTheme, 
+import {
   applyThemeToElement,
+  type CTTheme,
+  defaultTheme,
   getSemanticSpacing,
-  mergeWithDefaultTheme
+  mergeWithDefaultTheme,
+  themeContext,
 } from "../theme-context.ts";
 
 /**
@@ -68,15 +68,26 @@ export class CTChat extends BaseElement {
       .pending-message {
         display: flex;
         align-items: flex-start;
-        margin-bottom: var(--ct-theme-spacing-message-bottom, var(--ct-spacing-1, 0.25rem));
+        margin-bottom: var(
+          --ct-theme-spacing-message-bottom,
+          var(--ct-spacing-1, 0.25rem)
+        );
       }
 
       .pending-bubble {
-        background-color: var(--ct-theme-surface, var(--ct-color-gray-100, #f3f4f6));
+        background-color: var(
+          --ct-theme-surface,
+          var(--ct-color-gray-100, #f3f4f6)
+        );
         color: var(--ct-theme-text-muted, var(--ct-color-gray-900, #111827));
-        padding: var(--ct-theme-padding-bubble, var(--ct-spacing-3, 0.75rem)) var(--ct-theme-padding-bubble-horizontal, var(--ct-spacing-4, 1rem));
-        border-radius: var(--ct-theme-border-radius, var(--ct-border-radius-lg, 0.5rem));
-        border: 1px solid var(--ct-theme-border-muted, var(--ct-color-gray-200, #e5e7eb));
+        padding: var(--ct-theme-padding-bubble, var(--ct-spacing-3, 0.75rem))
+          var(--ct-theme-padding-bubble-horizontal, var(--ct-spacing-4, 1rem));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-lg, 0.5rem)
+        );
+        border: 1px solid
+          var(--ct-theme-border-muted, var(--ct-color-gray-200, #e5e7eb));
         max-width: 70%;
         display: flex;
         align-items: center;
@@ -91,7 +102,10 @@ export class CTChat extends BaseElement {
       .typing-dot {
         width: 8px;
         height: 8px;
-        background-color: var(--ct-theme-text-muted, var(--ct-color-gray-400, #9ca3af));
+        background-color: var(
+          --ct-theme-text-muted,
+          var(--ct-color-gray-400, #9ca3af)
+        );
         border-radius: 50%;
         animation: typingBounce 1.4s infinite ease-in-out;
       }
@@ -170,22 +184,34 @@ export class CTChat extends BaseElement {
     // Apply standard theme properties with custom spacing for chat-specific needs
     applyThemeToElement(this, this._computedTheme, {
       additionalSpacing: {
-        "message-bottom": getSemanticSpacing(this._computedTheme.density, 'sm', 'tight'),
-        "padding-bubble": getSemanticSpacing(this._computedTheme.density, 'lg', 'normal'),
-        "padding-bubble-horizontal": getSemanticSpacing(this._computedTheme.density, 'xl', 'normal'),
-      }
+        "message-bottom": getSemanticSpacing(
+          this._computedTheme.density,
+          "sm",
+          "tight",
+        ),
+        "padding-bubble": getSemanticSpacing(
+          this._computedTheme.density,
+          "lg",
+          "normal",
+        ),
+        "padding-bubble-horizontal": getSemanticSpacing(
+          this._computedTheme.density,
+          "xl",
+          "normal",
+        ),
+      },
     });
   }
 
   override willUpdate(changedProperties: Map<string, any>) {
     super.willUpdate(changedProperties);
-    
+
     // If the messages property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("messages")) {
       // Bind the new messages (Cell or plain array) to the controller
       this._cellController.bind(this.messages);
     }
-    
+
     // If the theme property changed, recompute the merged theme
     if (changedProperties.has("theme")) {
       this._computedTheme = mergeWithDefaultTheme(this.theme);

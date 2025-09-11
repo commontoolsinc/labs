@@ -13,7 +13,11 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commontools/api";
-import { themeContext, type CTTheme, applyThemeToElement } from "../theme-context.ts";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  themeContext,
+} from "../theme-context.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -44,7 +48,12 @@ export class CTChatMessage extends BaseElement {
         display: flex;
         flex-direction: column;
         width: 100%;
-        font-family: var(--ct-theme-font-family, system-ui, -apple-system, sans-serif);
+        font-family: var(
+          --ct-theme-font-family,
+          system-ui,
+          -apple-system,
+          sans-serif
+        );
       }
 
       .message-wrapper {
@@ -74,12 +83,21 @@ export class CTChatMessage extends BaseElement {
 
       /* Role-specific message styling */
       :host([role="user"]) .message {
-        background-color: var(--ct-theme-color-accent, var(--ct-color-blue-500, #3b82f6));
-        color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+        background-color: var(
+          --ct-theme-color-accent,
+          var(--ct-color-blue-500, #3b82f6)
+        );
+        color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
       }
 
       :host([role="assistant"]) .message {
-        background-color: var(--ct-theme-color-surface, var(--ct-color-gray-100, #f3f4f6));
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-gray-100, #f3f4f6)
+        );
         color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
@@ -243,12 +261,18 @@ export class CTChatMessage extends BaseElement {
       /* Adjust colors for user messages */
       :host([role="user"]) .message-content code,
       :host([role="user"]) .message-content pre {
-        background-color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+        background-color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
         opacity: 0.2;
       }
 
       :host([role="user"]) .message-content blockquote {
-        border-left-color: var(--ct-theme-color-accent-foreground, var(--ct-color-white, #ffffff));
+        border-left-color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
         opacity: 0.4;
       }
 
@@ -264,8 +288,6 @@ export class CTChatMessage extends BaseElement {
       .message-bubble:hover .message-actions {
         opacity: 1;
       }
-
-
 
       /* Code block copy button styles */
       .code-block-container {
@@ -526,7 +548,9 @@ export class CTChatMessage extends BaseElement {
     `;
   }
 
-  override firstUpdated(changedProperties: Map<string | number | symbol, unknown>) {
+  override firstUpdated(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
     super.firstUpdated(changedProperties);
     // Set initial theme properties if theme is available
     if (this.theme) {

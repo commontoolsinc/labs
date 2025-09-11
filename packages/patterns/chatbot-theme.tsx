@@ -29,7 +29,7 @@ type LLMTestInput = {
     accentColor: Default<string, "#3b82f6">;
     fontFace: Default<string, "Arial, sans-serif">;
     borderRadius: Default<string, "4px">;
-  }
+  };
 };
 
 type LLMTestResult = {
@@ -48,7 +48,7 @@ const setTheme = handler<
       accentColor: Cell<string>;
       fontFace: Cell<string>;
       borderRadius: Cell<string>;
-    }
+    };
   }
 >((params, { theme }) => {
   try {
@@ -73,7 +73,9 @@ const setTheme = handler<
       params.result.set("⚠️ No theme changes requested");
     }
   } catch (error) {
-    params.result.set(`❌ Error updating theme: ${(error as any)?.message || "Unknown error"}`);
+    params.result.set(
+      `❌ Error updating theme: ${(error as any)?.message || "Unknown error"}`,
+    );
   }
 });
 
@@ -114,21 +116,25 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     const tools = {
       setTheme: {
-        description: "Change the visual theme of the chat interface. You can modify the accent color, font family, and border radius.",
+        description:
+          "Change the visual theme of the chat interface. You can modify the accent color, font family, and border radius.",
         inputSchema: {
           type: "object",
           properties: {
             accentColor: {
               type: "string",
-              description: "Hex color code for the accent color (e.g., '#3b82f6' for blue, '#10b981' for green, '#ef4444' for red)",
+              description:
+                "Hex color code for the accent color (e.g., '#3b82f6' for blue, '#10b981' for green, '#ef4444' for red)",
             },
             fontFace: {
               type: "string",
-              description: "Font family string (e.g., 'system-ui, -apple-system, sans-serif', 'ui-monospace, Consolas, monospace')",
+              description:
+                "Font family string (e.g., 'system-ui, -apple-system, sans-serif', 'ui-monospace, Consolas, monospace')",
             },
             borderRadius: {
               type: "string",
-              description: "Border radius value (e.g., '0px' for sharp, '0.5rem' for medium, '1rem' for rounded)",
+              description:
+                "Border radius value (e.g., '0px' for sharp, '0.5rem' for medium, '1rem' for rounded)",
             },
           },
         } as JSONSchema,
@@ -202,7 +208,12 @@ export default recipe<LLMTestInput, LLMTestResult>(
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             <ct-screen>
               <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                <ct-chat theme={theme} $messages={chat} pending={pending} tools={tools} />
+                <ct-chat
+                  theme={theme}
+                  $messages={chat}
+                  pending={pending}
+                  tools={tools}
+                />
               </ct-vscroll>
 
               <div slot="footer">
@@ -221,10 +232,19 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   <ct-text>Font Family</ct-text>
                   <ct-select
                     items={[
-                      { label: 'System', value: 'system-ui, -apple-system, sans-serif' },
-                      { label: 'Monospace', value: 'ui-monospace, Consolas, monospace' },
-                      { label: 'Serif', value: 'Georgia, Times, serif' },
-                      { label: 'Sans Serif', value: 'Arial, Helvetica, sans-serif' }
+                      {
+                        label: "System",
+                        value: "system-ui, -apple-system, sans-serif",
+                      },
+                      {
+                        label: "Monospace",
+                        value: "ui-monospace, Consolas, monospace",
+                      },
+                      { label: "Serif", value: "Georgia, Times, serif" },
+                      {
+                        label: "Sans Serif",
+                        value: "Arial, Helvetica, sans-serif",
+                      },
                     ]}
                     $value={theme.fontFace}
                   />
@@ -234,14 +254,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   <ct-text>Accent Color</ct-text>
                   <ct-select
                     items={[
-                      { label: 'Blue', value: '#3b82f6' },
-                      { label: 'Purple', value: '#8b5cf6' },
-                      { label: 'Green', value: '#10b981' },
-                      { label: 'Red', value: '#ef4444' },
-                      { label: 'Orange', value: '#f97316' },
-                      { label: 'Pink', value: '#ec4899' },
-                      { label: 'Indigo', value: '#6366f1' },
-                      { label: 'Teal', value: '#14b8a6' }
+                      { label: "Blue", value: "#3b82f6" },
+                      { label: "Purple", value: "#8b5cf6" },
+                      { label: "Green", value: "#10b981" },
+                      { label: "Red", value: "#ef4444" },
+                      { label: "Orange", value: "#f97316" },
+                      { label: "Pink", value: "#ec4899" },
+                      { label: "Indigo", value: "#6366f1" },
+                      { label: "Teal", value: "#14b8a6" },
                     ]}
                     $value={theme.accentColor}
                   />
@@ -251,12 +271,12 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   <ct-text>Border Radius</ct-text>
                   <ct-select
                     items={[
-                      { label: 'None', value: '0px' },
-                      { label: 'Small', value: '0.25rem' },
-                      { label: 'Medium', value: '0.5rem' },
-                      { label: 'Large', value: '0.75rem' },
-                      { label: 'Extra Large', value: '1rem' },
-                      { label: 'Rounded', value: '1.5rem' }
+                      { label: "None", value: "0px" },
+                      { label: "Small", value: "0.25rem" },
+                      { label: "Medium", value: "0.5rem" },
+                      { label: "Large", value: "0.75rem" },
+                      { label: "Extra Large", value: "1rem" },
+                      { label: "Rounded", value: "1.5rem" },
                     ]}
                     $value={theme.borderRadius}
                   />

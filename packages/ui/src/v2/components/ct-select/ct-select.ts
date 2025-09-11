@@ -118,7 +118,7 @@ export class CTSelect extends BaseElement {
     onChange: (newValue, oldValue) => {
       // Sync cell value changes to DOM
       this.applyValueToDom();
-      
+
       // Emit change events
       this.emit("ct-change", {
         value: newValue,

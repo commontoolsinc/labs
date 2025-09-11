@@ -85,12 +85,12 @@ const DENSITY_SCALES = {
  * Base spacing values in rem that get scaled by density
  */
 const BASE_SPACING = {
-  xs: 0.125,  // 2px at 16px base
-  sm: 0.25,   // 4px
-  md: 0.5,    // 8px  
-  lg: 0.75,   // 12px
-  xl: 1.0,    // 16px
-  xxl: 1.5,   // 24px
+  xs: 0.125, // 2px at 16px base
+  sm: 0.25, // 4px
+  md: 0.5, // 8px
+  lg: 0.75, // 12px
+  xl: 1.0, // 16px
+  xxl: 1.5, // 24px
 } as const;
 
 /**
@@ -102,7 +102,9 @@ export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
   if (scheme === "auto") {
     // Check system preference
     if (typeof window !== "undefined" && window.matchMedia) {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     }
     return "light"; // Fallback for non-browser environments
   }
@@ -115,7 +117,10 @@ export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
  * @param colorScheme - Current color scheme
  * @returns Resolved color string
  */
-export function resolveColor(token: ColorToken, colorScheme: "light" | "dark"): string {
+export function resolveColor(
+  token: ColorToken,
+  colorScheme: "light" | "dark",
+): string {
   if (typeof token === "string") {
     return token;
   }
@@ -132,16 +137,16 @@ export function resolveColor(token: ColorToken, colorScheme: "light" | "dark"): 
 export function getSemanticSpacing(
   density: CTTheme["density"],
   size: keyof typeof BASE_SPACING,
-  context: "tight" | "normal" | "loose" = "normal"
+  context: "tight" | "normal" | "loose" = "normal",
 ): string {
   const scale = DENSITY_SCALES[density][context];
   const baseValue = BASE_SPACING[size];
   const scaledValue = baseValue * scale;
-  
+
   // Map to closest ct-spacing level for compatibility
   const spacingLevel = Math.min(4, Math.round(scaledValue * 4));
   const fallback = `${scaledValue}rem`;
-  
+
   return `var(--ct-spacing-${spacingLevel}, ${fallback})`;
 }
 
@@ -150,7 +155,8 @@ export function getSemanticSpacing(
  */
 export const defaultTheme: CTTheme = {
   fontFamily: "system-ui, -apple-system, sans-serif",
-  monoFontFamily: "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+  monoFontFamily:
+    "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
   borderRadius: "0.5rem",
   density: "comfortable",
   colorScheme: "light",
@@ -158,79 +164,79 @@ export const defaultTheme: CTTheme = {
   colors: {
     primary: {
       light: "#3b82f6",
-      dark: "#60a5fa"
+      dark: "#60a5fa",
     },
     primaryForeground: {
       light: "#ffffff",
-      dark: "#1e3a8a"
+      dark: "#1e3a8a",
     },
     secondary: {
       light: "#6b7280",
-      dark: "#9ca3af"
+      dark: "#9ca3af",
     },
     secondaryForeground: {
       light: "#ffffff",
-      dark: "#374151"
+      dark: "#374151",
     },
     background: {
       light: "#ffffff",
-      dark: "#0f172a"
+      dark: "#0f172a",
     },
     surface: {
       light: "#f1f5f9",
-      dark: "#1e293b"
+      dark: "#1e293b",
     },
     surfaceHover: {
       light: "#e2e8f0",
-      dark: "#334155"
+      dark: "#334155",
     },
     text: {
       light: "#111827",
-      dark: "#f1f5f9"
+      dark: "#f1f5f9",
     },
     textMuted: {
       light: "#6b7280",
-      dark: "#94a3b8"
+      dark: "#94a3b8",
     },
     border: {
       light: "#e5e7eb",
-      dark: "#475569"
+      dark: "#475569",
     },
     borderMuted: {
       light: "#f3f4f6",
-      dark: "#334155"
+      dark: "#334155",
     },
     success: {
       light: "#16a34a",
-      dark: "#22c55e"
+      dark: "#22c55e",
     },
     successForeground: {
       light: "#ffffff",
-      dark: "#14532d"
+      dark: "#14532d",
     },
     error: {
       light: "#dc2626",
-      dark: "#ef4444"
+      dark: "#ef4444",
     },
     errorForeground: {
       light: "#ffffff",
-      dark: "#7f1d1d"
+      dark: "#7f1d1d",
     },
     warning: {
       light: "#d97706",
-      dark: "#f59e0b"
+      dark: "#f59e0b",
     },
     warningForeground: {
       light: "#ffffff",
-      dark: "#451a03"
+      dark: "#451a03",
     },
     accent: {
       light: "#8b5cf6",
-      dark: "#a78bfa"
+      dark: "#a78bfa",
     },
     accentForeground: {
       light: "#ffffff",
-      dark: "#4c1d95"
+      dark: "#4c1d95",
     },
   },
 };
@@ -243,21 +249,24 @@ export const defaultTheme: CTTheme = {
  */
 export function getThemeColor(
   value: keyof CTTheme["colors"] | ColorToken | string,
-  theme: CTTheme
+  theme: CTTheme,
 ): string {
   const colorScheme = resolveColorScheme(theme.colorScheme);
-  
+
   // If it's a semantic color key, resolve from theme
   if (typeof value === "string" && value in theme.colors) {
     const semanticToken = theme.colors[value as keyof CTTheme["colors"]];
     return resolveColor(semanticToken, colorScheme);
   }
-  
+
   // If it's a color token object, resolve it
-  if (typeof value === "object" && value !== null && ("light" in value || "dark" in value)) {
+  if (
+    typeof value === "object" && value !== null &&
+    ("light" in value || "dark" in value)
+  ) {
     return resolveColor(value as ColorToken, colorScheme);
   }
-  
+
   // Otherwise, treat as specific color value
   return value as string;
 }
@@ -269,17 +278,26 @@ export function getThemeColor(
  * @returns CSS spacing value
  */
 export function getThemeSpacing(
-  value: `${keyof typeof BASE_SPACING}-${keyof typeof DENSITY_SCALES[CTTheme["density"]]}` | string,
-  theme: CTTheme
+  value:
+    | `${keyof typeof BASE_SPACING}-${keyof typeof DENSITY_SCALES[
+      CTTheme["density"]
+    ]}`
+    | string,
+  theme: CTTheme,
 ): string {
   // If it's a semantic spacing descriptor (e.g., "lg-normal", "sm-tight")
   if (typeof value === "string" && value.includes("-")) {
-    const [sizeStr, contextStr] = value.split("-") as [keyof typeof BASE_SPACING, keyof typeof DENSITY_SCALES[CTTheme["density"]]];
-    if (sizeStr in BASE_SPACING && contextStr in DENSITY_SCALES[theme.density]) {
+    const [sizeStr, contextStr] = value.split("-") as [
+      keyof typeof BASE_SPACING,
+      keyof typeof DENSITY_SCALES[CTTheme["density"]],
+    ];
+    if (
+      sizeStr in BASE_SPACING && contextStr in DENSITY_SCALES[theme.density]
+    ) {
       return getSemanticSpacing(theme.density, sizeStr, contextStr);
     }
   }
-  
+
   // Otherwise, treat as specific value
   return value;
 }
@@ -294,7 +312,7 @@ export function createThemeVariant(
   baseTheme: CTTheme,
   overrides: Partial<CTTheme> & {
     colors?: Partial<CTTheme["colors"]> & Record<string, ColorToken | string>;
-  }
+  },
 ): CTTheme {
   return {
     ...baseTheme,
@@ -314,7 +332,7 @@ export function createThemeVariant(
  */
 export function mergeWithDefaultTheme(
   partialTheme: any,
-  baseTheme: CTTheme = defaultTheme
+  baseTheme: CTTheme = defaultTheme,
 ): CTTheme {
   if (!partialTheme || typeof partialTheme !== "object") {
     return baseTheme;
@@ -322,7 +340,7 @@ export function mergeWithDefaultTheme(
 
   // Handle recipe-style theme objects with specific properties
   const mergedTheme = { ...baseTheme };
-  
+
   // Map common recipe theme properties to CTTheme properties
   if (partialTheme.accentColor) {
     mergedTheme.colors = {
@@ -378,11 +396,16 @@ export function mergeWithDefaultTheme(
  */
 export function getAnimationDuration(speed: CTTheme["animationSpeed"]): string {
   switch (speed) {
-    case "none": return "0ms";
-    case "slow": return "500ms";
-    case "normal": return "200ms";
-    case "fast": return "100ms";
-    default: return "200ms";
+    case "none":
+      return "0ms";
+    case "slow":
+      return "500ms";
+    case "normal":
+      return "200ms";
+    case "fast":
+      return "100ms";
+    default:
+      return "200ms";
   }
 }
 
@@ -400,13 +423,13 @@ export function applyThemeToElement(
     includeColors?: boolean;
     includeTypography?: boolean;
     additionalSpacing?: Record<string, string>;
-  } = {}
+  } = {},
 ) {
   const {
     includeSpacing = true,
     includeColors = true,
     includeTypography = true,
-    additionalSpacing = {}
+    additionalSpacing = {},
   } = options;
 
   const colorScheme = resolveColorScheme(theme.colorScheme);
@@ -414,9 +437,15 @@ export function applyThemeToElement(
   // Typography and base properties
   if (includeTypography) {
     element.style.setProperty("--ct-theme-font-family", theme.fontFamily);
-    element.style.setProperty("--ct-theme-mono-font-family", theme.monoFontFamily);
+    element.style.setProperty(
+      "--ct-theme-mono-font-family",
+      theme.monoFontFamily,
+    );
     element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
-    element.style.setProperty("--ct-theme-animation-duration", getAnimationDuration(theme.animationSpeed));
+    element.style.setProperty(
+      "--ct-theme-animation-duration",
+      getAnimationDuration(theme.animationSpeed),
+    );
   }
 
   // Colors - resolve all ColorTokens
@@ -444,20 +473,23 @@ export function applyThemeToElement(
     };
 
     Object.entries(colorMap).forEach(([key, token]) => {
-      element.style.setProperty(`--ct-theme-color-${key}`, resolveColor(token, colorScheme));
+      element.style.setProperty(
+        `--ct-theme-color-${key}`,
+        resolveColor(token, colorScheme),
+      );
     });
   }
 
   // Semantic spacing
   if (includeSpacing) {
     const spacingMap = {
-      "tight": getSemanticSpacing(theme.density, 'xs', 'tight'),
-      "normal": getSemanticSpacing(theme.density, 'sm', 'normal'),
-      "loose": getSemanticSpacing(theme.density, 'md', 'loose'),
-      "padding-message": getSemanticSpacing(theme.density, 'lg', 'normal'),
-      "padding-code": getSemanticSpacing(theme.density, 'sm', 'tight'),
-      "padding-block": getSemanticSpacing(theme.density, 'md', 'normal'),
-      ...additionalSpacing
+      "tight": getSemanticSpacing(theme.density, "xs", "tight"),
+      "normal": getSemanticSpacing(theme.density, "sm", "normal"),
+      "loose": getSemanticSpacing(theme.density, "md", "loose"),
+      "padding-message": getSemanticSpacing(theme.density, "lg", "normal"),
+      "padding-code": getSemanticSpacing(theme.density, "sm", "tight"),
+      "padding-block": getSemanticSpacing(theme.density, "md", "normal"),
+      ...additionalSpacing,
     };
 
     Object.entries(spacingMap).forEach(([key, value]) => {
