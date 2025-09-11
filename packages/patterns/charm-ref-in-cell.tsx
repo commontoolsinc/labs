@@ -93,6 +93,14 @@ const createCounter = handler<unknown, { charm: any; cellRef: Cell<any> }>(
   },
 );
 
+// Handler to navigate to the stored charm (just console.log for now)
+const goToStoredCharm = handler<unknown, { cellRef: Cell<any> }>(
+  (_, { cellRef }) => {
+    console.log("goToStoredCharm clicked");
+    return navigateTo(cellRef);
+  },
+);
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe("Launcher", () => {
   // cell to store  to the last charm we created
@@ -116,6 +124,14 @@ export default recipe("Launcher", () => {
         >
           Create Sub Charm
         </ct-button>
+        {derive(cellRef, (innerCell) => {
+          if (!innerCell) return "no subcharm yet!";
+          return (
+            <ct-button onClick={goToStoredCharm({ cellRef: innerCell })}>
+              Go to Stored Charm
+            </ct-button>
+          );
+        })}
       </div>
     ),
     cellRef,
