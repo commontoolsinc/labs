@@ -54,25 +54,31 @@ const createCellRef = lift(
   },
 );
 
-// this will be called whenever charm changes
-// note: charm wont be undefined
-// we need to make sure that the charm is not already in the list
-// TODO: make the cellRef a list of charms
+// this will be called whenever charm or cellRef changes
+// pass isInitialized to make sure we dont call this each time
+// we change cellRef, otherwise creates a loop
+// note this is a separate isInitialized for each created charm
 const storeCharmInCell = lift(
   {
     type: "object",
     properties: {
       charm: { type: "object" },
-      cellRef: { type: "object", asCell: true }
+      cellRef: { type: "object", asCell: true },
+      isInitialized: { type: "boolean", asCell: true }
     }
   },
   undefined,
-  ({ charm, cellRef }) => {
-    if (cellRef) {
-      console.log("storeCharmInCell storing charm:", JSON.stringify(charm));
-      cellRef.set(charm);
+  ({ charm, cellRef, isInitialized }) => {
+    if (!isInitialized.get()) {
+      if (cellRef) {
+        console.log("storeCharmInCell storing charm:", JSON.stringify(charm));
+        cellRef.set(charm);
+        isInitialized.set(true);
+      } else {
+        console.log("storeCharmInCell undefined cellRef");
+      }
     } else {
-      console.log("storeCharmInCell undefined cellRef");
+      console.log("storeCharmInCell already initialized, skipping");
     }
     return charm;
   }
@@ -85,11 +91,13 @@ const storeCharmInCell = lift(
 // browser to the newly created charm
 const createCounter = handler<unknown, { cellRef: Cell<any> }>(
   (_, { cellRef }) => {
+    const isInitialized = cell(false);
+
     // create the charm
     const charm = SimpleRecipe({});
     
-    // store the charm ref in a cell
-    storeCharmInCell({ charm, cellRef });
+    // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
+    storeCharmInCell({ charm, cellRef, isInitialized });
 
     // navigate to the charm
     return navigateTo(charm);
