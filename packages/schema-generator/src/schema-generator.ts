@@ -125,22 +125,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     isRootType: boolean = false,
   ): SchemaDefinition {
-    // Early named-type handling for named types (wrappers/anonymous filtered)
-    const inCycle = context.cyclicTypes.has(type);
+    // All-named strategy:
+    // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
+    // into definitions and return $ref for non-root uses. Cycle detection
+    // still applies via definitionStack.
     const namedKey = getNamedTypeKey(type);
-    const inCycleByName = !!(namedKey && context.cyclicNames.has(namedKey));
-
-    if (namedKey && (inCycle || inCycleByName)) {
+    if (namedKey) {
       if (
         context.inProgressNames.has(namedKey) || context.definitions[namedKey]
       ) {
+        // Already being built or exists: emit a ref
         context.emittedRefs.add(namedKey);
         context.definitionStack.delete(
           this.createStackKey(type, context.typeNode, context.typeChecker),
         );
         return { "$ref": `#/definitions/${namedKey}` };
       }
-      // Mark as in-progress but delay writing definition until filled to preserve post-order
+      // Start building this named type; we'll store the result below
       context.inProgressNames.add(namedKey);
     }
 
@@ -174,9 +175,8 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (formatter.supportsType(type, context)) {
         const result = formatter.formatType(type, context);
 
-        // If we seeded a named placeholder, fill it and return $ref for non-root
-        if (namedKey && (inCycle || inCycleByName)) {
-          // Finish cyclic def
+        // If this is a named type (all-named policy), store in definitions.
+        if (namedKey) {
           context.definitions[namedKey] = result;
           context.inProgressNames.delete(namedKey);
           context.definitionStack.delete(
@@ -186,6 +186,7 @@ export class SchemaGenerator implements ISchemaGenerator {
             context.emittedRefs.add(namedKey);
             return { "$ref": `#/definitions/${namedKey}` };
           }
+          // For root, keep inline; buildFinalSchema may promote if we choose
         }
         // Pop after formatting
         context.definitionStack.delete(

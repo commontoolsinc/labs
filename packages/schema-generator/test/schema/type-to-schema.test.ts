@@ -34,7 +34,12 @@ describe("Schema: type-to-schema parity", () => {
     // RecipeOutput
     expect(o.properties?.values?.type).toBe("array");
     expect(o.properties?.values?.items?.type).toBe("string");
-    expect(o.properties?.updater?.type).toBe("object");
-    expect(o.properties?.updater?.asStream).toBe(true);
+    const upd = o.properties?.updater as any;
+    expect(upd.asStream).toBe(true);
+    expect(upd.$ref).toBe("#/definitions/UpdaterInput");
+    const defU = (o as any).definitions?.UpdaterInput as any;
+    expect(defU.type).toBe("object");
+    expect(defU.properties?.newValues?.type).toBe("array");
+    expect(defU.properties?.newValues?.items?.type).toBe("string");
   });
 });

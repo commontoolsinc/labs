@@ -50,7 +50,7 @@ describe("Schema: Type aliases and shared types", () => {
     expect(na.items?.items?.type).toBe("string");
   });
 
-  it("duplicates shared object type structure where referenced twice", async () => {
+  it("hoists shared object type to definitions and references via $ref", async () => {
     const code = `
       interface B { value: string; }
       interface A { b1: B; b2: B; }
@@ -59,10 +59,11 @@ describe("Schema: Type aliases and shared types", () => {
     const s = createSchemaTransformerV2()(type, checker);
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;
-    for (const bx of [b1, b2]) {
-      expect(bx.type).toBe("object");
-      expect(bx.properties?.value?.type).toBe("string");
-      expect(bx.required).toContain("value");
-    }
+    expect(b1.$ref).toBe("#/definitions/B");
+    expect(b2.$ref).toBe("#/definitions/B");
+    const defB = (s as any).definitions?.B as any;
+    expect(defB.type).toBe("object");
+    expect(defB.properties?.value?.type).toBe("string");
+    expect(defB.required).toContain("value");
   });
 });

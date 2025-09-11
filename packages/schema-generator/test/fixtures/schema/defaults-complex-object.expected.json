@@ -14,8 +14,8 @@
         }
       },
       "required": [
-        "theme",
-        "count"
+        "count",
+        "theme"
       ],
       "type": "object"
     },
@@ -41,8 +41,8 @@
             }
           },
           "required": [
-            "notifications",
-            "email"
+            "email",
+            "notifications"
           ],
           "type": "object"
         }

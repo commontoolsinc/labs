@@ -13,6 +13,17 @@
         "value"
       ],
       "type": "object"
+    },
+    "RootType": {
+      "properties": {
+        "list": {
+          "$ref": "#/definitions/LinkedList"
+        }
+      },
+      "required": [
+        "list"
+      ],
+      "type": "object"
     }
   },
   "properties": {

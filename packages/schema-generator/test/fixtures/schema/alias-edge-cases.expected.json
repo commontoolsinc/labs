@@ -1,18 +1,10 @@
 {
   "properties": {
-    "veryDeepCell": {
-      "asCell": true,
-      "type": "string"
-    },
-    "deepStream": {
+    "deepNestedStream": {
       "asStream": true,
       "type": "number"
     },
-    "stringCellStream": {
-      "asStream": true,
-      "type": "string"
-    },
-    "deepNestedStream": {
+    "deepStream": {
       "asStream": true,
       "type": "number"
     },
@@ -30,39 +22,47 @@
       },
       "type": "array"
     },
+    "stringCellStream": {
+      "asStream": true,
+      "type": "string"
+    },
+    "userStore": {
+      "asCell": true,
+      "type": "string"
+    },
     "users": {
       "asCell": true,
       "items": {
         "properties": {
-          "name": {
-            "type": "string"
-          },
           "id": {
             "type": "number"
+          },
+          "name": {
+            "type": "string"
           }
         },
         "required": [
-          "name",
-          "id"
+          "id",
+          "name"
         ],
         "type": "object"
       },
       "type": "array"
     },
-    "userStore": {
+    "veryDeepCell": {
       "asCell": true,
       "type": "string"
     }
   },
   "required": [
-    "veryDeepCell",
-    "deepStream",
-    "stringCellStream",
     "deepNestedStream",
+    "deepStream",
     "indirectArray",
     "numberListCell",
+    "stringCellStream",
+    "userStore",
     "users",
-    "userStore"
+    "veryDeepCell"
   ],
   "type": "object"
 }
