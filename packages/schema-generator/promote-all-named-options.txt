@@ -1,0 +1,98 @@
+Title: Options for making hoisted named-type $ref schemas resolvable
+
+Context
+  We changed the generator to an "all-named" policy: Every named type (except
+  wrappers/containers like Array, ReadonlyArray, Cell, Stream, Default, Date)
+  is hoisted into `definitions`, and non-root uses emit `$ref` to that entry.
+
+Problem observed in CT builder (chatbot-outliner)
+  The builder sometimes operates on schema fragments (e.g., after merges or
+  link steps). Those fragments can now contain `$ref` without a local
+  `definitions`, leading to unresolved `$ref` at runtime.
+
+Goal
+  Keep the all-named behavior (for readability/reuse), while ensuring
+  `$ref`-bearing fragments remain resolvable in the CT runner/builder.
+
+Option A — Embed subset `definitions` into non-root fragments (short-term)
+  Idea:
+    - When the generator returns a non-root schema that contains `$ref`, attach
+      the minimal subset of `definitions` required by that fragment (including
+      transitive dependencies).
+    - This makes fragments self-contained and resolvable, regardless of how the
+      builder slices schemas later.
+  Changes required:
+    - Generator: After formatting a non-root schema, detect referenced names,
+      compute a transitive closure over `definitions`, and attach that subset
+      under `definitions` on the fragment.
+    - Tests/fixtures: Update expectations for places where nested fragments are
+      asserted to include a small `definitions` block.
+  Pros:
+    - Unblocks current use-cases without touching the CT builder.
+    - Keeps the all-named policy intact.
+  Cons:
+    - Slight duplication/bloat in nested fragments.
+    - Requires fixture updates and careful subset computation.
+
+Option B — Inline in fragments, hoist only at root (hybrid)
+  Idea:
+    - Keep all-named hoisting at the root level, but when returning schemas for
+      nested positions (likely to be lifted out by the builder), inline named
+      types (no `$ref`).
+  Changes required:
+    - Generator: Introduce a policy toggle or heuristics to inline named types
+      when formatting non-root schemas that are likely to be used in isolation.
+    - Tests/fixtures: Update to expect inlined shapes in fragments.
+  Pros:
+    - Fragments remain self-contained; fewer nested `definitions`.
+  Cons:
+    - Hybrid policy is more complex and less predictable for readers.
+    - Loses some reuse within fragments.
+
+Option C — Patch CT runner to resolve `$ref` from parent/root (long-term)
+  Idea:
+    - In the CT builder/runner, when operating on a fragment that contains a
+      `$ref` without local `definitions`, resolve against the nearest parent
+      schema that carries `definitions` (e.g., the component's input/output
+      root). Alternatively, thread a shared `definitions` map through the
+      joinSchema/resolveRef code paths.
+  Changes required:
+    - packages/runner: ContextualFlowControl.resolveSchemaRefOrThrow and
+      related joinSchema helpers need to accept an optional "definitions
+      provider" or resolve upward to find a root `definitions` map.
+    - Tests: Add builder-level tests where fragments contain `$ref` and validate
+      successful resolution from the parent context.
+  Pros:
+    - Clean architecture; avoids duplicating `definitions` into fragments.
+    - Keeps all-named behavior consistent and DRY.
+  Cons:
+    - Requires a multi-package change (runner + tests); coordination needed.
+
+Recommended sequence
+  1) Implement Option A now to unblock current work:
+     - Add a helper: collectReferencedDefinitions(fragment, fullDefs) → subset
+       map of needed definitions (including transitive deps).
+     - Attach subset `definitions` for non-root results that contain `$ref`.
+     - Update fixtures to account for nested `definitions` where applicable.
+
+  2) Plan Option C as a follow-up:
+     - Add a "definitions context" resolver in the CT runner so fragments with
+       `$ref` can be resolved against the root schema. This preserves compact
+       fragments and centralizes definition storage.
+     - Once runner support lands, Option A's nested `definitions` can be
+       simplified or removed (guards remain for extreme edge cases).
+
+Implementation notes for Option A
+  - Definition subset:
+    • Start with the set of `$ref` names found in the fragment (scan keys and
+      nested values). For each referenced name N, include `definitions[N]` and
+      recursively scan that definition for further `$ref`s.
+    • Use a visited set to avoid cycles.
+  - Attachment point:
+    • Only attach `definitions` on non-root returns from the generator (root is
+      handled by buildFinalSchema which already includes full `definitions`).
+    • Keep the subset minimal; do not attach the entire `definitions` map.
+  - Tests:
+    • Where unit tests assert nested fragments, expect a small `definitions`
+      block, and assert that required definitions exist and shape is correct.
+

@@ -1,21 +1,72 @@
 {
+  "definitions": {
+    "SchemaRoot": {
+      "properties": {
+        "emptyItems": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TodoItem"
+          },
+          "type": "array"
+        },
+        "matrix": {
+          "default": [
+            [
+              1,
+              2
+            ],
+            [
+              3,
+              4
+            ]
+          ],
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "prefilledItems": {
+          "default": [
+            "item1",
+            "item2"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "emptyItems",
+        "matrix",
+        "prefilledItems"
+      ],
+      "type": "object"
+    },
+    "TodoItem": {
+      "properties": {
+        "done": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "title"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "emptyItems": {
       "default": [],
       "items": {
-        "properties": {
-          "done": {
-            "type": "boolean"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "done",
-          "title"
-        ],
-        "type": "object"
+        "$ref": "#/definitions/TodoItem"
       },
       "type": "array"
     },

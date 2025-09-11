@@ -124,7 +124,8 @@ export function getNamedTypeKey(
   type: ts.Type,
 ): string | undefined {
   // Prefer direct symbol name; fall back to target symbol for TypeReference
-  let name = type.symbol?.name;
+  const symbol = type.symbol;
+  let name = symbol?.name;
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
   if (!name && (objectFlags & ts.ObjectFlags.Reference)) {
     const ref = type as unknown as ts.TypeReference;
@@ -136,6 +137,25 @@ export function getNamedTypeKey(
     if (aliasName) name = aliasName;
   }
   if (!name || name === "__type") return undefined;
+  // Exclude property/method-like symbols (member names), which are not real named types
+  const symFlags = symbol?.flags ?? 0;
+  if (
+    (symFlags & ts.SymbolFlags.Property) !== 0 ||
+    (symFlags & ts.SymbolFlags.Method) !== 0 ||
+    (symFlags & ts.SymbolFlags.Signature) !== 0 ||
+    (symFlags & ts.SymbolFlags.Function) !== 0
+  ) {
+    return undefined;
+  }
+  const decls = symbol?.declarations ?? [];
+  if (
+    decls.some((d) =>
+      ts.isPropertySignature(d) || ts.isMethodSignature(d) ||
+      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d)
+    )
+  ) {
+    return undefined;
+  }
   // Avoid promoting wrappers/containers into definitions
   if (name === "Array" || name === "ReadonlyArray") return undefined;
   if (name === "Cell" || name === "Stream" || name === "Default") {

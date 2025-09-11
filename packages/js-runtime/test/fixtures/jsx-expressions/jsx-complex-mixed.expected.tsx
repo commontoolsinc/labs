@@ -13,27 +13,13 @@ interface State {
     taxRate: number;
 }
 export default recipe({
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "number"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["id", "name", "price", "active"]
+                $ref: "#/definitions/Item"
             }
         },
         filter: {
@@ -46,7 +32,48 @@ export default recipe({
             type: "number"
         }
     },
-    required: ["items", "filter", "discount", "taxRate"]
+    required: ["items", "filter", "discount", "taxRate"],
+    definitions: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        },
+        State: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/definitions/Item"
+                    }
+                },
+                filter: {
+                    type: "string"
+                },
+                discount: {
+                    type: "number"
+                },
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["items", "filter", "discount", "taxRate"]
+        }
+    }
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
@@ -84,4 +111,3 @@ export default recipe({
       </div>),
     };
 });
-

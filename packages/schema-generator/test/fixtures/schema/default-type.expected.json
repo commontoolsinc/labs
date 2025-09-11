@@ -1,6 +1,6 @@
 {
-  "properties": {
-    "appConfig": {
+  "definitions": {
+    "AppConfig": {
       "properties": {
         "features": {
           "properties": {
@@ -55,7 +55,7 @@
       ],
       "type": "object"
     },
-    "cellDefaults": {
+    "CellDefaults": {
       "properties": {
         "counter": {
           "asCell": true,
@@ -77,7 +77,7 @@
       ],
       "type": "object"
     },
-    "complexDefault": {
+    "ComplexDefault": {
       "properties": {
         "config": {
           "default": {
@@ -124,7 +124,7 @@
       ],
       "type": "object"
     },
-    "listConfig": {
+    "ListConfig": {
       "properties": {
         "items": {
           "default": [
@@ -152,7 +152,7 @@
       ],
       "type": "object"
     },
-    "optionalDefaults": {
+    "OptionalWithDefaults": {
       "properties": {
         "nestedOptional": {
           "properties": {
@@ -176,7 +176,38 @@
       ],
       "type": "object"
     },
-    "userSettings": {
+    "SchemaRoot": {
+      "properties": {
+        "appConfig": {
+          "$ref": "#/definitions/AppConfig"
+        },
+        "cellDefaults": {
+          "$ref": "#/definitions/CellDefaults"
+        },
+        "complexDefault": {
+          "$ref": "#/definitions/ComplexDefault"
+        },
+        "listConfig": {
+          "$ref": "#/definitions/ListConfig"
+        },
+        "optionalDefaults": {
+          "$ref": "#/definitions/OptionalWithDefaults"
+        },
+        "userSettings": {
+          "$ref": "#/definitions/UserSettings"
+        }
+      },
+      "required": [
+        "appConfig",
+        "cellDefaults",
+        "complexDefault",
+        "listConfig",
+        "optionalDefaults",
+        "userSettings"
+      ],
+      "type": "object"
+    },
+    "UserSettings": {
       "properties": {
         "fontSize": {
           "default": 16,
@@ -197,6 +228,26 @@
         "theme"
       ],
       "type": "object"
+    }
+  },
+  "properties": {
+    "appConfig": {
+      "$ref": "#/definitions/AppConfig"
+    },
+    "cellDefaults": {
+      "$ref": "#/definitions/CellDefaults"
+    },
+    "complexDefault": {
+      "$ref": "#/definitions/ComplexDefault"
+    },
+    "listConfig": {
+      "$ref": "#/definitions/ListConfig"
+    },
+    "optionalDefaults": {
+      "$ref": "#/definitions/OptionalWithDefaults"
+    },
+    "userSettings": {
+      "$ref": "#/definitions/UserSettings"
     }
   },
   "required": [
