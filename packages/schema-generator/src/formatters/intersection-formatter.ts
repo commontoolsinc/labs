@@ -7,10 +7,7 @@ import type {
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getLogger } from "@commontools/utils/logger";
 
-const logger = getLogger("schema-generator.intersection", {
-  enabled: true,
-  level: "warn",
-});
+const logger = getLogger("schema-generator.intersection");
 
 export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -117,7 +114,11 @@ export class IntersectionFormatter implements TypeFormatter {
                   );
                 }
               }
-              // Prefer the first definition by default
+              // Prefer the first definition by default; emit debug for visibility
+              logger.debug(() =>
+                `Intersection kept first definition for '${key}'`
+              );
+              // Keep existing
               continue;
             }
             mergedProps[key] = value as SchemaDefinition;
