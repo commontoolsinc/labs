@@ -80,6 +80,7 @@
     "npm:@hono/sentry@^1.2.0": "1.2.2_hono@4.8.10",
     "npm:@hono/zod-openapi@~0.18.3": "0.18.4_hono@4.8.10_zod@3.25.76",
     "npm:@hono/zod-validator@~0.4.2": "0.4.3_hono@4.8.10_zod@3.25.76",
+    "npm:@jitl/quickjs-singlefile-mjs-debug-sync@*": "0.31.0",
     "npm:@lit/context@^1.1.5": "1.1.6",
     "npm:@lit/task@^1.0.2": "1.0.3",
     "npm:@noble/ed25519@^2.2.3": "2.3.0",
@@ -115,6 +116,7 @@
     "npm:pino-pretty@13": "13.0.0",
     "npm:pino@^9.6.0": "9.7.0",
     "npm:plaid@36": "36.0.0",
+    "npm:quickjs-emscripten-core@*": "0.31.0",
     "npm:react-dom@^18.3.1": "18.3.1_react@18.3.1",
     "npm:react@^18.3.1": "18.3.1",
     "npm:source-map-js@^1.2.1": "1.2.1",
@@ -822,6 +824,15 @@
       "dependencies": [
         "hono",
         "zod"
+      ]
+    },
+    "@jitl/quickjs-ffi-types@0.31.0": {
+      "integrity": "sha512-1yrgvXlmXH2oNj3eFTrkwacGJbmM0crwipA3ohCrjv52gBeDaD7PsTvFYinlAnqU8iPME3LGP437yk05a2oejw=="
+    },
+    "@jitl/quickjs-singlefile-mjs-debug-sync@0.31.0": {
+      "integrity": "sha512-z7umztXCfzbPPAN0loy1GJKgns2Jp4P4isGoEJaKR/+Hq6IsksXvsbZ8cUG8uFMzr0IxZ6MQBTGdxRVVJrLrsA==",
+      "dependencies": [
+        "@jitl/quickjs-ffi-types"
       ]
     },
     "@lezer/common@1.2.3": {
@@ -1827,6 +1838,12 @@
     "quick-format-unescaped@4.0.4": {
       "integrity": "sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg=="
     },
+    "quickjs-emscripten-core@0.31.0": {
+      "integrity": "sha512-oQz8p0SiKDBc1TC7ZBK2fr0GoSHZKA0jZIeXxsnCyCs4y32FStzCW4d1h6E1sE0uHDMbGITbk2zhNaytaoJwXQ==",
+      "dependencies": [
+        "@jitl/quickjs-ffi-types"
+      ]
+    },
     "react-dom@18.3.1_react@18.3.1": {
       "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
       "dependencies": [
@@ -2082,6 +2099,12 @@
         "dependencies": [
           "npm:source-map-js@^1.2.1",
           "npm:typescript@*"
+        ]
+      },
+      "packages/js-sandbox": {
+        "dependencies": [
+          "npm:@jitl/quickjs-singlefile-mjs-debug-sync@*",
+          "npm:quickjs-emscripten-core@*"
         ]
       },
       "packages/llm": {
