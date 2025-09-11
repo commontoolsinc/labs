@@ -83,8 +83,11 @@ const storeCharmInCell = lift(
 // possible.
 // we then call navigateTo() which will redirect the
 // browser to the newly created charm
-const createCounter = handler<unknown, { charm: any; cellRef: Cell<any> }>(
-  (_, { charm, cellRef }) => {
+const createCounter = handler<unknown, { cellRef: Cell<any> }>(
+  (_, { cellRef }) => {
+    // create the charm
+    const charm = SimpleRecipe({});
+    
     // store the charm ref in a cell
     storeCharmInCell({ charm, cellRef });
 
@@ -120,7 +123,7 @@ export default recipe("Launcher", () => {
           return innerCell[UI];
         })}</div>
         <ct-button
-          onClick={createCounter({ charm: SimpleRecipe({}), cellRef })}
+          onClick={createCounter({ cellRef })}
         >
           Create Sub Charm
         </ct-button>
