@@ -35,57 +35,6 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = recipe<
-  { expression: string; result: Cell<string> },
-  { result: Cell<string> }
->("Calculator", ({ expression }) => {
-  return derive(expression, (expr) => {
-    const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
-    const result = Function(`"use strict"; return (${sanitized})`)();
-    return result;
-  });
-});
-
-const calculator_old = handler<
-  { expression: string; result: Cell<string> },
-  { result: Cell<string> }
->(
-  (args, state) => {
-    try {
-      // Simple calculator - only allow basic operations for security
-      const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
-      const result = Function(`"use strict"; return (${sanitized})`)();
-      args.result.set(`${args.expression} = ${result}`);
-      state.result.set(`${args.expression} = ${result}`);
-    } catch (error) {
-      args.result.set(
-        `Error calculating ${args.expression}: ${
-          (error as any)?.message || "<error>"
-        }`,
-      );
-      state.result.set(
-        `Error calculating ${args.expression}: ${
-          (error as any)?.message || "<error>"
-        }`,
-      );
-    }
-  },
-);
-
-const addListItem = handler<
-  { item: string; result: Cell<string> },
-  { list: Cell<ListItem[]> }
->(
-  (args, state) => {
-    try {
-      state.list.push({ title: args.item });
-      args.result.set(`${state.list.get().length} items`);
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
 const sendMessage = handler<
   { detail: { message: string } },
   {
@@ -113,7 +62,67 @@ const clearChat = handler(
   },
 );
 
-const searchWeb = handler<
+/*** Tools ***/
+
+const calculator = recipe<
+  { expression: string; result: Cell<string> },
+  { result: Cell<string> }
+>("Calculator", ({ expression }) => {
+  return derive(expression, (expr) => {
+    const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
+    const result = Function(`"use strict"; return (${sanitized})`)();
+    return result;
+  });
+});
+
+const addListItem = handler<
+  { item: string; result: Cell<string> },
+  { list: Cell<ListItem[]> }
+>(
+  (args, state) => {
+    try {
+      state.list.push({ title: args.item });
+      args.result.set(`${state.list.get().length} items`);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
+type SearchWebResult = {
+  results: {
+    title: string;
+    url: string;
+    description: string;
+  }[];
+};
+
+const searchWeb = recipe<
+  { query: string },
+  SearchWebResult | { error: string }
+>("Search Web", ({ query }) => {
+  const { result, error } = fetchData<SearchWebResult>({
+    url: "/api/agent-tools/web-search",
+    mode: "json",
+    options: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        max_results: 5,
+      }),
+    },
+  });
+
+  // TODO(seefeld): Should we instead return { result, error }? Or allocate a
+  // special [ERROR] for errors? Ideally this isn't specific to using recipes as
+  // tools but a general pattern.
+  return ifElse(error, { error }, result);
+});
+
+const searchWeb_old = handler<
   { query: string; result: Cell<string> },
   { result: Cell<string> }
 >(
@@ -232,7 +241,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           },
           required: ["query"],
         } as JSONSchema,
-        handler: searchWeb({ result: searchWebResult }),
+        pattern: searchWeb,
       },
       read_webpage: {
         description: "Read and extract content from a specific webpage URL.",
