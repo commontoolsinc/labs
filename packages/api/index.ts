@@ -250,7 +250,7 @@ export type BuiltInLLMToolResultPart = {
   type: "tool-result";
   toolCallId: string;
   toolName: string;
-  output: any;
+  output: { type: 'text', value: string } | { type: 'json', value: any };
 };
 
 export type BuiltInLLMContentPart =
