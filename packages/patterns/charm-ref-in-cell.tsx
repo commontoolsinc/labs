@@ -58,7 +58,8 @@ const createCellRef = lift(
 // pass isInitialized to make sure we dont call this each time
 // we change cellRef, otherwise creates a loop
 // also, we need to only navigateTo if not initialized so that
-// we know we have the charm ready
+// the other lifts we created compete and try to
+// navigateTo at the same time.
 // note there is a separate isInitialized for each created charm
 const storeCharmAndNavigate = lift(
   {
