@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "name": {
+      "description": "Name doc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "description": "Root doc",
+  "type": "object"
+}

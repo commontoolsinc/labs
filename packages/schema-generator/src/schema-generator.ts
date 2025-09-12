@@ -17,6 +17,8 @@ import {
   safeGetIndexTypeOfType,
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
+import { extractDocFromSymbolAndDecls } from "./doc-utils.ts";
+import { isRecord } from "@commontools/utils/types";
 
 /**
  * Main schema generator that uses a chain of formatters
@@ -61,7 +63,10 @@ export class SchemaGenerator implements ISchemaGenerator {
     };
 
     // Generate the root schema
-    const rootSchema = this.formatType(type, context, true);
+    let rootSchema = this.formatType(type, context, true);
+
+    // Attach root-level description from JSDoc if available
+    rootSchema = this.attachRootDescription(rootSchema, type, context);
 
     // Build final schema with definitions if needed
     return this.buildFinalSchema(rootSchema, type, context, typeNode);
@@ -341,5 +346,46 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     if (checker) visit(type);
     return { types: cycles, names: cycleNames };
+  }
+
+  /**
+   * Attach a root-level description from JSDoc on the type symbol when
+   * available and when the root schema is an object that does not already have
+   * a description.
+   */
+  private attachRootDescription(
+    schema: SchemaDefinition,
+    type: ts.Type,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    if (typeof schema !== "object") return schema;
+
+    // Consider both alias symbol (for type aliases) and the underlying
+    // symbol (for interfaces/classes). Prefer alias doc when present; fall
+    // back to underlying.
+    const aliasSym = type.aliasSymbol;
+    const directSym = type.getSymbol?.() || (type as any).symbol;
+
+    const pickDoc = (sym?: ts.Symbol): string | undefined => {
+      if (!sym) return undefined;
+      const hasUserDecl = (sym.declarations ?? []).some((d) =>
+        !d.getSourceFile().isDeclarationFile
+      );
+      if (!hasUserDecl) return undefined;
+      const { text } = extractDocFromSymbolAndDecls(
+        sym,
+        context.typeChecker,
+      );
+      return text;
+    };
+
+    const aliasDoc = pickDoc(aliasSym);
+    const directDoc = pickDoc(directSym);
+    const chosen = aliasDoc ?? directDoc;
+
+    if (chosen && isRecord(schema) && !("description" in schema)) {
+      (schema as Record<string, unknown>).description = chosen;
+    }
+    return schema;
   }
 }

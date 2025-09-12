@@ -6,6 +6,14 @@ import type {
 } from "../interface.ts";
 import { safeGetPropertyType } from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
+import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
+
+const logger = getLogger("schema-generator.object", {
+  enabled: true,
+  level: "warn",
+});
 
 /**
  * Formatter for object types (interfaces, type literals, etc.)
@@ -15,11 +23,22 @@ export class ObjectFormatter implements TypeFormatter {
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Handle object types (interfaces, type literals, classes)
-    return (type.flags & ts.TypeFlags.Object) !== 0;
+    const flags = type.flags;
+    if ((flags & ts.TypeFlags.Object) !== 0) return true;
+    // Also claim the exact TypeScript `object` type via string check.
+    return context.typeChecker.typeToString(type) === "object";
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
+
+    // If this is the TS `object` type (unknown object shape), emit a permissive
+    // object schema instead of attempting to enumerate properties.
+    // This avoids false "no formatter" errors for unions containing `object`.
+    const typeName = checker.typeToString(type);
+    if (typeName === "object") {
+      return { type: "object", additionalProperties: true };
+    }
 
     // Special-case Date to a string with date-time format (match old behavior)
     if (type.symbol?.name === "Date" && type.symbol?.valueDeclaration) {
@@ -75,10 +94,73 @@ export class ObjectFormatter implements TypeFormatter {
         context,
         propTypeNode,
       );
+      // Attach property description from JSDoc (if any)
+      const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+      if (text && isRecord(generated)) {
+        const conflicts = all.filter((s) => s && s !== text);
+        (generated as Record<string, unknown>).description = text;
+        if (conflicts.length > 0) {
+          const comment = typeof generated.$comment === "string"
+            ? (generated.$comment as string)
+            : undefined;
+          (generated as Record<string, unknown>).$comment = comment
+            ? comment
+            : "Conflicting docs across declarations; using first";
+          // Warning only
+          logger.warn(() =>
+            `JSDoc conflict for property '${propName}'; using first doc`
+          );
+        }
+      }
       properties[propName] = generated;
     }
 
     const schema: SchemaDefinition = { type: "object", properties };
+
+    // Handle string/number index signatures → additionalProperties with description
+    const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
+    const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    const chosenIndex = stringIndex ?? numberIndex;
+    if (chosenIndex) {
+      const apSchema = this.schemaGenerator.formatChildType(
+        chosenIndex,
+        context,
+        undefined,
+      );
+      // Attempt to read JSDoc from index signature declarations
+      const sym = type.getSymbol?.();
+      const foundDocs: string[] = [];
+      if (sym) {
+        for (const decl of sym.declarations ?? []) {
+          if (ts.isInterfaceDeclaration(decl) || ts.isTypeLiteralNode(decl)) {
+            for (const member of decl.members) {
+              if (ts.isIndexSignatureDeclaration(member)) {
+                const docs = getDeclDocs(member);
+                for (const d of docs) {
+                  if (!foundDocs.includes(d)) foundDocs.push(d);
+                }
+              }
+            }
+          }
+        }
+      }
+      if (foundDocs.length > 0 && isRecord(apSchema)) {
+        (apSchema as Record<string, unknown>).description = foundDocs[0]!;
+        if (foundDocs.length > 1) {
+          const comment = typeof apSchema.$comment === "string"
+            ? (apSchema.$comment as string)
+            : undefined;
+          (apSchema as Record<string, unknown>).$comment = comment
+            ? comment
+            : "Conflicting docs for index signatures; using first";
+          logger.warn(() =>
+            "JSDoc conflict for index signatures; using first doc"
+          );
+        }
+      }
+      (schema as Record<string, unknown>).additionalProperties =
+        apSchema as SchemaDefinition;
+    }
     if (required.length > 0) schema.required = required;
 
     return schema;

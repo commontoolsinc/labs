@@ -1,0 +1,14 @@
+{
+  "description": "Summary line\n\nLonger details here.",
+  "properties": {
+    "value": {
+      "description": "A value",
+      "type": "number"
+    }
+  },
+  "required": [
+    "value"
+  ],
+  "type": "object"
+}
+

@@ -1,0 +1,19 @@
+{
+  "description": "Derived type",
+  "properties": {
+    "id": {
+      "description": "Base id",
+      "type": "string"
+    },
+    "name": {
+      "description": "Derived name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "type": "object"
+}
+

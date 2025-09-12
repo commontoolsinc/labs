@@ -5,6 +5,10 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
+
+const logger = getLogger("schema-generator.intersection");
 
 export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -88,14 +92,36 @@ export class IntersectionFormatter implements TypeFormatter {
         // Merge properties from this part
         if (schema.properties) {
           for (const [key, value] of Object.entries(schema.properties)) {
-            if (mergedProps[key] && mergedProps[key] !== value) {
-              // Property conflict - could improve this with more sophisticated merging
-              console.warn(
-                `Intersection property conflict for key '${key}' - using first definition`,
+            const existing = mergedProps[key];
+            if (existing) {
+              // If both are object schemas, check description conflicts
+              if (isRecord(existing) && isRecord(value)) {
+                const aDesc = typeof existing.description === "string"
+                  ? (existing.description as string)
+                  : undefined;
+                const bDesc = typeof value.description === "string"
+                  ? (value.description as string)
+                  : undefined;
+                if (aDesc && bDesc && aDesc !== bDesc) {
+                  const priorComment = typeof existing.$comment === "string"
+                    ? (existing.$comment as string)
+                    : undefined;
+                  (existing as Record<string, unknown>).$comment =
+                    priorComment ??
+                      "Conflicting docs across intersection constituents; using first";
+                  logger.warn(() =>
+                    `Intersection doc conflict for '${key}'; using first`
+                  );
+                }
+              }
+              // Prefer the first definition by default; emit debug for visibility
+              logger.debug(() =>
+                `Intersection kept first definition for '${key}'`
               );
-            } else {
-              mergedProps[key] = value;
+              // Keep existing
+              continue;
             }
+            mergedProps[key] = value as SchemaDefinition;
           }
         }
 

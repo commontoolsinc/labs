@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "flag": {
+      "description": "maybe flag",
+      "type": "boolean"
+    },
+    "label": {
+      "description": "maybe label",
+      "type": "string"
+    }
+  },
+  "required": [
+    "flag"
+  ],
+  "type": "object"
+}

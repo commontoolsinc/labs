@@ -1,0 +1,10 @@
+{
+  "additionalProperties": {
+    "$comment": "Conflicting docs for index signatures; using first",
+    "description": "Doc for string index",
+    "type": "number"
+  },
+  "properties": {},
+  "type": "object"
+}
+

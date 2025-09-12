@@ -1,0 +1,10 @@
+{
+  "additionalProperties": {
+    "description": "per-key count",
+    "type": "number"
+  },
+  "description": "Record of counts",
+  "properties": {},
+  "type": "object"
+}
+

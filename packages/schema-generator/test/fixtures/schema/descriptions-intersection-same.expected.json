@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "age": {
+      "description": "Age",
+      "type": "number"
+    },
+    "name": {
+      "description": "Name doc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "age"
+  ],
+  "type": "object"
+}
+

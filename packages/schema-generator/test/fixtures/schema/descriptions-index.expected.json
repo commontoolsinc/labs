@@ -1,0 +1,9 @@
+{
+  "additionalProperties": {
+    "description": "Description for arbitrary string keys",
+    "type": "number"
+  },
+  "properties": {},
+  "type": "object"
+}
+

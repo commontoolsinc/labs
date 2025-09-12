@@ -1,0 +1,28 @@
+{
+  "properties": {
+    "count": {
+      "asStream": true,
+      "description": "Count as stream",
+      "type": "number"
+    },
+    "level": {
+      "default": 3,
+      "description": "Level with default",
+      "type": "number"
+    },
+    "titles": {
+      "asCell": true,
+      "description": "Titles in a cell",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "titles",
+    "count",
+    "level"
+  ],
+  "type": "object"
+}

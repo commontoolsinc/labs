@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "tags": {
+      "description": "tags of the item",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tags"
+  ],
+  "type": "object"
+}
+

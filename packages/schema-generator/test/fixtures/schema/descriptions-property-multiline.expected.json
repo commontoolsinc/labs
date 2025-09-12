@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "doc": {
+      "description": "Summary line\n\nMore details with markdown:\n- item one\n- item two",
+      "type": "string"
+    }
+  },
+  "required": [
+    "doc"
+  ],
+  "type": "object"
+}
+
