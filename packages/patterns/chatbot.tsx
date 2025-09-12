@@ -48,6 +48,7 @@ const clearChat = handler(
 type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
+  theme?: any;
 };
 
 type ChatOutput = {
@@ -59,7 +60,7 @@ type ChatOutput = {
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools }) => {
+  ({ messages, tools, theme }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-0");
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
@@ -106,7 +107,7 @@ export default recipe<ChatInput, ChatOutput>(
           </ct-hstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <ct-chat $messages={messages} pending={pending} tools={tools} />
+            <ct-chat theme={theme} $messages={messages} pending={pending} tools={tools} />
           </ct-vscroll>
 
           <div slot="footer">
