@@ -18,7 +18,7 @@ import {
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { isVNode } from "@commontools/html";
-import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
+import { FileSystemProgramResolver } from "@commontools/js-runtime";
 
 export interface EntryConfig {
   mainPath: string;

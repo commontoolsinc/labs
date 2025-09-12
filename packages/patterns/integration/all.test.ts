@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
+import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { RuntimeProgram } from "@commontools/runner";
 
 const { API_URL, SPACE_NAME } = env;

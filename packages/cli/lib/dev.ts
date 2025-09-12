@@ -1,5 +1,5 @@
 import { type JsScript } from "@commontools/js-runtime";
-import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
+import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
 import { basename } from "@std/path";

@@ -19,5 +19,9 @@ export {
   UnsafeEvalJsValue,
   UnsafeEvalRuntime,
 } from "./runtime/mod.ts";
-export { InMemoryProgram } from "./program.ts";
+export {
+  FileSystemProgramResolver,
+  HttpProgramResolver,
+  InMemoryProgram,
+} from "./program.ts";
 export { getTypeScriptEnvironmentTypes } from "./utils.ts";
