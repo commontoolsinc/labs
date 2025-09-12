@@ -14,6 +14,7 @@ import type {
   BuiltInGenerateObjectParams,
   BuiltInLLMParams,
   BuiltInLLMState,
+  FetchOptions,
 } from "commontools";
 
 export const compileAndRun = createNodeFactory({
@@ -51,7 +52,7 @@ export const fetchData = createNodeFactory({
   params: Opaque<{
     url: string;
     mode?: "json" | "text";
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
   }>,
 ) => Opaque<{ pending: boolean; result: T; error: unknown }>;
@@ -62,7 +63,7 @@ export const streamData = createNodeFactory({
 }) as <T>(
   params: Opaque<{
     url: string;
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
   }>,
 ) => Opaque<{ pending: boolean; result: T; error: unknown }>;

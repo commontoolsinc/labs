@@ -14,6 +14,7 @@ import type {
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
+import { ID, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -65,8 +66,21 @@ const LLMToolSchema = {
       // Deliberately no schema, so it gets populated from the handler
       asStream: true,
     },
+    pattern: {
+      type: "object",
+      properties: {
+        argumentSchema: { type: "object" },
+        resultSchema: { type: "object" },
+        nodes: { type: "array", items: { type: "object" } },
+        program: { type: "object" },
+        initial: { type: "object" },
+        result: { type: "object" },
+      },
+      required: ["argumentSchema", "resultSchema", "nodes", "result"],
+      asCell: true,
+    },
   },
-  required: ["description", "handler"],
+  required: ["description"],
 } as const satisfies JSONSchema;
 
 const LLMParamsSchema = {
@@ -150,38 +164,45 @@ async function safelyPerformUpdate(
  * @param toolCall - The LLM tool call containing id, name, and arguments
  * @returns Promise that resolves to the tool execution result
  */
-async function invokeHandlerAsToolCall(
+async function invokeToolCall(
   runtime: IRuntime,
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>>,
   toolCall: LLMToolCall,
 ) {
-  const handlerTx = runtime.edit();
-  const result = runtime.getCell<any>(
-    space,
-    toolCall.id,
-    undefined,
-    handlerTx,
-  );
+  const pattern = toolDef.key("pattern").getRaw() as unknown as
+    | Readonly<Recipe>
+    | undefined;
+  const handler = toolDef.key("handler");
+  const result = runtime.getCell<any>(space, toolCall.id);
 
   const { resolve, promise } = Promise.withResolvers<any>();
 
-  const handlerCell = toolDef.key("handler");
-  handlerCell.withTx(handlerTx).send({
-    ...toolCall.input,
-    result,
-  } as any); // TODO(bf): why any needed?
+  runtime.editWithRetry((tx) => {
+    if (pattern) {
+      runtime.run(tx, pattern, toolCall.input, result);
+    } else if (handler) {
+      handler.withTx(tx).send({
+        ...toolCall.input,
+        result, // doesn't need tx, since it's just a link
+      } as any); // TODO(bf): why any needed?
+    } else {
+      throw new Error("Tool has neither pattern nor handler");
+    }
+  }).then((error) => error && resolve({ error })); // Return error if tx failed
 
   // wait until we know we have the result of the tool call
   // not just that the transaction has been comitted
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  handlerTx.commit();
   const resultValue = await promise;
   cancel();
 
-  return resultValue;
+  // If this was a pattern, stop it now that we have the result
+  if (pattern) runtime.runner.stop(result);
+
+  return { type: "json", value: resultValue };
 }
 
 /**
@@ -254,6 +275,7 @@ export function llmDialog(
         resultSchema,
         tx,
       );
+      result.sync(); // Kick off sync, no need to await
 
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
@@ -264,6 +286,7 @@ export function llmDialog(
         internalSchema,
         tx,
       );
+      internal.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
 
@@ -299,8 +322,15 @@ export function llmDialog(
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
           inputs.key("messages").withTx(tx).push(
-            // Cast is necessary because we can't yet express ArrayBuffer in JSON Schema
-            event as Schema<typeof LLMMessageSchema>,
+            {
+              ...event,
+              // Add ID manually, as for built-ins this isn't automated
+              // TODO(seefeld): Once we have event ids, it should be that.
+              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              // Cast because we can't yet express ArrayBuffer in JSON Schema
+            } as Schema<
+              typeof LLMMessageSchema
+            >,
           );
 
           // Set up new request (abort existing ones just in case) by allocating
@@ -319,6 +349,7 @@ export function llmDialog(
             tx,
             runtime,
             parentCell.space,
+            cause,
             inputs,
             pending,
             internal,
@@ -366,6 +397,7 @@ function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
+  cause: any,
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
@@ -380,16 +412,29 @@ function startRequest(
   // Just send the schemas for each handler to the server
   const toolsWithSchemas = Object.fromEntries(
     Object.entries(toolsCell.get() ?? {}).filter(([name, tool]) => {
-      if (!tool.inputSchema && !tool.handler.schema) {
+      const pattern = tool.pattern?.get();
+      const handler = tool.handler;
+      if (
+        !(
+          // providing a schema always works
+          tool.inputSchema ||
+          // otherwise if pattern is provided, it must have an argument schema
+          pattern?.argumentSchema ||
+          // otherwise if handler is provided and pattern is not, it must have a schema
+          (!pattern && handler?.schema)
+        )
+      ) {
         logger.error(`Tool ${name} has no schema`);
         return false;
       }
       return true;
     }).map(([name, tool]) => {
-      const { handler, description, inputSchema } = tool;
+      const { description, inputSchema } = tool;
+      const pattern = tool.pattern?.get();
+      const handler = tool.handler;
       return [name, {
         description,
-        inputSchema: inputSchema ?? handler.schema!,
+        inputSchema: inputSchema ?? pattern?.argumentSchema ?? handler?.schema!,
       }];
     }),
   );
@@ -460,14 +505,15 @@ function startRequest(
             const toolDef = toolsCell.key(toolCall.toolName);
 
             try {
-              const resultValue = await invokeHandlerAsToolCall(
+              const resultValue = await invokeToolCall(
                 runtime,
                 space,
                 toolDef,
                 toolCall,
               );
-              // this is probably a proxy, so it may still update in the conversation history reactively later
-              // but we intend this to be a static / snapshot at this stage
+              // this resolves back to a cell, so it may still update in the
+              // conversation history reactively later but we intend this to be
+              // a static / snapshot at this stage
               toolResults.push({
                 id: toolCall.toolCallId,
                 result: resultValue,
@@ -497,10 +543,16 @@ function startRequest(
                 toolName: matchingToolCall?.toolName || "unknown",
                 output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
-                  : { type: "text", value: toolResult.result },
+                  : toolResult.result,
               }],
             });
           }
+
+          newMessages.forEach((message) => {
+            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
+              llmDialog: { message: cause, id: crypto.randomUUID() },
+            };
+          });
 
           const success = await safelyPerformUpdate(
             runtime,
@@ -522,6 +574,7 @@ function startRequest(
               continueTx,
               runtime,
               space,
+              cause,
               inputs,
               pending,
               internal,
@@ -538,9 +591,10 @@ function startRequest(
       } else {
         // No tool calls, just add the assistant message
         const assistantMessage = {
+          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content: llmResult.content,
-        } as BuiltInLLMMessage;
+        } satisfies BuiltInLLMMessage & { [ID]: unknown };
 
         // Ignore errors here, it probably means something else took over.
         await safelyPerformUpdate(

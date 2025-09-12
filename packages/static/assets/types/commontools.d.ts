@@ -143,7 +143,13 @@ export type BuiltInLLMToolResultPart = {
     type: "tool-result";
     toolCallId: string;
     toolName: string;
-    output: any;
+    output: {
+        type: "text";
+        value: string;
+    } | {
+        type: "json";
+        value: any;
+    };
 };
 export type BuiltInLLMContentPart = BuiltInLLMTextPart | BuiltInLLMImagePart | BuiltInLLMToolCallPart | BuiltInLLMToolResultPart;
 export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
@@ -151,11 +157,14 @@ export type BuiltInLLMMessage = {
     role: "user" | "assistant" | "system" | "tool";
     content: BuiltInLLMContent;
 };
-export interface BuiltInLLMTool {
+export type BuiltInLLMTool = {
     description: string;
-    inputSchema: JSONSchema;
-    handler?: OpaqueRef<any> | Stream<any>;
-}
+    inputSchema?: JSONSchema;
+} & ({
+    handler: OpaqueRef<any> | Stream<any>;
+} | {
+    pattern: Recipe;
+});
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];
     model?: string;
@@ -174,8 +183,9 @@ export interface BuiltInLLMParams {
      */
     tools?: Record<string, {
         description: string;
-        inputSchema: JSONSchema;
-        handler: Stream<any> | OpaqueRef<any>;
+        inputSchema?: JSONSchema;
+        handler?: Stream<any> | OpaqueRef<any>;
+        pattern?: Recipe;
     }>;
 }
 export interface BuiltInLLMState<T> {
@@ -255,10 +265,17 @@ export type IfElseFunction = <T = any, U = any, V = any>(condition: Opaque<T>, i
 export type LLMFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
 export type LLMDialogFunction = (params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMDialogState>;
 export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMState<T>>;
+export type FetchOptions = {
+    body?: JSONValue;
+    headers?: Record<string, string>;
+    cache?: "default" | "no-store" | "reload" | "no-cache" | "force-cache" | "only-if-cached";
+    method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
+    redirect?: "follow" | "error" | "manual";
+};
 export type FetchDataFunction = <T>(params: Opaque<{
     url: string;
     mode?: "json" | "text";
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
 }>) => Opaque<{
     pending: boolean;
@@ -267,7 +284,7 @@ export type FetchDataFunction = <T>(params: Opaque<{
 }>;
 export type StreamDataFunction = <T>(params: Opaque<{
     url: string;
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
 }>) => Opaque<{
     pending: boolean;
