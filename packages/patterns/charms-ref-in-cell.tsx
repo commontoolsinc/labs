@@ -67,9 +67,7 @@ const addCharmAndNavigate = lift(
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
-        const oldArray = cellRef.get();
-        const newArray = [...oldArray, charm];
-        cellRef.set(newArray);
+        cellRef.push(charm);
         isInitialized.set(true);
         return navigateTo(charm);
       } else {
