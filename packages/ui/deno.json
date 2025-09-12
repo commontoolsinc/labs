@@ -22,6 +22,7 @@
     "@codemirror/lang-css": "npm:@codemirror/lang-css@^6.3.1",
     "@codemirror/lang-html": "npm:@codemirror/lang-html@^6.4.9",
     "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
-    "@codemirror/theme-one-dark": "npm:@codemirror/theme-one-dark@^6.1.2"
+    "@codemirror/theme-one-dark": "npm:@codemirror/theme-one-dark@^6.1.2",
+    "@codemirror/autocomplete": "npm:@codemirror/autocomplete@^6.15.0"
   }
 }
