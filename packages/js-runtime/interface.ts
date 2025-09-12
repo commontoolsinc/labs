@@ -48,7 +48,7 @@ export interface Compiler<T> {
 // A program's entry point with a resolver to
 // resolve other sources used in the program.
 export interface ProgramResolver {
-  main(): Source;
+  main(): Promise<Source>;
   resolveSource(identifier: string): Promise<Source | undefined>;
 }
 

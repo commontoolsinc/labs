@@ -18,7 +18,7 @@ export async function resolveProgram(
   { unresolvedModules, target, resolveUnresolvedModuleTypes }:
     ResolveModuleConfig,
 ): Promise<Program> {
-  const main = graph.main();
+  const main = await graph.main();
   const sources = new Map([[main.name, main]]);
   const toProcess = [main.name];
   const processed: string[] = [];
