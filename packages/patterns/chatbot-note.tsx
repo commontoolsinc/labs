@@ -57,7 +57,7 @@ export const Note = recipe<NoteInput>(
         <ct-code-editor
           $value={content}
           $mentionable={allCharms}
-          oncharm-link-click={handleCharmLinkClick({})}
+          onbacklink-click={handleCharmLinkClick({})}
           language="text/markdown"
           style="min-height: 400px;"
         />
