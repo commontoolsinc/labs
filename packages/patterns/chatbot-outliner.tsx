@@ -24,7 +24,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from './chatbot.tsx'
+import Chat from "./chatbot.tsx";
 
 type Charm = any;
 
@@ -173,7 +173,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             {ifElse(
               expandChat,
               chat,
-              null
+              null,
             )}
           </ct-autolayout>
         </ct-screen>

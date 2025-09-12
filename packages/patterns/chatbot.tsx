@@ -48,14 +48,14 @@ const clearChat = handler(
 type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
-}
+};
 
 type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
   cancelGeneration: Stream<void>;
-}
+};
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
@@ -89,19 +89,19 @@ export default recipe<ChatInput, ChatOutput>(
         <ct-screen>
           <ct-hstack justify="between" slot="header">
             <div>
-            <h2>Chat</h2>
+              <h2>Chat</h2>
             </div>
 
             <div>
-            <ct-button
-              id="clear-chat-button"
-              onClick={clearChat({
-                messages,
-                pending,
-              })}
-            >
-              Clear Chat
-            </ct-button>
+              <ct-button
+                id="clear-chat-button"
+                onClick={clearChat({
+                  messages,
+                  pending,
+                })}
+              >
+                Clear Chat
+              </ct-button>
             </div>
           </ct-hstack>
 
