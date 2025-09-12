@@ -10,7 +10,7 @@
   "exports": {
     ".": "./mod.ts",
     "./typescript": "./typescript/mod.ts",
-    "./cli": "./cli/mod.ts"
+    "./deno": "./deno.ts"
   },
   "fmt": {
     "exclude": ["test/fixtures/"]

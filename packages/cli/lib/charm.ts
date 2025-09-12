@@ -17,9 +17,8 @@ import {
 } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
-import { CliProgram } from "./dev.ts";
-import { ValidationError } from "@cliffy/command";
 import { isVNode } from "@commontools/html";
+import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
 
 export interface EntryConfig {
   mainPath: string;
@@ -129,7 +128,7 @@ async function getProgramFromFile(
 ): Promise<RuntimeProgram> {
   // Walk entry file and collect all sources from fs.
   const program: RuntimeProgram = await manager.runtime.harness.resolve(
-    new CliProgram(entry.mainPath),
+    new FileSystemProgramResolver(entry.mainPath),
   );
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
+import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -24,15 +25,13 @@ describe("counter direct operations test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
+    const sourcePath = join(import.meta.dirname!, "..", "counter.tsx");
+    const program = await cc.manager().runtime.harness
+      .resolve(
+        new FileSystemProgramResolver(sourcePath),
+      );
     charm = await cc.create(
-      await Deno.readTextFile(
-        join(
-          import.meta.dirname!,
-          "..",
-          "counter.tsx",
-        ),
-      ),
-      // We operate on the charm in this thread
+      program, // We operate on the charm in this thread
       { start: true },
     );
   });

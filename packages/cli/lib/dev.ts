@@ -1,11 +1,8 @@
-import {
-  type JsScript,
-  type ProgramResolver,
-  type Source,
-} from "@commontools/js-runtime";
+import { type JsScript } from "@commontools/js-runtime";
+import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
-import { basename, dirname, join } from "@std/path";
+import { basename } from "@std/path";
 
 async function createRuntime() {
   const { StorageManager } = await import(
@@ -15,39 +12,6 @@ async function createRuntime() {
     as: await Identity.fromPassphrase("builder"),
   });
   return new Runtime({ storageManager, blobbyServerUrl: import.meta.url });
-}
-
-// Extend `EngineProgramResolver` to add the necessary 3P module
-// types when needed, but otherwise lazily crawl the filesystem
-// while walking source files
-export class CliProgram implements ProgramResolver {
-  private fsRoot: string;
-  private _main: Source;
-  constructor(mainPath: string) {
-    this.fsRoot = dirname(mainPath);
-    this._main = {
-      name: mainPath.substring(this.fsRoot.length),
-      contents: Deno.readTextFileSync(mainPath),
-    };
-  }
-
-  main(): Source {
-    return this._main;
-  }
-
-  resolveSource(specifier: string): Promise<Source | undefined> {
-    if (specifier && specifier[0] === "/") {
-      const absPath = join(
-        this.fsRoot,
-        specifier.substring(1, specifier.length),
-      );
-      return Promise.resolve({
-        name: specifier,
-        contents: Deno.readTextFileSync(absPath),
-      });
-    }
-    return Promise.resolve(undefined);
-  }
 }
 
 export interface ProcessOptions {
@@ -68,7 +32,9 @@ export async function process(
     ? basename(options.output)
     : undefined;
   const engine = new Engine(await createRuntime());
-  const program = await engine.resolve(new CliProgram(options.main));
+  const program = await engine.resolve(
+    new FileSystemProgramResolver(options.main),
+  );
   const { output, main } = await engine.process(program, {
     noCheck: !options.check,
     noRun: !options.run,

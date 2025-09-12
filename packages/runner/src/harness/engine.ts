@@ -111,7 +111,7 @@ export class Engine extends EventTarget implements Harness {
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
-  async resolve(program: ProgramResolver): Promise<Program> {
+  async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
     const { compiler } = await this.getInternals();
     return await compiler.resolveProgram(program, {
       runtimeModules: Engine.runtimeModuleNames(),
