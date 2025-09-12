@@ -4,19 +4,19 @@ import {
   Cell,
   cell,
   Default,
-  navigateTo,
   derive,
   fetchData,
   getRecipeEnvironment,
-  ID,
   h,
   handler,
+  ID,
   ifElse,
   JSONSchema,
   lift,
   llm,
   llmDialog,
   NAME,
+  navigateTo,
   OpaqueRef,
   recipe,
   str,
@@ -64,7 +64,13 @@ export const Page = recipe<PageInput>(
   ({ outline, allCharms }) => {
     return {
       [NAME]: "Page",
-      [UI]: <ct-outliner $value={outline as any} $mentionable={allCharms} oncharm-link-click={handleCharmLinkClick({})} />,
+      [UI]: (
+        <ct-outliner
+          $value={outline as any}
+          $mentionable={allCharms}
+          oncharm-link-click={handleCharmLinkClick({})}
+        />
+      ),
       outline,
     };
   },
@@ -86,34 +92,22 @@ type LLMTestResult = {
 
 // put a node at the end of the outline (by appending to root.children)
 const appendOutlinerNode = handler<
-  { body: string; result: Cell<string> },
+  {
+    /** The text content/title of the outliner node to be appended */
+    body: string;
+    /** A cell to store the result message indicating success or error */
+    result: Cell<string>;
+  },
   { outline: Cell<Outliner> }
 >(
   (args, state) => {
     try {
-      // state.outline.key("root").key("children").set([
-      //   ...state.outline.key("root").key("children").get(),
-      //   {
-      //     [ID]: Math.random(), // really?
-      //     body: args.body,
-      //     children: [],
-      //     attachments: [],
-      //   } as OutlinerNode,
-      // ]);
-
       (state.outline.key("root").key("children")).push({
         body: args.body,
         children: [],
         attachments: [],
       });
 
-      // Error: Cannot add property 0, object is not extensible"
-      // readonly OutlinerNode[]
-      // (state.outline.key("root").key("children").get()).push({
-      //   body: args.body,
-      //   children: [],
-      //   attachments: [],
-      // });
       args.result.set(
         `${state.outline.key("root").key("children").get().length} nodes`,
       );
@@ -189,14 +183,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     const items = derive(result, (models) => {
       if (!models) return [];
-
-      console.log("[LLM] Models:", models);
       const items = Object.keys(models as any).map((key) => ({
         label: key,
         value: key,
       }));
-
-      console.log("[LLM] Items:", items);
       return items;
     });
 

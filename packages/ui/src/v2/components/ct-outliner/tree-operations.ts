@@ -518,7 +518,7 @@ export const TreeOperations = {
       ...parentChildren.slice(nodeIndex + 1),
     ];
     const newSiblingChildren = [...siblingChildren, nodeToMove];
-    
+
     parentChildrenCell.withTx(tx).set(newParentChildren);
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
     await tx.commit();
@@ -578,7 +578,7 @@ export const TreeOperations = {
       nodeToMove,
       ...grandParentChildren.slice(parentIndex + 1),
     ];
-    
+
     parentChildrenCell.withTx(tx).set(newParentChildren);
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
     await tx.commit();
