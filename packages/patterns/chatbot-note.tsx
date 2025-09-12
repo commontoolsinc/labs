@@ -24,7 +24,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from './chatbot.tsx'
+import Chat from "./chatbot.tsx";
 
 type Charm = any;
 
@@ -140,7 +140,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
         description: "Read the shared note.",
         inputSchema: {
           type: "object",
-          properties: { },
+          properties: {},
           required: [],
         } as JSONSchema,
         handler: readNote({ content }),
@@ -180,7 +180,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             {ifElse(
               expandChat,
               chat,
-              null
+              null,
             )}
           </ct-autolayout>
         </ct-screen>
