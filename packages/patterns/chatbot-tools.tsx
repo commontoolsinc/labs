@@ -113,10 +113,10 @@ const searchWeb = recipe<
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: {
         query,
         max_results: 5,
-      }),
+      },
     },
   });
 
@@ -148,11 +148,11 @@ const readWebpage = recipe<
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: {
         url,
         max_tokens: 4000,
         include_code: true,
-      }),
+      },
     },
   });
 

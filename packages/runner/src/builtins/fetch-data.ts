@@ -121,9 +121,16 @@ export function fetchData(
     const thisRun = ++currentRun;
     const abort = new AbortController();
 
+    const fetchOptions = { ...options };
+    if (
+      fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
+    ) {
+      fetchOptions.body = JSON.stringify(fetchOptions.body);
+    }
+
     fetch(new URL(url, getRecipeEnvironment().apiUrl), {
       signal: abort.signal,
-      ...options,
+      ...fetchOptions,
     })
       .then(processResponse)
       .then(async (data) => {
