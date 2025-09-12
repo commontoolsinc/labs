@@ -14,7 +14,7 @@ import type {
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import type { Recipe } from "../builder/types.ts";
+import { ID, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -275,6 +275,7 @@ export function llmDialog(
         resultSchema,
         tx,
       );
+      result.sync(); // Kick off sync, no need to await
 
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
@@ -285,6 +286,7 @@ export function llmDialog(
         internalSchema,
         tx,
       );
+      internal.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
 
@@ -320,8 +322,15 @@ export function llmDialog(
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
           inputs.key("messages").withTx(tx).push(
-            // Cast is necessary because we can't yet express ArrayBuffer in JSON Schema
-            event as Schema<typeof LLMMessageSchema>,
+            {
+              ...event,
+              // Add ID manually, as for built-ins this isn't automated
+              // TODO(seefeld): Once we have event ids, it should be that.
+              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              // Cast because we can't yet express ArrayBuffer in JSON Schema
+            } as Schema<
+              typeof LLMMessageSchema
+            >,
           );
 
           // Set up new request (abort existing ones just in case) by allocating
