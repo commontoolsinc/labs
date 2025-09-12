@@ -6,6 +6,7 @@ import {
   derive,
   h,
   handler,
+  ifElse,
   lift,
   NAME,
   navigateTo,
@@ -113,26 +114,25 @@ export default recipe("Charms Launcher", () => {
     [UI]: (
       <div>
         <h3>Stored Charms:</h3>
-        {derive(cellRef, (charmsArray) => {
-          if (!charmsArray || charmsArray.length === 0) {
-            return <div>No charms created yet</div>;
-          }
-
-          return (
-            <ul>
-              {charmsArray.map((charm: any, index: number) => (
-                <li>
-                  <ct-button
-                    onClick={goToCharm({ charm })}
-                  >
-                    Go to Charm {index + 1}
-                  </ct-button>
-                  <span>Charm {index + 1}: {charm[NAME] || "Unnamed"}</span>
-                </li>
-              ))}
-            </ul>
-          );
-        })}
+        {ifElse(
+          !cellRef?.length,
+          <div>No charms created yet</div>,
+          <ul>
+            {cellRef.map((charm: any, index: number) => (
+              <li>
+                <ct-button
+                  onClick={goToCharm({ charm })}
+                >
+                  Go to Charm {derive(index, (i) => i + 1)}
+                </ct-button>
+                <span>
+                  Charm {derive(index, (i) => i + 1)}:{" "}
+                  {charm[NAME] || "Unnamed"}
+                </span>
+              </li>
+            ))}
+          </ul>,
+        )}
 
         <ct-button
           onClick={createSimpleRecipe({ cellRef })}
