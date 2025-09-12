@@ -1099,7 +1099,7 @@ export class Replica {
       }
       if (
         result.error.name === "ConflictError" &&
-        result.error.conflict.existsInHistory
+        result.error.conflict.expected == null
       ) {
         logger.info(() => ["Transaction failed (aready exists)", result.error]);
       } else {
