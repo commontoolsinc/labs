@@ -176,6 +176,8 @@ async function invokeToolCall(
   const handler = toolDef.key("handler");
   const result = runtime.getCell<any>(space, toolCall.id);
 
+  const { resolve, promise } = Promise.withResolvers<any>();
+
   runtime.editWithRetry((tx) => {
     if (pattern) {
       runtime.run(tx, pattern, toolCall.input, result);
@@ -187,11 +189,10 @@ async function invokeToolCall(
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
-  });
+  }).then((error) => error && resolve({ error })); // Return error if tx failed
 
   // wait until we know we have the result of the tool call
   // not just that the transaction has been comitted
-  const { resolve, promise } = Promise.withResolvers<any>();
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
