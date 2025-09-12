@@ -20,51 +20,64 @@ import {
   UI,
 } from "commontools";
 
+import Chat from './chatbot.tsx'
+
 type ListItem = {
   title: string;
 };
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
-  chat: Default<Array<BuiltInLLMMessage>, []>;
+  messages: Default<Array<BuiltInLLMMessage>, []>;
   list: Default<Array<ListItem>, []>;
 };
 
 type LLMTestResult = {
-  chat: Default<Array<BuiltInLLMMessage>, []>;
+  messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const sendMessage = handler<
-  { detail: { message: string } },
-  {
-    addMessage: Stream<BuiltInLLMMessage>;
-  }
->((event, { addMessage }) => {
-  addMessage.send({
-    role: "user",
-    content: [{ type: "text", text: event.detail.message }],
-  });
-});
-
-const clearChat = handler(
-  (
-    _: never,
-    { chat, llmResponse }: {
-      chat: Cell<Array<BuiltInLLMMessage>>;
-      llmResponse: {
-        pending: Cell<boolean>;
-      };
-    },
-  ) => {
-    chat.set([]);
-    llmResponse.pending.set(false);
+const calculator = handler<
+  { expression: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
+  (args, state) => {
+    try {
+      // Simple calculator - only allow basic operations for security
+      const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
+      const result = Function(`"use strict"; return (${sanitized})`)();
+      args.result.set(`${args.expression} = ${result}`);
+      state.result.set(`${args.expression} = ${result}`);
+    } catch (error) {
+      args.result.set(
+        `Error calculating ${args.expression}: ${
+          (error as any)?.message || "<error>"
+        }`,
+      );
+      state.result.set(
+        `Error calculating ${args.expression}: ${
+          (error as any)?.message || "<error>"
+        }`,
+      );
+    }
   },
 );
 
-/*** Tools ***/
+const addListItem = handler<
+  { item: string; result: Cell<string> },
+  { list: Cell<ListItem[]> }
+>(
+  (args, state) => {
+    try {
+      state.list.push({ title: args.item });
+      args.result.set(`${state.list.get().length} items`);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
 
-const calculator = recipe<
-  { expression: string; result: Cell<string> },
+const searchWeb = handler<
+  { query: string; result: Cell<string> },
   { result: Cell<string> }
 >("Calculator", ({ expression }) => {
   return derive(expression, (expr) => {
@@ -161,8 +174,11 @@ const readWebpage = recipe<
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
-  ({ title, chat, list }) => {
-    const model = cell<string>("anthropic:claude-sonnet-4-0");
+  ({ title, messages, list }) => {
+    const calculatorResult = cell<string>("");
+    const searchWebResult = cell<string>("");
+    const readWebpageResult = cell<string>("");
+
     const tools = {
       search_web: {
         description: "Search the web for information.",
@@ -225,89 +241,15 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const { addMessage, cancelGeneration, pending } = llmDialog({
-      system: "You are a helpful assistant with some tools.",
-      messages: chat,
-      tools: tools,
-      model,
-    });
-
-    // Debug logging
-    // derive(chat, (c) => {
-    //   console.log("[CHAT] Messages:", c.length);
-    //   if (c.length > 0) {
-    //     const last = c[c.length - 1];
-    //     console.log(
-    //       "[CHAT] Last message:",
-    //       last.role,
-    //       typeof last.content === "string"
-    //         ? last.content.substring(0, 50) + "..."
-    //         : last.content,
-    //     );
-    //   }
-    // });
-
-    const { result } = fetchData({
-      url: "/api/ai/llm/models",
-      mode: "json",
-    });
-
-    const items = derive(result, (models) => {
-      if (!models) return [];
-
-      console.log("[LLM] Models:", models);
-      const items = Object.keys(models as any).map((key) => ({
-        label: key,
-        value: key,
-      }));
-
-      console.log("[LLM] Items:", items);
-      return items;
-    });
+    const chat = Chat({ messages, tools });
+    const { addMessage, cancelGeneration, pending } = chat;
 
     return {
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <ct-hstack justify="between" slot="header">
-            <ct-button
-              id="clear-chat-button"
-              onClick={clearChat({
-                chat,
-                llmResponse: { pending },
-              })}
-            >
-              Clear Chat
-            </ct-button>
-
-            <div>
-              <ct-select
-                items={items}
-                $value={model}
-              />
-            </div>
-          </ct-hstack>
-
           <ct-autolayout tabNames={["Chat", "Tools"]}>
-            <ct-screen>
-              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                <ct-chat $messages={chat} pending={pending} tools={tools} />
-              </ct-vscroll>
-
-              <div slot="footer">
-                {ifElse(
-                  pending,
-                  <ct-button onClick={cancelGeneration}>Cancel</ct-button>,
-                  <ct-message-input
-                    name="Ask"
-                    placeholder="Ask the LLM a question..."
-                    appearance="rounded"
-                    disabled={pending}
-                    onct-send={sendMessage({ addMessage })}
-                  />,
-                )}
-              </div>
-            </ct-screen>
+            {chat}
 
             <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
               <ct-vstack data-label="Tools">
@@ -320,7 +262,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </ct-autolayout>
         </ct-screen>
       ),
-      chat,
+      messages,
     };
   },
 );
