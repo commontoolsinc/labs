@@ -349,6 +349,7 @@ export function llmDialog(
             tx,
             runtime,
             parentCell.space,
+            cause,
             inputs,
             pending,
             internal,
@@ -396,6 +397,7 @@ function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
+  cause: any,
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
@@ -546,6 +548,12 @@ function startRequest(
             });
           }
 
+          newMessages.forEach((message) => {
+            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
+              llmDialog: { message: cause, id: crypto.randomUUID() },
+            };
+          });
+
           const success = await safelyPerformUpdate(
             runtime,
             pending,
@@ -566,6 +574,7 @@ function startRequest(
               continueTx,
               runtime,
               space,
+              cause,
               inputs,
               pending,
               internal,
@@ -582,9 +591,10 @@ function startRequest(
       } else {
         // No tool calls, just add the assistant message
         const assistantMessage = {
+          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content: llmResult.content,
-        } as BuiltInLLMMessage;
+        } satisfies BuiltInLLMMessage & { [ID]: unknown };
 
         // Ignore errors here, it probably means something else took over.
         await safelyPerformUpdate(
