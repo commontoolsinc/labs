@@ -2,7 +2,7 @@ import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import { basicSetup } from "codemirror";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
+import { EditorView, placeholder, keymap } from "@codemirror/view";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
@@ -11,19 +11,8 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import {
-  autocompletion,
-  Completion,
-  CompletionContext,
-  CompletionResult,
-} from "@codemirror/autocomplete";
-import {
-  Decoration,
-  DecorationSet,
-  ViewPlugin,
-  ViewUpdate,
-  WidgetType,
-} from "@codemirror/view";
+import { autocompletion, CompletionContext, CompletionResult, Completion } from "@codemirror/autocomplete";
+import { Decoration, DecorationSet, ViewPlugin, ViewUpdate, WidgetType } from "@codemirror/view";
 import { type Cell, getEntityId, NAME } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
@@ -147,29 +136,51 @@ export class CTCodeEditor extends BaseElement {
    */
   private createBacklinkCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
+      console.log("Completion source called, context:", context.pos, context.explicit);
+      
       // Look for incomplete backlinks: [[ followed by optional text
       const backlink = context.matchBefore(/\[\[([^\]]*)?/);
-
+      console.log("Backlink match:", backlink);
+      
       if (!backlink) {
+        // Also try a simpler pattern to debug
+        const simpleMatch = context.matchBefore(/\[\[/);
+        console.log("Simple [[ match:", simpleMatch);
         return null;
       }
-
+      
       // Check what comes after the cursor
-      const afterCursor = context.state.doc.sliceString(
-        context.pos,
-        context.pos + 2,
-      );
-
+      const afterCursor = context.state.doc.sliceString(context.pos, context.pos + 2);
+      console.log("After cursor:", afterCursor);
+      
       // Allow completion inside existing backlinks - we'll replace the content between [[ and ]]
       const query = backlink.text.slice(2); // Remove [[ prefix
-
+      
+      // Debug logging to see what's happening
+      console.log("Backlink completion triggered:", { query, mentionableExists: !!this.mentionable });
+      
       const mentionable = this.getFilteredMentionable(query);
+      console.log("Filtered mentionable items:", mentionable);
 
       if (mentionable.length === 0) return null;
 
-      const options: Completion[] = mentionable.map((charm) => {
+      // Determine the completion range and apply text based on whether ]] exists
+      let applyText: string;
+      let completionTo: number;
+      
+      if (afterCursor === "]]") {
+        // We're inside existing backlinks like [[llm|]], just replace the content
+        applyText = (text: string) => text;
+        completionTo = context.pos;
+      } else {
+        // We're in incomplete backlinks like [[llm, add the closing ]]
+        applyText = (text: string) => text + "]]";
+        completionTo = context.pos;
+      }
+
+      const options: Completion[] = mentionable.map(charm => {
         const charmIdObj = getEntityId(charm);
-        const charmId = charmIdObj?.["/"] || "";
+        const charmId = charmIdObj["/"] || "";
         const charmName = charm[NAME] || "";
         const insertText = `${charmName} (${charmId})`;
         return {
@@ -179,6 +190,8 @@ export class CTCodeEditor extends BaseElement {
           info: "Backlink to " + charmName,
         };
       });
+
+      console.log("Completion options:", options);
 
       return {
         from: backlink.from + 2, // Start after [[
@@ -193,26 +206,34 @@ export class CTCodeEditor extends BaseElement {
    * Get filtered mentionable items based on query
    */
   private getFilteredMentionable(query: string): Charm[] {
+    console.log("getFilteredMentionable called with query:", query);
+    
     if (!this.mentionable) {
+      console.log("No mentionable property");
       return [];
     }
 
     const mentionableData = this.mentionable.getAsQueryResult();
-
+    console.log("Mentionable data:", mentionableData);
+    
     if (!mentionableData || mentionableData.length === 0) {
+      console.log("No mentionable data or empty array");
       return [];
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Charm[] = [];
+    const matches = [];
 
+    // Filter mentionable items by name matching query
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = this.mentionable.key(i).getAsQueryResult();
+      console.log(`Mention ${i}:`, mention, "NAME:", mention?.[NAME]);
       if (mention && mention[NAME]?.toLowerCase()?.includes(queryLower)) {
         matches.push(mention);
       }
     }
 
+    console.log("Final matches:", matches);
     return matches;
   }
 
@@ -233,10 +254,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Handle backlink activation (Cmd/Ctrl+Click on a backlink)
    */
-  private handleBacklinkActivation(
-    view: EditorView,
-    event?: MouseEvent,
-  ): boolean {
+  private handleBacklinkActivation(view: EditorView, event?: MouseEvent): boolean {
     const state = view.state;
     const pos = state.selection.main.head;
     const doc = state.doc;
@@ -245,15 +263,15 @@ export class CTCodeEditor extends BaseElement {
     const lineStart = doc.lineAt(pos).from;
     const lineEnd = doc.lineAt(pos).to;
     const lineText = doc.sliceString(lineStart, lineEnd);
-
+    
     // Find all [[...]] patterns in the line
     const backlinkRegex = /\[\[([^\]]+)\]\]/g;
     let match;
-
+    
     while ((match = backlinkRegex.exec(lineText)) !== null) {
       const matchStart = lineStart + match.index;
       const matchEnd = matchStart + match[0].length;
-
+      
       // Check if cursor is within this backlink
       if (pos >= matchStart && pos <= matchEnd) {
         const backlinkText = match[1]; // This is "Name (id)" format
@@ -261,7 +279,7 @@ export class CTCodeEditor extends BaseElement {
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
         const backlinkId = idMatch ? idMatch[1] : backlinkText;
         const charm = this.findCharmById(backlinkId);
-
+        
         if (charm) {
           this.emit("backlink-click", {
             id: backlinkId,
@@ -272,7 +290,7 @@ export class CTCodeEditor extends BaseElement {
         }
       }
     }
-
+    
     return false;
   }
 
@@ -289,7 +307,7 @@ export class CTCodeEditor extends BaseElement {
       const charm = this.mentionable.key(i).getAsQueryResult();
       if (charm) {
         const charmIdObj = getEntityId(charm);
-        const charmId = charmIdObj?.["/"] || "";
+        const charmId = charmIdObj["/"] || "";
         if (charmId === id) {
           return charm;
         }
@@ -304,54 +322,51 @@ export class CTCodeEditor extends BaseElement {
    */
   private createBacklinkDecorationPlugin() {
     const backlinkMark = Decoration.mark({ class: "cm-backlink" });
-
-    return ViewPlugin.fromClass(
-      class {
-        decorations: DecorationSet;
-
-        constructor(view: EditorView) {
-          this.decorations = this.getBacklinkDecorations(view);
+    
+    return ViewPlugin.fromClass(class {
+      decorations: DecorationSet;
+      
+      constructor(view: EditorView) {
+        this.decorations = this.getBacklinkDecorations(view);
+      }
+      
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = this.getBacklinkDecorations(update.view);
         }
-
-        update(update: ViewUpdate) {
-          if (update.docChanged || update.viewportChanged) {
-            this.decorations = this.getBacklinkDecorations(update.view);
-          }
-        }
-
-        getBacklinkDecorations(view: EditorView) {
-          const decorations = [];
-          const doc = view.state.doc;
-          const backlinkRegex = /\[\[([^\]]+)\]\]/g;
-
-          for (const { from, to } of view.visibleRanges) {
-            for (let pos = from; pos <= to;) {
-              const line = doc.lineAt(pos);
-              const text = line.text;
-              let match;
-
-              backlinkRegex.lastIndex = 0; // Reset regex
-              while ((match = backlinkRegex.exec(text)) !== null) {
-                const start = line.from + match.index;
-                const end = start + match[0].length;
-
-                // Only decorate if within visible range
-                if (start >= from && end <= to) {
-                  decorations.push(backlinkMark.range(start, end));
-                }
+      }
+      
+      getBacklinkDecorations(view: EditorView) {
+        const decorations: any[] = [];
+        const doc = view.state.doc;
+        const backlinkRegex = /\[\[([^\]]+)\]\]/g;
+        
+        for (const { from, to } of view.visibleRanges) {
+          for (let pos = from; pos <= to;) {
+            const line = doc.lineAt(pos);
+            const text = line.text;
+            let match;
+            
+            backlinkRegex.lastIndex = 0; // Reset regex
+            while ((match = backlinkRegex.exec(text)) !== null) {
+              const start = line.from + match.index;
+              const end = start + match[0].length;
+              
+              // Only decorate if within visible range
+              if (start >= from && end <= to) {
+                decorations.push(backlinkMark.range(start, end));
               }
-
-              pos = line.to + 1;
             }
+            
+            pos = line.to + 1;
           }
-
-          return Decoration.set(decorations);
         }
-      },
-      {
-        decorations: (v) => v.decorations,
-      },
-    );
+        
+        return Decoration.set(decorations);
+      }
+    }, {
+      decorations: (v) => v.decorations,
+    });
   }
 
   private getValue(): string {
@@ -513,7 +528,8 @@ export class CTCodeEditor extends BaseElement {
       this.createBacklinkClickHandler(),
       // Add backlink decoration plugin to visually style [[backlinks]]
       this.createBacklinkDecorationPlugin(),
-      // Add autocompletion with backlink support
+      // Always add autocompletion with backlink support (handles case where mentionable is not set)
+      // Use activateOnTyping: false to disable default word completion and only show our completions
       autocompletion({
         override: [this.createBacklinkCompletionSource()],
         activateOnTyping: true,
