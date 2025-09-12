@@ -101,8 +101,8 @@ const BASE_SPACING = {
 export function resolveColorScheme(scheme: ColorScheme): "light" | "dark" {
   if (scheme === "auto") {
     // Check system preference
-    if (typeof window !== "undefined" && window.matchMedia) {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
+    if (typeof globalThis !== "undefined" && globalThis.matchMedia) {
+      return globalThis.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light";
     }
