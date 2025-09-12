@@ -1,9 +1,11 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
+import { consume } from "@lit/context";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
+import "../ct-button/ct-button.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
@@ -11,6 +13,11 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commontools/api";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  themeContext,
+} from "../theme-context.ts";
 
 /**
  * CTChatMessage - Chat message component with markdown support
@@ -41,6 +48,12 @@ export class CTChatMessage extends BaseElement {
         display: flex;
         flex-direction: column;
         width: 100%;
+        font-family: var(
+          --ct-theme-font-family,
+          system-ui,
+          -apple-system,
+          sans-serif
+        );
       }
 
       .message-wrapper {
@@ -58,14 +71,34 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message {
-        padding: var(--ct-spacing-3, 0.75rem) var(--ct-spacing-4, 1rem);
-        border-radius: var(--ct-border-radius-lg, 0.5rem);
+        padding: var(--ct-theme-padding-message, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
         word-wrap: break-word;
         position: relative;
         width: fit-content;
         max-width: 100%;
         animation: messageSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         transform-origin: bottom;
+      }
+
+      /* Role-specific message styling */
+      :host([role="user"]) .message {
+        background-color: var(
+          --ct-theme-color-accent,
+          var(--ct-color-blue-500, #3b82f6)
+        );
+        color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
+      }
+
+      :host([role="assistant"]) .message {
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-gray-100, #f3f4f6)
+        );
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       @keyframes messageSlideIn {
@@ -102,13 +135,12 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-user {
-        background-color: var(--ct-color-primary-500, #3b82f6);
-        color: var(--ct-color-primary-50, #eff6ff);
+        background-color: var(--ct-theme-color-primary, #3b82f6);
+        color: var(--ct-theme-color-primary-foreground, #ffffff);
       }
 
       .message-assistant {
-        padding: 0;
-        color: var(--ct-color-gray-900, #111827);
+        color: var(--ct-theme-color-text, #111827);
       }
 
       .message-content {
@@ -121,12 +153,12 @@ export class CTChatMessage extends BaseElement {
         width: 32px;
         height: 32px;
         flex-shrink: 0;
-        margin-right: var(--ct-spacing-2, 0.5rem);
+        margin-right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-avatar {
         margin-right: 0;
-        margin-left: var(--ct-spacing-2, 0.5rem);
+        margin-left: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
       }
 
       :host([role="user"]) .message-wrapper {
@@ -144,8 +176,8 @@ export class CTChatMessage extends BaseElement {
         width: 100%;
         height: 100%;
         border-radius: 50%;
-        background-color: var(--ct-color-primary-500, #3b82f6);
-        color: var(--ct-color-primary-50, #eff6ff);
+        background-color: var(--ct-theme-color-primary, #3b82f6);
+        color: var(--ct-theme-color-primary-foreground, #ffffff);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -173,10 +205,10 @@ export class CTChatMessage extends BaseElement {
 
       /* Tool attachments */
       .tool-attachments {
-        margin-top: var(--ct-spacing-2, 0.5rem);
+        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         display: flex;
         flex-direction: column;
-        gap: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         width: 100%;
         max-width: 500px;
       }
@@ -187,32 +219,24 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message-content p:not(:last-child) {
-        margin-bottom: var(--ct-spacing-2, 0.5rem);
+        margin-bottom: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
       }
 
       .message-content code {
-        background-color: rgba(0, 0, 0, 0.1);
-        padding: 0.125rem 0.25rem;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        font-family: var(
-          --ct-font-mono,
-          ui-monospace,
-          "Cascadia Code",
-          "Source Code Pro",
-          Menlo,
-          Consolas,
-          "DejaVu Sans Mono",
-          monospace
-        );
+        background-color: var(--ct-theme-color-surface, #f9fafb);
+        padding: var(--ct-theme-padding-code, var(--ct-spacing-1, 0.25rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        font-family: var(--ct-theme-mono-font-family, ui-monospace, monospace);
         font-size: 0.875em;
       }
 
       .message-content pre {
-        background-color: rgba(0, 0, 0, 0.1);
-        padding: var(--ct-spacing-3, 0.75rem);
-        border-radius: var(--ct-border-radius, 0.25rem);
+        background-color: var(--ct-theme-color-surface, #f9fafb);
+        padding: var(--ct-theme-padding-block, var(--ct-spacing-3, 0.75rem));
+        border-radius: var(--ct-theme-border-radius, 0.5rem);
+        border: 1px solid var(--ct-theme-color-border, #e5e7eb);
         overflow-x: auto;
-        margin: var(--ct-spacing-2, 0.5rem) 0;
+        margin: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem)) 0;
       }
 
       .message-content pre code {
@@ -222,75 +246,48 @@ export class CTChatMessage extends BaseElement {
 
       .message-content ul,
       .message-content ol {
-        margin: var(--ct-spacing-2, 0.5rem) 0;
-        padding-left: var(--ct-spacing-4, 1rem);
+        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
+        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
       }
 
       .message-content blockquote {
-        border-left: 4px solid rgba(0, 0, 0, 0.2);
-        margin: var(--ct-spacing-2, 0.5rem) 0;
-        padding-left: var(--ct-spacing-3, 0.75rem);
+        border-left: 4px solid var(--ct-theme-color-border, #e5e7eb);
+        margin: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem)) 0;
+        padding-left: var(--ct-theme-padding, var(--ct-spacing-3, 0.75rem));
         font-style: italic;
+        color: var(--ct-theme-color-text-muted, #6b7280);
       }
 
       /* Adjust colors for user messages */
-      .message-user .message-content code,
-      .message-user .message-content pre {
-        background-color: rgba(255, 255, 255, 0.2);
+      :host([role="user"]) .message-content code,
+      :host([role="user"]) .message-content pre {
+        background-color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
+        opacity: 0.2;
       }
 
-      .message-user .message-content blockquote {
-        border-left-color: rgba(255, 255, 255, 0.4);
+      :host([role="user"]) .message-content blockquote {
+        border-left-color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
+        opacity: 0.4;
       }
 
       /* Message actions */
       .message-actions {
         display: flex;
-        gap: var(--ct-spacing-1, 0.25rem);
-        margin-top: var(--ct-spacing-1, 0.25rem);
+        gap: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
+        margin-top: var(--ct-theme-spacing, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: opacity 0.2s ease;
+        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
       }
 
       .message-bubble:hover .message-actions {
         opacity: 1;
       }
-
-      .action-button {
-        background: transparent;
-        border: none;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        padding: var(--ct-spacing-1, 0.25rem);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background-color 0.2s ease;
-        color: inherit;
-        font-size: 0.75rem;
-        min-width: 24px;
-        min-height: 24px;
-
-        transition: transform 0.2s ease;
-      }
-
-      .action-button:hover {
-        transform: scale(1.05);
-      }
-
-      .action-button:active {
-        transform: scale(0.95);
-      }
-
-      .action-button.copied {
-        background: var(--ct-color-green-500, #10b981);
-        color: white;
-      }
-
-      /* User message action button styling */
-      .message-user .action-button {}
-
-      .message-user .action-button:hover {}
 
       /* Code block copy button styles */
       .code-block-container {
@@ -299,38 +296,15 @@ export class CTChatMessage extends BaseElement {
 
       .code-copy-button {
         position: absolute;
-        top: var(--ct-spacing-2, 0.5rem);
-        right: var(--ct-spacing-2, 0.5rem);
-        background: rgba(0, 0, 0, 0.1);
-        color: white;
-        border: none;
-        border-radius: var(--ct-border-radius, 0.25rem);
-        padding: var(--ct-spacing-1, 0.25rem) var(--ct-spacing-2, 0.33rem);
-        cursor: pointer;
-        font-size: 0.75rem;
+        top: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
+        right: var(--ct-theme-spacing-normal, var(--ct-spacing-2, 0.5rem));
         opacity: 0;
-        transition: opacity 0.2s ease, transform 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: var(--ct-spacing-1, 0.25rem);
+        transition: opacity var(--ct-theme-animation-duration, 0.2s) ease;
         z-index: 1;
       }
 
       .code-block-container:hover .code-copy-button {
         opacity: 1;
-      }
-
-      .code-copy-button:hover {
-        background: rgba(0, 0, 0, 0.2);
-        transform: scale(1.05);
-      }
-
-      .code-copy-button:active {
-        transform: scale(0.95);
-      }
-
-      .code-copy-button.copied {
-        background: var(--ct-color-green-600, #059669);
       }
     `,
   ];
@@ -349,6 +323,10 @@ export class CTChatMessage extends BaseElement {
 
   @property({ type: String })
   declare name?: string;
+
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
 
   @property({ type: Boolean })
   private _copied = false;
@@ -390,14 +368,16 @@ export class CTChatMessage extends BaseElement {
 
         return `<div class="code-block-container">
           <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <button
+          <ct-button
             class="code-copy-button"
+            variant="ghost"
+            size="sm"
             data-block-id="${blockId}"
             data-copy-content="${this._escapeForAttribute(decodedContent)}"
             title="Copy code"
           >
             📋
-          </button>
+          </ct-button>
         </div>`;
       },
     );
@@ -454,10 +434,9 @@ export class CTChatMessage extends BaseElement {
       // Update the button to show copied state
       const button = this.shadowRoot?.querySelector(
         `[data-block-id="${blockId}"]`,
-      ) as HTMLButtonElement;
+      ) as HTMLElement;
       if (button) {
         button.textContent = "✓";
-        button.classList.add("copied");
         button.title = "Copied!";
       }
 
@@ -466,7 +445,6 @@ export class CTChatMessage extends BaseElement {
         this._codeBlockCopiedStates.set(blockId, false);
         if (button) {
           button.textContent = "📋";
-          button.classList.remove("copied");
           button.title = "Copy code";
         }
       }, 2000);
@@ -556,26 +534,47 @@ export class CTChatMessage extends BaseElement {
       <div class="message-actions">
         ${this.role === "assistant"
           ? html`
-            <button
-              class="action-button ${this._copied ? "copied" : ""}"
+            <ct-button
+              variant="ghost"
+              size="sm"
               @click="${this._copyMessage}"
               title="${this._copied ? "Copied!" : "Copy message"}"
             >
               ${this._copied ? "✓" : "📋"}
-            </button>
+            </ct-button>
           `
           : null}
       </div>
     `;
   }
 
+  override firstUpdated(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
+    super.firstUpdated(changedProperties);
+    // Set initial theme properties if theme is available
+    if (this.theme) {
+      this._updateThemeProperties();
+    }
+  }
+
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
+
+    // Update CSS custom properties when theme changes
+    if (changedProperties.has("theme") && this.theme) {
+      this._updateThemeProperties();
+    }
 
     // Add event listeners to code copy buttons after render
     if (changedProperties.has("content")) {
       this._setupCodeCopyButtons();
     }
+  }
+
+  private _updateThemeProperties() {
+    if (!this.theme) return;
+    applyThemeToElement(this, this.theme);
   }
 
   private _setupCodeCopyButtons() {
@@ -584,7 +583,7 @@ export class CTChatMessage extends BaseElement {
       button.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const target = e.target as HTMLButtonElement;
+        const target = e.target as HTMLElement;
         const blockId = target.getAttribute("data-block-id");
         const content = target.getAttribute("data-copy-content");
         if (blockId && content) {
