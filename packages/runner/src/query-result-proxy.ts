@@ -93,9 +93,9 @@ export function createQueryResultProxy<T>(
   const txStatus = tx?.status();
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLink(readTx, link);
-  const target = readTx.readValueOrThrow(link) as any;
+  const value = readTx.readValueOrThrow(link) as any;
 
-  if (!isRecord(target)) return target;
+  if (!isRecord(value) || Object.isFrozen(value)) return value;
 
   // Get the appropriate cache index by log
   const cacheIndex = tx ?? defaultTx;
@@ -106,11 +106,18 @@ export function createQueryResultProxy<T>(
   }
 
   // Check if we already have a proxy for this target in the cache
-  const existingProxy = txCache?.get(target);
+  const existingProxy = txCache?.get(value);
   if (existingProxy) return existingProxy;
 
-  const proxy = new Proxy(target as object, {
-    get: (_, prop, receiver) => {
+  const proxy = new Proxy(value as object, {
+    get: (target, prop, receiver) => {
+      // When encountering a frozen property, we just return the value to
+      // maintain proxy invariants.
+      const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+      if (descriptor?.configurable === false) {
+        return Reflect.get(target, prop, receiver);
+      }
+
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return () => createCell(runtime, link, tx, true);
@@ -119,17 +126,17 @@ export function createQueryResultProxy<T>(
         }
 
         const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-        const current = readTx.readValueOrThrow(link) as typeof target;
+        const current = readTx.readValueOrThrow(link) as typeof value;
 
-        const value = Reflect.get(current, prop, current);
-        if (typeof value === "function") return value.bind(current);
-        else return value;
+        const returnValue = Reflect.get(current, prop, current);
+        if (typeof returnValue === "function") return returnValue.bind(current);
+        else return returnValue;
       }
 
       if (
-        Array.isArray(target) &&
+        Array.isArray(value) &&
         Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
-        typeof (target[prop as keyof typeof target]) === "function"
+        typeof (value[prop as keyof typeof value]) === "function"
       ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
         const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
@@ -177,9 +184,9 @@ export function createQueryResultProxy<T>(
             // Wraps values in a proxy that remembers the original index and
             // creates cell value proxies on demand.
             let copy: any;
-            if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
+            if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...value];
             else {
-              copy = target.map((_, index) =>
+              copy = value.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
                   tx,
@@ -201,10 +208,8 @@ export function createQueryResultProxy<T>(
 
             if (isReadWrite === ArrayMethodType.ReadWrite) {
               // Undo the proxy wrapping and assign original items.
-              copy = copy.map((value: any) =>
-                isProxyForArrayValue(value)
-                  ? target[value[originalIndex]]
-                  : value
+              copy = copy.map((item: any) =>
+                isProxyForArrayValue(item) ? value[item[originalIndex]] : item
               );
             }
 
@@ -218,7 +223,7 @@ export function createQueryResultProxy<T>(
             });
 
             // Update target from store
-            const newValue = tx.readValueOrThrow(link) as typeof target;
+            const newValue = tx.readValueOrThrow(link) as typeof value;
 
             if (!Array.isArray(newValue)) {
               throw new Error(
@@ -226,7 +231,7 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            target.splice(0, target.length, ...newValue);
+            value.splice(0, value.length, ...newValue);
 
             if (Array.isArray(result)) {
               const cause = {
@@ -282,7 +287,7 @@ export function createQueryResultProxy<T>(
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
-  txCache.set(target, proxy);
+  txCache.set(value, proxy);
   return proxy;
 }
 

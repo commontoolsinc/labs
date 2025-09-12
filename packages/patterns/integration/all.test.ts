@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
+import { FileSystemProgramResolver } from "@commontools/js-runtime/deno";
+import { RuntimeProgram } from "@commontools/runner";
 
 const { API_URL, SPACE_NAME } = env;
 
@@ -29,16 +31,12 @@ describe("Compile all recipes", () => {
     });
 
     it(`Executes: ${name}`, async () => {
-      const charm = await cc!.create(
-        await Deno.readTextFile(
-          join(
-            import.meta.dirname!,
-            "..",
-            name,
-          ),
-        ),
-        { start: false },
-      );
+      const sourcePath = join(import.meta.dirname!, "..", name);
+      const program = await cc.manager().runtime.harness
+        .resolve(
+          new FileSystemProgramResolver(sourcePath),
+        );
+      const charm = await cc!.create(program, { start: false });
       assert(charm.id, `Received charm ID ${charm.id} for ${name}.`);
     });
   }

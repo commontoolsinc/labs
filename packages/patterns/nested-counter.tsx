@@ -1,48 +1,9 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  derive,
-  h,
-  handler,
-  NAME,
-  Opaque,
-  OpaqueRef,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { Default, h, NAME, recipe, str, UI } from "commontools";
+import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {
   value: Default<number, 0>;
-}
-
-// In this case we do not have to type our event parameter because it is not used in the body.
-// By requesting a Cell<number> we get a mutable handle when our handler is invoked.
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
-  state.value.set(state.value.get() + 1);
-});
-
-// This can also be done with inline types + inference
-const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
-});
-
-function previous(value: number) {
-  return value - 1;
-}
-
-function nth(value: number) {
-  if (value === 1) {
-    return "1st";
-  }
-  if (value === 2) {
-    return "2nd";
-  }
-  if (value === 3) {
-    return "3rd";
-  }
-  return `${value}th`;
 }
 
 export const Counter = recipe<RecipeState>("Counter", (state) => {
