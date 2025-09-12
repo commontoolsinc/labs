@@ -470,11 +470,24 @@ export type GenerateObjectFunction = <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMState<T>>;
 
+export type FetchOptions = {
+  body?: JSONValue;
+  headers?: Record<string, string>;
+  cache?:
+    | "default"
+    | "no-store"
+    | "reload"
+    | "no-cache"
+    | "force-cache"
+    | "only-if-cached";
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
+  redirect?: "follow" | "error" | "manual";
+};
 export type FetchDataFunction = <T>(
   params: Opaque<{
     url: string;
     mode?: "json" | "text";
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
   }>,
 ) => Opaque<{ pending: boolean; result: T; error: any }>;
@@ -482,7 +495,7 @@ export type FetchDataFunction = <T>(
 export type StreamDataFunction = <T>(
   params: Opaque<{
     url: string;
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
   }>,
 ) => Opaque<{ pending: boolean; result: T; error: any }>;

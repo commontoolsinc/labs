@@ -265,10 +265,17 @@ export type IfElseFunction = <T = any, U = any, V = any>(condition: Opaque<T>, i
 export type LLMFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
 export type LLMDialogFunction = (params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMDialogState>;
 export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMState<T>>;
+export type FetchOptions = {
+    body?: JSONValue;
+    headers?: Record<string, string>;
+    cache?: "default" | "no-store" | "reload" | "no-cache" | "force-cache" | "only-if-cached";
+    method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD";
+    redirect?: "follow" | "error" | "manual";
+};
 export type FetchDataFunction = <T>(params: Opaque<{
     url: string;
     mode?: "json" | "text";
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
 }>) => Opaque<{
     pending: boolean;
@@ -277,7 +284,7 @@ export type FetchDataFunction = <T>(params: Opaque<{
 }>;
 export type StreamDataFunction = <T>(params: Opaque<{
     url: string;
-    options?: RequestInit;
+    options?: FetchOptions;
     result?: T;
 }>) => Opaque<{
     pending: boolean;
