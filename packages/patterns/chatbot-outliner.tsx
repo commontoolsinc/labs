@@ -24,6 +24,8 @@ import {
   UI,
 } from "commontools";
 
+import Chat from './chatbot.tsx'
+
 type Charm = any;
 
 type OutlinerNode = {
@@ -78,7 +80,8 @@ export const Page = recipe<PageInput>(
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
-  chat: Default<Array<BuiltInLLMMessage>, []>;
+  messages: Default<Array<BuiltInLLMMessage>, []>;
+  expandChat: Default<boolean, false>;
   outline: Default<
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
@@ -87,7 +90,7 @@ type LLMTestInput = {
 };
 
 type LLMTestResult = {
-  chat: Default<Array<BuiltInLLMMessage>, []>;
+  messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
 // put a node at the end of the outline (by appending to root.children)
@@ -132,47 +135,37 @@ const sendMessage = handler<
 const clearChat = handler(
   (
     _: never,
-    { chat, llmResponse }: {
-      chat: Cell<Array<BuiltInLLMMessage>>;
-      llmResponse: {
-        pending: Cell<boolean>;
-      };
+    { messages, pending }: {
+      messages: Cell<Array<BuiltInLLMMessage>>;
+      pending: Cell<boolean | undefined>;
     },
   ) => {
-    chat.set([]);
-    llmResponse.pending.set(false);
+    messages.set([]);
+    pending.set(false);
   },
 );
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "LLM Test",
-  ({ title, chat, outline, allCharms }) => {
-    const calculatorResult = cell<string>("");
-    const model = cell<string>("anthropic:claude-sonnet-4-0");
-    const searchWebResult = cell<string>("");
-    const readWebpageResult = cell<string>("");
+type ChatInput = {
+  messages: Default<Array<BuiltInLLMMessage>, []>;
+  tools: any;
+}
 
-    const tools = {
-      appendOutlinerNode: {
-        description: "Add a new outliner node.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            body: {
-              type: "string",
-              description: "The title of the new node.",
-            },
-          },
-          required: ["body"],
-        } as JSONSchema,
-        handler: appendOutlinerNode({ outline }),
-      },
-    };
+type ChatOutput = {
+  messages: Array<BuiltInLLMMessage>;
+  pending: boolean | undefined;
+  addMessage: Stream<BuiltInLLMMessage>;
+  cancelGeneration: Stream<void>;
+}
+
+export const Chat = recipe<ChatInput, ChatOutput>(
+  "Chat",
+  ({ messages, tools }) => {
+    const model = cell<string>("anthropic:claude-sonnet-4-0");
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
-      messages: chat,
-      tools: tools,
+      messages,
+      tools,
       model,
     });
 
@@ -191,53 +184,115 @@ export default recipe<LLMTestInput, LLMTestResult>(
     });
 
     return {
-      [NAME]: title,
+      [NAME]: "Chat",
       [UI]: (
         <ct-screen>
           <ct-hstack justify="between" slot="header">
+            <div>
+            <h2>Chat</h2>
+            </div>
+
+            <div>
             <ct-button
               id="clear-chat-button"
               onClick={clearChat({
-                chat,
-                llmResponse: { pending },
+                messages,
+                pending,
               })}
             >
               Clear Chat
             </ct-button>
+            </div>
+          </ct-hstack>
 
+          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+            <ct-chat $messages={messages} pending={pending} tools={tools} />
+          </ct-vscroll>
+
+          <div slot="footer">
+            <ct-prompt-input
+              placeholder="Ask the LLM a question..."
+              pending={pending}
+              onct-send={sendMessage({ addMessage })}
+              onct-stop={cancelGeneration}
+            />
+            <ct-select
+              items={items}
+              $value={model}
+            />
+          </div>
+        </ct-screen>
+      ),
+      messages,
+      pending,
+      addMessage,
+      cancelGeneration,
+    };
+  },
+);
+
+
+export default recipe<LLMTestInput, LLMTestResult>(
+  "LLM Test",
+  ({ title, expandChat, messages, outline, allCharms }) => {
+    const model = cell<string>("anthropic:claude-sonnet-4-0");
+
+    const tools = {
+      appendOutlinerNode: {
+        description: "Add a new outliner node.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            body: {
+              type: "string",
+              description: "The title of the new node.",
+            },
+          },
+          required: ["body"],
+        } as JSONSchema,
+        handler: appendOutlinerNode({ outline }),
+      },
+    };
+
+    const chat = Chat({ messages, tools });
+    const { addMessage, cancelGeneration, pending } = chat;
+
+    return {
+      [NAME]: title,
+      [UI]: (
+        <ct-screen>
+          <ct-hstack justify="between" slot="header">
+            <div></div>
             <div>
-              <ct-select
-                items={items}
-                $value={model}
-              />
+              <ct-checkbox $checked={expandChat}>Show Chat</ct-checkbox>
             </div>
           </ct-hstack>
 
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             <ct-screen>
-              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                <ct-chat $messages={chat} pending={pending} tools={tools} />
-              </ct-vscroll>
-
-              <div slot="footer">
-                <ct-prompt-input
-                  placeholder="Ask the LLM a question..."
-                  pending={pending}
-                  onct-send={sendMessage({ addMessage })}
-                  onct-stop={cancelGeneration}
+              <div slot="header">
+                <ct-input
+                  $value={title}
+                  placeholder="Enter title..."
                 />
               </div>
+
+              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+                <ct-vstack data-label="Tools">
+                  <Page outline={outline} allCharms={allCharms} />
+                </ct-vstack>
+              </ct-vscroll>
             </ct-screen>
 
-            <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-              <ct-vstack data-label="Tools">
-                <Page outline={outline} allCharms={allCharms} />
-              </ct-vstack>
-            </ct-vscroll>
+            {ifElse(
+              expandChat,
+              chat,
+              null
+            )}
           </ct-autolayout>
         </ct-screen>
       ),
-      chat,
+      messages,
     };
   },
 );
