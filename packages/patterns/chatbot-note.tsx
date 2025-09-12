@@ -28,25 +28,12 @@ import Chat from "./chatbot.tsx";
 
 type Charm = any;
 
-type OutlinerNode = {
-  body: Default<string, "">;
-  children: Default<OutlinerNode[], []>;
-  attachments: Default<OpaqueRef<any>[], []>;
+type NoteResult = {
+  content: Default<string, "">;
 };
 
-type Outliner = {
-  root: OutlinerNode;
-};
-
-type PageResult = {
-  outline: Default<
-    Outliner,
-    { root: { body: ""; children: []; attachments: [] } }
-  >;
-};
-
-export type PageInput = {
-  outline: Outliner;
+export type NoteInput = {
+  content: Default<string, "">;
   allCharms: Cell<Charm[]>;
 };
 
@@ -61,19 +48,21 @@ const handleCharmLinkClick = handler<
   return navigateTo(detail.charm);
 });
 
-export const Page = recipe<PageInput>(
-  "Page",
-  ({ outline, allCharms }) => {
+export const Note = recipe<NoteInput>(
+  "Note",
+  ({ content, allCharms }) => {
     return {
-      [NAME]: "Page",
+      [NAME]: "Note",
       [UI]: (
-        <ct-outliner
-          $value={outline as any}
+        <ct-code-editor
+          $value={content}
           $mentionable={allCharms}
           oncharm-link-click={handleCharmLinkClick({})}
+          language="text/markdown"
+          style="min-height: 400px;"
         />
       ),
-      outline,
+      content,
     };
   },
 );
@@ -82,10 +71,7 @@ type LLMTestInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
   expandChat: Default<boolean, false>;
-  outline: Default<
-    Outliner,
-    { root: { body: "Untitled Page"; children: []; attachments: [] } }
-  >;
+  content: Default<string, "">;
   allCharms: Cell<Charm[]>;
 };
 
@@ -93,26 +79,22 @@ type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-// put a node at the end of the outline (by appending to root.children)
-const appendOutlinerNode = handler<
+// put a note at the end of the outline (by appending to root.children)
+const editNote = handler<
   {
-    /** The text content/title of the outliner node to be appended */
+    /** The text content of the note */
     body: string;
     /** A cell to store the result message indicating success or error */
     result: Cell<string>;
   },
-  { outline: Cell<Outliner> }
+  { content: Cell<string> }
 >(
   (args, state) => {
     try {
-      (state.outline.key("root").key("children")).push({
-        body: args.body,
-        children: [],
-        attachments: [],
-      });
+      state.content.set(args.body);
 
       args.result.set(
-        `${state.outline.key("root").key("children").get().length} nodes`,
+        `Updated note!`,
       );
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
@@ -120,23 +102,48 @@ const appendOutlinerNode = handler<
   },
 );
 
+const readNote = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { content: string }
+>(
+  (args, state) => {
+    try {
+      args.result.set(state.content);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<LLMTestInput, LLMTestResult>(
-  "Outliner",
-  ({ title, expandChat, messages, outline, allCharms }) => {
+  "Note",
+  ({ title, expandChat, messages, content, allCharms }) => {
     const tools = {
-      appendOutlinerNode: {
-        description: "Add a new outliner node.",
+      editNote: {
+        description: "Modify the shared note.",
         inputSchema: {
           type: "object",
           properties: {
             body: {
               type: "string",
-              description: "The title of the new node.",
+              description: "The content of the note.",
             },
           },
           required: ["body"],
         } as JSONSchema,
-        handler: appendOutlinerNode({ outline }),
+        handler: editNote({ content }),
+      },
+      readNote: {
+        description: "Read the shared note.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        } as JSONSchema,
+        handler: readNote({ content }),
       },
     };
 
@@ -165,7 +172,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
               <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
                 <ct-vstack data-label="Tools">
-                  <Page outline={outline} allCharms={allCharms} />
+                  <Note content={content} allCharms={allCharms} />
                 </ct-vstack>
               </ct-vscroll>
             </ct-screen>
