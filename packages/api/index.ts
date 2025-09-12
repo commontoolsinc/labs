@@ -266,10 +266,12 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
-export type BuiltInLLMTool = {
-  description: string;
-  inputSchema?: JSONSchema;
-} & ({ handler: OpaqueRef<any> | Stream<any> } | { pattern: Recipe });
+export type BuiltInLLMTool =
+  & { description?: string; inputSchema?: JSONSchema }
+  & (
+    | { pattern: Recipe; handler?: never }
+    | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
+  );
 
 // Built-in types
 export interface BuiltInLLMParams {
@@ -288,12 +290,7 @@ export interface BuiltInLLMParams {
    * Tools that can be called by the LLM during generation.
    * Each tool has a description, input schema, and handler function that runs client-side.
    */
-  tools?: Record<string, {
-    description: string;
-    inputSchema?: JSONSchema;
-    handler?: Stream<any> | OpaqueRef<any>;
-    pattern?: Recipe;
-  }>;
+  tools?: Record<string, BuiltInLLMTool>;
 }
 
 export interface BuiltInLLMState<T> {

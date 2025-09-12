@@ -13,6 +13,7 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
+import { isRecord } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { ID, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
@@ -432,9 +433,16 @@ function startRequest(
       const { description, inputSchema } = tool;
       const pattern = tool.pattern?.get();
       const handler = tool.handler;
+      let schema: JSONSchema = pattern?.argumentSchema ?? handler?.schema!;
+
+      // This isn't ideal, but I don't think the LLM API supports boolean schemas
+      if (schema === true) schema = { type: "object" };
+      else if (schema === false) schema = {};
+
       return [name, {
-        description,
-        inputSchema: inputSchema ?? pattern?.argumentSchema ?? handler?.schema!,
+        description: description ?? schema.description ??
+          "",
+        inputSchema: inputSchema ?? schema,
       }];
     }),
   );
