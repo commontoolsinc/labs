@@ -506,23 +506,20 @@ export const TreeOperations = {
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex)
       .key("children") as Cell<Node[]>;
 
-    // Get the node to move before any modifications
+    // Get both current states before any modifications
     const parentChildren = parentChildrenCell.getAsQueryResult();
+    const siblingChildren = siblingChildrenCell.getAsQueryResult();
     const nodeToMove = parentChildren[nodeIndex];
 
-    // First transaction: Remove from parent
-    let tx = rootCell.runtime.edit();
+    // Single atomic transaction: Remove from parent and add to sibling
+    const tx = rootCell.runtime.edit();
     const newParentChildren = [
       ...parentChildren.slice(0, nodeIndex),
       ...parentChildren.slice(nodeIndex + 1),
     ];
-    parentChildrenCell.withTx(tx).set(newParentChildren);
-    await tx.commit();
-
-    // Second transaction: Add to sibling
-    tx = rootCell.runtime.edit();
-    const siblingChildren = siblingChildrenCell.getAsQueryResult();
     const newSiblingChildren = [...siblingChildren, nodeToMove];
+
+    parentChildrenCell.withTx(tx).set(newParentChildren);
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
     await tx.commit();
 
@@ -565,27 +562,24 @@ export const TreeOperations = {
       grandParentPath,
     );
 
-    // Get the node to move before any modifications
+    // Get both current states before any modifications
     const parentChildren = parentChildrenCell.getAsQueryResult();
+    const grandParentChildren = grandParentChildrenCell.getAsQueryResult();
     const nodeToMove = parentChildren[nodeIndex];
 
-    // First transaction: Remove from parent
-    let tx = rootCell.runtime.edit();
+    // Single atomic transaction: Remove from parent and add to grandparent
+    const tx = rootCell.runtime.edit();
     const newParentChildren = [
       ...parentChildren.slice(0, nodeIndex),
       ...parentChildren.slice(nodeIndex + 1),
     ];
-    parentChildrenCell.withTx(tx).set(newParentChildren);
-    await tx.commit();
-
-    // Second transaction: Add to grandparent
-    tx = rootCell.runtime.edit();
-    const grandParentChildren = grandParentChildrenCell.getAsQueryResult();
     const newGrandParentChildren = [
       ...grandParentChildren.slice(0, parentIndex + 1),
       nodeToMove,
       ...grandParentChildren.slice(parentIndex + 1),
     ];
+
+    parentChildrenCell.withTx(tx).set(newParentChildren);
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
     await tx.commit();
 

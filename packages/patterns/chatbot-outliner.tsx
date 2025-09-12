@@ -9,12 +9,14 @@ import {
   getRecipeEnvironment,
   h,
   handler,
+  ID,
   ifElse,
   JSONSchema,
   lift,
   llm,
   llmDialog,
   NAME,
+  navigateTo,
   OpaqueRef,
   recipe,
   str,
@@ -43,14 +45,32 @@ type PageResult = {
 
 export type PageInput = {
   outline: Outliner;
+  allCharms: Cell<Charm[]>;
 };
+
+const handleCharmLinkClick = handler<
+  {
+    detail: {
+      charm: Cell<Charm>;
+    };
+  },
+  Record<string, never>
+>(({ detail }, _) => {
+  return navigateTo(detail.charm);
+});
 
 export const Page = recipe<PageInput>(
   "Page",
-  ({ outline }) => {
+  ({ outline, allCharms }) => {
     return {
       [NAME]: "Page",
-      [UI]: <ct-outliner $value={outline as any} />,
+      [UI]: (
+        <ct-outliner
+          $value={outline as any}
+          $mentionable={allCharms}
+          oncharm-link-click={handleCharmLinkClick({})}
+        />
+      ),
       outline,
     };
   },
@@ -63,6 +83,7 @@ type LLMTestInput = {
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
   >;
+  allCharms: Cell<Charm[]>;
 };
 
 type LLMTestResult = {
@@ -71,19 +92,22 @@ type LLMTestResult = {
 
 // put a node at the end of the outline (by appending to root.children)
 const appendOutlinerNode = handler<
-  { body: string; result: Cell<string> },
+  {
+    /** The text content/title of the outliner node to be appended */
+    body: string;
+    /** A cell to store the result message indicating success or error */
+    result: Cell<string>;
+  },
   { outline: Cell<Outliner> }
 >(
   (args, state) => {
     try {
-      state.outline.key("root").key("children").set([
-        ...state.outline.key("root").key("children").get(),
-        {
-          body: args.body,
-          children: [],
-          attachments: [],
-        },
-      ]);
+      (state.outline.key("root").key("children")).push({
+        body: args.body,
+        children: [],
+        attachments: [],
+      });
+
       args.result.set(
         `${state.outline.key("root").key("children").get().length} nodes`,
       );
@@ -122,7 +146,7 @@ const clearChat = handler(
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
-  ({ title, chat, outline }) => {
+  ({ title, chat, outline, allCharms }) => {
     const calculatorResult = cell<string>("");
     const model = cell<string>("anthropic:claude-sonnet-4-0");
     const searchWebResult = cell<string>("");
@@ -152,21 +176,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
       model,
     });
 
-    // Debug logging
-    // derive(chat, (c) => {
-    //   console.log("[CHAT] Messages:", c.length);
-    //   if (c.length > 0) {
-    //     const last = c[c.length - 1];
-    //     console.log(
-    //       "[CHAT] Last message:",
-    //       last.role,
-    //       typeof last.content === "string"
-    //         ? last.content.substring(0, 50) + "..."
-    //         : last.content,
-    //     );
-    //   }
-    // });
-
     const { result } = fetchData({
       url: "/api/ai/llm/models",
       mode: "json",
@@ -174,14 +183,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     const items = derive(result, (models) => {
       if (!models) return [];
-
-      console.log("[LLM] Models:", models);
       const items = Object.keys(models as any).map((key) => ({
         label: key,
         value: key,
       }));
-
-      console.log("[LLM] Items:", items);
       return items;
     });
 
@@ -226,7 +231,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
             <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
               <ct-vstack data-label="Tools">
-                <Page outline={outline} />
+                <Page outline={outline} allCharms={allCharms} />
               </ct-vstack>
             </ct-vscroll>
           </ct-autolayout>
