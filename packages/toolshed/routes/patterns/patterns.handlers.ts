@@ -1,8 +1,8 @@
 import type { Context } from "@hono/hono";
-import { PatternsCache } from "./patterns-cache.ts";
+import { PatternsServer } from "./patterns-server.ts";
 
-// Create a single cache instance to be reused across requests
-const patternsCache = new PatternsCache();
+// Create a single server instance to be reused across requests
+const patternsServer = new PatternsServer();
 
 /**
  * Handler for serving pattern files from the patterns directory.
@@ -22,8 +22,8 @@ export const getPattern = async (
       );
     }
 
-    // Get the file content from cache
-    const content = await patternsCache.getText(filename);
+    // Get the file content from server
+    const content = await patternsServer.getText(filename);
 
     // Return with proper headers for TSX files
     return new Response(content, {
