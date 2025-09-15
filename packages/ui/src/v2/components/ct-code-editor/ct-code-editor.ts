@@ -147,20 +147,10 @@ export class CTCodeEditor extends BaseElement {
    */
   private createBacklinkCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
-      console.log(
-        "Completion source called, context:",
-        context.pos,
-        context.explicit,
-      );
-
       // Look for incomplete backlinks: [[ followed by optional text
       const backlink = context.matchBefore(/\[\[([^\]]*)?/);
-      console.log("Backlink match:", backlink);
 
       if (!backlink) {
-        // Also try a simpler pattern to debug
-        const simpleMatch = context.matchBefore(/\[\[/);
-        console.log("Simple [[ match:", simpleMatch);
         return null;
       }
 
@@ -169,35 +159,13 @@ export class CTCodeEditor extends BaseElement {
         context.pos,
         context.pos + 2,
       );
-      console.log("After cursor:", afterCursor);
 
       // Allow completion inside existing backlinks - we'll replace the content between [[ and ]]
       const query = backlink.text.slice(2); // Remove [[ prefix
 
-      // Debug logging to see what's happening
-      console.log("Backlink completion triggered:", {
-        query,
-        mentionableExists: !!this.mentionable,
-      });
-
       const mentionable = this.getFilteredMentionable(query);
-      console.log("Filtered mentionable items:", mentionable);
 
       if (mentionable.length === 0) return null;
-
-      // Determine the completion range and apply text based on whether ]] exists
-      let applyText: (text: string) => string;
-      let completionTo: number;
-
-      if (afterCursor === "]]") {
-        // We're inside existing backlinks like [[llm|]], just replace the content
-        applyText = (text: string) => text;
-        completionTo = context.pos;
-      } else {
-        // We're in incomplete backlinks like [[llm, add the closing ]]
-        applyText = (text: string) => text + "]]";
-        completionTo = context.pos;
-      }
 
       const options: Completion[] = mentionable.map((charm) => {
         const charmIdObj = getEntityId(charm);
@@ -212,8 +180,6 @@ export class CTCodeEditor extends BaseElement {
         };
       });
 
-      console.log("Completion options:", options);
-
       return {
         from: backlink.from + 2, // Start after [[
         to: afterCursor === "]]" ? context.pos : undefined,
@@ -227,34 +193,26 @@ export class CTCodeEditor extends BaseElement {
    * Get filtered mentionable items based on query
    */
   private getFilteredMentionable(query: string): Charm[] {
-    console.log("getFilteredMentionable called with query:", query);
-
     if (!this.mentionable) {
-      console.log("No mentionable property");
       return [];
     }
 
     const mentionableData = this.mentionable.getAsQueryResult();
-    console.log("Mentionable data:", mentionableData);
 
     if (!mentionableData || mentionableData.length === 0) {
-      console.log("No mentionable data or empty array");
       return [];
     }
 
     const queryLower = query.toLowerCase();
-    const matches = [];
+    const matches: Charm[] = [];
 
-    // Filter mentionable items by name matching query
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = this.mentionable.key(i).getAsQueryResult();
-      console.log(`Mention ${i}:`, mention, "NAME:", mention?.[NAME]);
       if (mention && mention[NAME]?.toLowerCase()?.includes(queryLower)) {
         matches.push(mention);
       }
     }
 
-    console.log("Final matches:", matches);
     return matches;
   }
 
@@ -362,7 +320,7 @@ export class CTCodeEditor extends BaseElement {
         }
 
         getBacklinkDecorations(view: EditorView) {
-          const decorations: any[] = [];
+          const decorations = [];
           const doc = view.state.doc;
           const backlinkRegex = /\[\[([^\]]+)\]\]/g;
 
@@ -555,8 +513,7 @@ export class CTCodeEditor extends BaseElement {
       this.createBacklinkClickHandler(),
       // Add backlink decoration plugin to visually style [[backlinks]]
       this.createBacklinkDecorationPlugin(),
-      // Always add autocompletion with backlink support (handles case where mentionable is not set)
-      // Use activateOnTyping: false to disable default word completion and only show our completions
+      // Add autocompletion with backlink support
       autocompletion({
         override: [this.createBacklinkCompletionSource()],
         activateOnTyping: true,
