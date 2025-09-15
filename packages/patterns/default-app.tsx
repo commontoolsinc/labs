@@ -15,6 +15,9 @@ import {
 // Import recipes we want to be launchable from the default app.
 import Chatbot from "./chatbot.tsx";
 import ChatbotTools from "./chatbot-tools.tsx";
+import ChatbotOutliner from "./chatbot-outliner.tsx";
+import ChatbotNote from "./chatbot-note.tsx";
+import Note from "./note.tsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -70,22 +73,55 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       [UI]: (
         <ct-screen>
           <ct-vstack gap="4" padding="6">
-            <h2>Charms ({allCharms.length})</h2>
+            {/* Quick Launch Toolbar */}
+            <ct-hstack gap="2" align="center">
+              <h3>Quicklaunch:</h3>
+              <ct-button
+                onClick={spawnPattern(Chatbot, {
+                  messages: [],
+                  tools: undefined
+                })({})}
+              >
+                💬 Chatbot
+              </ct-button>
+              <ct-button
+                onClick={spawnPattern(ChatbotTools, {
+                  title: "Chatbot Tools",
+                  chat: [],
+                  list: [],
+                })({})}
+              >
+                🔧 Chatbot Tools
+              </ct-button>
+              <ct-button
+                onClick={spawnPattern(ChatbotOutliner, {
+                  outline: {
+                    root: { body: "", children: [], attachments: [] }
+                  },
+                  allCharms
+                })({})}
+              >
+                📝 Chatbot Outliner
+              </ct-button>
+              <ct-button
+                onClick={spawnPattern(ChatbotNote, {
+                  title: "New Note",
+                  content: ""
+                })({})}
+              >
+                🤖 Chatbot Note
+              </ct-button>
+              <ct-button
+                onClick={spawnPattern(Note, {
+                  title: "New Note",
+                  content: ""
+                })({})}
+              >
+                📄 Note
+              </ct-button>
+            </ct-hstack>
 
-            <ct-button
-              onClick={spawnPattern(Chatbot, { title: "Chatbot", chat: [] })({})}
-            >
-              Launch Chatbot
-            </ct-button>
-            <ct-button
-              onClick={spawnPattern(ChatbotTools, {
-                title: "Chatbot Tools",
-                chat: [],
-                list: []
-              })({})}
-            >
-              Launch Chatbot Tools
-            </ct-button>
+            <h2>Charms ({allCharms.length})</h2>
 
             <ct-table full-width hover>
               <thead>
