@@ -72,6 +72,23 @@ const launchChatbot = handler<
   return navigateTo(charm);
 });
 
+const launchChatbotTools = handler<
+  {
+    detail: {
+      message: string;
+    };
+  },
+  {}
+>((e, state) => {
+  const charm = ChatbotTools({
+    title: "Chatbot Tools",
+    chat: [],
+    list: [],
+  });
+
+  return navigateTo(charm);
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   ({ allCharms }) => {
@@ -83,6 +100,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             <h2>Charms ({allCharms.length})</h2>
 
             <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
+            <ct-button onClick={launchChatbotTools({})}>
+              Launch Chatbot Tools
+            </ct-button>
 
             <ct-table full-width hover>
               <thead>
