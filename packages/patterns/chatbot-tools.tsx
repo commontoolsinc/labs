@@ -20,7 +20,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from "./chatbot.tsx";
+import Chat from './chatbot.tsx';
 
 type ListItem = {
   title: string;
@@ -36,48 +36,10 @@ type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<
+/*** Tools ***/
+
+const calculator = recipe<
   { expression: string; result: Cell<string> },
-  { result: Cell<string> }
->(
-  (args, state) => {
-    try {
-      // Simple calculator - only allow basic operations for security
-      const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
-      const result = Function(`"use strict"; return (${sanitized})`)();
-      args.result.set(`${args.expression} = ${result}`);
-      state.result.set(`${args.expression} = ${result}`);
-    } catch (error) {
-      args.result.set(
-        `Error calculating ${args.expression}: ${
-          (error as any)?.message || "<error>"
-        }`,
-      );
-      state.result.set(
-        `Error calculating ${args.expression}: ${
-          (error as any)?.message || "<error>"
-        }`,
-      );
-    }
-  },
-);
-
-const addListItem = handler<
-  { item: string; result: Cell<string> },
-  { list: Cell<ListItem[]> }
->(
-  (args, state) => {
-    try {
-      state.list.push({ title: args.item });
-      args.result.set(`${state.list.get().length} items`);
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
-const searchWeb = handler<
-  { query: string; result: Cell<string> },
   { result: Cell<string> }
 >("Calculator", ({ expression }) => {
   return derive(expression, (expr) => {
@@ -175,10 +137,7 @@ const readWebpage = recipe<
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, messages, list }) => {
-    const calculatorResult = cell<string>("");
-    const searchWebResult = cell<string>("");
-    const readWebpageResult = cell<string>("");
-
+    const model = cell<string>("anthropic:claude-sonnet-4-0");
     const tools = {
       search_web: {
         description: "Search the web for information.",
@@ -248,6 +207,13 @@ export default recipe<LLMTestInput, LLMTestResult>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
+          <ct-hstack justify="between" slot="header">
+            <ct-input
+              $value={title}
+              placeholder="Enter title..."
+            />
+          </ct-hstack>
+
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             {chat}
 
