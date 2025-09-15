@@ -676,9 +676,7 @@ export class Runner implements IRunner {
       this.discoverAndCacheFunctionsFromModule(node.module, seen);
 
       // Also check inputs for nested recipes (e.g., in map operations)
-      if (isRecord(node.inputs)) {
-        this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
-      }
+      this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
     }
   }
 
@@ -750,7 +748,7 @@ export class Runner implements IRunner {
       this.discoverAndCacheFunctions(value, seen);
     } else if (isModule(value)) {
       this.discoverAndCacheFunctionsFromModule(value, seen);
-    } else if (isRecord(value)) {
+    } else { // = isRecord(value)
       // Recursively search in objects and arrays
       if (Array.isArray(value)) {
         for (const item of value) {
