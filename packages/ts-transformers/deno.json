@@ -1,0 +1,32 @@
+{
+  "name": "@commontools/ts-transformers",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/mod.ts",
+    "./core/context": "./src/core/context.ts",
+    "./core/imports": "./src/core/imports.ts"
+  },
+  "imports": {
+    "typescript": "npm:typescript"
+  },
+  "tasks": {
+    "test": "deno test --allow-read --allow-env test/**/*.test.ts",
+    "check": "deno check src/**/*.ts",
+    "fmt": "deno fmt src/ test/",
+    "lint": "deno lint src/ test/"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true
+  }
+}
