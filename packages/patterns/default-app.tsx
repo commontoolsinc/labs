@@ -79,37 +79,44 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
         <ct-screen>
-          <ct-vstack gap="6" padding="4">
-            <ct-vgroup>
-              <h2>Charms ({allCharms.length})</h2>
-            </ct-vgroup>
+          <ct-vstack gap="4" padding="6">
+            <h2>Charms ({allCharms.length})</h2>
 
             <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
 
-            <ct-vstack gap="3">
-              {allCharms.map((charm: any) => (
-                <ct-card>
-                  <ct-hstack justify="between" align="center">
-                    <span>{charm[NAME] || "Untitled Charm"}</span>
-                    <ct-hstack gap="2">
-                      <ct-button
-                        size="sm"
-                        onClick={visit({ charm })}
-                      >
-                        Visit
-                      </ct-button>
-                      <ct-button
-                        size="sm"
-                        variant="destructive"
-                        onClick={removeCharm({ charm, allCharms })}
-                      >
-                        Remove
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-hstack>
-                </ct-card>
-              ))}
-            </ct-vstack>
+            <ct-table full-width hover>
+              <thead>
+                <tr>
+                  <th>Charm Name</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {derive(allCharms, (allCharms) =>
+                  allCharms.map((charm: any) => (
+                    <tr>
+                      <td>{charm[NAME] || "Untitled Charm"}</td>
+                      <td>
+                        <ct-hstack gap="2">
+                          <ct-button
+                            size="sm"
+                            onClick={visit({ charm })}
+                          >
+                            Visit
+                          </ct-button>
+                          <ct-button
+                            size="sm"
+                            variant="destructive"
+                            onClick={removeCharm({ charm, allCharms })}
+                          >
+                            Remove
+                          </ct-button>
+                        </ct-hstack>
+                      </td>
+                    </tr>
+                  )))}
+              </tbody>
+            </ct-table>
           </ct-vstack>
         </ct-screen>
       ),
