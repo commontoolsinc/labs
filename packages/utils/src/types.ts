@@ -37,6 +37,15 @@ export function isString(value: unknown): value is string {
 }
 
 /**
+ * Predicate for narrowing a `boolean` type.
+ * @param value - The value to check
+ * @returns True if the value is a boolean
+ */
+export function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+/**
  * Helper type to recursively remove `readonly` properties from type `T`.
  */
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]

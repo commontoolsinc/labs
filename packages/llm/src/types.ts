@@ -26,7 +26,6 @@ export type LLMContent = BuiltInLLMContent;
 export interface LLMTool {
   description: string;
   inputSchema: JSONSchema;
-  handler?: (args: any) => any | Promise<any>; // Client-side only
 }
 
 export interface LLMToolCall {
