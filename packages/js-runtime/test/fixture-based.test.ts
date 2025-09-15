@@ -1,90 +1,20 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { compareFixtureTransformation } from "./test-utils.ts";
 import { StaticCache } from "@commontools/static";
-import { walk } from "@std/fs/walk";
-import { basename, dirname, relative, resolve } from "@std/path";
+import { resolve } from "@std/path";
 
-// Helper to create a unified diff-like output
-function createUnifiedDiff(
-  expected: string,
-  actual: string,
-  context: number = 3,
-): string {
-  const expectedLines = expected.split("\n");
-  const actualLines = actual.split("\n");
-  const maxLines = Math.max(expectedLines.length, actualLines.length);
+import {
+  createUnifiedDiff,
+  defineFixtureSuite,
+} from "@commontools/test-support/fixture-runner";
+import { loadFixture, transformFixture } from "./test-utils.ts";
 
-  const diffRanges: Array<{ start: number; end: number }> = [];
-
-  // First, find all ranges with differences
-  for (let i = 0; i < maxLines; i++) {
-    const expectedLine = expectedLines[i] ?? "";
-    const actualLine = actualLines[i] ?? "";
-
-    if (expectedLine !== actualLine) {
-      // Find or extend a range
-      const lastRange = diffRanges[diffRanges.length - 1];
-      if (lastRange && i <= lastRange.end + context * 2) {
-        // Extend the existing range
-        lastRange.end = i;
-      } else {
-        // Start a new range
-        diffRanges.push({ start: i, end: i });
-      }
-    }
-  }
-
-  // Now create diff blocks with context
-  let diff = "";
-  for (const range of diffRanges) {
-    const blockStart = Math.max(0, range.start - context);
-    const blockEnd = Math.min(maxLines - 1, range.end + context);
-
-    const lines: string[] = [];
-
-    for (let i = blockStart; i <= blockEnd; i++) {
-      const expectedLine = expectedLines[i] ?? "";
-      const actualLine = actualLines[i] ?? "";
-
-      if (expectedLine === actualLine) {
-        lines.push(`  ${expectedLine}`);
-      } else {
-        if (i < expectedLines.length && expectedLine !== "") {
-          lines.push(`- ${expectedLine}`);
-        }
-        if (i < actualLines.length && actualLine !== "") {
-          lines.push(`+ ${actualLine}`);
-        }
-      }
-    }
-
-    // Create the hunk header
-    const expectedCount = lines.filter((l) => !l.startsWith("+")).length;
-    const actualCount = lines.filter((l) => !l.startsWith("-")).length;
-
-    diff += `@@ -${blockStart + 1},${expectedCount} +${
-      blockStart + 1
-    },${actualCount} @@\n`;
-    diff += lines.join("\n") + "\n\n";
-  }
-
-  return diff.trim();
-}
-
-// Configuration for each fixture directory
 interface FixtureConfig {
   directory: string;
   describe: string;
-  transformerOptions?: any;
-  // Map file patterns to test group names
-  groups?: Array<{
-    pattern: RegExp;
-    name: string;
-  }>;
-  // Custom test name formatter
+  transformerOptions?: Record<string, unknown>;
+  groups?: Array<{ pattern: RegExp; name: string }>;
   formatTestName?: (fileName: string) => string;
-  // Skip certain files
   skip?: string[];
 }
 
@@ -125,178 +55,82 @@ const configs: FixtureConfig[] = [
       if (name === "with-opaque-ref") return "works with OpaqueRef transformer";
       return `transforms ${formatted}`;
     },
-    skip: ["no-directive"], // no-directive needs special handling
+    skip: ["no-directive"],
   },
 ];
 
-// Collect all fixtures before generating tests
-async function collectFixtures(config: FixtureConfig) {
-  const inputFiles: string[] = [];
-
-  for await (
-    const entry of walk(`test/fixtures/${config.directory}`, {
-      exts: [".ts", ".tsx"],
-      match: [/\.input\.(ts|tsx)$/],
-    })
-  ) {
-    const relativePath = relative(
-      `test/fixtures/${config.directory}`,
-      entry.path,
-    );
-    const baseName = basename(
-      relativePath,
-      basename(relativePath).includes(".tsx") ? ".input.tsx" : ".input.ts",
-    );
-
-    if (config.skip?.includes(baseName)) continue;
-
-    inputFiles.push(baseName);
-  }
-
-  return inputFiles;
-}
-
-// Determine file extension
-async function getFileExtension(basePath: string): Promise<string> {
-  try {
-    await Deno.stat(`test/${basePath}.tsx`);
-    return ".tsx";
-  } catch {
-    return ".ts";
-  }
-}
-
-// Get type definitions once
 const staticCache = new StaticCache();
 const commontools = await staticCache.getText("types/commontools.d.ts");
+const FIXTURES_ROOT = "./test/fixtures";
 
-// Collect all fixtures first
-const configsWithFixtures = await Promise.all(
-  configs.map(async (config) => ({
-    ...config,
-    fixtures: await collectFixtures(config),
-  })),
-);
-
-// Generate tests for each configuration
-for (const config of configsWithFixtures) {
-  describe(config.describe, () => {
-    // Group fixtures by pattern if groups are defined
-    const fixtureGroups = new Map<string, string[]>();
-    const ungroupedFixtures: string[] = [];
-
-    // Sort files into groups
-    for (const fileName of config.fixtures) {
-      let grouped = false;
-
-      if (config.groups) {
-        for (const group of config.groups) {
-          if (group.pattern.test(fileName)) {
-            if (!fixtureGroups.has(group.name)) {
-              fixtureGroups.set(group.name, []);
-            }
-            fixtureGroups.get(group.name)!.push(fileName);
-            grouped = true;
-            break;
+for (const config of configs) {
+  defineFixtureSuite<string, string>({
+    suiteName: config.describe,
+    rootDir: `${FIXTURES_ROOT}/${config.directory}`,
+    expectedPath: ({ stem, extension }) => `${stem}.expected${extension}`,
+    skip: config.skip
+      ? (fixture) => config.skip!.includes(fixture.baseName)
+      : undefined,
+    groupBy: config.groups
+      ? (fixture) => {
+        for (const group of config.groups!) {
+          if (group.pattern.test(fixture.baseName)) {
+            return group.name;
           }
         }
+        return undefined;
       }
+      : undefined,
+    formatTestName: config.formatTestName
+      ? (fixture) => config.formatTestName!(fixture.baseName)
+      : undefined,
+    async execute(fixture) {
+      return await transformFixture(
+        `${config.directory}/${fixture.relativeInputPath}`,
+        {
+          types: { "commontools.d.ts": commontools },
+          ...config.transformerOptions,
+        },
+      );
+    },
+    async loadExpected(fixture) {
+      return await loadFixture(
+        `${config.directory}/${fixture.relativeExpectedPath}`,
+      );
+    },
+    compare(actual, expected, fixture) {
+      const actualTrimmed = actual.trim();
+      const expectedTrimmed = expected.trim();
+      if (actualTrimmed === expectedTrimmed) return;
 
-      if (!grouped) {
-        ungroupedFixtures.push(fileName);
-      }
-    }
-
-    // Generate tests for grouped fixtures
-    for (const [groupName, fixtures] of fixtureGroups) {
-      describe(groupName, () => {
-        for (const fixture of fixtures.sort()) {
-          const testName = config.formatTestName?.(fixture) || fixture;
-
-          it(testName, async () => {
-            const inputPath = `${config.directory}/${fixture}`;
-            const ext = await getFileExtension(`fixtures/${inputPath}.input`);
-
-            const result = await compareFixtureTransformation(
-              `${inputPath}.input${ext}`,
-              `${inputPath}.expected${ext}`,
-              {
-                types: { "commontools.d.ts": commontools },
-                ...config.transformerOptions,
-              },
-            );
-
-            if (!result.matches) {
-              // Create a detailed diff message
-              const unifiedDiff = createUnifiedDiff(
-                result.expected,
-                result.actual,
-              );
-
-              let diffMessage =
-                `\n\nTransformation output does not match expected for: ${testName}\n`;
-              diffMessage += `\nFiles:\n`;
-              diffMessage += `  Input:    ${
-                resolve(`test/fixtures/${inputPath}.input${ext}`)
-              }\n`;
-              diffMessage += `  Expected: ${
-                resolve(`test/fixtures/${inputPath}.expected${ext}`)
-              }\n`;
-              diffMessage += `\n${"=".repeat(80)}\n`;
-              diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
-              diffMessage += `${"=".repeat(80)}\n`;
-              diffMessage += unifiedDiff;
-              diffMessage += `\n${"=".repeat(80)}\n`;
-
-              // Throw an assertion error with our detailed message
-              throw new Error(diffMessage);
-            }
-          });
-        }
-      });
-    }
-
-    // Generate tests for ungrouped fixtures
-    for (const fixture of ungroupedFixtures.sort()) {
-      const testName = config.formatTestName?.(fixture) || fixture;
-
-      it(testName, async () => {
-        const inputPath = `${config.directory}/${fixture}`;
-        const ext = await getFileExtension(`fixtures/${inputPath}.input`);
-
-        const result = await compareFixtureTransformation(
-          `${inputPath}.input${ext}`,
-          `${inputPath}.expected${ext}`,
-          {
-            types: { "commontools.d.ts": commontools },
-            ...config.transformerOptions,
-          },
-        );
-
-        if (!result.matches) {
-          // Create a detailed diff message
-          const unifiedDiff = createUnifiedDiff(result.expected, result.actual);
-
-          let diffMessage =
-            `\n\nTransformation output does not match expected for: ${testName}\n`;
-          diffMessage += `\nFiles:\n`;
-          diffMessage += `  Input:    ${
-            resolve(`test/fixtures/${inputPath}.input${ext}`)
-          }\n`;
-          diffMessage += `  Expected: ${
-            resolve(`test/fixtures/${inputPath}.expected${ext}`)
-          }\n`;
-          diffMessage += `\n${"=".repeat(80)}\n`;
-          diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
-          diffMessage += `${"=".repeat(80)}\n`;
-          diffMessage += unifiedDiff;
-          diffMessage += `\n${"=".repeat(80)}\n`;
-
-          // Throw an assertion error with our detailed message
-          throw new Error(diffMessage);
-        }
-      });
-    }
+      const diff = createUnifiedDiff(expectedTrimmed, actualTrimmed);
+      let message =
+        `\n\nTransformation output does not match expected for: ${fixture.baseName}\n`;
+      message += `\nFiles:\n`;
+      message += `  Input:    ${
+        resolve(
+          `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeInputPath}`,
+        )
+      }\n`;
+      message += `  Expected: ${
+        resolve(
+          `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeExpectedPath}`,
+        )
+      }\n`;
+      message += `\n${"=".repeat(80)}\n`;
+      message += `UNIFIED DIFF (expected vs actual):\n`;
+      message += `${"=".repeat(80)}\n`;
+      message += diff;
+      message += `\n${"=".repeat(80)}\n`;
+      throw new Error(message);
+    },
+    updateGolden(actual, fixture) {
+      const normalized = `${actual.trim()}\n`;
+      return Deno.writeTextFile(
+        `${FIXTURES_ROOT}/${config.directory}/${fixture.relativeExpectedPath}`,
+        normalized,
+      );
+    },
   });
 }
 

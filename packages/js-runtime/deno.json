@@ -1,11 +1,13 @@
 {
   "name": "@commontools/js-runtime",
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS test/*.test.ts"
   },
   "imports": {
     "typescript": "npm:typescript",
-    "source-map-js": "npm:source-map-js@^1.2.1"
+    "source-map-js": "npm:source-map-js@^1.2.1",
+    "@commontools/test-support": "../test-support/src/mod.ts",
+    "@commontools/test-support/fixture-runner": "../test-support/src/fixture-runner.ts"
   },
   "exports": {
     ".": "./mod.ts",
