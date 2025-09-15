@@ -12,6 +12,8 @@
     "./packages/integration",
     "./packages/js-runtime",
     "./packages/js-sandbox",
+    "./packages/ts-transformers",
+    "./packages/test-support",
     "./packages/schema-generator",
     "./packages/llm",
     "./packages/memory",

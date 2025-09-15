@@ -1926,6 +1926,11 @@
           "npm:@lit/task@^1.0.2"
         ]
       },
+      "packages/test-support": {
+        "dependencies": [
+          "npm:typescript@*"
+        ]
+      },
       "packages/toolshed": {
         "dependencies": [
           "jsr:@cmd-johnson/oauth2-client@2",
@@ -1962,6 +1967,11 @@
           "npm:pino@^9.6.0",
           "npm:plaid@36",
           "npm:stoker@^1.4.2"
+        ]
+      },
+      "packages/ts-transformers": {
+        "dependencies": [
+          "npm:typescript@*"
         ]
       },
       "packages/ui": {
