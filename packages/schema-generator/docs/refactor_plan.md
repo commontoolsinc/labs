@@ -9,11 +9,13 @@ AST transformers.
 ## Goals
 
 - Single source of truth for JSON Schema generation logic.
-- Clear separation between compile‑time AST transforms and schema generation.
-- Migrate schema‑related tests from `js-runtime` into
+- Clear separation between compile-time AST transforms and schema generation.
+- Migrate schema-related tests from `js-runtime` into
   `@commontools/schema-generator` for parity and focus.
 - Introduce a dedicated package for AST transformers and move transformer tests
   there.
+- Rebuild the OpaqueRef transformer on a modular architecture that reaches
+  parity first and unlocks closures support next.
 - Keep `js-runtime` focused on runtime/integration tests.
 
 ## Current State (observations)
@@ -26,15 +28,16 @@ AST transformers.
   engine, but other AST transformers still live under `js-runtime`.
 - Many js-runtime tests are integration/E2E; several are purely about schema
   shape and should move.
-- We added alias‑aware array detection to support nested aliases like
+- We added alias-aware array detection to support nested aliases like
   `Cell<DataArray>` in minimal compiler hosts.
-- Running `deno task test` in `schema-generator` is configured. For now, tests
-  run with `--no-check` due to `@commontools/api` generic constraints; a
-  `test:check` task exists to re‑enable strict type‑checking once the API
-  generics align with the generator’s output.
-  - Wrapper semantics are centralized in `CommonToolsFormatter`; arrays are
-    handled by `ArrayFormatter` and a small helper in the Common Tools
-    formatter. `ObjectFormatter` is intentionally thin and delegates.
+- `deno task test` in `schema-generator` now type-checks the suite; the
+  optional `test:check` task remains for symmetry with automation scripts.
+  Wrapper semantics are centralized in `CommonToolsFormatter`; arrays are
+  handled by `ArrayFormatter` and a helper inside the Common Tools formatter.
+  `ObjectFormatter` is intentionally thin and delegates.
+- The OpaqueRef transformer still lives in `js-runtime`, uses a monolithic
+  visitor, and misses cases like unary `!` and `map` callbacks with manually
+  typed parameters—highlighted by `ct-891`.
 
 ## Target Architecture
 
@@ -63,19 +66,18 @@ AST transformers.
 Move tests based on what they validate:
 
 - Move to `schema-generator` (pure schema output):
-  - arrays‑optional
-  - cell‑array‑types
-  - cell‑type
-  - default‑type
-  - complex‑defaults (value extraction, nullability)
-  - nested‑wrappers
-  - type‑aliases
-  - shared‑type
-  - recursive‑type
-  - recursive‑type‑nested
-  - multi‑hop‑circular
-  - mutually‑recursive
-  - type‑to‑schema (assert schema shape, not AST code transformation)
+  - arrays-optional
+  - array-special-types
+  - boolean-literals
+  - cell-type
+  - circular-alias-error
+  - complex-defaults (value extraction, nullability)
+  - default-type
+  - defaults-no-def-mutation
+  - nested-wrappers
+  - recursion-variants (covers multi-hop and mutual recursion cases)
+  - type-aliases-and-shared
+  - type-to-schema (assert schema shape, not AST code transformation)
 
 Testing model in schema‑generator:
 
@@ -115,21 +117,22 @@ Deliverables:
        comparisons (strip `$schema`, order `definitions`, optional `$ref`
        normalization if needed).
 
-2. Focused test suites (proposed structure)
-   - `packages/schema-generator/test/schema/cell-types.test.ts`
-     - `Cell<T>`, `Cell<Array<T>>`, `Stream<T>`, `Stream<Cell<T>>`,
-       `Default<T,V>`, `Cell<Default<T,V>>`
-   - `packages/schema-generator/test/schema/arrays-and-aliases.test.ts`
-     - `T[]`, `Array<T>`, alias types, nested generics
-   - `packages/schema-generator/test/schema/recursion-and-cycles.test.ts`
-     - recursive‑type, recursive‑type‑nested, multi‑hop‑circular,
-       mutually‑recursive (assert `$ref` + `definitions`)
-   - `packages/schema-generator/test/schema/type-aliases-and-shared.test.ts`
-     - alias re‑use across properties, shared types
-   - `packages/schema-generator/test/schema/complex-defaults.test.ts`
-     - defaults from `Default<T,V>`, `T|null`, tuples/objects where applicable
-   - `packages/schema-generator/test/schema/type-to-schema.test.ts`
-     - direct generator output equivalence vs expected structure
+2. Focused test suites (landed structure)
+   - `test/schema/cell-type.test.ts`
+     - `Cell<T>`, nested cells, streams, defaults-as-cell wrappers
+   - `test/schema/array-special-types.test.ts` and `arrays-optional.test.ts`
+     - `any[]`/`never[]` handling, optional arrays, alias coverage
+   - `test/schema/recursion-variants.test.ts`
+     - recursive, mutually-recursive, and multi-hop `$ref` scenarios
+   - `test/schema/type-aliases-and-shared.test.ts`
+     - alias reuse across properties and shared definitions
+   - `test/schema/complex-defaults.test.ts`
+     - `Default<T,V>` extraction, tuple/object defaults, nullability
+   - `test/schema/default-type.test.ts`, `boolean-literals.test.ts`,
+     `defaults-no-def-mutation.test.ts`
+     - primitive wrappers, literal unions, and mutation guards
+   - `test/schema/type-to-schema.test.ts`
+     - generator output equivalence vs expected JSON Schema structure
 
 3. Assertions
    - Prefer structural equality on normalized objects.
@@ -138,60 +141,93 @@ Deliverables:
      existence of expected definition names, and core sub‑shapes.
 
 4. Tasks
-   - Keep `deno task test` running with `--no-check` until API generics align.
-   - Provide and maintain `deno task test:check` to run with type checking; run
-     this in CI (non‑blocking) until generics are aligned, then flip the default
-     task to type‑checked.
+   - `deno task test` already type-checks; keep the optional `test:check` task
+     wired for tooling parity until CI scripts converge on a single entrypoint.
 
 5. De‑duplicate
    - After parity is achieved in `schema-generator`, remove redundant generator
      tests from `js-runtime` (keep only integration/E2E there until Phase 3 is
      complete).
 
-## Phase 2 — New Transformers Package
+## Phase 2 — Transformer Package & OpaqueRef Parity
 
-Create `packages/ts-transformers` with:
+Scope: stand up a dedicated transformers package, port existing utilities, and
+land a modular rewrite of the OpaqueRef transformer that reaches functional
+parity (including fixes for gaps such as unary `!` and `map` callback
+parameters typed as `any`/`number`).
 
-- `deno.json` with a `test` task, exports, and minimal imports.
-- `src/` contents migrated from `packages/js-runtime/typescript/transformer/`:
-  - `schema.ts`
-  - `opaque-ref.ts`
-  - `imports.ts`, `transforms.ts`, `logging.ts`, `types.ts`, `utils.ts`,
-    `debug.ts`
-- Public API:
-  - `createSchemaTransformer(program: ts.Program, options?: {...})`
-  - `createOpaqueRefTransformer(...)`
-  - Optional: a small helper to compose/apply transformers in tests.
+Deliverables:
 
-Testing in the new package:
+1. Package scaffolding
+   - Create `packages/ts-transformers` with `deno.json`, exports, lint/test
+     tasks, and a README documenting the public surface.
+   - Mirror the dependency footprint currently required by the transformer
+     files (`typescript`, `@commontools/utils`, etc.).
 
-- Recreate fixture‑based tests under `packages/ts-transformers/test/`:
-  - `fixture-based.test.ts` (AST Transformation)
-  - `schema-transformer.test.ts` (Schema Transformer, compile‑time injection)
-  - `jsx-expression-transformer.test.ts`
-  - `handler-schema-transformer.test.ts`
-  - `compiler-directive.test.ts` (cts‑enable)
-- Copy fixture files from `js-runtime/test/fixtures/schema-transform/` to
-  `packages/ts-transformers/test/fixtures/schema-transform/`.
-- Keep `.tsx` fixtures where needed for JSX tests.
+2. Shared infrastructure
+   - Extract transformer-wide utilities (`imports.ts`, logging helpers, shared
+     `types.ts`, debugging toggles) into `src/core/**` with explicit exports.
+   - Introduce a shared `TransformationContext` to centralize checker access,
+     scope state, and import management. Keep the first version lean enough to
+     serve the parity rewrite; closures support can extend it later.
 
-## Phase 3 — Integrate and Migrate Consumers
+3. Schema transformer port
+   - Move `schema.ts` into the new package with the minimal adjustments needed
+     to compile. Confirm fixture parity by running the existing
+     schema-transform tests from `packages/js-runtime/test/fixtures` inside the
+     new package.
 
-- Update `@commontools/js-runtime` to import transformers from
-  `@commontools/ts-transformers`.
-- Keep only end‑to‑end runtime tests in `js-runtime` (compiles/executes, bundler
-  wiring, recipe integration).
-- Remove redundant transformer tests in `js-runtime` after migration.
+4. OpaqueRef parity rewrite
+   - Break the monolithic visitor into focused rule modules (`jsx-expression`,
+     `conditional`, `call-expression`, `property-access`, `schema-injection`).
+   - Ensure map callbacks that annotate parameters as `any`/`number` still
+     derive correctly by tracking reactive provenance from call sites rather
+     than trusting checker annotations.
+   - Add unary `!` handling and keep existing binary/call/template derivations.
+   - Preserve import management by routing through the shared context.
+   - Provide an opt-in `mode: "error"` path that surfaces actionable
+     diagnostics for recipe authors.
 
-## Phase 4 — CI and Cleanups
+5. Test migration
+   - Copy fixture suites (`ast-transform`, `jsx-expressions`,
+     `schema-transform`, `handler-schema`) under
+     `packages/ts-transformers/test/fixtures`. Keep `.tsx` fixtures intact.
+   - Port the existing test runners, adding focused unit coverage for new rule
+     classes (especially unary `!` and map callbacks) and ensuring golden
+     updates remain ergonomic via `UPDATE_GOLDENS`.
 
-- Ensure the root `deno task test` runs both new packages’ tests.
-- When `@commontools/api` generics are aligned with the generator’s runtime
-  schema shape (`$ref?`, `properties?`, markers via an extended schema type),
-  remove `--no-check` from `schema-generator`’s default test task and make
-  type‑checked tests the default locally and in CI.
-- Optionally add a minimal compatibility/sanity test in `js-runtime` that
-  exercises both transformers to reduce regression risk.
+Exit criteria:
+
+- New package builds and tests independently.
+- Fixture comparisons match current `js-runtime` output for both schema and
+  opaque-ref transforms.
+- Known regressions called out in `ct-891-cts-not-converting-to-derive.txt` are
+  addressed by the rewritten parity implementation.
+
+## Phase 3 — Integrate Consumers & Add Closures Support
+
+- Update `@commontools/js-runtime` and any other callers to consume transformers
+  from `@commontools/ts-transformers`, leaving only runtime/E2E coverage in
+  `js-runtime`.
+- Provide a compatibility flag or environment toggle so we can fall back to the
+  legacy transformer during the rollout.
+- Design and implement closures support on top of the new architecture:
+  - Extend the shared context with scope analysis that can track captured
+    reactive values.
+  - Add rule modules for closure lifting (`OpaqueRef.map` callbacks, inline
+    handler factories, etc.).
+  - Cover destructuring of captured values and interop with mutable cells.
+- Expand the fixture suite with representative closures scenarios and ensure
+  runtime integration tests exercise the new behavior.
+
+## Phase 4 — CI and Operational Cleanups
+
+- Ensure the root `deno task test` runs the schema generator and transformer
+  packages in addition to runtime checks.
+- Align CI pipelines, including golden update flows, with the new package
+  layout.
+- Add a lightweight compatibility smoke test in `js-runtime` that imports the
+  new package to guard against packaging regressions.
 
 ## Risks and Considerations
 
@@ -215,19 +251,23 @@ Phase 1 (schema-generator):
 - [x] Remove redundant schema tests from `js-runtime` (after parity is verified
       across suites).
 
-Phase 2 (new package):
+Phase 2 (`ts-transformers` & parity):
 
-- [ ] Scaffold `packages/ts-transformers` with tasks/exports.
-- [ ] Move transformer sources from `js-runtime`.
-- [ ] Port fixture tests and utilities.
+- [ ] Scaffold `packages/ts-transformers` with tasks/exports/README.
+- [ ] Extract shared context/import utilities into the new package.
+- [ ] Port the schema transformer and verify fixture parity.
+- [ ] Land the modular OpaqueRef parity rewrite (map callbacks, unary `!`).
+- [ ] Migrate fixture runners and add parity-focused unit coverage.
 
-Phase 3 (integration):
+Phase 3 (integration & closures):
 
-- [ ] Update `js-runtime` to use new package.
-- [ ] Keep only E2E runtime tests in `js-runtime`.
+- [ ] Switch `js-runtime` (and other consumers) to the new package with a
+      fallback flag.
+- [ ] Implement scope analysis and closures support on top of the new engine.
+- [ ] Add fixture + integration coverage for closure scenarios.
 
-Phase 4 (stabilize):
+Phase 4 (CI & ops):
 
-- [ ] Root CI runs all packages via `deno task test`.
-- [ ] Align API types; drop `--no-check` in `schema-generator` and make
-      type‑checked tests the default.
+- [ ] Root `deno task test` exercises schema + transformer packages.
+- [ ] Update CI/golden pipelines for the new package layout.
+- [ ] Add a packaging/compatibility smoke test in `js-runtime`.
