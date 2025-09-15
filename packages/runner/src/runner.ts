@@ -667,7 +667,7 @@ export class Runner implements IRunner {
    */
   private discoverAndCacheFunctions(
     recipe: Recipe,
-    seen: Set<any> = new Set(),
+    seen: Set<object> = new Set(),
   ): void {
     if (seen.has(recipe)) return;
     seen.add(recipe);
@@ -689,7 +689,7 @@ export class Runner implements IRunner {
    */
   private discoverAndCacheFunctionsFromModule(
     module: Module,
-    seen: Set<any>,
+    seen: Set<object>,
   ): void {
     if (seen.has(module)) return;
     seen.add(module);
@@ -739,8 +739,10 @@ export class Runner implements IRunner {
    */
   private discoverAndCacheFunctionsFromValue(
     value: JSONValue,
-    seen: Set<any>,
+    seen: Set<object>,
   ): void {
+    if (!isRecord(value)) return;
+
     if (seen.has(value)) return;
     seen.add(value);
 
