@@ -165,9 +165,9 @@ export class CTCodeEditor extends BaseElement {
       if (mentionable.length === 0) return null;
 
       // Determine the completion range and apply text based on whether ]] exists
-      let applyText: string;
+      let applyText: (text: string) => string;
       let completionTo: number;
-      
+
       if (afterCursor === "]]") {
         // We're inside existing backlinks like [[llm|]], just replace the content
         applyText = (text: string) => text;
@@ -180,7 +180,7 @@ export class CTCodeEditor extends BaseElement {
 
       const options: Completion[] = mentionable.map(charm => {
         const charmIdObj = getEntityId(charm);
-        const charmId = charmIdObj["/"] || "";
+        const charmId = charmIdObj?.["/"] || "";
         const charmName = charm[NAME] || "";
         const insertText = `${charmName} (${charmId})`;
         return {
@@ -307,7 +307,7 @@ export class CTCodeEditor extends BaseElement {
       const charm = this.mentionable.key(i).getAsQueryResult();
       if (charm) {
         const charmIdObj = getEntityId(charm);
-        const charmId = charmIdObj["/"] || "";
+        const charmId = charmIdObj?.["/"] || "";
         if (charmId === id) {
           return charm;
         }
