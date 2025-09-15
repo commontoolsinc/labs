@@ -665,13 +665,19 @@ export class Runner implements IRunner {
    *
    * @param recipe The recipe to discover functions from
    */
-  private discoverAndCacheFunctions(recipe: Recipe): void {
+  private discoverAndCacheFunctions(
+    recipe: Recipe,
+    seen: Set<any> = new Set(),
+  ): void {
+    if (seen.has(recipe)) return;
+    seen.add(recipe);
+
     for (const node of recipe.nodes) {
-      this.discoverAndCacheFunctionsFromModule(node.module);
+      this.discoverAndCacheFunctionsFromModule(node.module, seen);
 
       // Also check inputs for nested recipes (e.g., in map operations)
       if (isRecord(node.inputs)) {
-        this.discoverAndCacheFunctionsFromValue(node.inputs);
+        this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
       }
     }
   }
@@ -681,7 +687,13 @@ export class Runner implements IRunner {
    *
    * @param module The module to process
    */
-  private discoverAndCacheFunctionsFromModule(module: Module): void {
+  private discoverAndCacheFunctionsFromModule(
+    module: Module,
+    seen: Set<any>,
+  ): void {
+    if (seen.has(module)) return;
+    seen.add(module);
+
     if (!isModule(module)) return;
 
     switch (module.type) {
@@ -698,7 +710,7 @@ export class Runner implements IRunner {
       case "recipe":
         // Recursively discover functions in nested recipes
         if (isRecipe(module.implementation)) {
-          this.discoverAndCacheFunctions(module.implementation);
+          this.discoverAndCacheFunctions(module.implementation, seen);
         }
         break;
 
@@ -708,7 +720,7 @@ export class Runner implements IRunner {
           const referencedModule = this.runtime.moduleRegistry.getModule(
             module.implementation as string,
           );
-          this.discoverAndCacheFunctionsFromModule(referencedModule);
+          this.discoverAndCacheFunctionsFromModule(referencedModule, seen);
         } catch (error) {
           console.warn(
             `Failed to resolve module reference for implementation "${module.implementation}":`,
@@ -725,20 +737,29 @@ export class Runner implements IRunner {
    *
    * @param value The value to search for recipes
    */
-  private discoverAndCacheFunctionsFromValue(value: JSONValue): void {
+  private discoverAndCacheFunctionsFromValue(
+    value: JSONValue,
+    seen: Set<any>,
+  ): void {
+    if (seen.has(value)) return;
+    seen.add(value);
+
     if (isRecipe(value)) {
-      this.discoverAndCacheFunctions(value);
+      this.discoverAndCacheFunctions(value, seen);
     } else if (isModule(value)) {
-      this.discoverAndCacheFunctionsFromModule(value);
+      this.discoverAndCacheFunctionsFromModule(value, seen);
     } else if (isRecord(value)) {
       // Recursively search in objects and arrays
       if (Array.isArray(value)) {
         for (const item of value) {
-          this.discoverAndCacheFunctionsFromValue(item);
+          this.discoverAndCacheFunctionsFromValue(item, seen);
         }
       } else {
         for (const key in value) {
-          this.discoverAndCacheFunctionsFromValue(value[key] as JSONValue);
+          this.discoverAndCacheFunctionsFromValue(
+            value[key] as JSONValue,
+            seen,
+          );
         }
       }
     }
