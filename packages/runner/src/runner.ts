@@ -332,7 +332,7 @@ export class Runner implements IRunner {
     }
 
     // Discover and cache all JavaScript functions in the recipe before start
-    this.discoverAndCacheFunctions(recipe);
+    this.discoverAndCacheFunctions(recipe, new Set());
 
     return { resultCell, recipe, processCell, needsStart: true };
   }
@@ -401,7 +401,7 @@ export class Runner implements IRunner {
     this.allCancels.add(cancel);
 
     // Re-discover functions to be safe (idempotent)
-    this.discoverAndCacheFunctions(recipe);
+    this.discoverAndCacheFunctions(recipe, new Set());
 
     for (const node of recipe.nodes) {
       this.instantiateNode(
@@ -667,7 +667,7 @@ export class Runner implements IRunner {
    */
   private discoverAndCacheFunctions(
     recipe: Recipe,
-    seen: Set<object> = new Set(),
+    seen: Set<object>,
   ): void {
     if (seen.has(recipe)) return;
     seen.add(recipe);
