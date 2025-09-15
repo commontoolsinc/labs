@@ -1,16 +1,20 @@
 import {
-  h,
+  Cell,
+  createCell,
   derive,
+  h,
+  handler,
   JSONSchema,
   NAME,
+  navigateTo,
   recipe,
   str,
   UI,
-  handler,
-  navigateTo,
-
 } from "commontools";
 
+// Import recipes we want to be launchable from the default app.
+import Chatbot from "./chatbot.tsx";
+import ChatbotTools from "./chatbot-tools.tsx";
 
 const CharmsListInputSchema = {
   type: "object",
@@ -46,26 +50,46 @@ const visit = handler<{}, { charm: any }>((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
 
-
 const removeCharm = handler({}, {
   type: "object",
   properties: {
     charm: { type: "object", asCell: true },
-    allCharms: { type: "array", items: { type: "object", asCell: true}, asCell: true }
+    allCharms: {
+      type: "array",
+      items: { type: "object", asCell: true },
+      asCell: true,
+    },
   },
   required: ["charm", "allCharms"],
 }, (_, state) => {
-  const charmName = state.charm.get()[NAME]
-  const index = state.allCharms.get().findIndex((c: any) => c.get()[NAME] === charmName);
+  const charmName = state.charm.get()[NAME];
+  const index = state.allCharms.get().findIndex((c: any) =>
+    c.get()[NAME] === charmName
+  );
 
-
-  const charmListCopy = [...state.allCharms.get()]
-  console.log('charmListCopy before', charmListCopy)
+  const charmListCopy = [...state.allCharms.get()];
+  console.log("charmListCopy before", charmListCopy);
   if (index !== -1) {
     charmListCopy.splice(index, 1);
-    console.log('charmListCopy after', charmListCopy)
+    console.log("charmListCopy after", charmListCopy);
     state.allCharms.set(charmListCopy);
   }
+});
+
+const launchChatbot = handler<
+  {
+    detail: {
+      message: string;
+    };
+  },
+  {}
+>((e, state) => {
+  const charm = Chatbot({
+    title: "Chatbot",
+    chat: [],
+  });
+
+  return navigateTo(charm);
 });
 
 export default recipe(
@@ -82,6 +106,8 @@ export default recipe(
             Charms ({charmCount})
           </h2>
 
+          <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
+
           <div style="display: flex; flex-direction: column; gap: 0.75rem;">
             {derive(allCharms, (allCharms) =>
               allCharms.map((charm) => (
@@ -90,23 +116,22 @@ export default recipe(
                     {charm[NAME] || "Untitled Charm"}
                   </span>
                   <div style="display: flex; gap: 0.5rem;">
-                    <ct-button 
+                    <ct-button
                       size="sm"
                       onClick={visit({ charm })}
                     >
                       Visit
                     </ct-button>
-                    <ct-button 
+                    <ct-button
                       size="sm"
                       variant="destructive"
-                      onClick={removeCharm({ charm,  allCharms })}
+                      onClick={removeCharm({ charm, allCharms })}
                     >
                       Remove
                     </ct-button>
                   </div>
                 </div>
-              )),
-            )}
+              )))}
           </div>
         </div>
       ),
