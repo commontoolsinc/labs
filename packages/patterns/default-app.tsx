@@ -11,21 +11,18 @@ import {
   str,
   UI,
 } from "commontools";
+import type { Charm } from "@commontools/charm";
 
 // Import recipes we want to be launchable from the default app.
 import Chatbot from "./chatbot.tsx";
 import ChatbotTools from "./chatbot-tools.tsx";
 
-// TypeScript types for the new pattern
-type Charm = any; // In real usage, this would be a proper type
-
 type CharmsListInput = {
   allCharms: Default<Charm[], []>;
 };
 
-type CharmsListOutput = {
-  // No specific output needed for this recipe
-};
+// Recipe returns only UI, no data outputs
+type CharmsListOutput = {};
 
 const visit = handler<
   {},
