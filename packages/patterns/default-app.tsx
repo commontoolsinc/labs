@@ -29,18 +29,20 @@ type CharmsListInput = {
   allCharms: Default<Charm[], []>;
 };
 
-// Recipe returns only UI, no data outputs
-type CharmsListOutput = {};
+// Recipe returns only UI, no data outputs (only symbol properties)
+interface CharmsListOutput {
+  [key: string]: unknown;
+}
 
 const visit = handler<
-  {},
+  Record<string, never>,
   { charm: any }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
 
 const removeCharm = handler<
-  {},
+  Record<string, never>,
   {
     charm: any;
     allCharms: Cell<any[]>;
@@ -60,7 +62,7 @@ const removeCharm = handler<
 });
 
 const spawnPattern = (recipe: any, params: any) =>
-  handler<{}, {}>((event, state) => {
+  handler<Record<string, never>, Record<string, never>>((event, state) => {
     const charm = recipe(params);
     return navigateTo(charm);
   });
