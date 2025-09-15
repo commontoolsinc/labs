@@ -79,7 +79,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               <ct-button
                 onClick={spawnPattern(Chatbot, {
                   messages: [],
-                  tools: undefined
+                  tools: undefined,
                 })({})}
               >
                 💬 Chatbot
@@ -96,9 +96,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               <ct-button
                 onClick={spawnPattern(ChatbotOutliner, {
                   outline: {
-                    root: { body: "", children: [], attachments: [] }
+                    root: { body: "", children: [], attachments: [] },
                   },
-                  allCharms
+                  allCharms,
                 })({})}
               >
                 📝 Chatbot Outliner
@@ -106,7 +106,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               <ct-button
                 onClick={spawnPattern(ChatbotNote, {
                   title: "New Note",
-                  content: ""
+                  content: "",
                 })({})}
               >
                 🤖 Chatbot Note
@@ -114,7 +114,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               <ct-button
                 onClick={spawnPattern(Note, {
                   title: "New Note",
-                  content: ""
+                  content: "",
                 })({})}
               >
                 📄 Note
