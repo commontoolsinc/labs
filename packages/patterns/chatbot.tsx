@@ -107,7 +107,12 @@ export default recipe<ChatInput, ChatOutput>(
           </ct-hstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <ct-chat theme={theme} $messages={messages} pending={pending} tools={tools} />
+            <ct-chat
+              theme={theme}
+              $messages={messages}
+              pending={pending}
+              tools={tools}
+            />
           </ct-vscroll>
 
           <div slot="footer">

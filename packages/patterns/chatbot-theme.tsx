@@ -22,7 +22,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from './chatbot.tsx';
+import Chat from "./chatbot.tsx";
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
@@ -84,7 +84,6 @@ const setTheme = handler<
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, messages, theme }) => {
-
     const tools = {
       setTheme: {
         description:

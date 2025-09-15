@@ -20,7 +20,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from './chatbot.tsx';
+import Chat from "./chatbot.tsx";
 
 type ListItem = {
   title: string;
