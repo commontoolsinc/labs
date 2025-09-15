@@ -57,7 +57,7 @@ export const Note = recipe<NoteInput>(
         <ct-code-editor
           $value={content}
           $mentionable={allCharms}
-          oncharm-link-click={handleCharmLinkClick({})}
+          onbacklink-click={handleCharmLinkClick({})}
           language="text/markdown"
           style="min-height: 400px;"
         />
@@ -170,11 +170,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 />
               </div>
 
-              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                <ct-vstack data-label="Tools">
-                  <Note content={content} allCharms={allCharms} />
-                </ct-vstack>
-              </ct-vscroll>
+              <Note content={content} allCharms={allCharms} />
             </ct-screen>
 
             {ifElse(

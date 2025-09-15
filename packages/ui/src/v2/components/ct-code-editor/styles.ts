@@ -49,4 +49,22 @@ export const styles = css`
   .cm-editor {
     border-radius: var(--radius, 0.375rem);
   }
+
+  /* Backlink styling - make [[backlinks]] visually distinct */
+  .cm-content .cm-line {
+    position: relative;
+  }
+
+  /* Style for backlinks - we'll use a highlight mark */
+  .cm-backlink {
+    background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+    border-radius: 0.25rem;
+    padding: 0.125rem 0.25rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .cm-backlink:hover {
+    background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+  }
 `;
