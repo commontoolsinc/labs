@@ -48,6 +48,7 @@ import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
+  IStorageSubscription,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -61,8 +62,36 @@ export class Runner implements IRunner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
+  // Map whose key is the result cell's full key, and whose values are the
+  // recipes as strings
+  private resultRecipeCache = new Map<`${MemorySpace}/${URI}`, string>();
 
-  constructor(readonly runtime: IRuntime) {}
+  constructor(readonly runtime: IRuntime) {
+    this.runtime.storageManager.subscribe(this.createStorageSubscription());
+  }
+
+  /**
+   * Creates and returns a new storage subscription.
+   *
+   * This will be used to remove the cached recipe information when the result
+   * cell changes. As a result, if we are scheduled, we will run that recipe
+   * and regenerate the result.
+   *
+   * @returns A new IStorageSubscription instance
+   */
+  private createStorageSubscription(): IStorageSubscription {
+    return {
+      next: (notification) => {
+        const space = notification.space;
+        if ("changes" in notification) {
+          for (const change of notification.changes) {
+            this.resultRecipeCache.delete(`${space}/${change.address.id}`);
+          }
+        }
+        return { done: false };
+      },
+    };
+  }
 
   /**
    * Prepare a charm for running by creating/updating its process and result
@@ -950,8 +979,10 @@ export class Runner implements IRunner {
         tx,
       );
 
-      let previousResultDoc: Cell<any> | undefined;
-      let previousResultRecipeAsString: string | undefined;
+      // Cache the result cell, so we don't regenerate it
+      // This will break if we altered the process cell to point to a
+      // different result, so don't do that.
+      let previousResultCell: Cell<any> | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
         const argument = module.argumentSchema
@@ -977,28 +1008,35 @@ export class Runner implements IRunner {
               undefined,
               () => result,
             );
+            const resultCell = previousResultCell ??
+              this.runtime.getCell(
+                processCell.space,
+                { resultFor: { inputs, outputs, fn: fn.toString() } },
+                undefined,
+                tx,
+              );
 
             // If nothing changed, don't rerun the recipe
             const resultRecipeAsString = JSON.stringify(resultRecipe);
+            const previousResultRecipeAsString = this.resultRecipeCache.get(
+              `${resultCell.space}/${resultCell.sourceURI}`,
+            );
             if (previousResultRecipeAsString === resultRecipeAsString) return;
-            previousResultRecipeAsString = resultRecipeAsString;
+            this.resultRecipeCache.set(
+              `${resultCell.space}/${resultCell.sourceURI}`,
+              resultRecipeAsString,
+            );
 
-            const resultCell = this.run(
+            this.run(
               tx,
               resultRecipe,
               undefined,
-              previousResultDoc ??
-                this.runtime.getCell(
-                  processCell.space,
-                  { resultFor: { inputs, outputs, fn: fn.toString() } },
-                  undefined,
-                  tx,
-                ),
+              resultCell,
             );
             addCancel(() => this.stop(resultCell));
 
-            if (!previousResultDoc) {
-              previousResultDoc = resultCell;
+            if (!previousResultCell) {
+              previousResultCell = resultCell;
               sendValueToBinding(
                 tx,
                 processCell,
