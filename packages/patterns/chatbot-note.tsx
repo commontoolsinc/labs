@@ -170,11 +170,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 />
               </div>
 
-              <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-                <ct-vstack data-label="Tools">
-                  <Note content={content} allCharms={allCharms} />
-                </ct-vstack>
-              </ct-vscroll>
+              <Note content={content} allCharms={allCharms} />
             </ct-screen>
 
             {ifElse(
