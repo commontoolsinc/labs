@@ -13,7 +13,7 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
-import { isRecord } from "@commontools/utils/types";
+import { isBoolean } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { ID, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
@@ -412,39 +412,36 @@ function startRequest(
 
   // Just send the schemas for each handler to the server
   const toolsWithSchemas = Object.fromEntries(
-    Object.entries(toolsCell.get() ?? {}).filter(([name, tool]) => {
+    Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
       const pattern = tool.pattern?.get();
       const handler = tool.handler;
-      if (
-        !(
-          // providing a schema always works
-          tool.inputSchema ||
-          // otherwise if pattern is provided, it must have an argument schema
-          pattern?.argumentSchema ||
-          // otherwise if handler is provided and pattern is not, it must have a schema
-          (!pattern && handler?.schema)
-        )
-      ) {
+
+      let inputSchema = pattern?.argumentSchema ?? handler?.schema;
+
+      if (inputSchema === undefined) {
         logger.error(`Tool ${name} has no schema`);
-        return false;
+        return [name, undefined];
       }
-      return true;
-    }).map(([name, tool]) => {
-      const { description, inputSchema } = tool;
-      const pattern = tool.pattern?.get();
-      const handler = tool.handler;
-      let schema: JSONSchema = pattern?.argumentSchema ?? handler?.schema!;
 
-      // This isn't ideal, but I don't think the LLM API supports boolean schemas
-      if (schema === true) schema = { type: "object" };
-      else if (schema === false) schema = {};
+      // Maps `any` and `never` to objects with either any or no properties
+      if (isBoolean(inputSchema)) {
+        inputSchema = {
+          type: "object",
+          properties: {},
+          additionalProperties: inputSchema,
+        };
+      }
 
-      return [name, {
-        description: description ?? schema.description ??
-          "",
-        inputSchema: inputSchema ?? schema,
-      }];
-    }),
+      let description = tool.description ?? inputSchema.description;
+
+      if (!description) {
+        logger.warn(`Tool ${name} has no description`);
+        // TODO(seefeld): Should we instead ignore the tool?
+        description = "";
+      }
+
+      return [name, { description, inputSchema }];
+    }).filter(([_, tool]) => tool !== undefined),
   );
 
   const llmParams: LLMRequest = {

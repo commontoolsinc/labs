@@ -267,7 +267,7 @@ export type BuiltInLLMMessage = {
 };
 
 export type BuiltInLLMTool =
-  & { description?: string; inputSchema?: JSONSchema }
+  & { description?: string }
   & (
     | { pattern: Recipe; handler?: never }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }

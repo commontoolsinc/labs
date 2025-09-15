@@ -33,7 +33,7 @@ type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-/*** Tools ***/
+///// TOOLS ////
 
 /**
  * Calculate the result of a mathematical expression.

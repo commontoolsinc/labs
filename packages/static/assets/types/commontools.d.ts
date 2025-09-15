@@ -159,7 +159,6 @@ export type BuiltInLLMMessage = {
 };
 export type BuiltInLLMTool = {
     description?: string;
-    inputSchema?: JSONSchema;
 } & ({
     pattern: Recipe;
     handler?: never;
