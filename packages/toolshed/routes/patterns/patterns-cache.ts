@@ -4,18 +4,22 @@ import { toFileUrl } from "@std/path/to-file-url";
 
 /**
  * Cache for pattern files that handles both dev and compiled modes.
- * In dev mode, reads from file system.
- * In compiled mode, reads from included resources.
+ * In dev mode, reads from file system on every request (no caching).
+ * In compiled mode, reads from included resources with caching enabled.
  */
 export class PatternsCache {
   private cache: Map<string, Promise<Uint8Array>> = new Map();
   private baseUrl: URL;
+  private isDevMode: boolean;
 
   constructor() {
     // Determine base URL based on execution context
     // Check if we're in a compiled binary by looking for the deno-compile temp directory
     const dirname = import.meta.dirname || "";
     const isCompiled = dirname.includes("deno-compile-");
+
+    // In dev mode, we want to read from disk every time
+    this.isDevMode = !isCompiled;
 
     if (isCompiled) {
       // We're in a compiled binary
@@ -42,6 +46,13 @@ export class PatternsCache {
    * Get a pattern file's content as Uint8Array.
    */
   async get(filename: string): Promise<Uint8Array> {
+    // In dev mode, always read from disk (no caching)
+    if (this.isDevMode) {
+      console.log(`[PatternsCache] Reading ${filename} from disk (dev mode)`);
+      return this.loadFile(filename);
+    }
+
+    // In production/compiled mode, use caching
     const cached = this.cache.get(filename);
     if (cached) {
       return cached;

@@ -11,11 +11,16 @@ import {
   str,
   UI,
 } from "commontools";
-import type { Charm } from "@commontools/charm";
 
 // Import recipes we want to be launchable from the default app.
 import Chatbot from "./chatbot.tsx";
 import ChatbotTools from "./chatbot-tools.tsx";
+
+export type Charm = {
+  [NAME]?: string;
+  [UI]?: unknown;
+  [key: string]: any;
+};
 
 type CharmsListInput = {
   allCharms: Default<Charm[], []>;
@@ -73,50 +78,40 @@ export default recipe<CharmsListInput, CharmsListOutput>(
     return {
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
-        <div>
-          <h2 style={{ marginBottom: "1.5rem" }}>
-            Charms ({allCharms.length})
-          </h2>
+        <ct-screen>
+          <ct-vstack gap="6" padding="4">
+            <ct-vgroup>
+              <h2>Charms ({allCharms.length})</h2>
+            </ct-vgroup>
 
-          <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
+            <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
 
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
-          >
-            {allCharms.map((charm: any) => (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "1rem",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  background: "#f8fafc",
-                }}
-              >
-                <span style={{ fontWeight: 500 }}>
-                  {charm[NAME] || "Untitled Charm"}
-                </span>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <ct-button
-                    size="sm"
-                    onClick={visit({ charm })}
-                  >
-                    Visit
-                  </ct-button>
-                  <ct-button
-                    size="sm"
-                    variant="destructive"
-                    onClick={removeCharm({ charm, allCharms })}
-                  >
-                    Remove
-                  </ct-button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+            <ct-vstack gap="3">
+              {allCharms.map((charm: any) => (
+                <ct-card>
+                  <ct-hstack justify="between" align="center">
+                    <span>{charm[NAME] || "Untitled Charm"}</span>
+                    <ct-hstack gap="2">
+                      <ct-button
+                        size="sm"
+                        onClick={visit({ charm })}
+                      >
+                        Visit
+                      </ct-button>
+                      <ct-button
+                        size="sm"
+                        variant="destructive"
+                        onClick={removeCharm({ charm, allCharms })}
+                      >
+                        Remove
+                      </ct-button>
+                    </ct-hstack>
+                  </ct-hstack>
+                </ct-card>
+              ))}
+            </ct-vstack>
+          </ct-vstack>
+        </ct-screen>
       ),
     };
   },
