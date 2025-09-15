@@ -193,22 +193,6 @@ Testing in the new package:
 - Optionally add a minimal compatibility/sanity test in `js-runtime` that
   exercises both transformers to reduce regression risk.
 
-## API Types (to revisit later)
-
-- Align `@commontools/api` `JSONSchema` generics with the JSON Schema spec and
-  generator output:
-  - Make `$ref?: string` optional and ensure
-    `properties?:
-    Readonly<Record<string, JSONSchema>>`.
-  - Introduce
-    `ExtendedJSONSchema = JSONSchema & { asCell?: boolean;
-    asStream?: boolean }`
-    for compile‑time utilities.
-  - Update generic helpers to accept `T extends ExtendedJSONSchema` while
-    manipulating markers; constrain to base `JSONSchema` after stripping.
-- Once updated, flip `schema-generator` tests back to strict type checking and
-  remove any transitional allowances in the fixture harness.
-
 ## Risks and Considerations
 
 - Fixture parity: exact textual expectations from legacy tests may require
@@ -228,7 +212,7 @@ Phase 1 (schema-generator):
       recursion/cycles, type aliases/shared types, complex defaults, and
       type‑to‑schema parity.
 - [x] Add fixture runner with determinism check and golden update support.
-- [ ] Remove redundant schema tests from `js-runtime` (after parity is verified
+- [x] Remove redundant schema tests from `js-runtime` (after parity is verified
       across suites).
 
 Phase 2 (new package):
