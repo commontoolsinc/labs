@@ -1,18 +1,23 @@
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { processSchema } from "@commontools/charm";
+import { HttpProgramResolver } from "@commontools/js-runtime";
+import { API_URL } from "./env.ts";
 
 const ALL_CHARMS_ID =
   "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";
 const DEFAULT_CHARM_NAME = "DefaultCharmList";
 
+const DEFAULT_APP_URL = `${API_URL}api/patterns/default-app.tsx`;
+
 export async function create(cc: CharmsController): Promise<CharmController> {
   const manager = cc.manager();
   const runtime = manager.runtime;
 
-  const recipeContent = await runtime.staticCache.getText(
-    "recipes/charm-list.tsx",
+  const program = await cc.manager().runtime.harness.resolve(
+    new HttpProgramResolver(DEFAULT_APP_URL),
   );
-  const charm = await cc.create(recipeContent);
+
+  const charm = await cc.create(program);
 
   const allCharmsCell = await manager.getCellById({ "/": ALL_CHARMS_ID });
 

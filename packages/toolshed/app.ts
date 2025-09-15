@@ -15,6 +15,7 @@ import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
 import shell from "@/routes/shell/shell.index.ts";
 import staticRoute from "@/routes/static/static.index.ts";
+import patterns from "@/routes/patterns/patterns.index.ts";
 
 const app = createApp();
 
@@ -35,6 +36,7 @@ const routes = [
   whoami,
   meta,
   staticRoute,
+  patterns,
 ] as const;
 
 routes.forEach((route) => {
