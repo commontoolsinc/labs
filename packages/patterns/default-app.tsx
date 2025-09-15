@@ -56,38 +56,11 @@ const removeCharm = handler<
   }
 });
 
-const launchChatbot = handler<
-  {
-    detail: {
-      message: string;
-    };
-  },
-  {}
->((e, state) => {
-  const charm = Chatbot({
-    title: "Chatbot",
-    chat: [],
+const spawnPattern = (recipe: any, params: any) =>
+  handler<{}, {}>((event, state) => {
+    const charm = recipe(params);
+    return navigateTo(charm);
   });
-
-  return navigateTo(charm);
-});
-
-const launchChatbotTools = handler<
-  {
-    detail: {
-      message: string;
-    };
-  },
-  {}
->((e, state) => {
-  const charm = ChatbotTools({
-    title: "Chatbot Tools",
-    chat: [],
-    list: [],
-  });
-
-  return navigateTo(charm);
-});
 
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
@@ -99,8 +72,18 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           <ct-vstack gap="4" padding="6">
             <h2>Charms ({allCharms.length})</h2>
 
-            <ct-button onClick={launchChatbot({})}>Launch Chatbot</ct-button>
-            <ct-button onClick={launchChatbotTools({})}>
+            <ct-button
+              onClick={spawnPattern(Chatbot, { title: "Chatbot", chat: [] })({})}
+            >
+              Launch Chatbot
+            </ct-button>
+            <ct-button
+              onClick={spawnPattern(ChatbotTools, {
+                title: "Chatbot Tools",
+                chat: [],
+                list: []
+              })({})}
+            >
               Launch Chatbot Tools
             </ct-button>
 
