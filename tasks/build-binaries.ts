@@ -88,6 +88,10 @@ class BuildConfig {
     return this.path("packages", "static", "assets");
   }
 
+  patternsPath() {
+    return this.path("packages", "patterns");
+  }
+
   staticTypesPath() {
     return this.path("packages", "static", "assets", "types");
   }
@@ -198,6 +202,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.toolshedEnvPath(),
       "--include",
       config.staticAssetsPath(),
+      "--include",
+      config.patternsPath(),
       ...config.toolshedFlags,
       config.toolshedEntryPath(),
     ],
