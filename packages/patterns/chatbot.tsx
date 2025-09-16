@@ -6,6 +6,7 @@ import {
   Default,
   derive,
   fetchData,
+  generateObject,
   h,
   handler,
   ifElse,
@@ -81,11 +82,39 @@ export const TitleGenerator = recipe<
     ];
   });
 
+  const titleMessages2 = derive(titleMessages, (m) => {
+    if (!m || m.length === 0) return "";
+
+    const messageCount = 2;
+    const selectedMessages = m.slice(0, messageCount).filter(Boolean);
+
+    if (selectedMessages.length === 0) return "";
+
+    return selectedMessages.map((msg) => JSON.stringify(msg)).join("\n");
+  });
+
   const { result: titleResult } = llm({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
     messages: titleMessages,
     model,
+  });
+
+  const { result: titleResult2 } = generateObject({
+    system:
+      "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
+    prompt: titleMessages2,
+    model,
+    schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "The title of the chat",
+        },
+      },
+      required: ["title"],
+    },
   });
 
   const title = derive(titleResult, (t) => {
@@ -100,7 +129,11 @@ export const TitleGenerator = recipe<
     return "Untitled Chat";
   });
 
-  return title;
+  const title2 = derive(titleResult2, (t) => {
+    return t?.title || "Untitled Chat";
+  });
+
+  return title2;
 });
 
 export default recipe<ChatInput, ChatOutput>(
