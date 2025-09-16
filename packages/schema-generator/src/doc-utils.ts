@@ -85,3 +85,40 @@ export function extractDocFromSymbolAndDecls(
   if (all[0]) result.text = all[0];
   return result;
 }
+
+/**
+ * Extract documentation info from a TypeScript type by inspecting both the
+ * alias symbol (for type aliases) and the underlying symbol (for interfaces,
+ * classes, etc.). Returns the first documentation string (if any), all unique
+ * doc strings, and the display name of the type as reported by the checker.
+ */
+export function extractDocFromType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): { firstDoc?: string; allDocs: string[]; typeName: string } {
+  const docs: string[] = [];
+  const aliasSym = type.aliasSymbol;
+  const directSym = type.getSymbol?.() || (type as any).symbol;
+
+  if (aliasSym) {
+    const { all } = extractDocFromSymbolAndDecls(aliasSym, checker);
+    for (const doc of all) {
+      if (doc && !docs.includes(doc)) docs.push(doc);
+    }
+  }
+
+  if (directSym) {
+    const { all } = extractDocFromSymbolAndDecls(directSym, checker);
+    for (const doc of all) {
+      if (doc && !docs.includes(doc)) docs.push(doc);
+    }
+  }
+
+  const typeName = checker.typeToString(type).replace(/\s+/g, " ").trim();
+  const result: { firstDoc?: string; allDocs: string[]; typeName: string } = {
+    allDocs: docs,
+    typeName,
+  };
+  if (docs[0]) result.firstDoc = docs[0];
+  return result;
+}

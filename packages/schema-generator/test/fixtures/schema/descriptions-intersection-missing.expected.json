@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "foo": {
+      "type": "string"
+    },
+    "bar": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "foo",
+    "bar"
+  ],
+  "description": "Doc A",
+  "$comment": "Docs inherited from intersection constituents. Missing docs for: { bar: number; }."
+}
