@@ -62,6 +62,23 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 - Handlers can emit new recipes; lifts that return recipes spawn fresh graphs
   and register teardown hooks.
 
+## Repository Observations
+
+- `packages/runner/src/builder/opaque-ref.ts` shows how `opaqueRef` proxies
+  track connected nodes via `.connect`, compute nested schema metadata with
+  `ContextualFlowControl`, and expose helpers such as `.map`. Capability
+  wrappers must recreate these affordances against real runtime cells.
+- `packages/runner/src/builder/factory.ts` pushes frames before calling the
+  author factory. `createCell` expects the frame to provide a `cause` and an
+  `unsafe_binding`, so the new wrappers must keep the frame lifecycle intact.
+- `packages/runner/src/runner.ts` writes recipe metadata into a process cell
+  (`TYPE`, `argument`, `internal`, `resultRef`) and later instantiates nodes by
+  unwrapping aliases in `unwrapOneLevelAndBindtoDoc`. Snapshot generation should
+  hook into this instantiation path to capture concrete cell ids.
+- `packages/runner/src/create-ref.ts` hashes the supplied `cause` and recorded
+  structure to derive entity ids. Stable causes therefore hinge on the data we
+  pass into frames when new cells are materialized.
+
 ## Problem Statement
 
 - Dual abstractions (`OpaqueRef` vs `Cell`) confuse authors and limit helper
@@ -184,9 +201,11 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 ## Next Steps
 
 - Prototype capability wrappers and convert a sample recipe to validate
-  ergonomics, including mixed-capability inputs (literals, `Opaque`,
-  `Mutable`) when invoking lifts.
-- Draft the graph snapshot schema and review with runtime/storage stakeholders.
-- Implement rehydration from the stored graph snapshot and exercise it with a
-  sample recipe.
-- Plan the rollout and documentation updates for existing recipes.
+  ergonomics (see `capability-wrappers.md`).
+- Draft and iterate on the graph snapshot schema, then review with
+  runtime/storage stakeholders (`graph-snapshot.md`).
+- Implement rehydration against the stored graph snapshot and exercise it with
+  a sample recipe while observing cause stability (`graph-snapshot.md`,
+  `cause-derivation.md`).
+- Plan the migration and documentation rollout for existing recipes
+  (`rollout-plan.md`).
