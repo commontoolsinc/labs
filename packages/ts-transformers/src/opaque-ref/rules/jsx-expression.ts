@@ -2,10 +2,7 @@ import ts from "typescript";
 
 import type { TransformationContext } from "../../core/context.ts";
 import { isEventHandlerJsxAttribute } from "../types.ts";
-import {
-  type OpaqueRefHelperName,
-  transformExpressionWithOpaqueRef,
-} from "../transforms.ts";
+import type { OpaqueRefHelperName } from "../transforms.ts";
 import { createDependencyAnalyzer } from "../dependency.ts";
 import { rewriteExpression } from "../rewrite/rewrite.ts";
 
@@ -67,21 +64,6 @@ export function createJsxExpressionRule(): OpaqueRefRule {
             );
           }
 
-          const transformed = transformExpressionWithOpaqueRef(
-            node.expression,
-            checker,
-            context.factory,
-            sourceFile,
-            transformation,
-            (helper) => helpers.add(helper),
-          );
-
-          if (transformed !== node.expression) {
-            return context.factory.createJsxExpression(
-              node.dotDotDotToken,
-              transformed,
-            );
-          }
         }
 
         return ts.visitEachChild(node, visit, transformation);

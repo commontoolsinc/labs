@@ -108,3 +108,31 @@ Focused Next Steps
 2. Update call/conditional emitters to derive only the predicate/value (e.g., the first argument to `ifElse`, the result of a `.map` callback) while leaving the enclosing call unchanged and skipping pure boolean comparisons.
 3. Add unit coverage for analyzer/normaliser edge cases and the new emitters before re-running the full fixture suite.
 4. Once fixtures match legacy output, remove the legacy fallback (`transformExpressionWithOpaqueRef`) and update the documentation with the final architecture notes.
+
+---
+
+Post-fallback progress snapshot
+- Dropped the JSX-rule fallback to `transformExpressionWithOpaqueRef`; the
+  modular rewrite pipeline now runs by itself. This surfaced several analyzer
+  blind spots that were previously masked.
+- Added utilities in the analyzer to chase property/element roots and detect
+  when they originate from recipe/handler parameters (e.g. the `state` binding)
+  so array element access can be marked as a dependency even when the checker
+  reports `any`.
+- With the fallback removed, additional regressions are now visible: method
+  calls such as `state.name.toUpperCase()` and chained expressions like
+  `state.items.filter(...).length` are being rewritten against the method
+  symbols instead of deriving the receiver because the analyzer still records
+  `state.name.toUpperCase` rather than the `state.name` root.
+
+Updated action items
+- Improve the analyzer to attribute dependencies to the receiver/root
+  identifier for property/method/element chains when that root resolves to a
+  known opaque parameter, even if TypeScript reports the type as `any`.
+- Once analysis is fixed, update emitters so method calls derive the receiver
+  and invoke the method inside the lambda, restoring the readable derive
+  patterns used in the legacy implementation.
+- Re-run the JSX fixtures and update the expectations only after the new
+  pipeline reproduces the intended output for the outstanding cases
+  (`jsx-complex-mixed`, `jsx-function-calls`, `jsx-property-access`,
+  `jsx-string-operations`).
