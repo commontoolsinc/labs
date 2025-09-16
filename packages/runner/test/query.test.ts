@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import type { JSONSchema, JSONValue } from "../src/index.ts";
+import type { JSONSchema, JSONValue, SchemaContext } from "../src/index.ts";
 import {
-  CycleTracker,
+  CompoundCycleTracker,
   MapSet,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -31,7 +31,7 @@ describe("Query", () => {
     Revision<State>
   >();
   let manager: StoreObjectManager;
-  let tracker: CycleTracker<JSONValue>;
+  let tracker: CompoundCycleTracker<JSONValue, SchemaContext | undefined>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -43,7 +43,7 @@ describe("Query", () => {
     });
     tx = runtime.edit();
     manager = new StoreObjectManager(store);
-    tracker = new CycleTracker<JSONValue>();
+    tracker = new CompoundCycleTracker<JSONValue, SchemaContext | undefined>();
   });
 
   afterEach(async () => {

@@ -1,8 +1,8 @@
-import type { JSONObject, JSONValue, URI } from "@commontools/runner";
+import type { JSONObject, JSONValue, SchemaContext } from "@commontools/runner";
 import {
   BaseMemoryAddress,
   BaseObjectManager,
-  CycleTracker,
+  CompoundCycleTracker,
   DefaultSchemaSelector,
   getAtPath,
   type IAttestation,
@@ -154,7 +154,10 @@ export const selectSchema = <Space extends MemorySpace>(
   // Track any docs loaded while traversing the factSelection
   const manager = new ServerObjectManager(session, providedClassifications);
   // while loading dependent docs, we want to avoid cycles
-  const tracker = new CycleTracker<Immutable<JSONValue>>();
+  const tracker = new CompoundCycleTracker<
+    Immutable<JSONValue>,
+    SchemaContext | undefined
+  >();
   const schemaTracker = new MapSet<string, SchemaPathSelector>();
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
