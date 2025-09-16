@@ -86,8 +86,15 @@ export class Runner implements IRunner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            this.resultRecipeCache.delete(`${space}/${change.address.id}`);
+            if (change.address.type === "application/json") {
+              this.resultRecipeCache.delete(`${space}/${change.address.id}`);
+            }
           }
+        } else if (notification.type === "reset") {
+          // copy keys, since we'll mutate the collection while iterating
+          const cacheKeys = [...this.resultRecipeCache.keys()];
+          cacheKeys.filter((key) => key.startsWith(`${notification.space}/`))
+            .forEach(this.resultRecipeCache.delete);
         }
         return { done: false };
       },
@@ -657,6 +664,9 @@ export class Runner implements IRunner {
       }
     }
     this.allCancels.clear();
+    // Clear the result recipe cache as well, since the actions have been
+    // canceled
+    this.resultRecipeCache.clear();
   }
 
   /**
