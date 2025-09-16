@@ -33,5 +33,4 @@ export * as CommonTodo from "./common-todo.ts";
 export * as CommonUnibox from "./common-unibox.ts";
 export * as CommonUpdater from "./common-updater.ts";
 export * as CommonVstack from "./common-vstack.ts";
-export * as shoelace from "./shoelace/index.ts";
 export * as style from "./style.ts";

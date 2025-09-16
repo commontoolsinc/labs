@@ -1,1 +1,0 @@
-import "@shoelace-style/shoelace";
