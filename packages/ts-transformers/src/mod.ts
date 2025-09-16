@@ -16,10 +16,11 @@ export type {
 
 export {
   createOpaqueRefTransformer,
+  type OpaqueRefTransformerOptions,
+  type TransformationError,
+} from "./legacy.ts";
+
+export {
   createSchemaTransformer,
-} from "./legacy.ts";
-export type {
-  OpaqueRefTransformerOptions,
-  SchemaTransformerOptions,
-  TransformationError,
-} from "./legacy.ts";
+  type SchemaTransformerOptions,
+} from "./schema/schema-transformer.ts";
