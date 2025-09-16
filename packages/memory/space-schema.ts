@@ -1,4 +1,9 @@
-import type { JSONObject, JSONValue, SchemaContext } from "@commontools/runner";
+import {
+  deepEqual,
+  type JSONObject,
+  type JSONValue,
+  type SchemaContext,
+} from "@commontools/runner";
 import {
   BaseMemoryAddress,
   BaseObjectManager,
@@ -158,7 +163,7 @@ export const selectSchema = <Space extends MemorySpace>(
     Immutable<JSONValue>,
     SchemaContext | undefined
   >();
-  const schemaTracker = new MapSet<string, SchemaPathSelector>();
+  const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
