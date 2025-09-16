@@ -71,10 +71,10 @@ describe("complex recipe function", () => {
     );
     expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "value"] },
+      $alias: { path: ["internal", "defaultValue"] },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { path: ["internal", "value"] },
+      $alias: { path: ["internal", "defaultValue"] },
     });
     expect(nodes[1].outputs).toEqual({
       $alias: { path: ["internal", "double"] },
@@ -167,7 +167,7 @@ describe("complex recipe with path aliases", () => {
       },
     });
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "__#0", "doubled"] } },
+      double: { $alias: { path: ["internal", "__#1", "doubled"] } },
     });
   });
 
@@ -180,13 +180,13 @@ describe("complex recipe with path aliases", () => {
       x: { $alias: { path: ["argument", "x"] } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "x"] },
+      $alias: { path: ["internal", "__#0"] },
     });
     expect(nodes[1].inputs).toEqual({
-      x: { $alias: { path: ["internal", "x", "doubled"] } },
+      x: { $alias: { path: ["internal", "__#0", "doubled"] } },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { path: ["internal", "__#1"] },
     });
   });
 
@@ -352,7 +352,7 @@ describe("recipe with ifc property", () => {
     expect(result).toEqual({
       double: {
         $alias: {
-          path: ["internal", "__#0", "double"],
+          path: ["internal", "__#1", "double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -378,14 +378,14 @@ describe("recipe with ifc property", () => {
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toEqual({
       $alias: {
-        path: ["internal", "x"],
+        path: ["internal", "__#0"],
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
     expect(nodes[1].inputs).toEqual({
       x: {
         $alias: {
-          path: ["internal", "x", "double"],
+          path: ["internal", "__#0", "double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -394,7 +394,7 @@ describe("recipe with ifc property", () => {
     });
     expect(nodes[1].outputs).toEqual({
       $alias: {
-        path: ["internal", "__#0"],
+        path: ["internal", "__#1"],
         schema: {
           ifc: ArgumentSchema.properties.x.ifc,
         },
