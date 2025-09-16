@@ -24,3 +24,17 @@ export {
   createSchemaTransformer,
   type SchemaTransformerOptions,
 } from "./schema/schema-transformer.ts";
+
+export {
+  collectOpaqueRefs,
+  containsOpaqueRef,
+  isOpaqueRefType,
+  isSimpleOpaqueRefAccess,
+} from "./opaque-ref/types.ts";
+
+export {
+  createIfElseCall,
+  replaceOpaqueRefWithParam,
+  replaceOpaqueRefsWithParams,
+  transformExpressionWithOpaqueRef,
+} from "./opaque-ref/transforms.ts";
