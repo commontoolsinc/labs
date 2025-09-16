@@ -67,6 +67,11 @@ export const Note = recipe<NoteInput>(
   },
 );
 
+const handleCharmLinkClicked = handler((_: any, { charm }: { charm: Cell<Charm> }) => {
+  navigateTo(charm);
+})
+
+
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
@@ -77,6 +82,9 @@ type LLMTestInput = {
 
 type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
+  mentioned: Default<Array<string>, []>;
+  backlinks: Default<Array<Charm>, []>;
+  content: Default<string, "">;
 };
 
 // put a note at the end of the outline (by appending to root.children)
@@ -150,6 +158,57 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const chat = Chat({ messages, tools });
     const { addMessage, cancelGeneration, pending } = chat;
 
+    const mentioned = cell<Charm[]>([]);
+
+    // const mentionedCharms = derive(content, (c) => {
+    //   const regex = /\[\[.*?\(([^)]+)\)\]\]/g;
+    //   const ids = [];
+    //   let match;
+    //   while ((match = regex.exec(c)) !== null) {
+    //     const id = match[1];
+    //     if (id) {
+    //       ids.push(id);
+    //     }
+    //   }
+    //   return ids;
+    // });
+
+    // TODO(bf): something is wrong with the types here
+    // also, within here be dragons, lots of weird issues accessing proxies and getting links unless I index into the array manually.
+    const backlinks = derive(allCharms as unknown as Charm[], (cs: Charm[]) => {
+      if (!cs) return [];
+
+      let self: Charm | undefined;
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+
+        if (c.content && c.content == content) {
+          self = c;
+        }
+      }
+
+      let results: Charm[] = [];
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+
+        if (c.mentioned) {
+          let found = false;
+          for (let j = 0; j < c.mentioned.length; j++) {
+            if (c.mentioned[j] == self) {
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            console.log("mentioned", c.mentioned);
+            results.push(c);
+          }
+        }
+      }
+
+      return results;
+    });
+
     return {
       [NAME]: title,
       [UI]: (
@@ -173,10 +232,27 @@ export default recipe<LLMTestInput, LLMTestResult>(
               <ct-code-editor
                 $value={content}
                 $mentionable={allCharms}
+                $mentioned={mentioned}
                 onbacklink-click={handleCharmLinkClick({})}
                 language="text/markdown"
                 style="min-height: 400px;"
               />
+              <details>
+                <summary>Mentioned Charms</summary>
+                <ct-vstack>
+                  {mentioned.map((charm: Charm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>{charm[NAME]}</ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
+              <details>
+                <summary>Backlinks</summary>
+                <ct-vstack>
+                  {backlinks.map((charm: Charm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>{charm[NAME]}</ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
             </ct-screen>
 
             {ifElse(
@@ -187,7 +263,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </ct-autolayout>
         </ct-screen>
       ),
+      content,
       messages,
+      mentioned,
+      backlinks
     };
   },
 );
