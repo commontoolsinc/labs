@@ -9,6 +9,7 @@ import {
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
+  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
 } from "@commontools/api";
@@ -38,7 +39,7 @@ const client = new LLMClient();
  * @param stop - A doc to store (optional) stop sequence.
  * @param maxTokens - A doc to store the maximum number of tokens to generate.
  *
- * @returns { pending: boolean, result?: string, partial?: string } - As individual
+ * @returns { pending: boolean, result?: Array<{type: string, text: string}>, partial?: string } - As individual
  *   docs, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */

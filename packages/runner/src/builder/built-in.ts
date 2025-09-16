@@ -12,6 +12,7 @@ import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
   BuiltInGenerateObjectParams,
+  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
   FetchOptions,
@@ -27,15 +28,15 @@ export const compileAndRun = createNodeFactory({
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
-}) as <T = string>(
+}) as (
   params: Opaque<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMState<T>>;
+) => OpaqueRef<BuiltInLLMState>;
 
 export const llmDialog = createNodeFactory({
   type: "ref",
   implementation: "llmDialog",
 }) as (
-  params: Opaque<BuiltInLLMParams>, // TODO(bf): maybe need to drop `messages` from this type
+  params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMDialogState>;
 
 export const generateObject = createNodeFactory({
@@ -43,7 +44,7 @@ export const generateObject = createNodeFactory({
   implementation: "generateObject",
 }) as <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,
-) => OpaqueRef<BuiltInLLMState<T>>;
+) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
 export const fetchData = createNodeFactory({
   type: "ref",
