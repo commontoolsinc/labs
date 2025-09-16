@@ -6,7 +6,7 @@ export {
 } from "./opaque-ref.ts";
 
 // Schema transformer
-export { createSchemaTransformer } from "./schema.ts";
+export { createSchemaTransformer } from "@commontools/ts-transformers";
 
 // Logging transformer
 export { createLoggingTransformer } from "./logging.ts";
