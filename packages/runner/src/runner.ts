@@ -6,6 +6,7 @@ import {
   isModule,
   isOpaqueRef,
   isRecipe,
+  isShadowRef,
   isStreamValue,
   type JSONSchema,
   type JSONValue,
@@ -24,7 +25,7 @@ import {
   pushFrameFromCause,
   recipeFromFrame,
 } from "./builder/recipe.ts";
-import { type Cell } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -332,7 +333,7 @@ export class Runner implements IRunner {
     }
 
     // Discover and cache all JavaScript functions in the recipe before start
-    this.discoverAndCacheFunctions(recipe);
+    this.discoverAndCacheFunctions(recipe, new Set());
 
     return { resultCell, recipe, processCell, needsStart: true };
   }
@@ -401,7 +402,7 @@ export class Runner implements IRunner {
     this.allCancels.add(cancel);
 
     // Re-discover functions to be safe (idempotent)
-    this.discoverAndCacheFunctions(recipe);
+    this.discoverAndCacheFunctions(recipe, new Set());
 
     for (const node of recipe.nodes) {
       this.instantiateNode(
@@ -665,14 +666,18 @@ export class Runner implements IRunner {
    *
    * @param recipe The recipe to discover functions from
    */
-  private discoverAndCacheFunctions(recipe: Recipe): void {
+  private discoverAndCacheFunctions(
+    recipe: Recipe,
+    seen: Set<object>,
+  ): void {
+    if (seen.has(recipe)) return;
+    seen.add(recipe);
+
     for (const node of recipe.nodes) {
-      this.discoverAndCacheFunctionsFromModule(node.module);
+      this.discoverAndCacheFunctionsFromModule(node.module, seen);
 
       // Also check inputs for nested recipes (e.g., in map operations)
-      if (isRecord(node.inputs)) {
-        this.discoverAndCacheFunctionsFromValue(node.inputs);
-      }
+      this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
     }
   }
 
@@ -681,7 +686,13 @@ export class Runner implements IRunner {
    *
    * @param module The module to process
    */
-  private discoverAndCacheFunctionsFromModule(module: Module): void {
+  private discoverAndCacheFunctionsFromModule(
+    module: Module,
+    seen: Set<object>,
+  ): void {
+    if (seen.has(module)) return;
+    seen.add(module);
+
     if (!isModule(module)) return;
 
     switch (module.type) {
@@ -698,7 +709,7 @@ export class Runner implements IRunner {
       case "recipe":
         // Recursively discover functions in nested recipes
         if (isRecipe(module.implementation)) {
-          this.discoverAndCacheFunctions(module.implementation);
+          this.discoverAndCacheFunctions(module.implementation, seen);
         }
         break;
 
@@ -708,7 +719,7 @@ export class Runner implements IRunner {
           const referencedModule = this.runtime.moduleRegistry.getModule(
             module.implementation as string,
           );
-          this.discoverAndCacheFunctionsFromModule(referencedModule);
+          this.discoverAndCacheFunctionsFromModule(referencedModule, seen);
         } catch (error) {
           console.warn(
             `Failed to resolve module reference for implementation "${module.implementation}":`,
@@ -725,22 +736,43 @@ export class Runner implements IRunner {
    *
    * @param value The value to search for recipes
    */
-  private discoverAndCacheFunctionsFromValue(value: JSONValue): void {
+  private discoverAndCacheFunctionsFromValue(
+    value: JSONValue,
+    seen: Set<object>,
+  ): void {
     if (isRecipe(value)) {
-      this.discoverAndCacheFunctions(value);
-    } else if (isModule(value)) {
-      this.discoverAndCacheFunctionsFromModule(value);
-    } else if (isRecord(value)) {
-      // Recursively search in objects and arrays
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          this.discoverAndCacheFunctionsFromValue(item);
-        }
-      } else {
-        for (const key in value) {
-          this.discoverAndCacheFunctionsFromValue(value[key] as JSONValue);
-        }
+      this.discoverAndCacheFunctions(value, seen);
+      return;
+    }
+
+    if (isModule(value)) {
+      this.discoverAndCacheFunctionsFromModule(value, seen);
+      return;
+    }
+
+    if (
+      !isRecord(value) || isOpaqueRef(value) || isShadowRef(value) ||
+      isCell(value)
+    ) {
+      return;
+    }
+
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    // Recursively search in objects and arrays
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.discoverAndCacheFunctionsFromValue(item, seen);
       }
+      return;
+    }
+
+    for (const key in value) {
+      this.discoverAndCacheFunctionsFromValue(
+        value[key] as JSONValue,
+        seen,
+      );
     }
   }
 

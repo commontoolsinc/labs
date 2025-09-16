@@ -156,7 +156,7 @@ function factoryFromRecipe<T, R>(
       if (isOpaqueRef(value)) value = value.unsafe_getExternal();
       if (
         (isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) &&
-        !shadows.has(value)
+        !shadows.has(value as ShadowRef)
       ) {
         if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
           value = createShadowRef(value.export().value);
@@ -190,12 +190,26 @@ function factoryFromRecipe<T, R>(
 
   // Fill in reasonable names for all cells, where possible:
 
+  const usedNames = new Set<string>();
+  cells.forEach((cell) => {
+    const existingName = cell.export().name;
+    if (existingName) usedNames.add(existingName);
+  });
+
   // First from results
   if (isRecord(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
       if (isOpaqueRef(value)) {
         const ref = value; // Typescript needs this to avoid type errors
-        if (!ref.export().path.length && !ref.export().name) ref.setName(key);
+        const exported = ref.export();
+        if (
+          !exported.path.length &&
+          !exported.name &&
+          !usedNames.has(key)
+        ) {
+          ref.setName(key);
+          usedNames.add(key);
+        }
       }
     });
   }
@@ -207,9 +221,11 @@ function factoryFromRecipe<T, R>(
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueRef(input) && input.cell === cell && !cell.export().name
+            isOpaqueRef(input) && input.export().cell === cell &&
+            !cell.export().name && !usedNames.has(key)
           ) {
             cell.setName(key);
+            usedNames.add(key);
           }
         });
       }

@@ -71,9 +71,11 @@ describe("complex recipe function", () => {
     );
     expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { path: ["internal", "defaultValue"] },
     });
-    expect(nodes[1].inputs).toEqual({ $alias: { path: ["internal", "__#0"] } });
+    expect(nodes[1].inputs).toEqual({
+      $alias: { path: ["internal", "defaultValue"] },
+    });
     expect(nodes[1].outputs).toEqual({
       $alias: { path: ["internal", "double"] },
     });

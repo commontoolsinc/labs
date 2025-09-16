@@ -42,7 +42,7 @@ export function toJSONWithLegacyAliases(
   // If this is an external reference, just copy the reference as is.
   if (isOpaqueRef(value)) {
     const { external } = value.export();
-    if (external) return external;
+    if (external) return external as JSONValue;
   }
 
   if (isOpaqueRef(value) || isShadowRef(value)) {
@@ -81,7 +81,7 @@ export function toJSONWithLegacyAliases(
             `Shadow ref alias with parent cell not found in current frame`,
           );
         }
-        return value;
+        return value as JSONValue;
       }
       if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
       return {
@@ -108,10 +108,10 @@ export function toJSONWithLegacyAliases(
   }
 
   if (isRecord(value) || isRecipe(value)) {
-    const valueToProcess =
-      (isRecipe(value) && typeof (value as toJSON).toJSON === "function")
-        ? (value as toJSON).toJSON() as Record<string, any>
-        : (value as Record<string, any>);
+    const valueToProcess = (isRecipe(value) &&
+        typeof (value as unknown as toJSON).toJSON === "function")
+      ? (value as unknown as toJSON).toJSON() as Record<string, any>
+      : (value as Record<string, any>);
 
     const result: any = {};
     let hasValue = false;
