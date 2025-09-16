@@ -59,8 +59,10 @@ type ChatOutput = {
   title?: string;
 };
 
-export const TitleGenerator = recipe<{ model?: string, messages: Array<BuiltInLLMMessage>; }>("Title Generator", ({ model, messages }) => {
-  const titleMessages = derive(messages, m => {
+export const TitleGenerator = recipe<
+  { model?: string; messages: Array<BuiltInLLMMessage> }
+>("Title Generator", ({ model, messages }) => {
+  const titleMessages = derive(messages, (m) => {
     if (!m || m.length === 0) return [];
 
     const messageCount = 2;
@@ -70,27 +72,28 @@ export const TitleGenerator = recipe<{ model?: string, messages: Array<BuiltInLL
 
     return [
       {
-        role: 'user' as const,
+        role: "user" as const,
         content: [{
-          type: 'text' as const,
-          text: selectedMessages.map(msg => JSON.stringify(msg)).join('\n')
-        }]
-      }
+          type: "text" as const,
+          text: selectedMessages.map((msg) => JSON.stringify(msg)).join("\n"),
+        }],
+      },
     ];
-  })
+  });
 
   const { result: titleResult } = llm({
-    system: "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
+    system:
+      "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
     messages: titleMessages,
     model,
   });
 
-  const title = derive(titleResult, t => {
-    if (typeof t === 'string') {
+  const title = derive(titleResult, (t) => {
+    if (typeof t === "string") {
       return t;
     }
 
-    if (t?.[0] && t[0].type === 'text') {
+    if (t?.[0] && t[0].type === "text") {
       return t[0].text;
     }
 
@@ -98,7 +101,7 @@ export const TitleGenerator = recipe<{ model?: string, messages: Array<BuiltInLL
   });
 
   return title;
-})
+});
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
@@ -177,7 +180,7 @@ export default recipe<ChatInput, ChatOutput>(
       pending,
       addMessage,
       cancelGeneration,
-      title
+      title,
     };
   },
 );
