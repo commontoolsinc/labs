@@ -15,6 +15,9 @@ export interface TransformOptions {
   types?: Record<string, string>;
   logger?: (message: string) => void;
   applySchemaTransformer?: boolean;
+  applyOpaqueRefTransformer?: boolean;
+  before?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
+  after?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
 }
 
 export async function transformSource(
@@ -26,6 +29,9 @@ export async function transformSource(
     types = {},
     logger,
     applySchemaTransformer = false,
+    applyOpaqueRefTransformer = true,
+    before = [],
+    after = [],
   } = options;
 
   if (!envTypesCache) {
@@ -156,11 +162,17 @@ export async function transformSource(
     }
   }
 
-  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [];
-  transformers.push(createOpaqueRefTransformer(program, { mode }));
+  const beforeTransformers = before.map((factory) => factory(program));
+  const afterTransformers = after.map((factory) => factory(program));
+
+  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [...beforeTransformers];
+  if (applyOpaqueRefTransformer) {
+    transformers.push(createOpaqueRefTransformer(program, { mode }));
+  }
   if (applySchemaTransformer) {
     transformers.push(createSchemaTransformer(program));
   }
+  transformers.push(...afterTransformers);
 
   const sourceFile = program.getSourceFile(fileName)!;
   const result = ts.transform(sourceFile, transformers);
