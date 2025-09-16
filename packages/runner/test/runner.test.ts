@@ -6,7 +6,13 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { NAME, type Recipe } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type ICommitNotification,
+  type IExtendedStorageTransaction,
+  type IStorageSubscription,
+  type MediaType,
+  type URI,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -737,6 +743,56 @@ describe("runRecipe", () => {
     // Verify second instance is unaffected
     expect(internal2.nested.value).toBe("initial");
     expect(result2.getAsQueryResult().nested.value).toBe("initial");
+  });
+});
+
+describe("storage subscription", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("clears cached recipes when storage notifies of changes", () => {
+    const internals = runtime.runner as unknown as {
+      resultRecipeCache: Map<string, string>;
+      createStorageSubscription(): IStorageSubscription;
+    };
+
+    const uri = "recipe-cache-test" as URI;
+    const key = `${space}/${uri}`;
+    internals.resultRecipeCache.set(key, "cached-recipe");
+
+    const notification = {
+      type: "commit",
+      space,
+      changes: [
+        {
+          address: {
+            id: uri,
+            type: "application/json" as MediaType,
+            path: [],
+          },
+          before: undefined,
+          after: undefined,
+        },
+      ],
+    } satisfies ICommitNotification;
+
+    const subscription = internals.createStorageSubscription();
+    subscription.next(notification);
+
+    expect(internals.resultRecipeCache.has(key)).toBe(false);
   });
 });
 
