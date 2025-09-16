@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
+  BuiltInLLMTool,
   Cell,
   cell,
   Default,
@@ -9,13 +10,9 @@ import {
   h,
   handler,
   ifElse,
-  JSONSchema,
-  lift,
-  llm,
   llmDialog,
   NAME,
   recipe,
-  str,
   Stream,
   UI,
 } from "commontools";
@@ -36,11 +33,20 @@ type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-/*** Tools ***/
+///// TOOLS ////
+
+/**
+ * Calculate the result of a mathematical expression.
+ * Supports +, -, *, /, and parentheses.
+ */
+type CalculatorRequest = {
+  /** The mathematical expression to evaluate. */
+  expression: string;
+};
 
 const calculator = recipe<
-  { expression: string; result: Cell<string> },
-  { result: Cell<string> }
+  CalculatorRequest,
+  string | { error: string }
 >("Calculator", ({ expression }) => {
   return derive(expression, (expr) => {
     const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
@@ -54,8 +60,15 @@ const calculator = recipe<
   });
 });
 
+/** Add an item to the list. */
+type AddListItemRequest = {
+  /** The item to add to the list. */
+  item: string;
+  result: Cell<string>;
+};
+
 const addListItem = handler<
-  { item: string; result: Cell<string> },
+  AddListItemRequest,
   { list: Cell<ListItem[]> }
 >(
   (args, state) => {
@@ -68,6 +81,12 @@ const addListItem = handler<
   },
 );
 
+/** Search the web for information. */
+type SearchQuery = {
+  /** The query to search the web for. */
+  query: string;
+};
+
 type SearchWebResult = {
   results: {
     title: string;
@@ -77,7 +96,7 @@ type SearchWebResult = {
 };
 
 const searchWeb = recipe<
-  { query: string },
+  SearchQuery,
   SearchWebResult | { error: string }
 >("Search Web", ({ query }) => {
   const { result, error } = fetchData<SearchWebResult>({
@@ -101,6 +120,12 @@ const searchWeb = recipe<
   return ifElse(error, { error }, result);
 });
 
+/** Read and extract content from a specific webpage URL. */
+type ReadWebRequest = {
+  /** The URL of the webpage to read and extract content from. */
+  url: string;
+};
+
 type ReadWebResult = {
   content: string;
   metadata: {
@@ -112,7 +137,7 @@ type ReadWebResult = {
 };
 
 const readWebpage = recipe<
-  { url: string },
+  ReadWebRequest,
   ReadWebResult | { error: string }
 >("Read Webpage", ({ url }) => {
   const { result, error } = fetchData<ReadWebResult>({
@@ -138,64 +163,17 @@ export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, messages, list }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-0");
-    const tools = {
+    const tools: Record<string, BuiltInLLMTool> = {
       search_web: {
-        description: "Search the web for information.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "The query to search the web for.",
-            },
-          },
-          required: ["query"],
-        } as JSONSchema,
         pattern: searchWeb,
       },
       read_webpage: {
-        description: "Read and extract content from a specific webpage URL.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string",
-              description:
-                "The URL of the webpage to read and extract content from.",
-            },
-          },
-          required: ["url"],
-        } as JSONSchema,
         pattern: readWebpage,
       },
       calculator: {
-        description:
-          "Calculate the result of a mathematical expression. Supports +, -, *, /, and parentheses.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            expression: {
-              type: "string",
-              description:
-                "The mathematical expression to evaluate (e.g., '2 + 3 * 4')",
-            },
-          },
-          required: ["expression"],
-        } as JSONSchema,
         pattern: calculator,
       },
       addListItem: {
-        description: "Add an item to the list.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            item: {
-              type: "string",
-              description: "The item to add to the list.",
-            },
-          },
-          required: ["item"],
-        } as JSONSchema,
         handler: addListItem({ list }),
       },
     };
