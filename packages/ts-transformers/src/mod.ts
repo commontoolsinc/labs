@@ -13,3 +13,13 @@ export type {
   TransformationOptions,
   TransformMode,
 } from "./core/context.ts";
+
+export {
+  createOpaqueRefTransformer,
+  createSchemaTransformer,
+} from "./legacy.ts";
+export type {
+  OpaqueRefTransformerOptions,
+  SchemaTransformerOptions,
+  TransformationError,
+} from "./legacy.ts";
