@@ -10,7 +10,6 @@
     "test": "deno test --allow-env --allow-ffi --allow-read"
   },
   "imports": {
-    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
     "@lit/context": "npm:@lit/context@^1.1.2",
     "marked": "npm:marked@^4.0.0",
     "codemirror": "npm:codemirror@^6.0.1",
