@@ -54,3 +54,27 @@ Next steps
 Outstanding work from the overall plan
 - Implement emitter-level heuristics based on analyzer metadata (above) and ensure future closures support is enabled by keeping scope info intact.
 - Add analyzer/normaliser test coverage (per rewrite_design plan) and extend docs once the pipeline is stable.
+
+---
+
+Latest checkpoint (post-fallback removal)
+- Removed the legacy `transformExpressionWithOpaqueRef` fallback path so the
+  modular pipeline now runs unconditionally for JSX expressions.
+- Augmented the dependency analyser to flag expressions that originate from
+  root recipe/handler parameters (e.g. `state.items[index]`) so that array
+  element access can be rewritten without relying on type information.
+- After these changes the fixture suite regressed: with the fallback gone we
+  now under-detect opaque references inside method chains (e.g.
+  `state.items.filter`, `state.name.toUpperCase`) because the type checker
+  reports those identifiers as `any` in the harness. As a result multiple JSX
+  fixtures (`jsx-complex-mixed`, `jsx-function-calls`, `jsx-property-access`,
+  `jsx-string-operations`) currently differ from expectations.
+
+Next steps
+- Teach the analyser to conservatively treat property/element accesses whose
+  root identifier is a known opaque parameter as opaque even when the checker
+  returns `any`, or update the testing harness to provide the `OpaqueRef`
+  declaration so that TypeScript can detect the intersection type.
+- Revisit the emitter logic once the analyser correctly reports dependencies
+  so that method calls and chained expressions derive over the enclosing
+  object instead of the method symbols.

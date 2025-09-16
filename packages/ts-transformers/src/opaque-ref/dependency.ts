@@ -54,6 +54,14 @@ const BUILDER_FUNCTIONS = new Set([
   "str",
 ]);
 
+const ROOT_OPAQUE_PARAMETER_FUNCTIONS = new Set([
+  "recipe",
+  "handler",
+  "lift",
+  "compute",
+  "render",
+]);
+
 export function dedupeExpressions(
   expressions: ts.Expression[],
   sourceFile: ts.SourceFile,
@@ -209,6 +217,73 @@ export function createDependencyAnalyzer(
       return node;
     };
 
+    const findRootIdentifier = (
+      expr: ts.Expression,
+    ): ts.Identifier | undefined => {
+      let current: ts.Expression = expr;
+      while (true) {
+        if (ts.isIdentifier(current)) return current;
+        if (ts.isPropertyAccessExpression(current)) {
+          current = current.expression;
+          continue;
+        }
+        if (ts.isElementAccessExpression(current)) {
+          current = current.expression;
+          continue;
+        }
+        if (
+          ts.isParenthesizedExpression(current) ||
+          ts.isAsExpression(current) ||
+          ts.isTypeAssertionExpression(current) ||
+          ts.isNonNullExpression(current)
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (ts.isCallExpression(current)) {
+          current = current.expression;
+          continue;
+        }
+        return undefined;
+      }
+    };
+
+    const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean => {
+      if (!symbol) return false;
+      const declarations = symbol.getDeclarations();
+      if (!declarations) return false;
+      for (const declaration of declarations) {
+        if (!ts.isParameter(declaration)) continue;
+        let functionNode: ts.Node | undefined = declaration.parent;
+        while (functionNode && !ts.isFunctionLike(functionNode)) {
+          functionNode = functionNode.parent;
+        }
+        if (!functionNode) continue;
+        let candidate: ts.Node | undefined = functionNode.parent;
+        while (candidate && !ts.isCallExpression(candidate)) {
+          candidate = candidate.parent;
+        }
+        if (!candidate) continue;
+        const functionName = getFunctionName(candidate as ts.CallExpression);
+        if (
+          functionName &&
+          ROOT_OPAQUE_PARAMETER_FUNCTIONS.has(functionName)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const isImplicitOpaqueRefExpression = (
+      expr: ts.Expression,
+    ): boolean => {
+      const root = findRootIdentifier(expr);
+      if (!root) return false;
+      const symbol = checker.getSymbolAtLocation(root);
+      return isRootOpaqueParameter(symbol);
+    };
+
     if (ts.isIdentifier(expression)) {
       const symbol = checker.getSymbolAtLocation(expression);
       if (isSymbolIgnored(symbol)) {
@@ -245,6 +320,20 @@ export function createDependencyAnalyzer(
           nodes: [node],
         };
       }
+      if (isImplicitOpaqueRefExpression(expression)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          findParentNodeId(target.nodes, expression.expression) ?? null;
+        const node = recordDependency(expression, scope, parentId);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: true,
+          dependencies: [expression],
+          nodes: [node],
+        };
+      }
       return {
         containsOpaqueRef: target.containsOpaqueRef,
         requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
@@ -259,6 +348,20 @@ export function createDependencyAnalyzer(
           ts.isExpression(expression.argumentExpression)
         ? analyzeExpression(expression.argumentExpression, scope, context)
         : emptyAnalysis();
+      if (isImplicitOpaqueRefExpression(expression.expression)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          findParentNodeId(target.nodes, expression.expression) ?? null;
+        const node = recordDependency(expression, scope, parentId);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: true,
+          dependencies: [expression],
+          nodes: [node],
+        };
+      }
       return {
         containsOpaqueRef: target.containsOpaqueRef ||
           argument.containsOpaqueRef,
