@@ -46,6 +46,40 @@ describe("SchemaGenerator", () => {
     });
   });
 
+  describe("jsdoc integration", () => {
+    it("prefers the comment closest to the type declaration", async () => {
+      const generator = new SchemaGenerator();
+      const code = `/*** Tool ***/
+
+/**
+ * Calculate the result of a mathematical expression.
+ * Supports +, -, *, /, and parentheses.
+ */
+type CalculatorRequest = {
+  /** The mathematical expression to evaluate. */
+  expression: string;
+};`;
+      const { type, checker, typeNode } = await getTypeFromCode(
+        code,
+        "CalculatorRequest",
+      );
+
+      const schema = generator.generateSchema(type, checker, typeNode);
+      const typedSchema = schema as Record<string, unknown>;
+      const properties = typedSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(typedSchema.description).toBe(
+        "Calculate the result of a mathematical expression.\n" +
+          "Supports +, -, *, /, and parentheses.",
+      );
+      expect(properties?.expression?.description).toBe(
+        "The mathematical expression to evaluate.",
+      );
+    });
+  });
+
   describe("error handling", () => {
     it("should handle unknown types gracefully", async () => {
       const generator = new SchemaGenerator();

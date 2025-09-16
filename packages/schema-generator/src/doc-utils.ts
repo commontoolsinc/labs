@@ -26,7 +26,12 @@ export function getDeclDocs(decl: ts.Declaration): string[] {
   const docs: string[] = [];
   const jsDocs = (decl as any).jsDoc as Array<ts.JSDoc> | undefined;
   if (jsDocs && jsDocs.length > 0) {
-    for (const d of jsDocs) {
+    // Prefer comments that are closest to the declaration by iterating in
+    // reverse source order. TypeScript keeps JSDoc entries ordered as they
+    // appear in the source, so sorting by position places the comment nearest
+    // to the declaration at the front of the list.
+    const sorted = [...jsDocs].sort((a, b) => b.pos - a.pos);
+    for (const d of sorted) {
       const comment = (d as any).comment as unknown;
       let text = "";
       if (typeof comment === "string") {
