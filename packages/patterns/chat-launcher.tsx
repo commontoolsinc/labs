@@ -23,31 +23,6 @@ interface ChatEntry {
   label: string;
 }
 
-const createChatsCell = lift(
-  {
-    type: "object",
-    properties: {
-      isInitialized: { type: "boolean", default: false, asCell: true },
-      storedCellRef: { type: "object", asCell: true },
-    },
-  },
-  undefined,
-  ({ isInitialized, storedCellRef }) => {
-    if (!isInitialized.get()) {
-      const newCellRef = createCell(undefined, "chatsList");
-      newCellRef.set([]);
-      storedCellRef.set(newCellRef);
-      isInitialized.set(true);
-      return {
-        chatsCell: newCellRef,
-      };
-    }
-    return {
-      chatsCell: storedCellRef,
-    };
-  },
-);
-
 const addChatAndNavigate = lift(
   {
     type: "object",
@@ -128,20 +103,18 @@ const removeChat = handler<
   { index: number; chatsCell: Cell<ChatEntry[]> }
 >(
   (_, { index, chatsCell }) => {
-    const isInitialized = cell(false);
-    return removeCharmFromCell({
-      indexToRemove: index,
-      chatsCell,
-      isInitialized,
-    });
+    console.log("removeChat: index=", index, " chatsCell=", chatsCell);
+    const current = chatsCell.get() || [];
+    const newArray = [
+      ...current.slice(0, index),
+      ...current.slice(index + 1),
+    ];
+    chatsCell.set(newArray);
   },
 );
 
 export default recipe("Chat Launcher", () => {
-  const { chatsCell } = createChatsCell({
-    isInitialized: cell(false),
-    storedCellRef: cell(),
-  });
+  const { chatsCell } = { chatsCell: cell([]) };
 
   return {
     [NAME]: "Chat Launcher",
