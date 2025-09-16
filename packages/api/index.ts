@@ -293,13 +293,20 @@ export interface BuiltInLLMParams {
   tools?: Record<string, BuiltInLLMTool>;
 }
 
-export interface BuiltInLLMState<T> {
+export interface BuiltInLLMState {
   pending: boolean;
   result?: BuiltInLLMContent;
   partial?: string;
   error: unknown;
   cancelGeneration: Stream<void>;
-  addMessage: Stream<BuiltInLLMMessage>;
+}
+
+export interface BuiltInLLMGenerateObjectState<T> {
+  pending: boolean;
+  result?: T;
+  partial?: string;
+  error: unknown;
+  cancelGeneration: Stream<void>;
 }
 
 export interface BuiltInLLMDialogState {
@@ -455,9 +462,9 @@ export type IfElseFunction = <T = any, U = any, V = any>(
   ifFalse: Opaque<V>,
 ) => OpaqueRef<U | V>;
 
-export type LLMFunction = <T = string>(
+export type LLMFunction = (
   params: Opaque<BuiltInLLMParams>,
-) => OpaqueRef<BuiltInLLMState<T>>;
+) => OpaqueRef<BuiltInLLMState>;
 
 export type LLMDialogFunction = (
   params: Opaque<BuiltInLLMParams>,
@@ -465,7 +472,7 @@ export type LLMDialogFunction = (
 
 export type GenerateObjectFunction = <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,
-) => OpaqueRef<BuiltInLLMState<T>>;
+) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
 export type FetchOptions = {
   body?: JSONValue;

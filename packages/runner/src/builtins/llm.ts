@@ -9,6 +9,7 @@ import {
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
+  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
 } from "@commontools/api";

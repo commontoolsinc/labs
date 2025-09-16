@@ -184,13 +184,19 @@ export interface BuiltInLLMParams {
      */
     tools?: Record<string, BuiltInLLMTool>;
 }
-export interface BuiltInLLMState<T> {
+export interface BuiltInLLMState {
     pending: boolean;
     result?: BuiltInLLMContent;
     partial?: string;
     error: unknown;
     cancelGeneration: Stream<void>;
-    addMessage: Stream<BuiltInLLMMessage>;
+}
+export interface BuiltInLLMGenerateObjectState<T> {
+    pending: boolean;
+    result?: T;
+    partial?: string;
+    error: unknown;
+    cancelGeneration: Stream<void>;
 }
 export interface BuiltInLLMDialogState {
     pending: boolean;
@@ -258,9 +264,9 @@ export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
 export type RenderFunction = <T>(fn: () => T) => OpaqueRef<T>;
 export type StrFunction = (strings: TemplateStringsArray, ...values: any[]) => OpaqueRef<string>;
 export type IfElseFunction = <T = any, U = any, V = any>(condition: Opaque<T>, ifTrue: Opaque<U>, ifFalse: Opaque<V>) => OpaqueRef<U | V>;
-export type LLMFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
+export type LLMFunction = (params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState>;
 export type LLMDialogFunction = (params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMDialogState>;
-export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMState<T>>;
+export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 export type FetchOptions = {
     body?: JSONValue;
     headers?: Record<string, string>;
