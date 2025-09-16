@@ -740,32 +740,39 @@ export class Runner implements IRunner {
     value: JSONValue,
     seen: Set<object>,
   ): void {
+    if (isRecipe(value)) {
+      this.discoverAndCacheFunctions(value, seen);
+      return;
+    }
+
+    if (isModule(value)) {
+      this.discoverAndCacheFunctionsFromModule(value, seen);
+      return;
+    }
+
     if (
       !isRecord(value) || isOpaqueRef(value) || isShadowRef(value) ||
       isCell(value)
-    ) return;
+    ) {
+      return;
+    }
 
     if (seen.has(value)) return;
     seen.add(value);
 
-    if (isRecipe(value)) {
-      this.discoverAndCacheFunctions(value, seen);
-    } else if (isModule(value)) {
-      this.discoverAndCacheFunctionsFromModule(value, seen);
-    } else { // = isRecord(value)
-      // Recursively search in objects and arrays
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          this.discoverAndCacheFunctionsFromValue(item, seen);
-        }
-      } else {
-        for (const key in value) {
-          this.discoverAndCacheFunctionsFromValue(
-            value[key] as JSONValue,
-            seen,
-          );
-        }
+    // Recursively search in objects and arrays
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.discoverAndCacheFunctionsFromValue(item, seen);
       }
+      return;
+    }
+
+    for (const key in value) {
+      this.discoverAndCacheFunctionsFromValue(
+        value[key] as JSONValue,
+        seen,
+      );
     }
   }
 
