@@ -15,23 +15,9 @@
     "@commontools/js-runtime": "../js-runtime/mod.ts"
   },
   "tasks": {
-    "test": "deno test --no-check --allow-read --allow-write --allow-env test/**/*.test.ts",
+    "test": "deno test --allow-read --allow-write --allow-env test/**/*.test.ts",
     "check": "deno check src/**/*.ts",
     "fmt": "deno fmt src/ test/",
     "lint": "deno lint src/ test/"
-  },
-  "compilerOptions": {
-    "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "strictBindCallApply": true,
-    "strictPropertyInitialization": true,
-    "noImplicitThis": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true
   }
 }

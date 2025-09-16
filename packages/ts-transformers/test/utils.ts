@@ -4,10 +4,11 @@ import { StaticCache } from "@commontools/static";
 import {
   createOpaqueRefTransformer,
   createSchemaTransformer,
-} from "@commontools/js-runtime/transformers";
-import { getTypeScriptEnvironmentTypes } from "@commontools/js-runtime";
+} from "../src/mod.ts";
+const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
-let envTypesCache: Record<string, string> | undefined;
+type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
+let envTypesCache: Record<EnvTypeKey, string> | undefined;
 
 export interface TransformOptions {
   mode?: "transform" | "error";
@@ -28,8 +29,7 @@ export async function transformSource(
   } = options;
 
   if (!envTypesCache) {
-    const cache = new StaticCache();
-    envTypesCache = await getTypeScriptEnvironmentTypes(cache);
+    envTypesCache = await loadEnvironmentTypes();
   }
 
   const fileName = "/test.tsx";
@@ -41,7 +41,10 @@ export async function transformSource(
     strict: true,
   };
 
-  const allTypes = { ...envTypesCache, ...types };
+  const allTypes: Record<string, string> = {
+    ...envTypesCache,
+    ...types,
+  };
 
   const host: ts.CompilerHost = {
     getSourceFile: (name) => {
@@ -64,7 +67,7 @@ export async function transformSource(
           true,
         );
       }
-      const baseName = name.split("/").pop();
+      const baseName = baseNameFromPath(name);
       if (baseName && allTypes[baseName]) {
         return ts.createSourceFile(
           name,
@@ -82,7 +85,7 @@ export async function transformSource(
       if (name === fileName) return true;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
       if (allTypes[name]) return true;
-      const baseName = name.split("/").pop();
+      const baseName = baseNameFromPath(name);
       if (baseName && allTypes[baseName]) return true;
       return false;
     },
@@ -92,7 +95,7 @@ export async function transformSource(
         return allTypes.es2023;
       }
       if (allTypes[name]) return allTypes[name];
-      const baseName = name.split("/").pop();
+      const baseName = baseNameFromPath(name);
       if (baseName && allTypes[baseName]) return allTypes[baseName];
       return undefined;
     },
@@ -208,4 +211,17 @@ export async function compareFixtureTransformation(
     expected: expectedNormalized,
     matches: actualNormalized === expectedNormalized,
   };
+}
+
+async function loadEnvironmentTypes(): Promise<Record<EnvTypeKey, string>> {
+  const cache = new StaticCache();
+  const entries = await Promise.all(
+    ENV_TYPE_ENTRIES.map(async (key) => [key, await cache.getText(`types/${key}.d.ts`)] as const),
+  );
+  return Object.fromEntries(entries) as Record<EnvTypeKey, string>;
+}
+
+function baseNameFromPath(path: string): string | undefined {
+  const segments = path.split("/");
+  return segments.length > 0 ? segments[segments.length - 1] : undefined;
 }
