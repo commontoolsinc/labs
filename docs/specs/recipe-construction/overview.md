@@ -1,5 +1,10 @@
 # Recipe Graph Unification Spec
 
+> **Terminology update:** Authored graphs are now referred to as “patterns.”
+> The builder module still exposes helpers like `recipe(...)`, so this spec
+> uses “pattern” when discussing authored artifacts and keeps the API names
+> unchanged.
+
 ## Summary
 
 Unify builder-time `OpaqueRef` proxies and runtime `Cell` objects into a single
