@@ -36,20 +36,35 @@ export type SchemaPathSelector = {
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
+ * While the default behavior is to use object equality, you can provide an
+ * `equalFn` parameter to the constructor, which will be used for the value
+ * comparisons.
+ *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
   private map = new Map<K, Set<V>>();
+  private equalFn?: (a: V, b: V) => boolean;
+
+  constructor(equalFn?: (a: V, b: V) => boolean) {
+    this.equalFn = equalFn;
+  }
 
   public get(key: K): Set<V> | undefined {
     return this.map.get(key);
   }
 
   public add(key: K, value: V) {
-    if (!this.map.has(key)) {
+    const values = this.map.get(key);
+    if (values === undefined) {
       const values = new Set<V>([value]);
       this.map.set(key, values);
+    } else if (
+      this.equalFn !== undefined &&
+      (values.values().some((item) => this.equalFn!(item, value)))
+    ) {
+      return;
     } else {
       this.map.get(key)!.add(value);
     }
@@ -61,7 +76,10 @@ export class MapSet<K, V> {
 
   public hasValue(key: K, value: V): boolean {
     const values = this.map.get(key);
-    return (values !== undefined && values.has(value));
+    if (values !== undefined && this.equalFn !== undefined) {
+      return values.values().some((item) => this.equalFn!(item, value));
+    }
+    return values !== undefined && values.has(value);
   }
 
   public deleteValue(key: K, value: V): boolean {
@@ -69,7 +87,17 @@ export class MapSet<K, V> {
       return false;
     } else {
       const values = this.map.get(key)!;
-      const rv = values.delete(value);
+      let existing: V = value;
+      if (this.equalFn !== undefined) {
+        const match = values.values().find((item) =>
+          this.equalFn!(item, value)
+        );
+        if (match === undefined) {
+          return false;
+        }
+        existing = match;
+      }
+      const rv = values.delete(existing);
       if (values.size === 0) {
         this.map.delete(key);
       }
@@ -151,11 +179,6 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
       this.partial.set(partialKey, existing);
     }
     if (existing.some((item) => deepEqual(item, extraKey))) {
-      logger.warn(() => [
-        "Cycle Detected!",
-        extraKey,
-        context,
-      ]);
       return null;
     }
     existing.push(extraKey);
@@ -679,7 +702,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     private schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(),
+    >(deepEqual),
   ) {
     super(manager);
   }

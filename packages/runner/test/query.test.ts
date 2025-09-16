@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import type { JSONSchema, JSONValue, SchemaContext } from "../src/index.ts";
+import {
+  deepEqual,
+  type JSONSchema,
+  type JSONValue,
+  type SchemaContext,
+} from "../src/index.ts";
 import {
   CompoundCycleTracker,
   MapSet,
@@ -301,6 +306,128 @@ describe("Query", () => {
     expect(selectorSet1).toContainEqual({
       path: ["name"],
       schemaContext: schemaContext,
+    });
+  });
+
+  it("detects pointer cycles when schema initially differ", () => {
+    const testCell1 = runtime.getCell<
+      { name: { cell: { ["/"]: string }; path: string[] } }
+    >(
+      space,
+      "query cycle schema test cell1",
+      undefined,
+      tx,
+    );
+
+    const testCell2 = runtime.getCell<
+      { name: { cell: { ["/"]: string }; path: string[] } }
+    >(
+      space,
+      "query cycle schema test cell2",
+      undefined,
+      tx,
+    );
+
+    // testCell1 self property points to itself
+    const assert1 = {
+      the: "application/json",
+      of: testCell1.sourceURI,
+      is: {
+        value: {
+          self: {
+            cell: testCell1.entityId,
+            path: [],
+          },
+          other: {
+            cell: testCell2.entityId,
+            path: [],
+          },
+        },
+      },
+      cause: refer({ the: "application/json", of: testCell1.sourceURI }),
+      since: 1,
+    };
+
+    store.set(`${assert1.of}/${assert1.the}`, assert1);
+
+    const assert2 = {
+      the: "application/json",
+      of: testCell2.sourceURI,
+      is: {
+        value: {
+          self: {
+            cell: testCell2.entityId,
+            path: [],
+          },
+        },
+      },
+      cause: refer({ the: "application/json", of: testCell2.sourceURI }),
+      since: 2,
+    };
+
+    store.set(`${assert2.of}/${assert2.the}`, assert2);
+
+    // Top level cell matches, but our other link does not, since
+    // additionalProperties is not provided.
+    // After walking down the self property of the top level cell, our other
+    // link does match, since it's a property of that schema.
+    const schema = {
+      "type": "object",
+      "required": ["self"],
+      "properties": {
+        "self": {
+          "type": "object",
+          "properties": {
+            "self": { "$ref": "#" },
+            "other": { "$ref": "#" },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const schemaContext = {
+      schema,
+      rootSchema: schema,
+    };
+    const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+    const traverser = new SchemaObjectTraverser(
+      manager,
+      { path: [], schemaContext },
+      tracker,
+      schemaTracker,
+    );
+
+    const result = traverser.traverse({
+      address: {
+        id: testCell1.sourceURI,
+        type: "application/json",
+        path: ["value"],
+      },
+      value: assert1.is.value,
+    });
+
+    expect(result).toBeDefined();
+
+    // Our matching selectors for both entries should each have one entry for
+    // the top level schema, and one entry for the schema at `self`.
+    const selectors1 = schemaTracker.get(
+      `${testCell1.sourceURI}/application/json`,
+    );
+    expect(selectors1).not.toBeUndefined();
+    expect(selectors1?.size).toBe(2);
+    expect(selectors1).toContainEqual({
+      path: [],
+      schemaContext,
+    });
+
+    const selectors2 = schemaTracker.get(
+      `${testCell2.sourceURI}/application/json`,
+    );
+    expect(selectors2).not.toBeUndefined();
+    expect(selectors2?.size).toBe(2);
+    expect(selectors2).toContainEqual({
+      path: [],
+      schemaContext,
     });
   });
 
