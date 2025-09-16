@@ -207,7 +207,7 @@ function factoryFromRecipe<T, R>(
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueRef(input) && input.export().cell === cell &&
+            isOpaqueRef(input) && (input as any).cell === cell &&
             !cell.export().name
           ) {
             cell.setName(key);
