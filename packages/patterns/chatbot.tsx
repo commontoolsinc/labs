@@ -64,25 +64,6 @@ export const TitleGenerator = recipe<
   { model?: string; messages: Array<BuiltInLLMMessage> }
 >("Title Generator", ({ model, messages }) => {
   const titleMessages = derive(messages, (m) => {
-    if (!m || m.length === 0) return [];
-
-    const messageCount = 2;
-    const selectedMessages = m.slice(0, messageCount).filter(Boolean);
-
-    if (selectedMessages.length === 0) return [];
-
-    return [
-      {
-        role: "user" as const,
-        content: [{
-          type: "text" as const,
-          text: selectedMessages.map((msg) => JSON.stringify(msg)).join("\n"),
-        }],
-      },
-    ];
-  });
-
-  const titleMessages2 = derive(titleMessages, (m) => {
     if (!m || m.length === 0) return "";
 
     const messageCount = 2;
@@ -93,17 +74,10 @@ export const TitleGenerator = recipe<
     return selectedMessages.map((msg) => JSON.stringify(msg)).join("\n");
   });
 
-  const { result: titleResult } = llm({
+  const { result } = generateObject({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
-    messages: titleMessages,
-    model,
-  });
-
-  const { result: titleResult2 } = generateObject({
-    system:
-      "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
-    prompt: titleMessages2,
+    prompt: titleMessages,
     model,
     schema: {
       type: "object",
@@ -117,23 +91,11 @@ export const TitleGenerator = recipe<
     },
   });
 
-  const title = derive(titleResult, (t) => {
-    if (typeof t === "string") {
-      return t;
-    }
-
-    if (t?.[0] && t[0].type === "text") {
-      return t[0].text;
-    }
-
-    return "Untitled Chat";
-  });
-
-  const title2 = derive(titleResult2, (t) => {
+  const title = derive(result, (t) => {
     return t?.title || "Untitled Chat";
   });
 
-  return title2;
+  return title;
 });
 
 export default recipe<ChatInput, ChatOutput>(
