@@ -5,14 +5,12 @@ import { IRuntime } from "../runtime.ts";
 
 export type RuntimeModuleIdentifier =
   | "commontools"
-  | "dom-parser"
   | "turndown"
   | "@commontools/html"
   | "@commontools/builder"
   | "@commontools/runner";
 export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
   "commontools",
-  "dom-parser",
   "turndown",
   // backwards compat
   "@commontools/html",
@@ -40,9 +38,6 @@ export const getTypes = (() => {
     const builderTypes = await cache.getText("types/commontools.d.ts");
     depTypes = {
       "commontools": builderTypes,
-      "dom-parser": await cache.getText(
-        "types/dom-parser.d.ts",
-      ),
       "turndown": await cache.getText(
         "types/turndown.d.ts",
       ),
@@ -54,13 +49,11 @@ export const getTypes = (() => {
   };
 })();
 
-export async function getExports(runtime: IRuntime) {
+export function getExports(runtime: IRuntime) {
   const { commontools, exportsCallback } = createBuilder(runtime);
-  const DOMParser = await getDOMParser();
   return {
     runtimeExports: {
       "commontools": commontools,
-      "dom-parser": { DOMParser },
       // __esModule lets this load in the AMD loader
       // when finding the "default"
       "turndown": { default: turndown, __esModule: true },
@@ -71,20 +64,3 @@ export async function getExports(runtime: IRuntime) {
     exportsCallback,
   };
 }
-
-const getDOMParser = (() => {
-  let domParser: object | undefined;
-  return async () => {
-    if (domParser) {
-      return domParser;
-    }
-    if (globalThis.DOMParser) {
-      domParser = globalThis.DOMParser as object;
-    } else {
-      const { JSDOM } = await import("jsdom");
-      const jsdom = new JSDOM("");
-      domParser = jsdom.window.DOMParser as object;
-    }
-    return domParser;
-  };
-})();

@@ -13,6 +13,17 @@ import {
 import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
 import * as logger from "./logger.ts";
 
+export type SetPropHandler = <T>(
+  target: T,
+  key: string,
+  value: unknown,
+) => void;
+
+export interface RenderOptions {
+  setProp?: SetPropHandler;
+  document?: Document;
+}
+
 export const vdomSchema: JSONSchema = {
   type: "object",
   properties: {
@@ -43,30 +54,37 @@ export const vdomSchema: JSONSchema = {
  * Renders a view into a parent element, supporting both static VNodes and reactive cells.
  * @param parent - The HTML element to render into
  * @param view - The VNode or reactive cell containing a VNode to render
+ * @param options - Options for the renderer.
  * @returns A cancel function to clean up the rendering
  */
 export const render = (
   parent: HTMLElement,
   view: VNode | Cell<VNode>,
+  options: RenderOptions = {},
 ): Cancel => {
   // If this is a reactive cell, ensure the schema is VNode
   if (isCell(view)) view = view.asSchema(vdomSchema);
-  return effect(view, (view: VNode) => renderImpl(parent, view));
+  return effect(view, (view: VNode) => renderImpl(parent, view, options));
 };
 
 /**
  * Internal implementation that renders a VNode into a parent element.
  * @param parent - The HTML element to render into
  * @param view - The VNode to render
+ * @param options - Options for the renderer.
  * @returns A cancel function to remove the rendered content
  */
-export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
+export const renderImpl = (
+  parent: HTMLElement,
+  view: VNode,
+  options: RenderOptions = {},
+): Cancel => {
   // If there is no valid vnode, don't render anything
   if (!isVNode(view)) {
     logger.debug("No valid vnode to render", view);
     return () => {};
   }
-  const [root, cancel] = renderNode(view);
+  const [root, cancel] = renderNode(view, options);
   if (!root) {
     logger.warn("Could not render view", view);
     return cancel;
@@ -81,7 +99,10 @@ export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
 
 export default render;
 
-const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
+const renderNode = (
+  node: VNode,
+  options: RenderOptions = {},
+): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
 
   // Follow `[UI]` to actual vdom. Do this before otherwise parsing the vnode,
@@ -95,13 +116,19 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
     return [null, cancel];
   }
 
-  const element = document.createElement(sanitizedNode.name);
+  const element = (options.document ?? globalThis.document).createElement(
+    sanitizedNode.name,
+  );
 
-  const cancelProps = bindProps(element, sanitizedNode.props);
+  const cancelProps = bindProps(element, sanitizedNode.props, options);
   addCancel(cancelProps);
 
   if (sanitizedNode.children !== undefined) {
-    const cancelChildren = bindChildren(element, sanitizedNode.children);
+    const cancelChildren = bindChildren(
+      element,
+      sanitizedNode.children,
+      options,
+    );
     addCancel(cancelChildren);
   }
 
@@ -111,6 +138,7 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
 const bindChildren = (
   element: HTMLElement,
   children: RenderNode,
+  options: RenderOptions = {},
 ): Cancel => {
   // Mapping from stable key to its rendered node and cancel function.
   let keyedChildren = new Map<string, { node: ChildNode; cancel: Cancel }>();
@@ -123,10 +151,11 @@ const bindChildren = (
     key: string,
   ): { node: ChildNode; cancel: Cancel } => {
     let currentNode: ChildNode | null = null;
+    const document = options.document ?? globalThis.document;
     const cancel = effect(child, (childValue) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
       if (isVNode(childValue)) {
-        const [childElement, childCancel] = renderNode(childValue);
+        const [childElement, childCancel] = renderNode(childValue, options);
         newRendered = {
           node: childElement ?? document.createTextNode(""),
           cancel: childCancel ?? (() => {}),
@@ -229,7 +258,12 @@ const bindChildren = (
   };
 };
 
-const bindProps = (element: HTMLElement, props: Props): Cancel => {
+const bindProps = (
+  element: HTMLElement,
+  props: Props,
+  options: RenderOptions,
+): Cancel => {
+  const setProperty = options.setProp ?? setProp;
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
     if (isCell(propValue) || isStream(propValue)) {
@@ -249,18 +283,18 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
         // Properties starting with $ get passed in as raw values, useful for
         // e.g. passing a cell itself instead of its value.
         const key = propKey.slice(1);
-        setProp(element, key, propValue);
+        setProperty(element, key, propValue);
       } else {
         const cancel = effect(propValue, (replacement) => {
           logger.debug("prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
-          setProp(element, propKey, replacement);
+          setProperty(element, propKey, replacement);
         });
         addCancel(cancel);
       }
     } else {
-      setProp(element, propKey, propValue);
+      setProperty(element, propKey, propValue);
     }
   }
   return cancel;
@@ -370,14 +404,17 @@ export function serializableEvent<T>(event: Event): T {
   for (const property of allowListedEventTargetProperties) {
     targetObject[property] = event.target?.[property as keyof EventTarget];
   }
-  if (
-    event.target instanceof HTMLSelectElement && event.target.selectedOptions
-  ) {
+
+  const { target } = event;
+
+  if (isSelectElement(target) && target.selectedOptions) {
     // To support multiple selections, we create serializable option elements
-    targetObject.selectedOptions = Array.from(event.target.selectedOptions).map(
-      (option) => ({ value: option.value }),
-    );
+    targetObject.selectedOptions = Array.from(target.selectedOptions)
+      .map(
+        (option) => ({ value: option.value }),
+      );
   }
+
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
 
   if ((event as CustomEvent).detail !== undefined) {
@@ -394,3 +431,9 @@ let sanitizeEvent: EventSanitizer<unknown> = serializableEvent;
 export const setEventSanitizer = (sanitize: EventSanitizer<unknown>) => {
   sanitizeEvent = sanitize;
 };
+
+function isSelectElement(value: unknown): value is HTMLSelectElement {
+  return !!(value && typeof value === "object" && ("tagName" in value) &&
+    typeof value.tagName === "string" &&
+    value.tagName.toUpperCase() === "SELECT");
+}
