@@ -38,3 +38,5 @@ export {
   replaceOpaqueRefsWithParams,
   transformExpressionWithOpaqueRef,
 } from "./opaque-ref/transforms.ts";
+
+export { createJsxExpressionRule } from "./opaque-ref/rules/jsx-expression.ts";
