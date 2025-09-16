@@ -186,7 +186,7 @@ export interface BuiltInLLMParams {
 }
 export interface BuiltInLLMState<T> {
     pending: boolean;
-    result?: T;
+    result?: BuiltInLLMContent;
     partial?: string;
     error: unknown;
     cancelGeneration: Stream<void>;

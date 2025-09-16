@@ -56,7 +56,49 @@ type ChatOutput = {
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
   cancelGeneration: Stream<void>;
+  title?: string;
 };
+
+export const TitleGenerator = recipe<{ model?: string, messages: Array<BuiltInLLMMessage>; }>("Title Generator", ({ model, messages }) => {
+  const titleMessages = derive(messages, m => {
+    if (!m || m.length === 0) return [];
+
+    const messageCount = 2;
+    const selectedMessages = m.slice(0, messageCount).filter(Boolean);
+
+    if (selectedMessages.length === 0) return [];
+
+    return [
+      {
+        role: 'user' as const,
+        content: [{
+          type: 'text' as const,
+          text: selectedMessages.map(msg => JSON.stringify(msg)).join('\n')
+        }]
+      }
+    ];
+  })
+
+  const { result: titleResult } = llm({
+    system: "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
+    messages: titleMessages,
+    model,
+  });
+
+  const title = derive(titleResult, t => {
+    if (typeof t === 'string') {
+      return t;
+    }
+
+    if (t?.[0] && t[0].type === 'text') {
+      return t[0].text;
+    }
+
+    return "Untitled Chat";
+  });
+
+  return title;
+})
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
@@ -84,13 +126,15 @@ export default recipe<ChatInput, ChatOutput>(
       return items;
     });
 
+    const title = TitleGenerator({ model, messages });
+
     return {
-      [NAME]: "Chat",
+      [NAME]: title,
       [UI]: (
         <ct-screen>
           <ct-hstack justify="between" slot="header">
             <div>
-              <h2>Chat</h2>
+              <h2>{title}</h2>
             </div>
 
             <div>
@@ -133,6 +177,7 @@ export default recipe<ChatInput, ChatOutput>(
       pending,
       addMessage,
       cancelGeneration,
+      title
     };
   },
 );
