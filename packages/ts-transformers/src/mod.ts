@@ -27,6 +27,9 @@ export {
 
 export {
   collectOpaqueRefs,
+} from "./opaque-ref/dependency.ts";
+
+export {
   containsOpaqueRef,
   isOpaqueRefType,
   isSimpleOpaqueRefAccess,
@@ -34,9 +37,17 @@ export {
 
 export {
   createIfElseCall,
-  replaceOpaqueRefWithParam,
   replaceOpaqueRefsWithParams,
+  replaceOpaqueRefWithParam,
   transformExpressionWithOpaqueRef,
 } from "./opaque-ref/transforms.ts";
 
-export { createJsxExpressionRule } from "./opaque-ref/rules/jsx-expression.ts";
+export {
+  createJsxExpressionRule,
+  type OpaqueRefRule,
+} from "./opaque-ref/rules/jsx-expression.ts";
+
+export {
+  createModularOpaqueRefTransformer,
+  type ModularOpaqueRefTransformerOptions,
+} from "./opaque-ref/transformer.ts";
