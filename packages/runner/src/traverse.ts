@@ -1,4 +1,5 @@
 import { refer } from "merkle-reference";
+import { SchemaAll } from "@commontools/memory/schema";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
@@ -20,7 +21,6 @@ import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-import { SchemaAll } from "@commontools/memory/schema";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
