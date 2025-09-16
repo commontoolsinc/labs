@@ -1,38 +1,99 @@
 import ts from "typescript";
-import { containsOpaqueRef, isEventHandlerJsxAttribute } from "../types.ts";
-import { transformExpressionWithOpaqueRef } from "../transforms.ts";
 
-export function createJsxExpressionRule(
-  program: ts.Program,
-): ts.TransformerFactory<ts.SourceFile> {
-  const checker = program.getTypeChecker();
+import type { TransformationContext } from "../../core/context.ts";
+import { isEventHandlerJsxAttribute } from "../types.ts";
+import {
+  type OpaqueRefHelperName,
+  transformExpressionWithOpaqueRef,
+} from "../transforms.ts";
+import { createDependencyAnalyzer } from "../dependency.ts";
+import { rewriteExpression } from "../rewrite/rewrite.ts";
 
-  return (context) => (sourceFile) => {
-    const visit: ts.Visitor = (node) => {
-      if (ts.isJsxExpression(node) && node.expression) {
-        if (isEventHandlerJsxAttribute(node)) {
-          return ts.visitEachChild(node, visit, context);
-        }
-        if (!containsOpaqueRef(node.expression, checker)) {
-          return ts.visitEachChild(node, visit, context);
-        }
-        const transformed = transformExpressionWithOpaqueRef(
-          node.expression,
-          checker,
-          context.factory,
-          sourceFile,
-          context,
-        );
-        if (transformed !== node.expression) {
-          return context.factory.createJsxExpression(
-            node.dotDotDotToken,
-            transformed,
+export interface OpaqueRefRule {
+  readonly name: string;
+  transform(
+    sourceFile: ts.SourceFile,
+    context: TransformationContext,
+    transformation: ts.TransformationContext,
+  ): ts.SourceFile;
+}
+
+export function createJsxExpressionRule(): OpaqueRefRule {
+  return {
+    name: "jsx-expression",
+    transform(
+      sourceFile,
+      context,
+      transformation,
+    ): ts.SourceFile {
+      const checker = context.checker;
+      const analyze = createDependencyAnalyzer(checker);
+      const helpers = new Set<OpaqueRefHelperName>();
+
+      const visit: ts.Visitor = (node) => {
+        if (ts.isJsxExpression(node) && node.expression) {
+          if (isEventHandlerJsxAttribute(node)) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          const analysis = analyze(node.expression);
+
+          if (!analysis.containsOpaqueRef) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          if (!analysis.requiresRewrite) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          const rewriteResult = rewriteExpression({
+            expression: node.expression,
+            analysis,
+            context: {
+              factory: context.factory,
+              checker,
+              sourceFile,
+              transformation,
+            },
+          });
+
+          if (rewriteResult) {
+            for (const helper of rewriteResult.helpers) {
+              helpers.add(helper);
+            }
+            return context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              rewriteResult.expression,
+            );
+          }
+
+          const transformed = transformExpressionWithOpaqueRef(
+            node.expression,
+            checker,
+            context.factory,
+            sourceFile,
+            transformation,
+            (helper) => helpers.add(helper),
           );
-        }
-      }
-      return ts.visitEachChild(node, visit, context);
-    };
 
-    return ts.visitEachChild(sourceFile, visit, context);
+          if (transformed !== node.expression) {
+            return context.factory.createJsxExpression(
+              node.dotDotDotToken,
+              transformed,
+            );
+          }
+        }
+
+        return ts.visitEachChild(node, visit, transformation);
+      };
+
+      const updated = ts.visitEachChild(sourceFile, visit, transformation);
+
+      for (const helper of helpers) {
+        context.imports.request({ name: helper });
+      }
+
+      return updated;
+    },
   };
 }
