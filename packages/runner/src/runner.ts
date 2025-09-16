@@ -6,6 +6,7 @@ import {
   isModule,
   isOpaqueRef,
   isRecipe,
+  isShadowRef,
   isStreamValue,
   type JSONSchema,
   type JSONValue,
@@ -24,7 +25,7 @@ import {
   pushFrameFromCause,
   recipeFromFrame,
 } from "./builder/recipe.ts";
-import { type Cell } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -739,7 +740,10 @@ export class Runner implements IRunner {
     value: JSONValue,
     seen: Set<object>,
   ): void {
-    if (!isRecord(value)) return;
+    if (
+      !isRecord(value) || isOpaqueRef(value) || isShadowRef(value) ||
+      isCell(value)
+    ) return;
 
     if (seen.has(value)) return;
     seen.add(value);

@@ -24,6 +24,7 @@ import type {
   NavigateToFunction,
   Opaque,
   OpaqueRef,
+  OpaqueRefMethods,
   Recipe,
   RecipeFunction,
   RenderFunction,
@@ -132,11 +133,13 @@ declare module "@commontools/api" {
   }
 }
 
-export type { OpaqueRefMethods } from "@commontools/api";
+export type { OpaqueRefMethods };
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueRef<T = any>(value: unknown): value is OpaqueRef<T> {
+export function isOpaqueRef<T = any>(
+  value: unknown,
+): value is OpaqueRefMethods<T> {
   return !!value &&
     typeof (value as OpaqueRef<T>)[isOpaqueRefMarker] === "boolean";
 }

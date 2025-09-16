@@ -156,7 +156,7 @@ function factoryFromRecipe<T, R>(
       if (isOpaqueRef(value)) value = value.unsafe_getExternal();
       if (
         (isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) &&
-        !shadows.has(value)
+        !shadows.has(value as ShadowRef)
       ) {
         if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
           value = createShadowRef(value.export().value);
@@ -207,7 +207,8 @@ function factoryFromRecipe<T, R>(
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueRef(input) && input.cell === cell && !cell.export().name
+            isOpaqueRef(input) && input.export().cell === cell &&
+            !cell.export().name
           ) {
             cell.setName(key);
           }
