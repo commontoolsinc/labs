@@ -8,9 +8,7 @@
   "imports": {
     "typescript": "npm:typescript",
     "@commontools/utils": "../utils/src/index.ts",
-    "@commontools/static": "../static/index.ts",
-    "@commontools/test-support": "../test-support/src/mod.ts",
-    "@commontools/test-support/fixture-runner": "../test-support/src/fixture-runner.ts"
+    "@commontools/static": "../static/index.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS test/**/*.test.ts",
