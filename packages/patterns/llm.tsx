@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  BuiltInLLMContent,
   Cell,
   cell,
   Default,
@@ -19,7 +20,7 @@ type LLMTestInput = {
 
 type LLMTestResult = {
   question: string;
-  response?: string;
+  response?: BuiltInLLMContent;
 };
 
 const askQuestion = handler<
@@ -76,7 +77,7 @@ export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
               <div>
                 <h3>LLM Response:</h3>
                 <pre>
-                {r}
+                  {JSON.stringify(r, null, 2)}
                 </pre>
               </div>
             )
