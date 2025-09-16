@@ -4,6 +4,9 @@ export function isOpaqueRefType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
+  if (type.getCallSignatures().length > 0) {
+    return false;
+  }
   if (type.flags & ts.TypeFlags.Union) {
     return (type as ts.UnionType).types.some((t) =>
       isOpaqueRefType(t, checker)
@@ -102,62 +105,7 @@ export function isSimpleOpaqueRefAccess(
   return false;
 }
 
-export function collectOpaqueRefs(
-  node: ts.Node,
-  checker: ts.TypeChecker,
-): ts.Expression[] {
-  const refs: ts.Expression[] = [];
-  const processed = new Set<ts.Node>();
-
-  const visit = (n: ts.Node): void => {
-    if (processed.has(n)) return;
-    processed.add(n);
-
-    if (ts.isJsxAttribute(n)) {
-      const name = n.name.getText();
-      if (name.startsWith("on")) {
-        return;
-      }
-    }
-
-    if (ts.isPropertyAccessExpression(n) && ts.isExpression(n)) {
-      if (
-        ts.isIdentifier(n.expression) &&
-        isFunctionParameter(n.expression, checker)
-      ) {
-        return;
-      }
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        refs.push(n);
-        return;
-      }
-    }
-
-    if (ts.isIdentifier(n) && ts.isExpression(n)) {
-      const parent = n.parent;
-      if (
-        parent && ts.isPropertyAccessExpression(parent) && parent.name === n
-      ) {
-        return;
-      }
-      if (isFunctionParameter(n, checker)) {
-        return;
-      }
-      const type = checker.getTypeAtLocation(n);
-      if (isOpaqueRefType(type, checker)) {
-        refs.push(n);
-      }
-    }
-
-    ts.forEachChild(n, visit);
-  };
-
-  visit(node);
-  return refs;
-}
-
-function isFunctionParameter(
+export function isFunctionParameter(
   node: ts.Identifier,
   checker: ts.TypeChecker,
 ): boolean {

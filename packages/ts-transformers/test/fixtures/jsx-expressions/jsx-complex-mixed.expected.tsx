@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, ifElse, derive, JSONSchema } from "commontools";
+import { h, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
 interface Item {
     id: number;
     name: string;

@@ -1,6 +1,28 @@
 import ts from "typescript";
 import { getCommonToolsModuleAlias } from "../core/common-tools.ts";
-import { collectOpaqueRefs } from "./types.ts";
+import {
+  containsOpaqueRef,
+  isOpaqueRefType,
+  isSimpleOpaqueRefAccess,
+} from "./types.ts";
+import {
+  createDependencyAnalyzer,
+  dedupeExpressions,
+  type OpaqueExpressionAnalysis,
+} from "./dependency.ts";
+
+export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
+
+export function getFunctionName(node: ts.CallExpression): string | undefined {
+  const expr = node.expression;
+  if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  if (ts.isPropertyAccessExpression(expr)) {
+    return expr.name.text;
+  }
+  return undefined;
+}
 
 export function replaceOpaqueRefWithParam(
   expression: ts.Expression,
@@ -35,10 +57,17 @@ export function replaceOpaqueRefsWithParams(
   return visit(expression) as ts.Expression;
 }
 
+export interface IfElseOverrides {
+  readonly predicate?: ts.Expression;
+  readonly whenTrue?: ts.Expression;
+  readonly whenFalse?: ts.Expression;
+}
+
 export function createIfElseCall(
   ternary: ts.ConditionalExpression,
   factory: ts.NodeFactory,
   sourceFile: ts.SourceFile,
+  overrides: IfElseOverrides = {},
 ): ts.CallExpression {
   const moduleAlias = getCommonToolsModuleAlias(sourceFile);
   const ifElseIdentifier = moduleAlias
@@ -48,8 +77,12 @@ export function createIfElseCall(
     )
     : factory.createIdentifier("ifElse");
 
-  let whenTrue = ternary.whenTrue;
-  let whenFalse = ternary.whenFalse;
+  let predicate = overrides.predicate ?? ternary.condition;
+  let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
+  let whenFalse = overrides.whenFalse ?? ternary.whenFalse;
+  while (ts.isParenthesizedExpression(predicate)) {
+    predicate = predicate.expression;
+  }
   while (ts.isParenthesizedExpression(whenTrue)) whenTrue = whenTrue.expression;
   while (ts.isParenthesizedExpression(whenFalse)) {
     whenFalse = whenFalse.expression;
@@ -58,7 +91,7 @@ export function createIfElseCall(
   return factory.createCallExpression(
     ifElseIdentifier,
     undefined,
-    [ternary.condition, whenTrue, whenFalse],
+    [predicate, whenTrue, whenFalse],
   );
 }
 
@@ -72,6 +105,8 @@ export function transformExpressionWithOpaqueRef(
   factory: ts.NodeFactory,
   sourceFile: ts.SourceFile,
   context: ts.TransformationContext,
+  registerHelper?: (helper: OpaqueRefHelperName) => void,
+  analyzer?: (expression: ts.Expression) => OpaqueExpressionAnalysis,
 ): ts.Expression {
   if (
     ts.isJsxExpression(expression) &&
@@ -82,8 +117,77 @@ export function transformExpressionWithOpaqueRef(
     if (attrName.startsWith("on")) return expression;
   }
 
+  const dependencyAnalyzer = analyzer ?? createDependencyAnalyzer(checker);
+  const getDependencies = (expr: ts.Expression): ts.Expression[] => {
+    const analysis = dependencyAnalyzer(expr);
+    const deduped = dedupeExpressions(analysis.dependencies, sourceFile);
+    const texts = deduped.map((dep) => dep.getText(sourceFile));
+    const filtered = deduped.filter((dep, index) => {
+      if (!ts.isIdentifier(dep)) return true;
+      const text = texts[index];
+      return !texts.some((other, otherIndex) =>
+        otherIndex !== index && other.startsWith(`${text}.`)
+      );
+    });
+    return filtered;
+  };
+
+  if (ts.isConditionalExpression(expression)) {
+    const conditionType = checker.getTypeAtLocation(expression.condition);
+    const conditionContainsOpaqueRef = containsOpaqueRef(
+      expression.condition,
+      checker,
+    );
+    const conditionIsOpaqueRef = isOpaqueRefType(conditionType, checker);
+
+    const transformBranch = (expr: ts.Expression): ts.Expression => {
+      if (ts.isConditionalExpression(expr)) {
+        return expr;
+      }
+      if (
+        !isSimpleOpaqueRefAccess(expr, checker) &&
+        containsOpaqueRef(expr, checker)
+      ) {
+        return transformExpressionWithOpaqueRef(
+          expr,
+          checker,
+          factory,
+          sourceFile,
+          context,
+          registerHelper,
+          dependencyAnalyzer,
+        );
+      }
+      return expr;
+    };
+
+    const visitedCondition = transformBranch(expression.condition);
+    const visitedWhenTrue = transformBranch(expression.whenTrue);
+    const visitedWhenFalse = transformBranch(expression.whenFalse);
+
+    const updated = factory.updateConditionalExpression(
+      expression,
+      visitedCondition,
+      expression.questionToken,
+      visitedWhenTrue,
+      expression.colonToken,
+      visitedWhenFalse,
+    );
+
+    if (
+      conditionIsOpaqueRef ||
+      conditionContainsOpaqueRef ||
+      visitedCondition !== expression.condition
+    ) {
+      registerHelper?.("ifElse");
+      return createIfElseCall(updated, factory, sourceFile);
+    }
+
+    return updated;
+  }
+
   if (ts.isPropertyAccessExpression(expression)) {
-    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    const opaqueRefs = getDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     if (opaqueRefs.length === 1) {
       const ref = opaqueRefs[0];
@@ -117,6 +221,7 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier("derive"),
         )
         : factory.createIdentifier("derive");
+      registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
         undefined,
@@ -206,6 +311,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier("derive"),
       )
       : factory.createIdentifier("derive");
+    registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
       undefined,
@@ -214,7 +320,11 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isCallExpression(expression)) {
-    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    const functionName = getFunctionName(expression);
+    if (functionName === "ifElse") {
+      return expression;
+    }
+    const opaqueRefs = getDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
@@ -261,6 +371,7 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier("derive"),
         )
         : factory.createIdentifier("derive");
+      registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
         undefined,
@@ -330,6 +441,263 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier("derive"),
       )
       : factory.createIdentifier("derive");
+    registerHelper?.("derive");
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [refObject, arrowFunction],
+    );
+  }
+
+  if (ts.isTemplateExpression(expression)) {
+    const opaqueRefs = getDependencies(expression);
+    if (opaqueRefs.length === 0) return expression;
+    const uniqueRefs = new Map<string, ts.Expression>();
+    const refToParamName = new Map<ts.Expression, string>();
+    opaqueRefs.forEach((ref) => {
+      const refText = ref.getText();
+      if (!uniqueRefs.has(refText)) {
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
+        uniqueRefs.set(refText, ref);
+        refToParamName.set(ref, paramName);
+      } else {
+        const firstRef = uniqueRefs.get(refText)!;
+        refToParamName.set(ref, refToParamName.get(firstRef)!);
+      }
+    });
+    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const lambdaBody = replaceOpaqueRefsWithParams(
+      expression,
+      refToParamName,
+      factory,
+      context,
+    );
+    if (uniqueRefArray.length === 1) {
+      const ref = uniqueRefArray[0];
+      const paramName = refToParamName.get(ref)!;
+      const arrowFunction = factory.createArrowFunction(
+        undefined,
+        undefined,
+        [factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          factory.createIdentifier(paramName),
+          undefined,
+          undefined,
+          undefined,
+        )],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        lambdaBody,
+      );
+      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+      const deriveIdentifier = moduleAlias
+        ? factory.createPropertyAccessExpression(
+          factory.createIdentifier(moduleAlias),
+          factory.createIdentifier("derive"),
+        )
+        : factory.createIdentifier("derive");
+      registerHelper?.("derive");
+      return factory.createCallExpression(
+        deriveIdentifier,
+        undefined,
+        [ref, arrowFunction],
+      );
+    }
+    const paramNames = uniqueRefArray.map((ref) => refToParamName.get(ref)!);
+    const refProperties = uniqueRefArray.map((ref) => {
+      if (ts.isIdentifier(ref)) {
+        return factory.createShorthandPropertyAssignment(ref, undefined);
+      }
+      if (ts.isPropertyAccessExpression(ref)) {
+        const propName = ref.getText().replace(/\./g, "_");
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref,
+        );
+      }
+      const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+      return factory.createPropertyAssignment(
+        factory.createIdentifier(propName),
+        ref,
+      );
+    });
+    const refObject = factory.createObjectLiteralExpression(
+      refProperties,
+      false,
+    );
+    const paramProperties = uniqueRefArray.map((ref, index) => {
+      const paramName = paramNames[index];
+      let propName: string;
+      if (ts.isIdentifier(ref)) {
+        propName = ref.text;
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        propName = ref.getText().replace(/\./g, "_");
+      } else {
+        propName = `ref${index + 1}`;
+      }
+      return factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(propName),
+        factory.createIdentifier(paramName),
+        undefined,
+      );
+    });
+    const paramPattern = factory.createObjectBindingPattern(paramProperties);
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        paramPattern,
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    registerHelper?.("derive");
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [refObject, arrowFunction],
+    );
+  }
+
+  if (ts.isBinaryExpression(expression)) {
+    const opaqueRefs = getDependencies(expression);
+    if (opaqueRefs.length === 0) return expression;
+    const uniqueRefs = new Map<string, ts.Expression>();
+    const refToParamName = new Map<ts.Expression, string>();
+    opaqueRefs.forEach((ref) => {
+      const refText = ref.getText();
+      if (!uniqueRefs.has(refText)) {
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
+        uniqueRefs.set(refText, ref);
+        refToParamName.set(ref, paramName);
+      } else {
+        const firstRef = uniqueRefs.get(refText)!;
+        refToParamName.set(ref, refToParamName.get(firstRef)!);
+      }
+    });
+    const uniqueRefArray = Array.from(uniqueRefs.values());
+    if (uniqueRefArray.length === 1) {
+      const ref = uniqueRefArray[0];
+      const paramName = refToParamName.get(ref)!;
+      const lambdaBody = replaceOpaqueRefsWithParams(
+        expression,
+        refToParamName,
+        factory,
+        context,
+      );
+      const arrowFunction = factory.createArrowFunction(
+        undefined,
+        undefined,
+        [factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          factory.createIdentifier(paramName),
+          undefined,
+          undefined,
+          undefined,
+        )],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        lambdaBody,
+      );
+      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+      const deriveIdentifier = moduleAlias
+        ? factory.createPropertyAccessExpression(
+          factory.createIdentifier(moduleAlias),
+          factory.createIdentifier("derive"),
+        )
+        : factory.createIdentifier("derive");
+      registerHelper?.("derive");
+      return factory.createCallExpression(
+        deriveIdentifier,
+        undefined,
+        [ref, arrowFunction],
+      );
+    }
+    const paramNames = uniqueRefArray.map((ref) => refToParamName.get(ref)!);
+    const refProperties = uniqueRefArray.map((ref) => {
+      if (ts.isIdentifier(ref)) {
+        return factory.createShorthandPropertyAssignment(ref, undefined);
+      }
+      if (ts.isPropertyAccessExpression(ref)) {
+        const propName = ref.getText().replace(/\./g, "_");
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref,
+        );
+      }
+      const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+      return factory.createPropertyAssignment(
+        factory.createIdentifier(propName),
+        ref,
+      );
+    });
+    const refObject = factory.createObjectLiteralExpression(
+      refProperties,
+      false,
+    );
+    const paramProperties = uniqueRefArray.map((ref, index) => {
+      const paramName = paramNames[index];
+      let propName: string;
+      if (ts.isIdentifier(ref)) {
+        propName = ref.text;
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        propName = ref.getText().replace(/\./g, "_");
+      } else {
+        propName = `ref${index + 1}`;
+      }
+      return factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(propName),
+        factory.createIdentifier(paramName),
+        undefined,
+      );
+    });
+    const paramPattern = factory.createObjectBindingPattern(paramProperties);
+    const lambdaBody = replaceOpaqueRefsWithParams(
+      expression,
+      refToParamName,
+      factory,
+      context,
+    );
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        paramPattern,
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
       undefined,

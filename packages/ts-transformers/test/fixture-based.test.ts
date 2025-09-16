@@ -5,6 +5,7 @@ import {
 import { StaticCache } from "@commontools/static";
 import { resolve } from "@std/path";
 
+import { createModularOpaqueRefTransformer } from "../src/mod.ts";
 import { loadFixture, transformFixture } from "./utils.ts";
 
 interface FixtureConfig {
@@ -31,7 +32,11 @@ const configs: FixtureConfig[] = [
   {
     directory: "jsx-expressions",
     describe: "JSX Expression Transformer",
-    transformerOptions: { applySchemaTransformer: true },
+    transformerOptions: {
+      applySchemaTransformer: true,
+      applyOpaqueRefTransformer: false,
+      before: [createModularOpaqueRefTransformer],
+    },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
       if (name.includes("no-transform")) {
