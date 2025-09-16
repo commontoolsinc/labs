@@ -1,0 +1,17 @@
+Schema transformer has been migrated into @commontools/ts-transformers (exports from src/schema/schema-transformer.ts). @commontools/js-runtime now imports it from the new package; the old schema.ts file has been deleted.
+
+We have copied the shared OpaqueRef utilities into @commontools/ts-transformers:
+- src/opaque-ref/types.ts (isOpaqueRefType, containsOpaqueRef, collectOpaqueRefs, etc.).
+- src/opaque-ref/transforms.ts (createIfElseCall, transformExpressionWithOpaqueRef, etc.).
+
+The legacy OpaqueRef transformer is still supplied via src/legacy.ts, re-exporting the existing js-runtime implementation. Next steps are:
+1. Start modularizing OpaqueRef by introducing a new transformer wrapper that uses the shared context and delegates to modular rules.
+2. Peel off rule by rule (JSX expression handling first) into the new structure while keeping fixtures green.
+3. Eventually remove the legacy monolithic transformer once all behaviors are migrated.
+
+Tests currently pass in all packages:
+- packages/ts-transformers: deno task check/test
+- packages/js-runtime: deno task test
+- packages/schema-generator: deno task test
+
+No other changes pending.
