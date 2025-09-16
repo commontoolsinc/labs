@@ -7,10 +7,15 @@
     "./core/imports": "./src/core/imports.ts"
   },
   "imports": {
-    "typescript": "npm:typescript"
+    "typescript": "npm:typescript",
+    "@commontools/test-support": "../test-support/src/mod.ts",
+    "@commontools/test-support/fixture-runner": "../test-support/src/fixture-runner.ts",
+    "@commontools/static": "../static/index.ts",
+    "@commontools/js-runtime/transformers": "../js-runtime/typescript/transformer/mod.ts",
+    "@commontools/js-runtime": "../js-runtime/mod.ts"
   },
   "tasks": {
-    "test": "deno test --allow-read --allow-env test/**/*.test.ts",
+    "test": "deno test --no-check --allow-read --allow-write --allow-env test/**/*.test.ts",
     "check": "deno check src/**/*.ts",
     "fmt": "deno fmt src/ test/",
     "lint": "deno lint src/ test/"
