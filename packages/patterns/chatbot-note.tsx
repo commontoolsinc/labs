@@ -170,7 +170,13 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 />
               </div>
 
-              <Note content={content} allCharms={allCharms} />
+              <ct-code-editor
+                $value={content}
+                $mentionable={allCharms}
+                onbacklink-click={handleCharmLinkClick({})}
+                language="text/markdown"
+                style="min-height: 400px;"
+              />
             </ct-screen>
 
             {ifElse(
