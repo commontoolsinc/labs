@@ -9,12 +9,23 @@ export interface AnalysisHarnessResult {
   readonly analysis: ReturnType<ReturnType<typeof createDependencyAnalyzer>>;
 }
 
-export function analyseExpression(source: string): AnalysisHarnessResult {
+interface AnalyseOptions {
+  readonly prelude?: string;
+}
+
+export function analyseExpression(
+  source: string,
+  options: AnalyseOptions = {},
+): AnalysisHarnessResult {
   const fileName = "/analysis.ts";
   const programSource = `
+interface OpaqueRefMethods<T> {
+  map<S>(fn: (...args: unknown[]) => S): OpaqueRef<S[]>;
+}
+
 type OpaqueRef<T> = {
   readonly __opaque: T;
-};
+} & OpaqueRefMethods<T>;
 
 declare const state: {
   readonly count: OpaqueRef<number>;
@@ -23,6 +34,9 @@ declare const state: {
 };
 
 declare function ifElse<T>(predicate: boolean, whenTrue: T, whenFalse: T): T;
+declare function recipe<T>(body: () => T): T;
+
+${options.prelude ?? ""}
 
 const result = ${source};
 `;

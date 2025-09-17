@@ -2,15 +2,15 @@
 
 ## Problem Statement
 
-`dependency.ts` currently special-cases certain call expressions by matching on
+`dependency.ts` previously special-cased certain call expressions by matching
 identifier text:
 
 - `BUILDER_FUNCTIONS` (recipe, lift, handler, derive, compute, render, ifElse,
   str) are detected by calling `getFunctionName` and comparing strings.
 - Array `map` is recognised when the identifier is literally "map".
 
-This approach works only when the helper is imported under its canonical name
-and called directly. It fails in several scenarios:
+That approach only worked when the helper was imported under its canonical name
+and called directly. It failed in several scenarios:
 
 - Import aliasing (`import { recipe as build }`).
 - Namespace-qualified calls (`commontools.recipe`).
@@ -72,3 +72,7 @@ text.
 - Keep the matching set intentionally small—only helpers we ship in the runtime
   package need to be considered.
 
+The implementation now lives in `src/opaque-ref/call-kind.ts` as
+`detectCallKind`, which resolves aliases, inspects method declarations (including
+`OpaqueRef.map`), and feeds the result back into both the dependency analyser
+and the schema-injection rule.

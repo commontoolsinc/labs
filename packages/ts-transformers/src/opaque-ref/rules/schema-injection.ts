@@ -2,17 +2,7 @@ import ts from "typescript";
 
 import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
-
-function getFunctionName(node: ts.CallExpression): string | undefined {
-  const expr = node.expression;
-  if (ts.isIdentifier(expr)) {
-    return expr.text;
-  }
-  if (ts.isPropertyAccessExpression(expr)) {
-    return expr.name.text;
-  }
-  return undefined;
-}
+import { detectCallKind } from "../call-kind.ts";
 
 export function createSchemaInjectionRule(): OpaqueRefRule {
   return {
@@ -31,9 +21,9 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           return ts.visitEachChild(node, visit, transformation);
         }
 
-        const functionName = getFunctionName(node);
+        const callKind = detectCallKind(node, context.checker);
 
-        if (functionName === "recipe") {
+        if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
           const typeArgs = node.typeArguments;
           if (typeArgs && typeArgs.length >= 1) {
             const factory = transformation.factory;
@@ -66,7 +56,9 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           }
         }
 
-        if (functionName === "handler") {
+        if (
+          callKind?.kind === "builder" && callKind.builderName === "handler"
+        ) {
           const factory = transformation.factory;
 
           if (node.typeArguments && node.typeArguments.length >= 2) {
