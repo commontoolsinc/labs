@@ -14,6 +14,7 @@ import { emitTemplateExpression } from "./template-expression.ts";
 import { emitConditionalExpression } from "./conditional-expression.ts";
 import { emitElementAccessExpression } from "./element-access-expression.ts";
 import { emitContainerExpression } from "./container-expression.ts";
+import { emitPrefixUnaryExpression } from "./prefix-unary-expression.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
 
 const EMITTERS: readonly Emitter[] = [
@@ -23,6 +24,7 @@ const EMITTERS: readonly Emitter[] = [
   emitTemplateExpression,
   emitConditionalExpression,
   emitElementAccessExpression,
+  emitPrefixUnaryExpression,
   emitContainerExpression,
 ];
 
