@@ -43,24 +43,40 @@ export interface OpaqueExpressionAnalysis {
   rewriteHint?: RewriteHint;
 }
 
-const BUILDER_FUNCTIONS = new Set([
+type CallRole = "builder" | "ifElse";
+
+const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
-  "lift",
   "handler",
-  "derive",
+  "lift",
   "compute",
   "render",
-  "ifElse",
-  "str",
 ]);
 
-const ROOT_OPAQUE_PARAMETER_FUNCTIONS = new Set([
-  "recipe",
-  "handler",
-  "lift",
-  "compute",
-  "render",
-]);
+function resolveCallRole(
+  expression: ts.CallExpression,
+  checker: ts.TypeChecker,
+): CallRole | undefined {
+  let symbol = checker.getSymbolAtLocation(expression.expression);
+  if (!symbol) return undefined;
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  if (!symbol) return undefined;
+  const name = symbol.getName();
+  const declarations = symbol.declarations ?? [];
+  for (const declaration of declarations) {
+    const sourceFile = declaration.getSourceFile();
+    if (!sourceFile) continue;
+    const path = sourceFile.fileName;
+    if (!path.includes("commontools")) continue;
+    if (name === "ifElse") return "ifElse";
+    if (BUILDER_SYMBOL_NAMES.has(name)) return "builder";
+  }
+  if (name === "ifElse") return "ifElse";
+  if (BUILDER_SYMBOL_NAMES.has(name)) return "builder";
+  return undefined;
+}
 
 export function dedupeExpressions(
   expressions: ts.Expression[],
@@ -264,11 +280,8 @@ export function createDependencyAnalyzer(
           candidate = candidate.parent;
         }
         if (!candidate) continue;
-        const functionName = getFunctionName(candidate as ts.CallExpression);
-        if (
-          functionName &&
-          ROOT_OPAQUE_PARAMETER_FUNCTIONS.has(functionName)
-        ) {
+        const role = resolveCallRole(candidate as ts.CallExpression, checker);
+        if (role === "builder") {
           return true;
         }
       }
@@ -499,12 +512,13 @@ export function createDependencyAnalyzer(
 
       const combined = mergeAnalyses(...analyses);
       const functionName = getFunctionName(expression);
+      const callRole = resolveCallRole(expression, checker);
       const rewriteHint: RewriteHint | undefined = (() => {
-        if (functionName === "ifElse" && expression.arguments.length > 0) {
+        if (callRole === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
           return { kind: "call-if-else", predicate };
         }
-        if (functionName && BUILDER_FUNCTIONS.has(functionName)) {
+        if (callRole === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
         if (
@@ -516,7 +530,7 @@ export function createDependencyAnalyzer(
         return undefined;
       })();
 
-      if (functionName && BUILDER_FUNCTIONS.has(functionName)) {
+      if (callRole === "builder") {
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
