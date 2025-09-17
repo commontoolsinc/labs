@@ -83,6 +83,12 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {Array} mentionable - Array of mentionable items with Charm structure for backlink autocomplete
  * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
+ * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
+ * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
+ * @attr {number} maxLineWidth - Optional max line width in ch units
+ *   (default: undefined)
+ * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
+ * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -105,6 +111,12 @@ export class CTCodeEditor extends BaseElement {
     timingDelay: { type: Number },
     mentionable: { type: Array },
     mentioned: { type: Array },
+    // New editor configuration props
+    wordWrap: { type: Boolean },
+    lineNumbers: { type: Boolean },
+    maxLineWidth: { type: Number },
+    tabSize: { type: Number },
+    tabIndent: { type: Boolean },
   };
 
   declare value: Cell<string> | string;
@@ -116,10 +128,20 @@ export class CTCodeEditor extends BaseElement {
   declare timingDelay: number;
   declare mentionable: Cell<Charm[]>;
   declare mentioned?: Cell<Charm[]>;
+  declare wordWrap: boolean;
+  declare lineNumbers: boolean;
+  declare maxLineWidth?: number;
+  declare tabSize: number;
+  declare tabIndent: boolean;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
+  private _wrap = new Compartment();
+  private _gutters = new Compartment();
+  private _tabSizeComp = new Compartment();
+  private _tabIndentComp = new Compartment();
+  private _maxLineWidthComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _cellController = createStringCellController(this, {
     timing: {
@@ -146,6 +168,12 @@ export class CTCodeEditor extends BaseElement {
     this.placeholder = "";
     this.timingStrategy = "debounce";
     this.timingDelay = 500;
+    // Defaults for new props
+    this.wordWrap = true;
+    this.lineNumbers = false;
+    this.maxLineWidth = undefined;
+    this.tabSize = 2;
+    this.tabIndent = true;
   }
 
   /**
@@ -473,6 +501,59 @@ export class CTCodeEditor extends BaseElement {
       });
     }
 
+    // Update word wrap
+    if (changedProperties.has("wordWrap") && this._editorView) {
+      this._editorView.dispatch({
+        effects: this._wrap.reconfigure(
+          this.wordWrap ? EditorView.lineWrapping : [],
+        ),
+      });
+    }
+
+    // Update line numbers visibility (hide gutters when false)
+    if (changedProperties.has("lineNumbers") && this._editorView) {
+      const hideGutters = !this.lineNumbers;
+      const ext = hideGutters
+        ? EditorView.theme({
+          ".cm-gutters": { display: "none" },
+          ".cm-content": { paddingLeft: "0px" },
+        })
+        : [] as unknown as Extension;
+      this._editorView.dispatch({
+        effects: this._gutters.reconfigure(ext),
+      });
+    }
+
+    // Update tab size
+    if (changedProperties.has("tabSize") && this._editorView) {
+      this._editorView.dispatch({
+        effects: this._tabSizeComp.reconfigure(
+          EditorState.tabSize.of(this.tabSize ?? 2),
+        ),
+      });
+    }
+
+    // Update tab indent keymap
+    if (changedProperties.has("tabIndent") && this._editorView) {
+      const ext = this.tabIndent ? keymap.of([indentWithTab]) : [];
+      this._editorView.dispatch({
+        effects: this._tabIndentComp.reconfigure(ext),
+      });
+    }
+
+    // Update max line width theme
+    if (changedProperties.has("maxLineWidth") && this._editorView) {
+      const n = this.maxLineWidth;
+      const ext = typeof n === "number" && n > 0
+        ? EditorView.theme({
+          ".cm-content": { maxWidth: `${n}ch` },
+        })
+        : [] as unknown as Extension;
+      this._editorView.dispatch({
+        effects: this._maxLineWidthComp.reconfigure(ext),
+      });
+    }
+
     // Update timing controller if timing options changed
     if (
       changedProperties.has("timingStrategy") ||
@@ -526,10 +607,32 @@ export class CTCodeEditor extends BaseElement {
     // Create editor extensions
     const extensions: Extension[] = [
       basicSetup,
-      keymap.of([indentWithTab]),
+      // Tab indentation keymap (toggleable)
+      this._tabIndentComp.of(this.tabIndent ? keymap.of([indentWithTab]) : []),
       oneDark,
       this._lang.of(getLangExtFromMimeType(this.language)),
       this._readonly.of(EditorState.readOnly.of(this.readonly)),
+      // Word wrapping
+      this._wrap.of(this.wordWrap ? EditorView.lineWrapping : []),
+      // Hide gutters when line numbers are disabled
+      this._gutters.of(
+        !this.lineNumbers
+          ? EditorView.theme({
+            ".cm-gutters": { display: "none" },
+            ".cm-content": { paddingLeft: "0px" },
+          })
+          : [] as unknown as Extension,
+      ),
+      // Tab size
+      this._tabSizeComp.of(EditorState.tabSize.of(this.tabSize ?? 2)),
+      // Optional max line width (in ch)
+      this._maxLineWidthComp.of(
+        typeof this.maxLineWidth === "number" && this.maxLineWidth > 0
+          ? EditorView.theme({
+            ".cm-content": { maxWidth: `${this.maxLineWidth}ch` },
+          })
+          : [] as unknown as Extension,
+      ),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
