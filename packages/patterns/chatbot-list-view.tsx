@@ -24,7 +24,7 @@ type CharmEntry = {
 };
 
 type Input = {
-  selectedCharm: Default<any, undefined>;
+  selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
 };
 
@@ -38,7 +38,13 @@ const storeCharm = lift(
     type: "object",
     properties: {
       charm: { type: "object" },
-      selectedCharm: { type: "object", asCell: true },
+      selectedCharm: {
+        type: "object",
+        properties: {
+          charm: { type: "object" },
+        },
+        asCell: true,
+      },
       charmsList: {
         type: "array",
         items: {
@@ -60,7 +66,7 @@ const storeCharm = lift(
         "storeCharm storing charm:",
         JSON.stringify(charm),
       );
-      selectedCharm.set(charm);
+      selectedCharm.set({ charm });
 
       // create the chat charm with a custom name including a random suffix
       const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
@@ -77,7 +83,7 @@ const storeCharm = lift(
 
 const createChatRecipe = handler<
   unknown,
-  { selectedCharm: Cell<any>; charmsList: Cell<CharmEntry[]> }
+  { selectedCharm: Cell<{ charm: any }>; charmsList: Cell<CharmEntry[]> }
 >(
   (_, { selectedCharm, charmsList }) => {
     const isInitialized = cell(false);
@@ -91,10 +97,13 @@ const createChatRecipe = handler<
   },
 );
 
-const selectCharm = handler<unknown, { selectedCharm: Cell<any>; charm: any }>(
+const selectCharm = handler<
+  unknown,
+  { selectedCharm: Cell<{ charm: any }>; charm: any }
+>(
   (_, { selectedCharm, charm }) => {
     console.log("selectCharm: updating selectedCharm to ", charm);
-    selectedCharm.set(charm);
+    selectedCharm.set({ charm });
     return selectedCharm;
   },
 );
@@ -157,7 +166,7 @@ export default recipe<Input, Output>(
           </div>
 
           <div>--- end chat list ---</div>
-          <div>{selectedCharm}</div>
+          <div>{selectedCharm.charm}</div>
         </div>
       ),
       selectedCharm,
