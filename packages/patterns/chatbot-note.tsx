@@ -77,7 +77,6 @@ const handleCharmLinkClicked = handler(
   },
 );
 
-
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
@@ -166,21 +165,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     const mentioned = cell<Charm[]>([]);
 
-    // const mentionedCharms = derive(content, (c) => {
-    //   const regex = /\[\[.*?\(([^)]+)\)\]\]/g;
-    //   const ids = [];
-    //   let match;
-    //   while ((match = regex.exec(c)) !== null) {
-    //     const id = match[1];
-    //     if (id) {
-    //       ids.push(id);
-    //     }
-    //   }
-    //   return ids;
-    // });
-
-    // TODO(bf): something is wrong with the types here
-    // also, within here be dragons, lots of weird issues accessing proxies and getting links unless I index into the array manually.
+    // Must use JSONSchema here, CTS doesn't work correctly. See CT-901
     const computeBacklinks = lift(
       {
         type: "object",
@@ -194,36 +179,16 @@ export default recipe<LLMTestInput, LLMTestResult>(
         items: { type: "object" },
       } as JSONSchema,
       ({ allCharms, content }) => {
-        const cs = allCharms.get();
+        const cs: Charm[] = allCharms.get();
         if (!cs) return [];
 
-        let self: Charm | undefined;
-        for (let i = 0; i < cs.length; i++) {
-          const c = cs[i];
+        const self = cs.find((c) => c.content === content.get());
 
-          if (c.content && c.content == content) {
-            self = c;
-          }
-        }
-
-        let results: Charm[] = [];
-        for (let i = 0; i < cs.length; i++) {
-          const c = cs[i];
-
-          if (c.mentioned) {
-            let found = false;
-            for (let j = 0; j < c.mentioned.length; j++) {
-              if (c.mentioned[j] == self) {
-                found = true;
-                break;
-              }
-            }
-            if (found) {
-              console.log("mentioned", c.mentioned);
-              results.push(c);
-            }
-          }
-        }
+        const results = self
+          ? cs.filter((c) =>
+            c.mentioned?.some((m) => m.content === self.content) ?? false
+          )
+          : [];
 
         return results;
       },
