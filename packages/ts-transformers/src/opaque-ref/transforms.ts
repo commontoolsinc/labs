@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { getCommonToolsModuleAlias } from "../core/common-tools.ts";
+import { assertDefined } from "../core/assert.ts";
 import {
   containsOpaqueRef,
   isOpaqueRefType,
@@ -10,13 +11,6 @@ import {
   dedupeExpressions,
   type OpaqueExpressionAnalysis,
 } from "./dependency.ts";
-
-function assertDefined<T>(value: T | undefined, message: string): T {
-  if (value === undefined) {
-    throw new Error(message);
-  }
-  return value;
-}
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 

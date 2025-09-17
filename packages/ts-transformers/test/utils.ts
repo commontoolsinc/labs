@@ -2,9 +2,10 @@ import ts from "typescript";
 import { join } from "@std/path";
 import { StaticCache } from "@commontools/static";
 import {
-  createOpaqueRefTransformer,
+  createModularOpaqueRefTransformer,
   createSchemaTransformer,
 } from "../src/mod.ts";
+import { assertDefined } from "../src/core/assert.ts";
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
 type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
@@ -169,20 +170,28 @@ export async function transformSource(
     ...beforeTransformers,
   ];
   if (applyOpaqueRefTransformer) {
-    transformers.push(createOpaqueRefTransformer(program, { mode }));
+    transformers.push(createModularOpaqueRefTransformer(program, { mode }));
   }
   if (applySchemaTransformer) {
     transformers.push(createSchemaTransformer(program));
   }
   transformers.push(...afterTransformers);
 
-  const sourceFile = program.getSourceFile(fileName)!;
+  const sourceFile = assertDefined(
+    program.getSourceFile(fileName),
+    "Expected virtual source file to be present in program",
+  );
   const result = ts.transform(sourceFile, transformers);
   const printer = ts.createPrinter({
     newLine: ts.NewLineKind.LineFeed,
     removeComments: false,
   });
-  const output = printer.printFile(result.transformed[0]);
+  const transformedFile = assertDefined(
+    result.transformed[0],
+    "Expected transformer pipeline to return a source file",
+  );
+  const output = printer.printFile(transformedFile);
+  result.dispose?.();
 
   if (logger) {
     logger(`\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`);

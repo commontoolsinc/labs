@@ -40,12 +40,15 @@ export const emitCallExpression: Emitter = ({
     let rewrittenPredicate: ts.Expression = hint.predicate;
     if (relevantPredicateDependencies.length > 0) {
       const plan = createBindingPlan(relevantPredicateDependencies);
-      rewrittenPredicate = createDeriveCallForExpression(
+      const derivedPredicate = createDeriveCallForExpression(
         hint.predicate,
         plan,
         context,
       );
-      helpers.add("derive");
+      if (derivedPredicate !== hint.predicate) {
+        rewrittenPredicate = derivedPredicate;
+        helpers.add("derive");
+      }
     } else {
       const child = context.rewriteChildren(hint.predicate);
       if (child !== hint.predicate) {
@@ -95,6 +98,7 @@ export const emitCallExpression: Emitter = ({
 
   const plan = createBindingPlan(relevantDependencies);
   const rewritten = createDeriveCallForExpression(expression, plan, context);
+  if (rewritten === expression) return undefined;
 
   return {
     expression: rewritten,

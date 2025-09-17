@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertEquals } from "@std/assert";
+import { assertDefined } from "../../src/core/assert.ts";
 
 import {
   normaliseDependencies,
@@ -24,6 +25,10 @@ describe("normaliseDependencies", () => {
 
     const filtered = selectDependenciesWithin(dependencies, predicate);
     assertEquals(filtered.length, 1);
-    assertEquals(filtered[0].expression.getText(), "state.count");
+    const firstDependency = assertDefined(
+      filtered[0],
+      "Expected dependency inside predicate",
+    );
+    assertEquals(firstDependency.expression.getText(), "state.count");
   });
 });
