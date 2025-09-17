@@ -26,7 +26,11 @@ import {
 
 import Chat from "./chatbot.tsx";
 
-type Charm = any;
+type Charm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: Charm[];
+};
 
 type NoteResult = {
   content: Default<string, "">;
@@ -84,7 +88,7 @@ type LLMTestInput = {
 
 type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  mentioned: Default<Array<string>, []>;
+  mentioned: Default<Array<Charm>, []>;
   backlinks: Default<Array<Charm>, []>;
   content: Default<string, "">;
 };
@@ -177,38 +181,57 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     // TODO(bf): something is wrong with the types here
     // also, within here be dragons, lots of weird issues accessing proxies and getting links unless I index into the array manually.
-    const backlinks = derive(allCharms as unknown as Charm[], (cs: Charm[]) => {
-      if (!cs) return [];
+    const computeBacklinks = lift(
+      {
+        type: "object",
+        properties: {
+          allCharms: { type: "array", items: { type: "object" }, asCell: true },
+          content: { type: "string", asCell: true },
+        },
+      } as JSONSchema,
+      {
+        type: "array",
+        items: { type: "object" },
+      } as JSONSchema,
+      ({ allCharms, content }) => {
+        const cs = allCharms.get();
+        if (!cs) return [];
 
-      let self: Charm | undefined;
-      for (let i = 0; i < cs.length; i++) {
-        const c = cs[i];
+        let self: Charm | undefined;
+        for (let i = 0; i < cs.length; i++) {
+          const c = cs[i];
 
-        if (c.content && c.content == content) {
-          self = c;
+          if (c.content && c.content == content) {
+            self = c;
+          }
         }
-      }
 
-      let results: Charm[] = [];
-      for (let i = 0; i < cs.length; i++) {
-        const c = cs[i];
+        let results: Charm[] = [];
+        for (let i = 0; i < cs.length; i++) {
+          const c = cs[i];
 
-        if (c.mentioned) {
-          let found = false;
-          for (let j = 0; j < c.mentioned.length; j++) {
-            if (c.mentioned[j] == self) {
-              found = true;
-              break;
+          if (c.mentioned) {
+            let found = false;
+            for (let j = 0; j < c.mentioned.length; j++) {
+              if (c.mentioned[j] == self) {
+                found = true;
+                break;
+              }
+            }
+            if (found) {
+              console.log("mentioned", c.mentioned);
+              results.push(c);
             }
           }
-          if (found) {
-            console.log("mentioned", c.mentioned);
-            results.push(c);
-          }
         }
-      }
 
-      return results;
+        return results;
+      },
+    );
+
+    const backlinks: OpaqueRef<Charm[]> = computeBacklinks({
+      allCharms,
+      content,
     });
 
     return {
@@ -272,7 +295,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       content,
       messages,
       mentioned,
-      backlinks
+      backlinks,
     };
   },
 );
