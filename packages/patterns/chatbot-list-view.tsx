@@ -68,7 +68,7 @@ const storeCharm = lift(
       isInitialized.set(true);
       return charm;
     } else {
-      console.log("storeCharm undefined selectedCharm");
+      console.log("storeCharm: already initialized");
     }
     return undefined;
   },
