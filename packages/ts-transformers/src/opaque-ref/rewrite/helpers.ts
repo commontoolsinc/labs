@@ -245,6 +245,13 @@ export function createDeriveCallForExpression(
   context: RewriteContext,
   options: { wrapConditional?: boolean } = {},
 ): ts.Expression {
+  if (!plan.usesObjectBinding && plan.entries.length === 1) {
+    const [entry] = plan.entries;
+    if (entry.dependency.expression === expression) {
+      return expression;
+    }
+  }
+
   const factory = context.factory;
   const lambdaBody = replaceOpaqueRefsWithParams(
     expression,
