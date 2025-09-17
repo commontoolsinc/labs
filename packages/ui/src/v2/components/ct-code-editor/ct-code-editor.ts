@@ -213,7 +213,11 @@ export class CTCodeEditor extends BaseElement {
 
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = this.mentionable.key(i).get();
-      if (mention && this.mentionable.key(i).key(NAME).getAsQueryResult()?.toLowerCase()?.includes(queryLower)) {
+      if (
+        mention &&
+        this.mentionable.key(i).key(NAME).getAsQueryResult()?.toLowerCase()
+          ?.includes(queryLower)
+      ) {
         matches.push(this.mentionable.key(i));
       }
     }
