@@ -344,11 +344,25 @@ export function createDependencyAnalyzer(
 
     if (ts.isElementAccessExpression(expression)) {
       const target = analyzeExpression(expression.expression, scope, context);
-      const argument = expression.argumentExpression &&
-          ts.isExpression(expression.argumentExpression)
-        ? analyzeExpression(expression.argumentExpression, scope, context)
+      const argumentExpression = expression.argumentExpression;
+      const argument = argumentExpression &&
+          ts.isExpression(argumentExpression)
+        ? analyzeExpression(argumentExpression, scope, context)
         : emptyAnalysis();
-      if (isImplicitOpaqueRefExpression(expression.expression)) {
+
+      const isStaticIndex = argumentExpression &&
+        ts.isExpression(argumentExpression) &&
+        (ts.isLiteralExpression(argumentExpression) ||
+          ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+
+      if (isStaticIndex) {
+        return mergeAnalyses(target, argument);
+      }
+
+      if (
+        isImplicitOpaqueRefExpression(expression.expression) &&
+        target.dependencies.length === 0
+      ) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -512,7 +526,10 @@ export function createDependencyAnalyzer(
         };
       }
 
-      if (rewriteHint?.kind === "skip-call-rewrite" && rewriteHint.reason === "array-map") {
+      if (
+        rewriteHint?.kind === "skip-call-rewrite" &&
+        rewriteHint.reason === "array-map"
+      ) {
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
