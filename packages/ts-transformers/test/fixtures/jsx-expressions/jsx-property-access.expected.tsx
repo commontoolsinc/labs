@@ -144,10 +144,10 @@ export default recipe({
         <p>Location includes city: {commontools_1.ifElse(commontools_1.derive(state.user.profile.location, _v1 => _v1.includes("City")), "Yes", "No")}</p>
         
         <h3>Array Element Access</h3>
-        <p>Item at index: {state.items[state.index.get()]}</p>
+        <p>Item at index: {commontools_1.derive({ state_items: state.items, state_index: state.index }, ({ state_items: _v1, state_index: _v2 }) => _v1[_v2])}</p>
         <p>First item: {state.items[0]}</p>
-        <p>Last item: {state.items[state.items.get().length - 1]}</p>
-        <p>Number at index: {state.numbers[state.index.get()]}</p>
+        <p>Last item: {commontools_1.derive(state.items, _v1 => _v1[_v1.length - 1])}</p>
+        <p>Number at index: {commontools_1.derive({ state_numbers: state.numbers, state_index: state.index }, ({ state_numbers: _v1, state_index: _v2 }) => _v1[_v2])}</p>
         
         <h3>Config Access with Styles</h3>
         <p style={{
@@ -170,4 +170,3 @@ export default recipe({
       </div>),
     };
 });
-

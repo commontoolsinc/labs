@@ -1,4 +1,4 @@
-import type ts from "typescript";
+import ts from "typescript";
 
 import type { DependencyNode, OpaqueDependencyGraph } from "./dependency.ts";
 
@@ -27,29 +27,86 @@ export function normaliseDependencies(
   }>();
   const nodeToGroup = new Map<number, string>();
 
-  for (const node of graph.nodes) {
-    const existing = grouped.get(node.canonicalKey);
-    if (existing) {
-      existing.nodes.push(node);
-      nodeToGroup.set(node.id, node.canonicalKey);
-      continue;
+  const normaliseExpression = (node: DependencyNode): ts.Expression => {
+    let current: ts.Expression = node.expression;
+
+    while (true) {
+      if (ts.isPropertyAccessExpression(current)) {
+        if (
+          ts.isCallExpression(current.parent) &&
+          current.parent.expression === current
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (ts.isIdentifier(current.name) && current.name.text === "length") {
+          current = current.expression;
+          continue;
+        }
+      }
+
+      if (ts.isElementAccessExpression(current)) {
+        const argument = current.argumentExpression;
+        if (argument && ts.isExpression(argument)) {
+          if (
+            ts.isLiteralExpression(argument) ||
+            ts.isNoSubstitutionTemplateLiteral(argument)
+          ) {
+            current = current.expression;
+            continue;
+          }
+        }
+        if (
+          ts.isCallExpression(current.parent) &&
+          current.parent.expression === current
+        ) {
+          current = current.expression;
+          continue;
+        }
+      }
+
+      if (ts.isCallExpression(current)) {
+        const callee = current.expression;
+        if (
+          ts.isPropertyAccessExpression(callee) ||
+          ts.isElementAccessExpression(callee)
+        ) {
+          current = callee.expression;
+          continue;
+        }
+      }
+
+      break;
     }
-    grouped.set(node.canonicalKey, {
-      expression: node.expression,
-      nodes: [node],
-      scopeId: node.scopeId,
-    });
-    nodeToGroup.set(node.id, node.canonicalKey);
+
+    return current;
+  };
+
+  for (const node of graph.nodes) {
+    const expression = normaliseExpression(node);
+    const sourceFile = expression.getSourceFile();
+    const key = `${node.scopeId}:${expression.getText(sourceFile)}`;
+    let group = grouped.get(key);
+    if (!group) {
+      group = {
+        expression,
+        nodes: [],
+        scopeId: node.scopeId,
+      };
+      grouped.set(key, group);
+    }
+    group.nodes.push(node);
+    nodeToGroup.set(node.id, key);
   }
 
   const suppressed = new Set<string>();
 
-  for (const group of grouped.values()) {
+  for (const [canonicalKey, group] of grouped.entries()) {
     for (const node of group.nodes) {
       let currentParent = node.parentId;
       while (currentParent !== null) {
         const parentGroupKey = nodeToGroup.get(currentParent);
-        if (parentGroupKey) {
+        if (parentGroupKey && parentGroupKey !== canonicalKey) {
           suppressed.add(parentGroupKey);
         }
         currentParent = nodesById.get(currentParent)?.parentId ?? null;
