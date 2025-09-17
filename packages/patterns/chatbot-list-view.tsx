@@ -19,6 +19,7 @@ import Chat from "./chatbot.tsx";
 
 type CharmEntry = {
   [ID]: string; // randomId is a string
+  local_id: string; // same as ID but easier to access
   charm: any;
 };
 
@@ -43,7 +44,7 @@ const storeCharm = lift(
         items: {
           type: "object",
           properties: {
-            [ID]: { type: "string" }, // randomId is a string
+            local_id: { type: "string" }, // display ID for the charm
             charm: { type: "object" },
           },
         },
@@ -63,7 +64,7 @@ const storeCharm = lift(
 
       // create the chat charm with a custom name including a random suffix
       const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
-      charmsList.push({ [ID]: randomId, charm });
+      charmsList.push({ [ID]: randomId, local_id: randomId, charm });
 
       isInitialized.set(true);
       return charm;
@@ -98,10 +99,36 @@ const selectCharm = handler<unknown, { selectedCharm: Cell<any>; charm: any }>(
   },
 );
 
+const logCharmsList = lift(
+  {
+    type: "object",
+    properties: {
+      charmsList: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            local_id: { type: "string" }, // display ID for the charm
+            charm: { type: "object" },
+          },
+        },
+        asCell: true,
+      },
+    },
+  },
+  undefined,
+  ({ charmsList }) => {
+    console.log("logCharmsList: ", charmsList.get());
+    return charmsList;
+  },
+);
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList }) => {
+    logCharmsList({ charmsList });
+
     return {
       [NAME]: "Launcher",
       [UI]: (
@@ -116,7 +143,7 @@ export default recipe<Input, Output>(
           <div>
             {charmsList.map((charmEntry, i) => (
               <div>
-                index={i} chat ID: {charmEntry.charm[NAME]}
+                index={i} chat ID: {charmEntry.local_id}
                 <ct-button
                   onClick={selectCharm({
                     selectedCharm: selectedCharm,
