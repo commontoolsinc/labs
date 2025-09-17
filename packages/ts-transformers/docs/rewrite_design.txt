@@ -1,9 +1,9 @@
 Context & Goals
 
-  - Current branch copies legacy helper (transformExpressionWithOpaqueRef) into @commontools/ts-transformers and layers new rules (schema injection, JSX) around it.
-  Dependency analyzer exists but rewrite path still delegates to legacy collector logic, causing incorrect results.
+  - Initial snapshot: the branch began by copying the legacy helper (`transformExpressionWithOpaqueRef`) into @commontools/ts-transformers and layering new rules (schema
+  injection, JSX) around it. That version relied on the legacy collector logic and inherited its inaccuracies.
   - Objective: replace the monolithic helper with a maintainable architecture that (a) reaches functional parity with the old transformer, (b) cleanly separates concerns,
-  and (c) sets a foundation for closures/other future features.
+  and (c) sets a foundation for closures/other future features. ✅ The branch now delivers this modular pipeline and no longer falls back to the legacy helper.
 
   Core Principles
 
@@ -54,8 +54,8 @@ Context & Goals
   4. Rule Integration (rules/jsx-expression.ts etc.)
       - Update JSX rule to:
           - Call analyzer once for each expression.
-          - If analysis.requiresRewrite, pass both analysis and normalisedDependencies into a new top-level rewriteExpression function which dispatches by node kind and
-  returns { expression, helpers }.
+          - If analysis.requiresRewrite, pass both analysis and normalisedDependencies into the new `rewriteExpression` function (which now fully replaces the legacy
+  helper). The function dispatches by node kind and returns { expression, helpers }.
       - Schema rule unaffected (remains orthogonal). Later we can share analyzer for type-argument handling if needed.
   5. Helper & Import Management
       - Centralize helper registrations: emitters return a set of required helpers so rules can request imports (derive, ifElse, future helpers).
