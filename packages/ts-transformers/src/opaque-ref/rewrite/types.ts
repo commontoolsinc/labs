@@ -9,6 +9,7 @@ export interface RewriteContext {
   readonly checker: ts.TypeChecker;
   readonly sourceFile: ts.SourceFile;
   readonly transformation: ts.TransformationContext;
+  readonly analyze: (expression: ts.Expression) => OpaqueExpressionAnalysis;
 }
 
 export interface RewriteParams {
