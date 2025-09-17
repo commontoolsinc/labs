@@ -1,10 +1,12 @@
 import { refer } from "merkle-reference";
+import { SchemaAll } from "@commontools/memory/schema";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   type Immutable,
   isNumber,
   isObject,
+  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
@@ -17,7 +19,6 @@ import type {
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
-import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
@@ -35,20 +36,35 @@ export type SchemaPathSelector = {
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
+ * While the default behavior is to use object equality, you can provide an
+ * `equalFn` parameter to the constructor, which will be used for the value
+ * comparisons.
+ *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
   private map = new Map<K, Set<V>>();
+  private equalFn?: (a: V, b: V) => boolean;
+
+  constructor(equalFn?: (a: V, b: V) => boolean) {
+    this.equalFn = equalFn;
+  }
 
   public get(key: K): Set<V> | undefined {
     return this.map.get(key);
   }
 
   public add(key: K, value: V) {
-    if (!this.map.has(key)) {
+    const values = this.map.get(key);
+    if (values === undefined) {
       const values = new Set<V>([value]);
       this.map.set(key, values);
+    } else if (
+      this.equalFn !== undefined &&
+      (values.values().some((item) => this.equalFn!(item, value)))
+    ) {
+      return;
     } else {
       this.map.get(key)!.add(value);
     }
@@ -60,7 +76,10 @@ export class MapSet<K, V> {
 
   public hasValue(key: K, value: V): boolean {
     const values = this.map.get(key);
-    return (values !== undefined && values.has(value));
+    if (values !== undefined && this.equalFn !== undefined) {
+      return values.values().some((item) => this.equalFn!(item, value));
+    }
+    return values !== undefined && values.has(value);
   }
 
   public deleteValue(key: K, value: V): boolean {
@@ -68,7 +87,17 @@ export class MapSet<K, V> {
       return false;
     } else {
       const values = this.map.get(key)!;
-      const rv = values.delete(value);
+      let existing: V = value;
+      if (this.equalFn !== undefined) {
+        const match = values.values().find((item) =>
+          this.equalFn!(item, value)
+        );
+        if (match === undefined) {
+          return false;
+        }
+        existing = match;
+      }
+      const rv = values.delete(existing);
       if (values.size === 0) {
         this.map.delete(key);
       }
@@ -126,8 +155,57 @@ export class CycleTracker<K> {
   }
 }
 
-export type PointerCycleTracker = CycleTracker<
-  Immutable<JSONValue>
+/**
+ * Cycle tracker for more complex objects with multiple parts.
+ *
+ * This will not work correctly if the key is modified after being added.
+ *
+ * This will do an identity check on the partial key and a deepEqual check on
+ * the ExtraKey.
+ */
+export class CompoundCycleTracker<PartialKey, ExtraKey> {
+  private partial: Map<PartialKey, ExtraKey[]>;
+  constructor() {
+    this.partial = new Map<PartialKey, ExtraKey[]>();
+  }
+  include(
+    partialKey: PartialKey,
+    extraKey: ExtraKey,
+    context?: unknown,
+  ): Disposable | null {
+    let existing = this.partial.get(partialKey);
+    if (existing === undefined) {
+      existing = [];
+      this.partial.set(partialKey, existing);
+    }
+    if (existing.some((item) => deepEqual(item, extraKey))) {
+      return null;
+    }
+    existing.push(extraKey);
+    return {
+      [Symbol.dispose]: () => {
+        const entries = this.partial.get(partialKey)!;
+        const index = entries.indexOf(extraKey);
+        if (index === -1) {
+          logger.error(() => [
+            "Failed to dispose of missing key",
+            extraKey,
+            context,
+          ]);
+        }
+        if (entries.length === 0) {
+          this.partial.delete(partialKey);
+        } else {
+          entries.splice(index, 1);
+        }
+      },
+    };
+  }
+}
+
+export type PointerCycleTracker = CompoundCycleTracker<
+  Immutable<JSONValue>,
+  SchemaContext | undefined
 >;
 
 export interface ObjectStorageManager<K, S, V> {
@@ -220,7 +298,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      using t = tracker.include(doc.value, doc);
+      using t = tracker.include(doc.value, SchemaAll, doc);
       if (t === null) {
         return null;
       }
@@ -238,7 +316,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           schemaTracker,
         )
       ) as Immutable<JSONValue>[];
-    } else if (isObject(doc.value)) {
+    } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
         const [newDoc, _] = getAtPath(
@@ -254,14 +332,12 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
-        using t = tracker.include(doc.value, doc);
+        using t = tracker.include(doc.value, SchemaAll, doc);
         if (t === null) {
           return null;
         }
         return Object.fromEntries(
-          Object.entries(doc.value).map((
-            [k, value],
-          ) => [
+          Object.entries(doc.value as JSONObject).map(([k, value]) => [
             k,
             this.traverseDAG(
               {
@@ -388,11 +464,6 @@ function followPointer<S extends BaseMemoryAddress>(
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
-  using t = tracker.include(doc.value!, doc);
-  if (t === null) {
-    // Cycle detected - treat this as notFound to avoid traversal
-    return [notFound(doc.address), selector];
-  }
   const link = parseLink(doc.value)!;
   const target: BaseMemoryAddress = (link.id !== undefined)
     ? { id: link.id, type: "application/json" }
@@ -415,6 +486,11 @@ function followPointer<S extends BaseMemoryAddress>(
       selector,
       link.path as string[],
     );
+  }
+  using t = tracker.include(doc.value!, selector?.schemaContext, doc);
+  if (t === null) {
+    // Cycle detected - treat this as notFound to avoid traversal
+    return [notFound(doc.address), selector];
   }
   if (link.id !== undefined) {
     // We have a reference to a different cell, so track the dependency
@@ -619,13 +695,14 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   constructor(
     manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
     private selector: SchemaPathSelector,
-    private tracker: PointerCycleTracker = new CycleTracker<
-      Immutable<JSONValue>
+    private tracker: PointerCycleTracker = new CompoundCycleTracker<
+      Immutable<JSONValue>,
+      SchemaContext | undefined
     >(),
     private schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(),
+    >(deepEqual),
   ) {
     super(manager);
   }
@@ -730,7 +807,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       return this.isValidType(schemaObj, "number") ? doc.value : undefined;
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
-        using t = this.tracker.include(doc.value, doc);
+        using t = this.tracker.include(doc.value, schemaContext, doc);
         if (t === null) {
           return null;
         }
@@ -746,10 +823,8 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
         });
-        // TODO(@ubik2): it might be technically ok to follow the same pointer more than once, since we might have
-        // a different schema the second time, which could prevent an infinite cycle, but for now, just reject these.
       } else if (this.isValidType(schemaObj, "object")) {
-        using t = this.tracker.include(doc.value, doc);
+        using t = this.tracker.include(doc.value, schemaContext, doc);
         if (t === null) {
           return null;
         }
@@ -897,7 +972,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     // but we may have a pointer cycle of docs, and we've finished resolving
     // the pointer now. To avoid descending into a cycle, track entry to the
     // doc we were called with (not the one we resolved, which may be a pointer).
-    using t = this.tracker.include(doc.value!, doc);
+    using t = this.tracker.include(doc.value!, schemaContext, doc);
     if (t === null) {
       return null;
     }
