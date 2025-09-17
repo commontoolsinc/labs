@@ -51,6 +51,7 @@ export function createJsxExpressionRule(): OpaqueRefRule {
               checker,
               sourceFile,
               transformation,
+              analyze,
             },
           });
 

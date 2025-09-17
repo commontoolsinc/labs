@@ -160,15 +160,15 @@ export default recipe({
         
         <h3>Config Access with Styles</h3>
         <p style={{
-                color: state.config.theme.primaryColor,
-                fontSize: state.config.theme.fontSize + "px"
-            }}>
+            color: state.config.theme.primaryColor,
+            fontSize: commontools_1.derive(state.config.theme.fontSize, _v1 => _v1 + "px")
+        }}>
           Styled text
         </p>
         <div style={{
-                backgroundColor: commontools_1.ifElse(state.config.features.darkMode, "#333", "#fff"),
-                borderColor: state.config.theme.secondaryColor
-            }}>
+            backgroundColor: commontools_1.ifElse(state.config.features.darkMode, "#333", "#fff"),
+            borderColor: state.config.theme.secondaryColor
+        }}>
           Theme-aware box
         </div>
         
