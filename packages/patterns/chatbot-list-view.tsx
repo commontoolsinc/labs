@@ -6,6 +6,7 @@ import {
   derive,
   h,
   handler,
+  ID,
   ifElse,
   lift,
   NAME,
@@ -16,9 +17,14 @@ import {
 
 import Chat from "./chatbot.tsx";
 
+type CharmEntry = {
+  [ID]: string; // randomId is a string
+  charm: any;
+};
+
 type Input = {
   selectedCharm: Default<any, undefined>;
-  charmsList: Default<any[], []>;
+  charmsList: Default<CharmEntry[], []>;
 };
 
 type Output = Input;
@@ -32,7 +38,17 @@ const storeCharm = lift(
     properties: {
       charm: { type: "object" },
       selectedCharm: { type: "object", asCell: true },
-      charmsList: { type: "array", asCell: true },
+      charmsList: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            [ID]: { type: "string" }, // randomId is a string
+            charm: { type: "object" },
+          },
+        },
+        asCell: true,
+      },
       isInitialized: { type: "boolean", asCell: true },
     },
   },
@@ -44,7 +60,11 @@ const storeCharm = lift(
         JSON.stringify(charm),
       );
       selectedCharm.set(charm);
-      charmsList.push(charm);
+
+      // create the chat charm with a custom name including a random suffix
+      const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
+      charmsList.push({ [ID]: randomId, charm });
+
       isInitialized.set(true);
       return charm;
     } else {
@@ -56,17 +76,14 @@ const storeCharm = lift(
 
 const createChatRecipe = handler<
   unknown,
-  { selectedCharm: Cell<any>; charmsList: Cell<any[]> }
+  { selectedCharm: Cell<any>; charmsList: Cell<CharmEntry[]> }
 >(
   (_, { selectedCharm, charmsList }) => {
     const isInitialized = cell(false);
 
-    // create the chat charm with a custom name including a random suffix
-    const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
     const charm = Chat({
       messages: [],
       tools: undefined,
-      //name: `Chat-${randomId}`
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({ charm, selectedCharm, charmsList, isInitialized });
@@ -78,13 +95,6 @@ const selectCharm = handler<unknown, { selectedCharm: Cell<any>; charm: any }>(
     console.log("selectCharm: updating selectedCharm to ", charm);
     selectedCharm.set(charm);
     return selectedCharm;
-  },
-);
-
-// Handler to navigate to the stored charm (just console.log for now)
-const goToStoredCharm = handler<unknown, { selectedCharm: Cell<any> }>(
-  (_, { selectedCharm }) => {
-    console.log("goToStoredCharm clicked, selectedCharm=", selectedCharm);
   },
 );
 
@@ -104,13 +114,13 @@ export default recipe<Input, Output>(
             <h3>Chat List</h3>
           </div>
           <div>
-            {charmsList.map((charm, i) => (
+            {charmsList.map((charmEntry, i) => (
               <div>
-                index={i} chat ID: {charm[NAME]}
+                index={i} chat ID: {charmEntry.charm[NAME]}
                 <ct-button
                   onClick={selectCharm({
                     selectedCharm: selectedCharm,
-                    charm: charm,
+                    charm: charmEntry.charm,
                   })}
                 >
                   LOAD
