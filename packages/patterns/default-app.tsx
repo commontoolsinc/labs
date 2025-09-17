@@ -109,6 +109,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 onClick={spawnPattern(ChatbotNote, {
                   title: "New Note",
                   content: "",
+                  allCharms,
                 })({})}
               >
                 🤖 Chatbot Note
@@ -117,7 +118,6 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 onClick={spawnPattern(Note, {
                   title: "New Note",
                   content: "",
-                  allCharms,
                 })({})}
               >
                 📄 Note
