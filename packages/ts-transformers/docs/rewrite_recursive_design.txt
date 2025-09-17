@@ -1,67 +1,40 @@
-# Nested Rewrite Design Notes
+# Nested Rewrite Status
 
-## Problem Statement
+## Current Implementation
 
-The current `rewriteExpression` implementation dispatches to a set of emitters
-(based on node kind) and, if none of them handle the top-level expression,
-performs a second traversal that re-enters `rewriteExpression` on child nodes
-(lines 25-72 of `rewrite/rewrite.ts`). This fallback ensures that nested
-expressions (e.g. a `PropertyAssignment` inside an object literal) are rewritten
-when no top-level emitter matched. While effective, the approach masks a design
-issue:
+`rewriteExpression` now delegates child rewriting to emitters rather than
+falling back to a second traversal. The dispatcher (see
+`src/opaque-ref/rewrite/rewrite.ts`) wraps the transformation context with a
+`rewriteChildren` helper. Emitters call this helper to rewrite their inputs
+before building a replacement node, while `emitContainerExpression` handles
+pass-through nodes such as object and array literals.
 
-- Emitters that succeed do not visit their children. Their responsibility ends
-  with producing a replacement node for the expression they recognise.
-- Container expressions (object/array literals, parenthesised expressions,
-  type assertions, etc.) rely on the fallback traversal to rewrite inner nodes.
-- The fallback re-runs dependency analysis and recursively re-enters the full
-  dispatcher, which adds complexity and makes it harder to reason about
-  per-node responsibilities.
+Key points:
 
-The schema-generator pipeline avoids this pattern: formatters rewrite their own
-node and explicitly recurse into child nodes via the same formatting interface.
-This design is easier to extend, avoids extra analysis work, and clarifies
-ownership for nested structures.
-
-## Proposed Refactor
-
-Introduce an explicit "rewrite children" step that emitters call before (or
-while) building their replacement node. Key ideas:
-
-1. Provide a helper `rewriteChildren(node, context)` that walks the node's
-   immediate children, runs `context.analyze` on expression children, and
-   dispatches to `rewriteExpression` for each expression that still requires a
-   rewrite.
-2. Each emitter becomes responsible for invoking `rewriteChildren` before it
-   constructs the new node. For example, `emitPropertyAccess` would rewrite the
-   child `expression` first, then create the new derive call using the rewritten
-   child as input.
-3. For node kinds we do not rewrite (e.g. `ObjectLiteralExpression`), add a
-   simple emitter that leaves the node shape intact but rewrites its children by
-   calling `rewriteChildren`.
-4. With every emitter owning its subtree, the fallback recursion at the bottom
-   of `rewriteExpression` is no longer needed and can be removed.
+- Emitters own their subtrees: every operator, call, template, conditional,
+  element access, and container emitter invokes `context.rewriteChildren` as
+  needed and merges any helper imports returned by the recursive calls.
+- The historical fallback (re-running analysis and redispatching when no
+  emitter matched) has been deleted. Each emitter either rewrites its node or
+  yields `undefined`, and containers ensure descendants are visited exactly once.
+- Helper tracking merges child helpers into the parent result via the shared
+  `Set<OpaqueRefHelperName>` maintained inside `rewriteExpression`.
 
 ## Benefits
 
-- **Single ownership:** each emitter emits a node and ensures its children are
-  rewritten. No implicit second pass.
-- **Performance:** avoids redundant analysis when the first dispatch already
-  knows which children need rewriting.
-- **Extensibility:** adding support for new expression kinds (especially when
-  closures introduce nested functions) becomes a matter of adding an emitter and
-  calling `rewriteChildren`, mirroring the schema generator design.
+- **Single ownership:** the transformer no longer depends on an implicit second
+  pass, making per-node responsibilities clearer.
+- **Lower overhead:** analysis happens once per expression tree, eliminating the
+  redundant work triggered by the former fallback traversal.
+- **Extensibility:** adding new emitters or supporting closures now means
+  composing with `rewriteChildren`, mirroring the schema-generator architecture
+  that originally inspired this change.
 
-## Implementation Notes
+## Follow-up Considerations
 
-- Reuse `ts.visitEachChild` with a visitor that invokes `context.analyze` on
-  expression children and recurses into `rewriteExpression` as needed.
-- Update existing emitters (binary, call, template, conditional, element,
-  property) to rewrite child nodes explicitly.
-- Introduce emitters for container nodes we currently leave untouched (object
-  literal, array literal, parenthesised expression, type assertions, etc.).
-- Remove the fallback traversal in `rewriteExpression` once emitters handle
-  child rewrites directly.
-- Ensure helper tracking (`Set<OpaqueRefHelperName>`) merges child helpers
-  correctly when emitters rewrite nested expressions.
-
+- Container coverage is intentionally minimal; when we add new expression kinds
+  we should provide emitters that either rewrite them directly or defer to
+  `rewriteChildren`.
+- The helper still walks the entire subtree when any child requires a rewrite.
+  If performance becomes a concern we can allow emitters to shortcut specific
+  child paths, but that is not necessary today.
