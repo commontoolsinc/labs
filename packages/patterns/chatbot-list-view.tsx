@@ -2,7 +2,7 @@
 import {
   Cell,
   cell,
-  createCell,
+  Default,
   derive,
   h,
   handler,
@@ -15,6 +15,13 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
+
+type Input = {
+  selectedCharm: Default<any, undefined>;
+  charmsList: Default<any[], []>;
+};
+
+type Output = Input;
 
 // this will be called whenever charm or selectedCharm changes
 // pass isInitialized to make sure we dont call this each time
@@ -82,42 +89,42 @@ const goToStoredCharm = handler<unknown, { selectedCharm: Cell<any> }>(
 );
 
 // create the named cell inside the recipe body, so we do it just once
-export default recipe("Launcher", () => {
-  // cell to store  to the last charm we created
-  const selectedCharm = cell(undefined);
-  const charmsList = cell([]);
-
-  return {
-    [NAME]: "Launcher",
-    [UI]: (
-      <div>
-        <ct-button onClick={createChatRecipe({ selectedCharm, charmsList })}>
-          Create New Chat
-        </ct-button>
-
+export default recipe<Input, Output>(
+  "Launcher",
+  ({ selectedCharm, charmsList }) => {
+    return {
+      [NAME]: "Launcher",
+      [UI]: (
         <div>
-          <h3>Chat List</h3>
-        </div>
-        <div>
-          {charmsList.map((charm, i) => (
-            <div>
-              index={i} chat ID: {charm[NAME]}
-              <ct-button
-                onClick={selectCharm({
-                  selectedCharm: selectedCharm,
-                  charm: charm,
-                })}
-              >
-                LOAD
-              </ct-button>
-            </div>
-          ))}
-        </div>
+          <ct-button onClick={createChatRecipe({ selectedCharm, charmsList })}>
+            Create New Chat
+          </ct-button>
 
-        <div>--- end chat list ---</div>
-        <div>{selectedCharm}</div>
-      </div>
-    ),
-    selectedCharm,
-  };
-});
+          <div>
+            <h3>Chat List</h3>
+          </div>
+          <div>
+            {charmsList.map((charm, i) => (
+              <div>
+                index={i} chat ID: {charm[NAME]}
+                <ct-button
+                  onClick={selectCharm({
+                    selectedCharm: selectedCharm,
+                    charm: charm,
+                  })}
+                >
+                  LOAD
+                </ct-button>
+              </div>
+            ))}
+          </div>
+
+          <div>--- end chat list ---</div>
+          <div>{selectedCharm}</div>
+        </div>
+      ),
+      selectedCharm,
+      charmsList,
+    };
+  },
+);
