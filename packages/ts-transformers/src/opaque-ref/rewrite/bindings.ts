@@ -96,13 +96,24 @@ export function createBindingPlan(
       ? createIdentifierParamName(dependency.expression.text, usedParamNames)
       : createGeneratedParamName(index, usedParamNames);
 
+    const sourceFile = dependency.expression.getSourceFile();
+    const dependencyText = dependency.expression.getText(sourceFile);
+
     entries.push({
       dependency,
       propertyName,
       paramName,
     });
+
+    paramBindings.set(dependency.expression, paramName);
+
     for (const occurrence of dependency.occurrences) {
-      paramBindings.set(occurrence.expression, paramName);
+      const occurrenceText = occurrence.expression.getText(
+        occurrence.expression.getSourceFile(),
+      );
+      if (occurrenceText === dependencyText) {
+        paramBindings.set(occurrence.expression, paramName);
+      }
     }
   });
 
