@@ -11,6 +11,13 @@ import {
   type OpaqueExpressionAnalysis,
 } from "./dependency.ts";
 
+function assertDefined<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 
 export function replaceOpaqueRefWithParam(
@@ -188,7 +195,7 @@ export function transformExpressionWithOpaqueRef(
     if (opaqueRefs.length === 0) return expression;
 
     if (opaqueRefs.length === 1) {
-      const ref = opaqueRefs[0];
+      const ref = opaqueRefs[0]!;
       const paramName = getSimpleName(ref) ?? "_v1";
       const lambdaBody = replaceOpaqueRefWithParam(
         expression,
@@ -236,18 +243,22 @@ export function transformExpressionWithOpaqueRef(
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
-        const firstRef = uniqueRefs.get(refText)!;
-        refToParamName.set(ref, refToParamName.get(firstRef)!);
+        const firstRef = assertDefined(
+          uniqueRefs.get(refText),
+          "Expected ref to be tracked",
+        );
+        const existing = refToParamName.get(firstRef) ?? `_v${uniqueRefs.size}`;
+        refToParamName.set(ref, existing);
       }
     });
-    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const uniqueRefArray: ts.Expression[] = Array.from(uniqueRefs.values());
     const lambdaBody = replaceOpaqueRefsWithParams(
       expression,
       refToParamName,
       factory,
       context,
     );
-    const refProperties = uniqueRefArray.map((ref) => {
+    const refProperties = uniqueRefArray.map((ref, index) => {
       if (ts.isIdentifier(ref)) {
         return factory.createShorthandPropertyAssignment(ref, undefined);
       }
@@ -258,14 +269,14 @@ export function transformExpressionWithOpaqueRef(
           ref,
         );
       }
-      const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+      const propName = `ref${index + 1}`;
       return factory.createPropertyAssignment(
         factory.createIdentifier(propName),
         ref,
       );
     });
     const paramProperties = uniqueRefArray.map((ref, index) => {
-      const paramName = refToParamName.get(ref)!;
+      const paramName = refToParamName.get(ref) ?? `_v${index + 1}`;
       let propName = `ref${index + 1}`;
       if (ts.isIdentifier(ref)) {
         propName = ref.text;
@@ -319,7 +330,7 @@ export function transformExpressionWithOpaqueRef(
     const { dependencies: opaqueRefs } = analyzeDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     if (opaqueRefs.length === 1) {
-      const ref = opaqueRefs[0];
+      const ref = opaqueRefs[0]!;
       const paramName = getSimpleName(ref) ?? "_v1";
       const lambdaBody = replaceOpaqueRefWithParam(
         expression,
@@ -366,11 +377,15 @@ export function transformExpressionWithOpaqueRef(
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
-        const firstRef = uniqueRefs.get(refText)!;
-        refToParamName.set(ref, refToParamName.get(firstRef)!);
+        const firstRef = assertDefined(
+          uniqueRefs.get(refText),
+          "Expected ref to be tracked",
+        );
+        const existing = refToParamName.get(firstRef) ?? `_v${uniqueRefs.size}`;
+        refToParamName.set(ref, existing);
       }
     });
-    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const uniqueRefArray: ts.Expression[] = Array.from(uniqueRefs.values());
     const lambdaBody = replaceOpaqueRefsWithParams(
       expression,
       refToParamName,
@@ -399,7 +414,7 @@ export function transformExpressionWithOpaqueRef(
       false,
     );
     const paramProperties = uniqueRefArray.map((ref, index) => {
-      const paramName = refToParamName.get(ref)!;
+      const paramName = refToParamName.get(ref) ?? `_v${index + 1}`;
       let propName: string;
       if (ts.isIdentifier(ref)) {
         propName = ref.text;
@@ -458,18 +473,22 @@ export function transformExpressionWithOpaqueRef(
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
-    opaqueRefs.forEach((ref) => {
+    opaqueRefs.forEach((ref, idx) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
         const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
-        const firstRef = uniqueRefs.get(refText)!;
-        refToParamName.set(ref, refToParamName.get(firstRef)!);
+        const firstRef = assertDefined(
+          uniqueRefs.get(refText),
+          "Expected ref to be tracked",
+        );
+        const existing = refToParamName.get(firstRef) ?? `_v${idx + 1}`;
+        refToParamName.set(ref, existing);
       }
     });
-    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const uniqueRefArray: ts.Expression[] = Array.from(uniqueRefs.values());
     const lambdaBody = replaceOpaqueRefsWithParams(
       expression,
       refToParamName,
@@ -477,8 +496,11 @@ export function transformExpressionWithOpaqueRef(
       context,
     );
     if (uniqueRefArray.length === 1) {
-      const ref = uniqueRefArray[0];
-      const paramName = refToParamName.get(ref)!;
+      const ref = assertDefined(
+        uniqueRefArray[0],
+        "Expected at least one opaque ref",
+      );
+      const paramName = refToParamName.get(ref) ?? `_v1`;
       const arrowFunction = factory.createArrowFunction(
         undefined,
         undefined,
@@ -530,7 +552,7 @@ export function transformExpressionWithOpaqueRef(
       false,
     );
     const paramProperties = uniqueRefArray.map((ref, index) => {
-      const paramName = refToParamName.get(ref)!;
+      const paramName = refToParamName.get(ref) ?? `_v${index + 1}`;
       let propName: string;
       if (ts.isIdentifier(ref)) {
         propName = ref.text;
@@ -584,18 +606,26 @@ export function transformExpressionWithOpaqueRef(
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
-    opaqueRefs.forEach((ref) => {
+    opaqueRefs.forEach((ref, idx) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
         const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
-        const firstRef = uniqueRefs.get(refText)!;
-        refToParamName.set(ref, refToParamName.get(firstRef)!);
+        const firstRef = assertDefined(
+          uniqueRefs.get(refText),
+          "Expected ref to be tracked",
+        );
+        let existing = refToParamName.get(firstRef);
+        if (existing === undefined) {
+          existing = `_v${idx + 1}`;
+          refToParamName.set(firstRef, existing);
+        }
+        refToParamName.set(ref, existing);
       }
     });
-    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const uniqueRefArray: ts.Expression[] = Array.from(uniqueRefs.values());
     const lambdaBody = replaceOpaqueRefsWithParams(
       expression,
       refToParamName,
@@ -603,8 +633,11 @@ export function transformExpressionWithOpaqueRef(
       context,
     );
     if (uniqueRefArray.length === 1) {
-      const ref = uniqueRefArray[0];
-      const paramName = refToParamName.get(ref)!;
+      const ref = assertDefined(
+        uniqueRefArray[0],
+        "Expected at least one opaque ref",
+      );
+      const paramName = refToParamName.get(ref) ?? `_v1`;
       const arrowFunction = factory.createArrowFunction(
         undefined,
         undefined,
@@ -634,7 +667,9 @@ export function transformExpressionWithOpaqueRef(
         [ref, arrowFunction],
       );
     }
-    const paramNames = uniqueRefArray.map((ref) => refToParamName.get(ref)!);
+    const paramNames = uniqueRefArray.map((ref) =>
+      assertDefined(refToParamName.get(ref), "Expected param name")
+    );
     const refProperties = uniqueRefArray.map((ref) => {
       if (ts.isIdentifier(ref)) {
         return factory.createShorthandPropertyAssignment(ref, undefined);
@@ -657,7 +692,10 @@ export function transformExpressionWithOpaqueRef(
       false,
     );
     const paramProperties = uniqueRefArray.map((ref, index) => {
-      const paramName = paramNames[index];
+      const paramName = assertDefined(
+        paramNames[index],
+        "Expected param name",
+      );
       let propName: string;
       if (ts.isIdentifier(ref)) {
         propName = ref.text;
@@ -720,10 +758,16 @@ export function transformExpressionWithOpaqueRef(
         refToParamName.set(ref, refToParamName.get(firstRef)!);
       }
     });
-    const uniqueRefArray = Array.from(uniqueRefs.values());
+    const uniqueRefArray: ts.Expression[] = Array.from(uniqueRefs.values());
     if (uniqueRefArray.length === 1) {
-      const ref = uniqueRefArray[0];
-      const paramName = refToParamName.get(ref)!;
+      const ref = assertDefined(
+        uniqueRefArray[0],
+        "Expected at least one opaque ref",
+      );
+      const paramName = assertDefined(
+        refToParamName.get(ref),
+        "Expected param name",
+      );
       const lambdaBody = replaceOpaqueRefsWithParams(
         expression,
         refToParamName,
@@ -759,7 +803,9 @@ export function transformExpressionWithOpaqueRef(
         [ref, arrowFunction],
       );
     }
-    const paramNames = uniqueRefArray.map((ref) => refToParamName.get(ref)!);
+    const paramNames = uniqueRefArray.map((ref) =>
+      assertDefined(refToParamName.get(ref), "Expected param name")
+    );
     const refProperties = uniqueRefArray.map((ref) => {
       if (ts.isIdentifier(ref)) {
         return factory.createShorthandPropertyAssignment(ref, undefined);
@@ -782,7 +828,10 @@ export function transformExpressionWithOpaqueRef(
       false,
     );
     const paramProperties = uniqueRefArray.map((ref, index) => {
-      const paramName = paramNames[index];
+      const paramName = assertDefined(
+        paramNames[index],
+        "Expected param name",
+      );
       let propName: string;
       if (ts.isIdentifier(ref)) {
         propName = ref.text;

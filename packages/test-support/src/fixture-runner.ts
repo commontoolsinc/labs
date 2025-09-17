@@ -1,12 +1,6 @@
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { walkSync } from "@std/fs/walk";
-import {
-  SEPARATOR,
-  basename,
-  isAbsolute,
-  relative,
-  resolve,
-} from "@std/path";
+import { basename, isAbsolute, relative, resolve, SEPARATOR } from "@std/path";
 
 export interface Fixture {
   readonly rootDir: string;

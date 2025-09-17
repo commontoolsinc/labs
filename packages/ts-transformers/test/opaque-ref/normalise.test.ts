@@ -14,9 +14,10 @@ describe("normaliseDependencies", () => {
     );
 
     const dependencies = normaliseDependencies(analysis.graph);
-    const predicate = analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else"
-      ? analysis.rewriteHint.predicate
-      : undefined;
+    const predicate =
+      analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else"
+        ? analysis.rewriteHint.predicate
+        : undefined;
     if (!predicate) {
       throw new Error("Expected predicate hint");
     }
