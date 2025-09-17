@@ -1,4 +1,4 @@
-import { recipe, OpaqueRef, JSONSchema } from "commontools";
+import { OpaqueRef, recipe, JSONSchema } from "commontools";
 interface TodoItem {
     title: string;
     done: boolean;
@@ -31,7 +31,7 @@ export default recipe({
     const filtered = items.map((item, index) => ({
         title: item.title,
         done: item.done,
-        position: index
+        position: index,
     }));
     return { mapped, filtered };
 });

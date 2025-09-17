@@ -40,12 +40,12 @@ export default recipe({
         
         <h3>Ternary with Comparisons</h3>
         <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 > 10), "High", "Low")}</span>
-        <span>{commontools_1.ifElse(commontools_1.derive(state.score, _v1 => _v1 >= 90), "A", state.score >= 80 ? "B" : "C")}</span>
-        <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 === 0), "Empty", state.count === 1 ? "Single" : "Multiple")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.score, _v1 => _v1 >= 90), "A", commontools_1.derive(state.score, _v1 => _v1 >= 80 ? "B" : "C"))}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 === 0), "Empty", commontools_1.derive(state.count, _v1 => _v1 === 1 ? "Single" : "Multiple"))}</span>
         
         <h3>Nested Ternary</h3>
-        <span>{commontools_1.ifElse(state.isActive, state.isPremium ? "Premium Active" : "Regular Active", "Inactive")}</span>
-        <span>{commontools_1.ifElse(commontools_1.derive(state.userType, _v1 => _v1 === "admin"), "Admin", state.userType === "user" ? "User" : "Guest")}</span>
+        <span>{commontools_1.ifElse(state.isActive, commontools_1.derive(state.isPremium, _v1 => (_v1 ? "Premium Active" : "Regular Active")), "Inactive")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.userType, _v1 => _v1 === "admin"), "Admin", commontools_1.derive(state.userType, _v1 => _v1 === "user" ? "User" : "Guest"))}</span>
         
         <h3>Complex Conditions</h3>
         <span>{commontools_1.ifElse(commontools_1.derive({ state_isActive: state.isActive, state_hasPermission: state.hasPermission }, ({ state_isActive: _v1, state_hasPermission: _v2 }) => _v1 && _v2), "Full Access", "Limited Access")}</span>

@@ -27,9 +27,9 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           const typeArgs = node.typeArguments;
           if (typeArgs && typeArgs.length >= 1) {
             const factory = transformation.factory;
-            const schemaArgs = typeArgs.map((typeArg) =>
-              typeArg
-            ).map((typeArg) =>
+            const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
+              typeArg,
+            ) =>
               factory.createCallExpression(
                 factory.createIdentifier("toSchema"),
                 [typeArg],

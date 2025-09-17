@@ -1,7 +1,12 @@
 import ts from "typescript";
 
-import { isFunctionParameter, isOpaqueRefType } from "./types.ts";
+import {
+  isFunctionParameter,
+  isOpaqueRefType,
+  symbolDeclaresCommonToolsDefault,
+} from "./types.ts";
 import { detectCallKind } from "./call-kind.ts";
+import { getMemberSymbol } from "../core/commontools.ts";
 
 export interface DependencyScopeParameter {
   readonly name: string;
@@ -304,6 +309,15 @@ export function createDependencyAnalyzer(
           nodes: [node],
         };
       }
+      if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
+        const node = recordDependency(expression, scope);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dependencies: [expression],
+          nodes: [node],
+        };
+      }
       return emptyAnalysis();
     }
 
@@ -321,6 +335,21 @@ export function createDependencyAnalyzer(
         return {
           containsOpaqueRef: true,
           requiresRewrite: target.requiresRewrite,
+          dependencies: [expression],
+          nodes: [node],
+        };
+      }
+      const propertySymbol = getMemberSymbol(expression, checker);
+      if (symbolDeclaresCommonToolsDefault(propertySymbol, checker)) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          findParentNodeId(target.nodes, expression.expression) ?? null;
+        const node = recordDependency(expression, scope, parentId);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: true,
           dependencies: [expression],
           nodes: [node],
         };

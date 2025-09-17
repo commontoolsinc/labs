@@ -15,12 +15,6 @@ export type {
 } from "./core/context.ts";
 
 export {
-  createOpaqueRefTransformer,
-  type OpaqueRefTransformerOptions,
-  type TransformationError,
-} from "./legacy.ts";
-
-export {
   createSchemaTransformer,
   type SchemaTransformerOptions,
 } from "./schema/schema-transformer.ts";
