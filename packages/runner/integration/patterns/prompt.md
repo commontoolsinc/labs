@@ -10,7 +10,7 @@ message.
 Steps:
 
 1. Open `packages/runner/integration/patterns/test-ideas.md`, identify the first
-   10 unchecked tasks, and for each:
+   unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions.
    - Use CTS APIs (`handler`, `recipe`, `lift`, etc.) to realize the described
@@ -26,7 +26,7 @@ Steps:
    `deno test --allow-env --allow-read --allow-write --allow-ffi packages/runner/integration/pattern-harness.test.ts`
    and ensure it passes.
 
-5. Check off the 10 completed ideas in `test-ideas.md`.
+5. Check off the completed ideas in `test-ideas.md`.
 
 6. Stage and commit with a message like
    `Add pattern scenarios for toggle through rolling average`.
