@@ -67,9 +67,11 @@ export const Note = recipe<NoteInput>(
   },
 );
 
-const handleCharmLinkClicked = handler((_: any, { charm }: { charm: Cell<Charm> }) => {
-  navigateTo(charm);
-})
+const handleCharmLinkClicked = handler(
+  (_: any, { charm }: { charm: Cell<Charm> }) => {
+    return navigateTo(charm);
+  },
+);
 
 
 type LLMTestInput = {
@@ -241,7 +243,9 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 <summary>Mentioned Charms</summary>
                 <ct-vstack>
                   {mentioned.map((charm: Charm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>{charm[NAME]}</ct-button>
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
                   ))}
                 </ct-vstack>
               </details>
@@ -249,7 +253,9 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 <summary>Backlinks</summary>
                 <ct-vstack>
                   {backlinks.map((charm: Charm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>{charm[NAME]}</ct-button>
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
                   ))}
                 </ct-vstack>
               </details>
