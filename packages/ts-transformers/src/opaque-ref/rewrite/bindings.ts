@@ -35,7 +35,8 @@ function sanitiseName(
   let base = candidate.replace(/[^A-Za-z0-9_]/g, "_");
   base = base.replace(/^_+/, "");
   if (base.length === 0) base = fallback;
-  if (!/[A-Za-z_]/.test(base[0])) {
+  const firstChar = base.charAt(0);
+  if (!/[A-Za-z_]/.test(firstChar)) {
     base = `${fallback}_${used.size + 1}`;
   }
   let name = base;
@@ -53,7 +54,8 @@ function createIdentifierParamName(
 ): string {
   let base = raw.replace(/[^A-Za-z0-9_]/g, "_");
   if (base.length === 0) base = "ref";
-  if (!/[A-Za-z_]/.test(base[0])) {
+  const firstChar = base.charAt(0);
+  if (!/[A-Za-z_]/.test(firstChar)) {
     base = `_${base}`;
   }
   let name = base;

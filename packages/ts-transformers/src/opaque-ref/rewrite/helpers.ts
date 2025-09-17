@@ -210,10 +210,12 @@ function createLambdaParameter(
   factory: ts.NodeFactory,
 ): ts.ParameterDeclaration {
   if (!plan.usesObjectBinding) {
+    const firstEntry = plan.entries[0];
+    const paramName = firstEntry?.paramName ?? "_v1";
     return factory.createParameterDeclaration(
       undefined,
       undefined,
-      factory.createIdentifier(plan.entries[0].paramName),
+      factory.createIdentifier(paramName),
       undefined,
       undefined,
       undefined,
@@ -245,9 +247,11 @@ export function createDeriveCallForExpression(
   context: RewriteContext,
   options: { wrapConditional?: boolean } = {},
 ): ts.Expression {
+  if (plan.entries.length === 0) return expression;
+
   if (!plan.usesObjectBinding && plan.entries.length === 1) {
     const [entry] = plan.entries;
-    if (entry.dependency.expression === expression) {
+    if (entry && entry.dependency.expression === expression) {
       return expression;
     }
   }
@@ -272,7 +276,7 @@ export function createDeriveCallForExpression(
   const deriveIdentifier = createDeriveIdentifier(context);
   const deriveArgs = plan.usesObjectBinding
     ? [createDeriveDependencyObject(plan, factory), arrowFunction]
-    : [plan.entries[0].dependency.expression, arrowFunction];
+    : [plan.entries[0]!.dependency.expression, arrowFunction];
 
   const callExpression = factory.createCallExpression(
     deriveIdentifier,

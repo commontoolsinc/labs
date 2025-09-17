@@ -165,7 +165,9 @@ export async function transformSource(
   const beforeTransformers = before.map((factory) => factory(program));
   const afterTransformers = after.map((factory) => factory(program));
 
-  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [...beforeTransformers];
+  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [
+    ...beforeTransformers,
+  ];
   if (applyOpaqueRefTransformer) {
     transformers.push(createOpaqueRefTransformer(program, { mode }));
   }
@@ -228,7 +230,9 @@ export async function compareFixtureTransformation(
 async function loadEnvironmentTypes(): Promise<Record<EnvTypeKey, string>> {
   const cache = new StaticCache();
   const entries = await Promise.all(
-    ENV_TYPE_ENTRIES.map(async (key) => [key, await cache.getText(`types/${key}.d.ts`)] as const),
+    ENV_TYPE_ENTRIES.map(async (key) =>
+      [key, await cache.getText(`types/${key}.d.ts`)] as const
+    ),
   );
   return Object.fromEntries(entries) as Record<EnvTypeKey, string>;
 }

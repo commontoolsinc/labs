@@ -17,7 +17,21 @@
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-env test/**/*.test.ts",
     "check": "deno check src/**/*.ts",
-    "fmt": "deno fmt src/ test/",
+    "fmt": "deno fmt src/ test/**/*.test.ts",
     "lint": "deno lint src/ test/"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true
   }
 }

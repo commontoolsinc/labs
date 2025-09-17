@@ -149,11 +149,17 @@ export function createDependencyAnalyzer(
       const parameterDecl = declarations?.find((
         decl,
       ): decl is ts.ParameterDeclaration => ts.isParameter(decl));
+      if (parameterDecl) {
+        return {
+          name: symbol.getName(),
+          symbol,
+          declaration: parameterDecl,
+        } satisfies DependencyScopeParameter;
+      }
       return {
         name: symbol.getName(),
         symbol,
-        declaration: parameterDecl,
-      };
+      } satisfies DependencyScopeParameter;
     }),
   });
 
@@ -501,7 +507,9 @@ export function createDependencyAnalyzer(
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
-          return { kind: "call-if-else", predicate };
+          if (predicate) {
+            return { kind: "call-if-else", predicate };
+          }
         }
         if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
@@ -685,7 +693,7 @@ const findParentNodeId = (
 ): number | null => {
   for (let index = nodes.length - 1; index >= 0; index--) {
     const node = nodes[index];
-    if (node.expression === target) {
+    if (node && node.expression === target) {
       return node.id;
     }
   }

@@ -122,7 +122,11 @@ export function normaliseDependencies(
     expression: value.expression,
     occurrences: value.nodes,
     scopeId: value.scopeId,
-  })).sort((a, b) => a.occurrences[0].id - b.occurrences[0].id);
+  })).sort((a, b) => {
+    const aId = a.occurrences[0]?.id ?? -1;
+    const bId = b.occurrences[0]?.id ?? -1;
+    return aId - bId;
+  });
 
   return {
     all,
