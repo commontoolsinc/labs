@@ -13,17 +13,6 @@ import {
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 
-export function getFunctionName(node: ts.CallExpression): string | undefined {
-  const expr = node.expression;
-  if (ts.isIdentifier(expr)) {
-    return expr.text;
-  }
-  if (ts.isPropertyAccessExpression(expr)) {
-    return expr.name.text;
-  }
-  return undefined;
-}
-
 export function replaceOpaqueRefWithParam(
   expression: ts.Expression,
   opaqueRef: ts.Expression,
@@ -118,7 +107,12 @@ export function transformExpressionWithOpaqueRef(
   }
 
   const dependencyAnalyzer = analyzer ?? createDependencyAnalyzer(checker);
-  const getDependencies = (expr: ts.Expression): ts.Expression[] => {
+  const analyzeDependencies = (
+    expr: ts.Expression,
+  ): {
+    analysis: OpaqueExpressionAnalysis;
+    dependencies: ts.Expression[];
+  } => {
     const analysis = dependencyAnalyzer(expr);
     const deduped = dedupeExpressions(analysis.dependencies, sourceFile);
     const texts = deduped.map((dep) => dep.getText(sourceFile));
@@ -129,7 +123,7 @@ export function transformExpressionWithOpaqueRef(
         otherIndex !== index && other.startsWith(`${text}.`)
       );
     });
-    return filtered;
+    return { analysis, dependencies: filtered };
   };
 
   if (ts.isConditionalExpression(expression)) {
@@ -187,7 +181,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isPropertyAccessExpression(expression)) {
-    const opaqueRefs = getDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     if (opaqueRefs.length === 1) {
       const ref = opaqueRefs[0];
@@ -320,11 +314,12 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isCallExpression(expression)) {
-    const functionName = getFunctionName(expression);
-    if (functionName === "ifElse") {
+    const { analysis, dependencies: opaqueRefs } = analyzeDependencies(
+      expression,
+    );
+    if (analysis.rewriteHint?.kind === "call-if-else") {
       return expression;
     }
-    const opaqueRefs = getDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
@@ -450,7 +445,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isTemplateExpression(expression)) {
-    const opaqueRefs = getDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
@@ -575,7 +570,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isBinaryExpression(expression)) {
-    const opaqueRefs = getDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
