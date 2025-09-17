@@ -30,9 +30,12 @@ export function createSchemaTransformer(
         node.typeArguments.length === 1
       ) {
         const typeArg = node.typeArguments[0];
+        if (!typeArg) {
+          return ts.visitEachChild(node, visit, context);
+        }
         const type = checker.getTypeFromTypeNode(typeArg);
 
-        if (logger && typeArg) {
+        if (logger) {
           let typeText = "unknown";
           try {
             typeText = typeArg.getText();

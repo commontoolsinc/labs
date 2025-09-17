@@ -64,7 +64,6 @@ export function createJsxExpressionRule(): OpaqueRefRule {
               rewriteResult.expression,
             );
           }
-
         }
 
         return ts.visitEachChild(node, visit, transformation);

@@ -122,9 +122,9 @@ export function addCommonToolsImport(
 
   const statements = [...sourceFile.statements];
   let insertIndex = 0;
-  for (let i = 0; i < statements.length; i++) {
-    if (ts.isImportDeclaration(statements[i])) {
-      insertIndex = i + 1;
+  for (const statement of statements) {
+    if (ts.isImportDeclaration(statement)) {
+      insertIndex += 1;
     } else {
       break;
     }

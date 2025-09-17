@@ -25,9 +25,7 @@ export {
   type SchemaTransformerOptions,
 } from "./schema/schema-transformer.ts";
 
-export {
-  collectOpaqueRefs,
-} from "./opaque-ref/dependency.ts";
+export { collectOpaqueRefs } from "./opaque-ref/dependency.ts";
 
 export {
   containsOpaqueRef,
