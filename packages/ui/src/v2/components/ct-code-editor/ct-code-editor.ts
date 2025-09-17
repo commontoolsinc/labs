@@ -3,6 +3,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
+import { indentWithTab } from "@codemirror/commands";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
@@ -525,6 +526,7 @@ export class CTCodeEditor extends BaseElement {
     // Create editor extensions
     const extensions: Extension[] = [
       basicSetup,
+      keymap.of([indentWithTab]),
       oneDark,
       this._lang.of(getLangExtFromMimeType(this.language)),
       this._readonly.of(EditorState.readOnly.of(this.readonly)),
