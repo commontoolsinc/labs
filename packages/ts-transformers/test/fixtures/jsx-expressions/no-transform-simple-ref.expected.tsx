@@ -7,4 +7,3 @@ export default recipe("test", (state) => {
         [NAME]: "test",
     };
 });
-

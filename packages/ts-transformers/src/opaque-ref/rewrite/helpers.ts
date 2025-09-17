@@ -4,6 +4,7 @@ import {
   createIfElseCall,
   replaceOpaqueRefsWithParams,
 } from "../transforms.ts";
+import { detectCallKind } from "../call-kind.ts";
 import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
@@ -25,9 +26,18 @@ function originatesFromIgnoredParameter(
   const isIgnoredSymbol = (symbol: ts.Symbol | undefined): boolean => {
     if (!symbol) return false;
     const symbolName = symbol.getName();
-    return scope.parameters.some((parameter) =>
-      parameter.symbol === symbol || parameter.name === symbolName
-    );
+    return scope.parameters.some((parameter) => {
+      if (parameter.symbol === symbol || parameter.name === symbolName) {
+        if (
+          parameter.declaration &&
+          getOpaqueCallKindForParameter(parameter.declaration, checker)
+        ) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    });
   };
 
   const inner = (expr: ts.Expression): boolean => {
@@ -47,6 +57,69 @@ function originatesFromIgnoredParameter(
   };
 
   return inner(expression);
+}
+
+function getOpaqueCallKindForParameter(
+  declaration: ts.ParameterDeclaration,
+  checker: ts.TypeChecker,
+): "builder" | "array-map" | undefined {
+  let functionNode: ts.Node | undefined = declaration.parent;
+  while (functionNode && !ts.isFunctionLike(functionNode)) {
+    functionNode = functionNode.parent;
+  }
+  if (!functionNode) return undefined;
+
+  let candidate: ts.Node | undefined = functionNode.parent;
+  while (candidate && !ts.isCallExpression(candidate)) {
+    candidate = candidate.parent;
+  }
+  if (!candidate) return undefined;
+
+  const callKind = detectCallKind(candidate, checker);
+  if (callKind?.kind === "builder" || callKind?.kind === "array-map") {
+    return callKind.kind;
+  }
+  return undefined;
+}
+
+function resolvesToMapParameter(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Expression = expression;
+  let symbol: ts.Symbol | undefined;
+  while (true) {
+    if (ts.isIdentifier(current)) {
+      symbol = checker.getSymbolAtLocation(current);
+      break;
+    }
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) ||
+      ts.isCallExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    if (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) ||
+      ts.isNonNullExpression(current)
+    ) {
+      current = current.expression;
+      continue;
+    }
+    break;
+  }
+
+  if (!symbol) return false;
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return false;
+  return declarations.some((declaration) =>
+    ts.isParameter(declaration) &&
+    getOpaqueCallKindForParameter(declaration, checker) === "array-map"
+  );
 }
 
 export function filterRelevantDependencies(
@@ -92,7 +165,12 @@ export function filterRelevantDependencies(
     ) {
       return false;
     }
-    if (isParameterExpression(dependency.expression)) return false;
+    if (
+      isParameterExpression(dependency.expression) &&
+      !resolvesToMapParameter(dependency.expression, context.checker)
+    ) {
+      return false;
+    }
     return true;
   });
 }

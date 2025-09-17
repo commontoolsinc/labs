@@ -162,8 +162,13 @@ export function createDependencyAnalyzer(
     scope: DependencyScopeInternal,
     context: AnalyzerContext,
   ): InternalAnalysis => {
-    const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean =>
-      symbol ? scope.aggregated.has(symbol) : false;
+    const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
+      if (!symbol) return false;
+      if (scope.aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
+        return false;
+      }
+      return scope.aggregated.has(symbol);
+    };
 
     const originatesFromIgnored = (expr: ts.Expression): boolean => {
       if (ts.isIdentifier(expr)) {
@@ -229,10 +234,12 @@ export function createDependencyAnalyzer(
       }
     };
 
-    const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean => {
-      if (!symbol) return false;
+    const getOpaqueParameterCallKind = (
+      symbol: ts.Symbol | undefined,
+    ): "builder" | "array-map" | undefined => {
+      if (!symbol) return undefined;
       const declarations = symbol.getDeclarations();
-      if (!declarations) return false;
+      if (!declarations) return undefined;
       for (const declaration of declarations) {
         if (!ts.isParameter(declaration)) continue;
         let functionNode: ts.Node | undefined = declaration.parent;
@@ -247,12 +254,15 @@ export function createDependencyAnalyzer(
         if (!candidate) continue;
         const callExpression = candidate as ts.CallExpression;
         const callKind = detectCallKind(callExpression, checker);
-        if (callKind?.kind === "builder") {
-          return true;
+        if (callKind?.kind === "builder" || callKind?.kind === "array-map") {
+          return callKind.kind;
         }
       }
-      return false;
+      return undefined;
     };
+
+    const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean =>
+      getOpaqueParameterCallKind(symbol) !== undefined;
 
     const isImplicitOpaqueRefExpression = (
       expr: ts.Expression,
@@ -269,6 +279,16 @@ export function createDependencyAnalyzer(
         return emptyAnalysis();
       }
       const type = checker.getTypeAtLocation(expression);
+      const parameterCallKind = getOpaqueParameterCallKind(symbol);
+      if (parameterCallKind === "array-map") {
+        const node = recordDependency(expression, scope);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: true,
+          dependencies: [expression],
+          nodes: [node],
+        };
+      }
       if (isOpaqueRefType(type, checker)) {
         const node = recordDependency(expression, scope);
         return {

@@ -24,9 +24,11 @@ export function isOpaqueRefType(
       const target = typeRef.target;
       if (target && target.symbol) {
         const symbolName = target.symbol.getName();
-        if (symbolName === "OpaqueRef") return true;
+        if (symbolName === "OpaqueRef" || symbolName === "Cell") return true;
         const qualified = checker.getFullyQualifiedName(target.symbol);
-        if (qualified.includes("OpaqueRef")) return true;
+        if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
+          return true;
+        }
       }
     }
     const symbol = type.getSymbol();
@@ -34,19 +36,30 @@ export function isOpaqueRefType(
       if (
         symbol.name === "OpaqueRef" ||
         symbol.name === "OpaqueRefMethods" ||
-        symbol.name === "OpaqueRefBase"
+        symbol.name === "OpaqueRefBase" ||
+        symbol.name === "Cell"
       ) {
         return true;
       }
       const qualified = checker.getFullyQualifiedName(symbol);
-      if (qualified.includes("OpaqueRef")) return true;
+      if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
+        return true;
+      }
     }
   }
   if (type.aliasSymbol) {
     const aliasName = type.aliasSymbol.getName();
-    if (aliasName === "OpaqueRef" || aliasName === "Opaque") return true;
+    if (
+      aliasName === "OpaqueRef" ||
+      aliasName === "Opaque" ||
+      aliasName === "Cell"
+    ) {
+      return true;
+    }
     const qualified = checker.getFullyQualifiedName(type.aliasSymbol);
-    if (qualified.includes("OpaqueRef")) return true;
+    if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
+      return true;
+    }
   }
   return false;
 }

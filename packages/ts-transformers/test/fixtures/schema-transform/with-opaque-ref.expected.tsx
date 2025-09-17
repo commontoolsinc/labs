@@ -26,4 +26,3 @@ export default recipe(model, model, (cell) => {
         value: cell.value,
     };
 });
-

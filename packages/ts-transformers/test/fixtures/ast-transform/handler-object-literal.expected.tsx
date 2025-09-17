@@ -30,4 +30,3 @@ export default recipe({ type: "object", properties: { value: { type: "number" },
         onClick3: myHandler(state),
     };
 });
-

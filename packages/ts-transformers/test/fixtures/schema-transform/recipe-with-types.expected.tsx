@@ -124,4 +124,3 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
         items_count
     };
 });
-
