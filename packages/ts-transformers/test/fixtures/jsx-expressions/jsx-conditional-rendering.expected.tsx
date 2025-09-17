@@ -53,12 +53,11 @@ export default recipe({
         <span>{commontools_1.ifElse(commontools_1.derive({ state_isPremium: state.isPremium, state_score: state.score }, ({ state_isPremium: _v1, state_score: _v2 }) => _v1 || _v2 > 100), "Premium Features", "Basic Features")}</span>
         
         <h3>IfElse Component</h3>
-        {ifElse(state.isActive, <div>User is active with {state.count} items</div>, <div>User is inactive</div>)}
+        {ifElse(commontools_1.derive(state.isActive, _v1 => _v1), <div>User is active with {state.count} items</div>, <div>User is inactive</div>)}
         
-        {ifElse(state.count > 5, <ul>
+        {ifElse(commontools_1.derive(state.count, _v1 => _v1 > 5), <ul>
             <li>Many items: {state.count}</li>
           </ul>, <p>Few items: {state.count}</p>)}
       </div>),
     };
 });
-

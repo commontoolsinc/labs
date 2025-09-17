@@ -21,9 +21,9 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
 const COMMONTOOLS_PATH_FRAGMENT = "commontools";
 
 export type CallKind =
-  | { kind: "ifElse"; symbol: ts.Symbol }
-  | { kind: "builder"; symbol: ts.Symbol; builderName: string }
-  | { kind: "array-map"; symbol: ts.Symbol };
+  | { kind: "ifElse"; symbol?: ts.Symbol }
+  | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
+  | { kind: "array-map"; symbol?: ts.Symbol };
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -60,6 +60,13 @@ function resolveExpressionKind(
   if (symbol) {
     const kind = resolveSymbolKind(symbol, checker, seen);
     if (kind) return kind;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(target) &&
+    target.name.text === "map"
+  ) {
+    return { kind: "array-map" };
   }
 
   const type = checker.getTypeAtLocation(target);
