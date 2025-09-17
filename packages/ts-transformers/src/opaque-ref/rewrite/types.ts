@@ -12,6 +12,10 @@ export interface RewriteContext {
   readonly analyze: (expression: ts.Expression) => OpaqueExpressionAnalysis;
 }
 
+export interface EmitterContext extends RewriteContext {
+  rewriteChildren(node: ts.Expression): ts.Expression;
+}
+
 export interface RewriteParams {
   readonly expression: ts.Expression;
   readonly analysis: OpaqueExpressionAnalysis;
@@ -22,7 +26,7 @@ export interface EmitterParams {
   readonly expression: ts.Expression;
   readonly dependencies: NormalisedDependencySet;
   readonly analysis: OpaqueExpressionAnalysis;
-  readonly context: RewriteContext;
+  readonly context: EmitterContext;
 }
 
 export interface EmitterResult {
