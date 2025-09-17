@@ -26,7 +26,11 @@ import {
 
 import Chat from "./chatbot.tsx";
 
-type Charm = any;
+type Charm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: Charm[];
+};
 
 type NoteResult = {
   content: Default<string, "">;
@@ -67,6 +71,12 @@ export const Note = recipe<NoteInput>(
   },
 );
 
+const handleCharmLinkClicked = handler(
+  (_: any, { charm }: { charm: Cell<Charm> }) => {
+    return navigateTo(charm);
+  },
+);
+
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
@@ -77,6 +87,9 @@ type LLMTestInput = {
 
 type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
+  mentioned: Default<Array<Charm>, []>;
+  backlinks: Default<Array<Charm>, []>;
+  content: Default<string, "">;
 };
 
 // put a note at the end of the outline (by appending to root.children)
@@ -150,6 +163,42 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const chat = Chat({ messages, tools });
     const { addMessage, cancelGeneration, pending } = chat;
 
+    const mentioned = cell<Charm[]>([]);
+
+    // Must use JSONSchema here, CTS doesn't work correctly. See CT-901
+    const computeBacklinks = lift(
+      {
+        type: "object",
+        properties: {
+          allCharms: { type: "array", items: { type: "object" }, asCell: true },
+          content: { type: "string", asCell: true },
+        },
+      } as JSONSchema,
+      {
+        type: "array",
+        items: { type: "object" },
+      } as JSONSchema,
+      ({ allCharms, content }) => {
+        const cs: Charm[] = allCharms.get();
+        if (!cs) return [];
+
+        const self = cs.find((c) => c.content === content.get());
+
+        const results = self
+          ? cs.filter((c) =>
+            c.mentioned?.some((m) => m.content === self.content) ?? false
+          )
+          : [];
+
+        return results;
+      },
+    );
+
+    const backlinks: OpaqueRef<Charm[]> = computeBacklinks({
+      allCharms,
+      content,
+    });
+
     return {
       [NAME]: title,
       [UI]: (
@@ -170,7 +219,34 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 />
               </div>
 
-              <Note content={content} allCharms={allCharms} />
+              <ct-code-editor
+                $value={content}
+                $mentionable={allCharms}
+                $mentioned={mentioned}
+                onbacklink-click={handleCharmLinkClick({})}
+                language="text/markdown"
+                style="min-height: 400px;"
+              />
+              <details>
+                <summary>Mentioned Charms</summary>
+                <ct-vstack>
+                  {mentioned.map((charm: Charm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
+              <details>
+                <summary>Backlinks</summary>
+                <ct-vstack>
+                  {backlinks.map((charm: Charm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
             </ct-screen>
 
             {ifElse(
@@ -181,7 +257,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </ct-autolayout>
         </ct-screen>
       ),
+      content,
       messages,
+      mentioned,
+      backlinks,
     };
   },
 );

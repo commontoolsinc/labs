@@ -81,6 +81,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {Array} mentionable - Array of mentionable items with Charm structure for backlink autocomplete
+ * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -102,6 +103,7 @@ export class CTCodeEditor extends BaseElement {
     timingStrategy: { type: String },
     timingDelay: { type: Number },
     mentionable: { type: Array },
+    mentioned: { type: Array },
   };
 
   declare value: Cell<string> | string;
@@ -112,6 +114,7 @@ export class CTCodeEditor extends BaseElement {
   declare timingStrategy: InputTimingOptions["strategy"];
   declare timingDelay: number;
   declare mentionable: Cell<Charm[]>;
+  declare mentioned?: Cell<Charm[]>;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -128,6 +131,8 @@ export class CTCodeEditor extends BaseElement {
         oldValue,
         language: this.language,
       });
+      // Keep $mentioned in sync with content changes
+      this._updateMentionedFromContent();
     },
   });
 
@@ -170,7 +175,7 @@ export class CTCodeEditor extends BaseElement {
       const options: Completion[] = mentionable.map((charm) => {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
-        const charmName = charm[NAME] || "";
+        const charmName = charm.key(NAME).get() || "";
         const insertText = `${charmName} (${charmId})`;
         return {
           label: charmName,
@@ -192,7 +197,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query
    */
-  private getFilteredMentionable(query: string): Charm[] {
+  private getFilteredMentionable(query: string): Cell<Charm>[] {
     if (!this.mentionable) {
       return [];
     }
@@ -204,12 +209,16 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Charm[] = [];
+    const matches: Cell<Charm>[] = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const mention = this.mentionable.key(i).getAsQueryResult();
-      if (mention && mention[NAME]?.toLowerCase()?.includes(queryLower)) {
-        matches.push(mention);
+      const mention = this.mentionable.key(i).get();
+      if (
+        mention &&
+        this.mentionable.key(i).key(NAME).getAsQueryResult()?.toLowerCase()
+          ?.includes(queryLower)
+      ) {
+        matches.push(this.mentionable.key(i));
       }
     }
 
@@ -279,14 +288,14 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Find a charm by ID in the mentionable list
    */
-  private findCharmById(id: string): Charm | null {
+  private findCharmById(id: string): Cell<Charm> | null {
     if (!this.mentionable) return null;
 
     const mentionableData = this.mentionable.getAsQueryResult();
     if (!mentionableData) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const charm = this.mentionable.key(i).getAsQueryResult();
+      const charm = this.mentionable.key(i);
       if (charm) {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
@@ -387,6 +396,8 @@ export class CTCodeEditor extends BaseElement {
         });
       }
     }
+    // Ensure mentioned charms reflect external value changes
+    this._updateMentionedFromContent();
   }
 
   private _setupCellSyncHandler(): void {
@@ -412,6 +423,18 @@ export class CTCodeEditor extends BaseElement {
         this._cleanupFns.push(unsubscribe);
       }
     }
+  }
+
+  /**
+   * Subscribe to mentionable changes to re-resolve mentioned charms when
+   * the source list updates.
+   */
+  private _setupMentionableSyncHandler(): void {
+    if (!this.mentionable) return;
+    const unsubscribe = this.mentionable.sink(() => {
+      this._updateMentionedFromContent();
+    });
+    this._cleanupFns.push(unsubscribe);
   }
 
   private _cleanup(): void {
@@ -459,6 +482,17 @@ export class CTCodeEditor extends BaseElement {
         delay: this.timingDelay,
       });
     }
+
+    // Re-subscribe if mentionable cell reference changes
+    if (changedProperties.has("mentionable")) {
+      this._setupMentionableSyncHandler();
+      this._updateMentionedFromContent();
+    }
+
+    // If `$mentioned` binding changes, push current state immediately
+    if (changedProperties.has("mentioned")) {
+      this._updateMentionedFromContent();
+    }
   }
 
   protected override firstUpdated(_changedProperties: PropertyValues): void {
@@ -476,6 +510,10 @@ export class CTCodeEditor extends BaseElement {
 
     // Set up custom cell sync handler for CodeMirror
     this._setupCellSyncHandler();
+
+    // Set up mentionable sync handler and initialize mentioned list
+    this._setupMentionableSyncHandler();
+    this._updateMentionedFromContent();
   }
 
   private _initializeEditor(): void {
@@ -494,6 +532,8 @@ export class CTCodeEditor extends BaseElement {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
           this.setValue(value);
+          // Keep $mentioned current as user types
+          this._updateMentionedFromContent();
         }
       }),
       // Handle focus/blur events
@@ -564,6 +604,75 @@ export class CTCodeEditor extends BaseElement {
    */
   get editorView(): EditorView | undefined {
     return this._editorView;
+  }
+
+  /**
+   * Extract mentioned charms from current content and write to `$mentioned`.
+   *
+   * Link syntax: [[Name (id)]]. We parse ids and resolve them against
+   * `$mentionable` to produce live Charm instances.
+   */
+  private _updateMentionedFromContent(): void {
+    if (!this.mentioned) return;
+
+    const content = this.getValue() || "";
+    const newMentioned = this._extractMentionedCharms(content);
+
+    // Compare by id set to avoid unnecessary writes
+    const current = this.mentioned.getAsQueryResult?.() || [];
+    const curIds = new Set(
+      current
+        .map((c: Charm) => getEntityId(c)?.["/"] || "")
+        .filter((id: string) => id),
+    );
+    const newIds = new Set(
+      newMentioned
+        .map((c: Charm) => getEntityId(c)?.["/"] || "")
+        .filter((id: string) => id),
+    );
+
+    if (curIds.size === newIds.size) {
+      let same = true;
+      for (const id of newIds) {
+        if (!curIds.has(id)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return; // No change
+    }
+
+    const tx = this.mentioned.runtime.edit();
+    this.mentioned.withTx(tx).set(newMentioned);
+    tx.commit();
+  }
+
+  /**
+   * Parse content to a list of unique Charms referenced by [[...]] links.
+   */
+  private _extractMentionedCharms(content: string): Charm[] {
+    if (!content || !this.mentionable) return [];
+
+    const ids: string[] = [];
+    const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      const id = match[1];
+      if (id) ids.push(id);
+    }
+
+    // Resolve unique ids to charms using mentionable list
+    const seen = new Set<string>();
+    const result: Charm[] = [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      const charm = this.findCharmById(id);
+      if (charm) {
+        result.push(charm);
+        seen.add(id);
+      }
+    }
+    return result;
   }
 }
 
