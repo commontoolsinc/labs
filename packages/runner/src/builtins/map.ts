@@ -76,7 +76,7 @@ export function map(
 
     // .getRaw() because we want the recipe itself and avoid following the
     // aliases in the recipe
-    const opRecipe = op.getRaw() as any;
+    const opRecipe = op.getRaw();
 
     // If the result's value is undefined, set it to the empty array.
     if (resultWithLog.get() === undefined) {
@@ -98,6 +98,11 @@ export function map(
     }
 
     const newArrayValue = resultWithLog.get().slice(0, initializedUpTo);
+    // If we rollback a change to result cell, and that causes it to be
+    // shorter, we need to re-initialize some cells.
+    if (initializedUpTo > newArrayValue.length) {
+      initializedUpTo = newArrayValue.length;
+    }
     // Add values that have been appended
     while (initializedUpTo < list.length) {
       const resultCell = runtime.getCell(
