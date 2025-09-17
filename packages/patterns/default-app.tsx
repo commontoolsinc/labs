@@ -117,6 +117,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 onClick={spawnPattern(Note, {
                   title: "New Note",
                   content: "",
+                  allCharms,
                 })({})}
               >
                 📄 Note
