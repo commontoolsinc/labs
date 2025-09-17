@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 import { isFunctionParameter, isOpaqueRefType } from "./types.ts";
-import { getFunctionName } from "./transforms.ts";
+import { detectCallKind } from "./call-kind.ts";
 
 export interface DependencyScopeParameter {
   readonly name: string;
@@ -41,41 +41,6 @@ export interface OpaqueExpressionAnalysis {
   nodes: DependencyNode[];
   graph: OpaqueDependencyGraph;
   rewriteHint?: RewriteHint;
-}
-
-type CallRole = "builder" | "ifElse";
-
-const BUILDER_SYMBOL_NAMES = new Set([
-  "recipe",
-  "handler",
-  "lift",
-  "compute",
-  "render",
-]);
-
-function resolveCallRole(
-  expression: ts.CallExpression,
-  checker: ts.TypeChecker,
-): CallRole | undefined {
-  let symbol = checker.getSymbolAtLocation(expression.expression);
-  if (!symbol) return undefined;
-  if (symbol.flags & ts.SymbolFlags.Alias) {
-    symbol = checker.getAliasedSymbol(symbol);
-  }
-  if (!symbol) return undefined;
-  const name = symbol.getName();
-  const declarations = symbol.declarations ?? [];
-  for (const declaration of declarations) {
-    const sourceFile = declaration.getSourceFile();
-    if (!sourceFile) continue;
-    const path = sourceFile.fileName;
-    if (!path.includes("commontools")) continue;
-    if (name === "ifElse") return "ifElse";
-    if (BUILDER_SYMBOL_NAMES.has(name)) return "builder";
-  }
-  if (name === "ifElse") return "ifElse";
-  if (BUILDER_SYMBOL_NAMES.has(name)) return "builder";
-  return undefined;
 }
 
 export function dedupeExpressions(
@@ -280,8 +245,9 @@ export function createDependencyAnalyzer(
           candidate = candidate.parent;
         }
         if (!candidate) continue;
-        const role = resolveCallRole(candidate as ts.CallExpression, checker);
-        if (role === "builder") {
+        const callExpression = candidate as ts.CallExpression;
+        const callKind = detectCallKind(callExpression, checker);
+        if (callKind?.kind === "builder") {
           return true;
         }
       }
@@ -511,26 +477,22 @@ export function createDependencyAnalyzer(
       }
 
       const combined = mergeAnalyses(...analyses);
-      const functionName = getFunctionName(expression);
-      const callRole = resolveCallRole(expression, checker);
+      const callKind = detectCallKind(expression, checker);
       const rewriteHint: RewriteHint | undefined = (() => {
-        if (callRole === "ifElse" && expression.arguments.length > 0) {
+        if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
           return { kind: "call-if-else", predicate };
         }
-        if (callRole === "builder") {
+        if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
-        if (
-          functionName === "map" &&
-          ts.isPropertyAccessExpression(expression.expression)
-        ) {
+        if (callKind?.kind === "array-map") {
           return { kind: "skip-call-rewrite", reason: "array-map" };
         }
         return undefined;
       })();
 
-      if (callRole === "builder") {
+      if (callKind?.kind === "builder") {
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
