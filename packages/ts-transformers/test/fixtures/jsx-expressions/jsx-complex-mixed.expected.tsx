@@ -62,9 +62,9 @@ export default recipe({
         
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map(item => (<li key={commontools_1.derive(item.id, _v1 => _v1)}>
-              <span>{commontools_1.derive(item.name, _v1 => _v1)}</span>
-              <span> - Original: ${commontools_1.derive(item.price, _v1 => _v1)}</span>
+          {state.items.map(item => (<li key={item.id}>
+              <span>{item.name}</span>
+              <span> - Original: ${item.price}</span>
               <span> - Discounted: ${commontools_1.derive({ item_price: item.price, state_discount: state.discount }, ({ item_price: _v1, state_discount: _v2 }) => (_v1 * (1 - _v2)).toFixed(2))}</span>
               <span> - With tax: ${commontools_1.derive({ item_price: item.price, state_discount: state.discount, state_taxRate: state.taxRate }, ({ item_price: _v1, state_discount: _v2, state_taxRate: _v3 }) => (_v1 * (1 - _v2) * (1 + _v3)).toFixed(2))}</span>
             </li>))}
