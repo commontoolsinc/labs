@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { assertStringIncludes } from "@std/assert";
 import { StaticCache } from "@commontools/static";
 
-import { createModularOpaqueRefTransformer } from "../../src/mod.ts";
 import { transformSource } from "../utils.ts";
 
 const staticCache = new StaticCache();
@@ -44,8 +43,6 @@ describe("OpaqueRef map callbacks", () => {
     const output = await transformSource(SOURCE, {
       types: { "commontools.d.ts": commontools },
       applySchemaTransformer: true,
-      applyOpaqueRefTransformer: false,
-      before: [createModularOpaqueRefTransformer],
     });
 
     assertStringIncludes(

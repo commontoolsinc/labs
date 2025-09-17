@@ -1,5 +1,13 @@
 import ts from "typescript";
 
+import {
+  getMemberSymbol,
+  resolvesToCommonToolsSymbol,
+  symbolDeclaresCommonToolsDefault,
+} from "../core/commontools.ts";
+
+export { symbolDeclaresCommonToolsDefault } from "../core/commontools.ts";
+
 export function isOpaqueRefType(
   type: ts.Type,
   checker: ts.TypeChecker,
@@ -25,6 +33,11 @@ export function isOpaqueRefType(
       if (target && target.symbol) {
         const symbolName = target.symbol.getName();
         if (symbolName === "OpaqueRef" || symbolName === "Cell") return true;
+        if (
+          resolvesToCommonToolsSymbol(target.symbol, checker, "Default")
+        ) {
+          return true;
+        }
         const qualified = checker.getFullyQualifiedName(target.symbol);
         if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
           return true;
@@ -41,6 +54,9 @@ export function isOpaqueRefType(
       ) {
         return true;
       }
+      if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) {
+        return true;
+      }
       const qualified = checker.getFullyQualifiedName(symbol);
       if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
         return true;
@@ -54,6 +70,9 @@ export function isOpaqueRefType(
       aliasName === "Opaque" ||
       aliasName === "Cell"
     ) {
+      return true;
+    }
+    if (resolvesToCommonToolsSymbol(type.aliasSymbol, checker, "Default")) {
       return true;
     }
     const qualified = checker.getFullyQualifiedName(type.aliasSymbol);
@@ -77,6 +96,11 @@ export function containsOpaqueRef(
         found = true;
         return;
       }
+      const propertySymbol = getMemberSymbol(n, checker);
+      if (symbolDeclaresCommonToolsDefault(propertySymbol, checker)) {
+        found = true;
+        return;
+      }
     }
     if (
       ts.isCallExpression(n) &&
@@ -95,6 +119,11 @@ export function containsOpaqueRef(
       }
       const type = checker.getTypeAtLocation(n);
       if (isOpaqueRefType(type, checker)) {
+        found = true;
+        return;
+      }
+      const symbol = checker.getSymbolAtLocation(n);
+      if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
         found = true;
         return;
       }

@@ -32,8 +32,11 @@ export function emitPropertyAccess(
   if (relevantDependencies.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDependencies);
+  const rewritten = createDeriveCallForExpression(expression, plan, context);
+  if (rewritten === expression) return undefined;
+
   return {
-    expression: createDeriveCallForExpression(expression, plan, context),
+    expression: rewritten,
     helpers: new Set<OpaqueRefHelperName>(["derive"]),
   };
 }

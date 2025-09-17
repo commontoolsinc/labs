@@ -6,9 +6,11 @@ _Last updated: 2025-09-17_
 
 `@commontools/ts-transformers` now houses our TypeScript AST transformers. The
 package exposes the modular OpaqueRef rewrite we ship to recipe authors (via
-`createModularOpaqueRefTransformer`) alongside the legacy `createOpaqueRefTransformer`
-export for backwards compatibility. This document captures the current
-implementation, outstanding gaps, and the focused roadmap we intend to pursue.
+`createModularOpaqueRefTransformer`). The legacy
+`createOpaqueRefTransformer` remains inside `@commontools/js-runtime` only until
+that package migrates; it is no longer re-exported here. This document captures
+the current implementation, outstanding gaps, and the focused roadmap we intend
+to pursue.
 
 ## Current Implementation
 
@@ -93,9 +95,10 @@ implementation, outstanding gaps, and the focused roadmap we intend to pursue.
 - **Performance & diagnostics** – If rule count grows, revisit lightweight
   instrumentation (timing, rule-level debug logging) rather than the heavy
   “transformation engine” originally proposed.
-- **Legacy transformer sunset** – Plan the timeline for deprecating
-  `createOpaqueRefTransformer` once the modular path covers closures and
-  optional chaining, and `js-runtime` consumes the new package by default.
+- **Legacy transformer sunset** – Coordinate the timeline for deleting the
+  `js-runtime` copy of `createOpaqueRefTransformer` once the modular path covers
+  closures and optional chaining, and `js-runtime` consumes `ts-transformers`
+  by default.
 
 ## References
 

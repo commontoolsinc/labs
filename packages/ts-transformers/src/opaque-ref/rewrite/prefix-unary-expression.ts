@@ -45,6 +45,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
 
   const plan = createBindingPlan(relevantDependencies);
   const rewritten = createDeriveCallForExpression(expression, plan, context);
+  if (rewritten === expression) return undefined;
 
   return {
     expression: rewritten,
