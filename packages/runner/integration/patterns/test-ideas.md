@@ -187,7 +187,7 @@ current offline harness.
       cell and swap between pattern factories.
 - [ ] Counter with zipped arrays — derive zipped tuples from two arrays and
       assert results.
-- [ ] Counter with deduplicated list — handler builds set-like array avoiding
+- [x] Counter with deduplicated list — handler builds set-like array avoiding
       duplicates; derive exposes sorted unique list.
 - [ ] Counter with derived min/max — compute min and max via derive from list
       cell.
