@@ -3,6 +3,7 @@ import {
   Cell,
   cell,
   createCell,
+  Default,
   derive,
   h,
   handler,
@@ -11,24 +12,34 @@ import {
   NAME,
   navigateTo,
   recipe,
+  toSchema,
   UI,
 } from "commontools";
 
-// the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe("Simple Recipe", () => ({
-  [NAME]: "Some Simple Recipe",
-  [UI]: <div>Some Simple Recipe</div>,
+// Define interfaces for type safety
+interface AddCharmState {
+  charm: any;
+  cellRef: Cell<any[]>;
+  isInitialized: Cell<boolean>;
+}
+const AddCharmSchema = toSchema<AddCharmState>();
+
+interface CreateCellState {
+  isInitialized: Cell<boolean>;
+  storedCellRef: Cell<any>;
+}
+const CreateCellSchema = toSchema<CreateCellState>();
+
+// Simple charm that will be instantiated multiple times
+const SimpleRecipe = recipe<{ id: string }>("Simple Recipe", ({ id }) => ({
+  [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
+  [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
-// Create a cell to store an array of charms
+// Lift that creates a cell to store array of charms.
+// Uses isInitialized flag to ensure cell is created only once.
 const createCellRef = lift(
-  {
-    type: "object",
-    properties: {
-      isInitialized: { type: "boolean", default: false, asCell: true },
-      storedCellRef: { type: "object", asCell: true },
-    },
-  },
+  CreateCellSchema,
   undefined,
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
@@ -50,20 +61,12 @@ const createCellRef = lift(
   },
 );
 
-// Add a charm to the array and navigate to it
-// we get a new isInitialized passed in for each
-// charm we add to the list. this makes sure
-// we only try to add the charm once to the list
-// and we only call navigateTo once
+// Lift that adds a charm to the array and navigates to it.
+// The isInitialized flag prevents duplicate additions:
+// - Without it: lift runs → adds to array → array changes → lift runs again → duplicate
+// - With it: lift runs once → sets isInitialized → subsequent runs skip
 const addCharmAndNavigate = lift(
-  {
-    type: "object",
-    properties: {
-      charm: { type: "object" },
-      cellRef: { type: "array", asCell: true },
-      isInitialized: { type: "boolean", asCell: true },
-    },
-  },
+  AddCharmSchema,
   undefined,
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
@@ -79,14 +82,18 @@ const addCharmAndNavigate = lift(
   },
 );
 
-// Create a new SimpleRecipe and add it to the array
+// Handler that creates a new charm instance and adds it to the array.
+// Each invocation creates its own isInitialized cell for tracking.
 const createSimpleRecipe = handler<unknown, { cellRef: Cell<any[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false);
 
-    // Create the charm
-    const charm = SimpleRecipe({});
+    // Create a random 5-digit ID
+    const randomId = Math.floor(10000 + Math.random() * 90000).toString();
+
+    // Create the charm with unique ID
+    const charm = SimpleRecipe({ id: randomId });
 
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
@@ -101,7 +108,7 @@ const goToCharm = handler<unknown, { charm: any }>(
   },
 );
 
-// create the named cell inside the recipe body, so we do it just once
+// Main recipe that manages an array of charm references
 export default recipe("Charms Launcher", () => {
   // cell to store array of charms we created
   const { cellRef } = createCellRef({
