@@ -98,7 +98,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const resultCell = runtime.getCell<any>(
     space,
     { scenario: scenario.name },
-    patternFactory.argumentSchema,
+    patternFactory.resultSchema,
     tx,
   );
   const argument = scenario.argument ?? {};
