@@ -235,7 +235,7 @@ current offline harness.
       ensure each component updates as expected.
 - [ ] Counter with nested repeating groups — replicate group pattern multiple
       times using lifts and assert independence.
-- [ ] Counter with derived checksum — compute checksum of list values via derive
+- [x] Counter with derived checksum — compute checksum of list values via derive
       and assert after updates.
 - [ ] Counter with scenario covering no-op events — send empty payloads and
       ensure state unchanged.

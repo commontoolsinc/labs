@@ -14,6 +14,9 @@ import {
   scenarios as counterDerivedColorScenarios,
 } from "./patterns/counter-derived-color.ts";
 import {
+  scenarios as counterDerivedChecksumScenarios,
+} from "./patterns/counter-derived-checksum.ts";
+import {
   scenarios as counterDynamicStepScenarios,
 } from "./patterns/counter-dynamic-step.ts";
 import {
@@ -107,6 +110,7 @@ const allScenarios = [
   ...counterConditionalBranchScenarios,
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
+  ...counterDerivedChecksumScenarios,
   ...counterDynamicStepScenarios,
   ...counterHandlerSpawnScenarios,
   ...counterHierarchicalDefaultsScenarios,
