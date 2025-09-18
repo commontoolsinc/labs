@@ -5,6 +5,9 @@ import {
   scenarios as counterAggregateScenarios,
 } from "./patterns/counter-aggregate.ts";
 import {
+  scenarios as counterDeduplicatedListScenarios,
+} from "./patterns/counter-deduplicated-list.ts";
+import {
   scenarios as counterComputedDefaultStringsScenarios,
 } from "./patterns/counter-computed-default-strings.ts";
 import {
@@ -110,6 +113,7 @@ const allScenarios = [
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
+  ...counterDeduplicatedListScenarios,
   ...counterComputedDefaultStringsScenarios,
   ...counterConditionalBranchScenarios,
   ...counterDelayedComputeScenarios,
