@@ -53,25 +53,6 @@ const handleCharmLinkClick = handler<
   return navigateTo(detail.charm);
 });
 
-export const Note = recipe<NoteInput>(
-  "Note",
-  ({ content, allCharms }) => {
-    return {
-      [NAME]: "Note",
-      [UI]: (
-        <ct-code-editor
-          $value={content}
-          $mentionable={allCharms}
-          onbacklink-click={handleCharmLinkClick({})}
-          language="text/markdown"
-          style="min-height: 400px;"
-        />
-      ),
-      content,
-    };
-  },
-);
-
 const handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
@@ -222,6 +203,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 language="text/markdown"
                 wordWrap
                 tabIndent
+                lineNumbers
               />
               <details>
                 <summary>Mentioned Charms</summary>
