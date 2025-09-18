@@ -166,6 +166,28 @@ export function getNamedTypeKey(
 }
 
 /**
+ * Determine if a type represents a callable/constructable function value.
+ */
+export function isFunctionLike(type: ts.Type): boolean {
+  if (type.getCallSignatures().length > 0) return true;
+  if (type.getConstructSignatures().length > 0) return true;
+
+  const symbol = type.symbol;
+  if (!symbol) return false;
+
+  const flags = symbol.flags;
+  if (
+    (flags & ts.SymbolFlags.Function) !== 0 ||
+    (flags & ts.SymbolFlags.Method) !== 0 ||
+    (flags & ts.SymbolFlags.Signature) !== 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Helper to extract array element type using multiple detection methods
  */
 export type ArrayElementInfo = {

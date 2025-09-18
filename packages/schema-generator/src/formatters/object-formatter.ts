@@ -4,7 +4,7 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import { safeGetPropertyType } from "../type-utils.ts";
+import { isFunctionLike, safeGetPropertyType } from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -66,19 +66,24 @@ export class ObjectFormatter implements TypeFormatter {
       const propName = prop.getName();
       if (propName.startsWith("__")) continue; // Skip internal properties
 
-      const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
-      if (!isOptional) required.push(propName);
-
       let propTypeNode: ts.TypeNode | undefined;
       const propDecl = prop.valueDeclaration ??
-        (prop.declarations?.[0] as ts.Declaration);
+        (prop.declarations?.[0] as ts.Declaration | undefined);
+
       if (propDecl) {
+        if (
+          ts.isMethodSignature(propDecl) || ts.isMethodDeclaration(propDecl)
+        ) {
+          continue;
+        }
         if (
           ts.isPropertySignature(propDecl) || ts.isPropertyDeclaration(propDecl)
         ) {
           if (propDecl.type) propTypeNode = propDecl.type as ts.TypeNode;
         }
       }
+
+      if ((prop.flags & ts.SymbolFlags.Method) !== 0) continue;
 
       // Get the actual property type and recursively delegate to the main schema generator
       const resolvedPropType = safeGetPropertyType(
@@ -87,6 +92,13 @@ export class ObjectFormatter implements TypeFormatter {
         checker,
         propTypeNode,
       );
+
+      if (isFunctionLike(resolvedPropType)) {
+        continue;
+      }
+
+      const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      if (!isOptional) required.push(propName);
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
       const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
