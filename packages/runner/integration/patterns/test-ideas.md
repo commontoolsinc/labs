@@ -85,7 +85,7 @@ current offline harness.
       references into child pattern and verify shared state.
 - [ ] Counter with circular derived reference guard — ensure derive depending on
       handler-updated cell doesn’t cause infinite loop.
-- [ ] Counter with dynamic handler list — produce array of handlers for each
+- [x] Counter with dynamic handler list — produce array of handlers for each
       item and send events per index.
 - [ ] Counter with nested `ifElse` chains — layered branching based on multiple
       thresholds.
