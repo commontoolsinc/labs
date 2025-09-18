@@ -71,7 +71,7 @@ current offline harness.
       two numeric cells.
 - [ ] Counter with enumeration state — use string union for state transitions
       and handlers for next/previous steps.
-- [ ] Counter with reorderable list — handler swaps positions in array and
+- [x] Counter with reorderable list — handler swaps positions in array and
       scenario checks order.
 - [ ] Counter with filtered projection — derive filtered array based on
       threshold and assert updates after events.
