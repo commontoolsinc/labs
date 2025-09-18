@@ -176,37 +176,6 @@
       ],
       "type": "object"
     },
-    "SchemaRoot": {
-      "properties": {
-        "appConfig": {
-          "$ref": "#/definitions/AppConfig"
-        },
-        "cellDefaults": {
-          "$ref": "#/definitions/CellDefaults"
-        },
-        "complexDefault": {
-          "$ref": "#/definitions/ComplexDefault"
-        },
-        "listConfig": {
-          "$ref": "#/definitions/ListConfig"
-        },
-        "optionalDefaults": {
-          "$ref": "#/definitions/OptionalWithDefaults"
-        },
-        "userSettings": {
-          "$ref": "#/definitions/UserSettings"
-        }
-      },
-      "required": [
-        "appConfig",
-        "cellDefaults",
-        "complexDefault",
-        "listConfig",
-        "optionalDefaults",
-        "userSettings"
-      ],
-      "type": "object"
-    },
     "UserSettings": {
       "properties": {
         "fontSize": {

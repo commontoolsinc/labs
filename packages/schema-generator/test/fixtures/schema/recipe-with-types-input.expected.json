@@ -1,25 +1,5 @@
 {
   "definitions": {
-    "InputSchemaInterface": {
-      "properties": {
-        "items": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/Item"
-          },
-          "type": "array"
-        },
-        "title": {
-          "default": "untitled",
-          "type": "string"
-        }
-      },
-      "required": [
-        "items",
-        "title"
-      ],
-      "type": "object"
-    },
     "Item": {
       "properties": {
         "text": {

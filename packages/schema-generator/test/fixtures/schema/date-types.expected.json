@@ -48,25 +48,6 @@
       ],
       "type": "object"
     },
-    "SchemaRoot": {
-      "properties": {
-        "document": {
-          "$ref": "#/definitions/Document"
-        },
-        "eventLog": {
-          "$ref": "#/definitions/EventLog"
-        },
-        "userProfile": {
-          "$ref": "#/definitions/UserProfile"
-        }
-      },
-      "required": [
-        "document",
-        "eventLog",
-        "userProfile"
-      ],
-      "type": "object"
-    },
     "UserProfile": {
       "properties": {
         "createdAt": {

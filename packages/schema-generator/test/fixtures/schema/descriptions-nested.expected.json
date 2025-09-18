@@ -1,4 +1,30 @@
 {
+  "definitions": {
+    "ChildNode": {
+      "properties": {
+        "attachments": {
+          "description": "Attachments associated with the child node",
+          "items": true,
+          "type": "array"
+        },
+        "body": {
+          "description": "The main text content of the child node",
+          "type": "string"
+        },
+        "children": {
+          "description": "Children of the child node",
+          "items": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "attachments",
+        "body",
+        "children"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Outliner document",
   "properties": {
     "attachments": {
@@ -13,28 +39,7 @@
     "children": {
       "description": "Child nodes of this node",
       "items": {
-        "properties": {
-          "attachments": {
-            "description": "Attachments associated with the child node",
-            "items": true,
-            "type": "array"
-          },
-          "body": {
-            "description": "The main text content of the child node",
-            "type": "string"
-          },
-          "children": {
-            "description": "Children of the child node",
-            "items": true,
-            "type": "array"
-          }
-        },
-        "required": [
-          "body",
-          "children",
-          "attachments"
-        ],
-        "type": "object"
+        "$ref": "#/definitions/ChildNode"
       },
       "type": "array"
     },
@@ -44,9 +49,9 @@
     }
   },
   "required": [
+    "attachments",
     "body",
     "children",
-    "attachments",
     "version"
   ],
   "type": "object"

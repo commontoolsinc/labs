@@ -11,30 +11,6 @@
         "text"
       ],
       "type": "object"
-    },
-    "OutputSchemaInterface": {
-      "properties": {
-        "items": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/Item"
-          },
-          "type": "array"
-        },
-        "items_count": {
-          "type": "number"
-        },
-        "title": {
-          "default": "untitled",
-          "type": "string"
-        }
-      },
-      "required": [
-        "items",
-        "items_count",
-        "title"
-      ],
-      "type": "object"
     }
   },
   "properties": {
