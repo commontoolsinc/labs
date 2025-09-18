@@ -17,8 +17,11 @@ import {
 import Chatbot from "./chatbot.tsx";
 import ChatbotTools from "./chatbot-tools.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
-import ChatbotNote from "./chatbot-note.tsx";
-import Note from "./note.tsx";
+import {
+  default as ChatbotNote,
+  type MentionableCharm,
+} from "./chatbot-note.tsx";
+import { default as Note } from "./note.tsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -100,7 +103,7 @@ const spawnChatbotOutliner = handler<
 
 const spawnChatbotNote = handler<
   Record<string, never>,
-  { allCharms: Cell<any[]> } // any becaus Charm definition diverge between recipes
+  { allCharms: Cell<MentionableCharm[]> }
 >((_, state) => {
   return navigateTo(ChatbotNote({
     title: "New Note",
@@ -148,7 +151,12 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 📝 Chatbot Outliner
               </ct-button>
               <ct-button
-                onClick={spawnChatbotNote({ allCharms })}
+                onClick={spawnChatbotNote({
+                  // slight disagreement between Charm types but they are compatible
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
+                })}
               >
                 🤖 Chatbot Note
               </ct-button>
