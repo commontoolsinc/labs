@@ -6,8 +6,9 @@ Short notes on the JSON Schema generator and ref/definitions behavior.
 
 - Hoists every named type into `definitions` and emits `$ref` for non‑root
   occurrences.
-- Excludes wrapper/container names from hoisting: `Array`, `ReadonlyArray`,
-  `Cell`, `Stream`, `Default`, `Date`.
+- Excludes wrapper/container names and native leaf types from hoisting:
+  `Array`, `ReadonlyArray`, `Cell`, `Stream`, `Default`, `Date`, `URL`,
+  `Uint8Array`, `ArrayBuffer`.
 - Root types remain inline; `definitions` are included only if at least one
   `$ref` is emitted.
 - Anonymous/type‑literal shapes (including aliases that resolve to anonymous
@@ -20,6 +21,15 @@ keeping wrapper semantics explicit and simple.
 
 Implementation: see `src/schema-generator.ts` (`formatType`) and
 `src/type-utils.ts` (`getNamedTypeKey` filtering).
+
+## Native Type Schemas
+
+- Maps ECMAScript built-ins directly when they appear as properties:
+  - `Date` → `{ type: "string", format: "date-time" }`
+  - `URL` → `{ type: "string", format: "uri" }`
+  - `Uint8Array` and `ArrayBuffer` → `true` (permissive JSON Schema leaf)
+- These shortcuts keep schemas inline without emitting `$ref` definitions,
+  while avoiding conflicts with array detection or hoisting.
 
 ## Function Properties
 

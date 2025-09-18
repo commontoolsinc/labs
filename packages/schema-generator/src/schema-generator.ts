@@ -139,6 +139,19 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     isRootType: boolean = false,
   ): SchemaDefinition {
+    if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const checker = context.typeChecker;
+      const baseConstraint = checker.getBaseConstraintOfType(type);
+      if (baseConstraint && baseConstraint !== type) {
+        return this.formatType(baseConstraint, context, isRootType);
+      }
+      const defaultConstraint = checker.getDefaultFromTypeParameter?.(type);
+      if (defaultConstraint && defaultConstraint !== type) {
+        return this.formatType(defaultConstraint, context, isRootType);
+      }
+      return {};
+    }
+
     // All-named strategy:
     // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
     // into definitions and return $ref for non-root uses. Cycle detection

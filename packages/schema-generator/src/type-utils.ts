@@ -156,7 +156,8 @@ export function getNamedTypeKey(
     (symFlags & ts.SymbolFlags.Property) !== 0 ||
     (symFlags & ts.SymbolFlags.Method) !== 0 ||
     (symFlags & ts.SymbolFlags.Signature) !== 0 ||
-    (symFlags & ts.SymbolFlags.Function) !== 0
+    (symFlags & ts.SymbolFlags.Function) !== 0 ||
+    (symFlags & ts.SymbolFlags.TypeParameter) !== 0
   ) {
     return undefined;
   }
