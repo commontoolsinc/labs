@@ -2,16 +2,16 @@
 
 We’re in repo `labs-secondary`.
 
-Goal: implement the next unchecked items from
-`packages/runner/integration/patterns/test-ideas.md`, create their pattern
-modules and harness scenarios, run `deno fmt` plus
+Goal: implement a random unchecked item from
+`packages/runner/integration/patterns/test-ideas.md`, create its pattern module
+and harness scenarios, run `deno fmt` plus
 `deno test --allow-env --allow-read --allow-write --allow-ffi packages/runner/integration/pattern-harness.test.ts`,
 mark the checklist item as completed, and commit everything with a concise
 message.
 
 Steps:
 
-1. Open `packages/runner/integration/patterns/test-ideas.md`, identify the first
+1. Open `packages/runner/integration/patterns/test-ideas.md`, pick a random
    unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions in `packages/runner/integration/patterns/`.
@@ -31,9 +31,10 @@ Steps:
    `deno test --allow-env --allow-read --allow-write --allow-ffi packages/runner/integration/pattern-harness.test.ts`
    and ensure it passes.
 
-5. Check off the completed ideas in `test-ideas.md`.
-
-6. Stage and commit with a message like
+5. Once it passes, check off the completed ideas in `test-ideas.md`. and stage
+   and commit with a message like
    `Add pattern scenarios for toggle through rolling average`.
+
+6. If you can't get it work, stash it instead and exit.
 
 Please begin.
