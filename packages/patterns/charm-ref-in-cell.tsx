@@ -33,9 +33,9 @@ type RecipeInOutput = {
 };
 
 // the simple charm (to which we'll store a reference within a cell)
-const SimpleRecipe = recipe("Simple Recipe", () => ({
-  [NAME]: "Some Simple Recipe",
-  [UI]: <div>Some Simple Recipe</div>,
+const SimpleRecipe = recipe<{ id: string }>("Simple Recipe", ({ id }) => ({
+  [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
+  [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
 // Lift that stores a charm reference in a cell and navigates to it.
@@ -81,8 +81,11 @@ const createSimpleRecipe = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
   (_, { cellRef }) => {
     const isInitialized = cell(false);
 
+    // Create a random 5-digit ID
+    const randomId = Math.floor(10000 + Math.random() * 90000).toString();
+
     // create the charm
-    const charm = SimpleRecipe({});
+    const charm = SimpleRecipe({ id: randomId });
 
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharmAndNavigate({ charm, cellRef, isInitialized });
