@@ -1,3 +1,5 @@
+# Generating comprehensive test coverage
+
 We’re in repo `labs-secondary`.
 
 Goal: implement the next unchecked items from
@@ -12,9 +14,12 @@ Steps:
 1. Open `packages/runner/integration/patterns/test-ideas.md`, identify the first
    unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
-     conventions.
-   - Use CTS APIs (`handler`, `recipe`, `lift`, etc.) to realize the described
-     structure.
+     conventions in `packages/runner/integration/patterns/`.
+   - Use CTS APIs (`handler`, `recipe`, `lift`, `derive`, `str`, `cell`,
+     `createCell`) to realize the described structure.
+   - Do not use `compute` and `render` as they'll be deprecated.
+   - Don't use `.setDefault`, instead use `Default<type, value>` in the type
+     declaration.
    - Keep patterns offline-friendly (no network or LLM).
 
 2. Update `packages/runner/integration/pattern-harness.test.ts` to include new
