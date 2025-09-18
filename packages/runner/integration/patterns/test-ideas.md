@@ -189,7 +189,7 @@ current offline harness.
       assert results.
 - [x] Counter with deduplicated list — handler builds set-like array avoiding
       duplicates; derive exposes sorted unique list.
-- [ ] Counter with derived min/max — compute min and max via derive from list
+- [x] Counter with derived min/max — compute min and max via derive from list
       cell.
 - [ ] Counter with nested computed percentages — derive percentage contributions
       of each item relative to total.
