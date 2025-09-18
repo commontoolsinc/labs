@@ -149,7 +149,7 @@ current offline harness.
       counters and verifying deep updates.
 - [ ] Counter with mirrored arguments to outputs — ensure outputs re-expose
       arguments and reflect handler changes.
-- [ ] Counter with computed default strings — default string built via lift from
+- [x] Counter with computed default strings — default string built via lift from
       numeric argument.
 - [ ] Counter with selective projections — pattern exposes subset of internal
       state via derive and hides others.
