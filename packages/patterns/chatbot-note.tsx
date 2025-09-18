@@ -225,7 +225,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 $mentioned={mentioned}
                 onbacklink-click={handleCharmLinkClick({})}
                 language="text/markdown"
-                style="min-height: 400px;"
+                wordWrap
+                tabIndent
               />
               <details>
                 <summary>Mentioned Charms</summary>

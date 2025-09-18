@@ -68,6 +68,7 @@
     "npm:@arizeai/openinference-vercel@^2.0.1": "2.3.1_@opentelemetry+api@1.9.0",
     "npm:@babel/standalone@^7.28.2": "7.28.2",
     "npm:@codemirror/autocomplete@^6.15.0": "6.18.7",
+    "npm:@codemirror/commands@^6.8.1": "6.8.1",
     "npm:@codemirror/lang-css@^6.3.1": "6.3.1",
     "npm:@codemirror/lang-html@^6.4.9": "6.4.9",
     "npm:@codemirror/lang-javascript@^6.2.2": "6.2.4",
@@ -2125,6 +2126,7 @@
       "packages/ui": {
         "dependencies": [
           "npm:@codemirror/autocomplete@^6.15.0",
+          "npm:@codemirror/commands@^6.8.1",
           "npm:@codemirror/lang-css@^6.3.1",
           "npm:@codemirror/lang-html@^6.4.9",
           "npm:@codemirror/lang-javascript@^6.2.2",
