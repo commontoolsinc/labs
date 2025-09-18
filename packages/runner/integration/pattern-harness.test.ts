@@ -2,6 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "./pattern-harness.ts";
 import { scenarios as boundedCounterScenarios } from "./patterns/bounded-counter.ts";
 import {
+  scenarios as counterAggregateScenarios,
+} from "./patterns/counter-aggregate.ts";
+import {
+  scenarios as counterConditionalBranchScenarios,
+} from "./patterns/counter-conditional-branch.ts";
+import {
   scenarios as counterDelayedComputeScenarios,
 } from "./patterns/counter-delayed-compute.ts";
 import {
@@ -10,6 +16,9 @@ import {
 import {
   scenarios as counterDynamicStepScenarios,
 } from "./patterns/counter-dynamic-step.ts";
+import {
+  scenarios as counterHandlerSpawnScenarios,
+} from "./patterns/counter-handler-spawn.ts";
 import {
   scenarios as counterHistoryScenarios,
 } from "./patterns/counter-history-tracker.ts";
@@ -20,13 +29,34 @@ import {
   scenarios as counterNestedStreamScenarios,
 } from "./patterns/counter-nested-stream.ts";
 import {
+  scenarios as counterOptionalFallbackScenarios,
+} from "./patterns/counter-optional-fallback.ts";
+import {
+  scenarios as counterPersistenceDefaultsScenarios,
+} from "./patterns/counter-persistence-defaults.ts";
+import {
   scenarios as counterResetScenarios,
 } from "./patterns/counter-reset.ts";
+import {
+  scenarios as counterRichLabelScenarios,
+} from "./patterns/counter-rich-label.ts";
+import {
+  scenarios as counterRollingAverageScenarios,
+} from "./patterns/counter-rolling-average.ts";
+import {
+  scenarios as counterSharedAliasScenarios,
+} from "./patterns/counter-shared-alias.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
 import {
   scenarios as doubleCounterSharedIncrementScenarios,
 } from "./patterns/double-counter-shared-increment.ts";
 import { scenarios as echoScenarios } from "./patterns/echo.ts";
+import {
+  scenarios as counterKeyedMapScenarios,
+} from "./patterns/counter-keyed-map.ts";
+import {
+  scenarios as counterMutableTupleScenarios,
+} from "./patterns/counter-mutable-tuple.ts";
 import { scenarios as listManagerScenarios } from "./patterns/list-manager.ts";
 import {
   scenarios as nestedCounterScenarios,
@@ -46,13 +76,23 @@ const allScenarios = [
   ...listManagerScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
+  ...counterAggregateScenarios,
+  ...counterConditionalBranchScenarios,
   ...counterDelayedComputeScenarios,
-  ...counterHistoryScenarios,
-  ...boundedCounterScenarios,
-  ...counterDynamicStepScenarios,
-  ...counterLiftFormattingScenarios,
-  ...counterNestedStreamScenarios,
   ...counterDerivedColorScenarios,
+  ...counterDynamicStepScenarios,
+  ...counterHandlerSpawnScenarios,
+  ...counterHistoryScenarios,
+  ...counterKeyedMapScenarios,
+  ...boundedCounterScenarios,
+  ...counterLiftFormattingScenarios,
+  ...counterMutableTupleScenarios,
+  ...counterNestedStreamScenarios,
+  ...counterOptionalFallbackScenarios,
+  ...counterPersistenceDefaultsScenarios,
+  ...counterRichLabelScenarios,
+  ...counterRollingAverageScenarios,
+  ...counterSharedAliasScenarios,
   ...counterResetScenarios,
 ];
 

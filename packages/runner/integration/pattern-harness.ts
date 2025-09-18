@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
 import { fromFileUrl } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
@@ -97,7 +98,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const resultCell = runtime.getCell<any>(
     space,
     { scenario: scenario.name },
-    undefined,
+    patternFactory.argumentSchema,
     tx,
   );
   const argument = scenario.argument ?? {};
@@ -106,22 +107,34 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
 
   await runtime.idle();
 
+  let stepIndex = 0;
+  const name = scenario.exportName ?? scenario.name;
+
   for (const step of scenario.steps) {
+    stepIndex++;
     if (step.events) {
       for (const event of step.events) {
         const pathSegments = splitPath(event.stream);
-        const targetCell = getCellByPath(result, pathSegments);
-        targetCell.send(event.payload);
+        const targetCell = pathSegments.reduce(
+          (cell, segment) => cell.key(segment),
+          result,
+        );
+        await runtime.editWithRetry((tx) =>
+          targetCell.withTx(tx).send(event.payload)
+        );
       }
       await runtime.idle();
     }
 
-    const snapshot = result.getAsQueryResult();
-
     for (const assertion of step.expect) {
       const pathSegments = splitPath(assertion.path);
-      const actual = getValueByPath(snapshot, pathSegments);
-      expect(actual).toEqual(assertion.value);
+      const targetCell = pathSegments.reduce(
+        (cell, segment) => cell.key(segment),
+        result,
+      );
+      const actual = targetCell.get();
+      expect(actual, `${name}:${stepIndex}:${assertion.path}`)
+        .toEqualIgnoringSymbols(assertion.value);
     }
   }
 
