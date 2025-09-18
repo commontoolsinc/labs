@@ -5,7 +5,7 @@ import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
-import { LanguageSupport, indentUnit } from "@codemirror/language";
+import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
 import { css as createCss } from "@codemirror/lang-css";
