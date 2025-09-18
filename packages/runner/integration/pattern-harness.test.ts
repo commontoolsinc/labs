@@ -53,6 +53,9 @@ import {
   scenarios as counterReplicatorScenarios,
 } from "./patterns/counter-replicator.ts";
 import {
+  scenarios as counterReorderableListScenarios,
+} from "./patterns/counter-reorderable-list.ts";
+import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
@@ -116,6 +119,7 @@ const allScenarios = [
   ...counterRenderTreeScenarios,
   ...counterRollingAverageScenarios,
   ...counterReplicatorScenarios,
+  ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
   ...counterResetScenarios,
 ];
