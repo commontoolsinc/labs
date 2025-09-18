@@ -13,3 +13,6 @@
 - Batched handler updates land cleanly when every mutable cell is sanitized via
   `lift`; `derive` can safely fall back to the sanitized cell to avoid
   re-running custom defaults.
+- Building range-style controls benefits from a single helper that clamps values
+  and records history, letting both direct value sets and relative nudges share
+  consistent percentage calculations.

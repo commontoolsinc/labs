@@ -129,7 +129,7 @@ current offline harness.
       state changes.
 - [ ] Counter with multi-level spreads — combine multiple nested objects into
       final result using spread semantics.
-- [ ] Counter with range slider simulation — maintain numeric cell plus derived
+- [x] Counter with range slider simulation — maintain numeric cell plus derived
       percentage and label.
 - [ ] Counter with composite key updates — handler targets nested map key
       composed from argument values.
