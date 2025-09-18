@@ -147,5 +147,62 @@ interface HasDate {
         format: "date-time",
       });
     });
+
+    it("formats URL as string with uri format without hoisting", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasUrl {
+  homepage: URL;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasUrl");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.homepage).toEqual({
+        type: "string",
+        format: "uri",
+      });
+    });
+
+    it("formats Uint8Array as permissive true schema", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface BinaryHolder {
+  data: Uint8Array;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "BinaryHolder");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, unknown>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.data).toBe(true);
+    });
+
+    it("formats ArrayBuffer as permissive true schema", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface BufferHolder {
+  buffer: ArrayBuffer;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "BufferHolder");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, unknown>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.buffer).toBe(true);
+    });
   });
 });

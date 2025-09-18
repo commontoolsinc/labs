@@ -4,7 +4,11 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import { isFunctionLike, safeGetPropertyType } from "../type-utils.ts";
+import {
+  getPrimarySymbol,
+  isFunctionLike,
+  safeGetPropertyType,
+} from "../type-utils.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -167,8 +171,6 @@ export class ObjectFormatter implements TypeFormatter {
   }
 
   private lookupBuiltInSchema(type: ts.Type): SchemaDefinition | undefined {
-    const symbol = type.symbol;
-    if (!symbol?.valueDeclaration) return undefined;
     const builtin = BUILT_IN_SCHEMAS.find((entry) => entry.test(type));
     return builtin ? structuredClone(builtin.schema) : undefined;
   }
@@ -184,19 +186,37 @@ const BUILT_IN_SCHEMAS: BuiltInSchemaEntry[] = [
     test: isNativeType("Date"),
     schema: { type: "string", format: "date-time" },
   },
+  {
+    test: isNativeType("URL"),
+    schema: { type: "string", format: "uri" },
+  },
+  {
+    test: isNativeType("Uint8Array"),
+    schema: true,
+  },
+  {
+    test: isNativeType("ArrayBuffer"),
+    schema: true,
+  },
 ];
 
 function isNativeType(name: string) {
   return (type: ts.Type) => {
-    const symbol = type.symbol;
-    if (!symbol || symbol.name !== name || !symbol.valueDeclaration) {
+    const symbol = getPrimarySymbol(type);
+    if (!symbol || symbol.name !== name) {
       return false;
     }
-    const sourceFile = symbol.valueDeclaration.getSourceFile();
-    const fileName = sourceFile.fileName;
-    return fileName.includes("lib.") ||
-      fileName.includes("typescript/lib") ||
-      fileName.includes("ES2023.d.ts") ||
-      fileName.includes("DOM.d.ts");
+    const declarations = [
+      symbol.valueDeclaration,
+      ...(symbol.declarations ?? []),
+    ].filter((decl): decl is ts.Declaration => Boolean(decl));
+    if (declarations.length === 0) return false;
+    return declarations.some((decl) => {
+      const fileName = decl.getSourceFile().fileName;
+      return fileName.includes("lib.") ||
+        fileName.includes("typescript/lib") ||
+        fileName.includes("ES2023.d.ts") ||
+        fileName.includes("DOM.d.ts");
+    });
   };
 }

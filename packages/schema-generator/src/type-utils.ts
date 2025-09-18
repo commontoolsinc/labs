@@ -116,6 +116,19 @@ export interface TypeWithInternals extends ts.Type {
 }
 
 /**
+ * Resolve the most relevant symbol for a type, accounting for references,
+ * aliases, and internal helper accessors exposed on some compiler objects.
+ */
+export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
+  if (type.symbol) return type.symbol;
+  const ref = type as ts.TypeReference;
+  if (ref.target?.symbol) return ref.target.symbol;
+  const alias = (type as TypeWithInternals).aliasSymbol;
+  if (alias) return alias;
+  return undefined;
+}
+
+/**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
  * that we do not want to promote into top-level definitions.
@@ -161,7 +174,10 @@ export function getNamedTypeKey(
   if (name === "Cell" || name === "Stream" || name === "Default") {
     return undefined;
   }
-  if (name === "Date") return undefined;
+  if (
+    name === "Date" || name === "URL" ||
+    name === "Uint8Array" || name === "ArrayBuffer"
+  ) return undefined;
   return name;
 }
 
@@ -290,6 +306,12 @@ export function getArrayElementInfo(
   // Only object-like types can be arrays. Prevent primitives like string
   // from being treated as array-like due to numeric index access.
   if ((type.flags & ts.TypeFlags.Object) === 0) {
+    return undefined;
+  }
+
+  const primarySymbol = getPrimarySymbol(type);
+  const primaryName = primarySymbol?.name;
+  if (primaryName === "Uint8Array" || primaryName === "ArrayBuffer") {
     return undefined;
   }
   // Check ObjectFlags.Reference for Array/ReadonlyArray
