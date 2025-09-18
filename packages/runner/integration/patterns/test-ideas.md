@@ -55,9 +55,9 @@ current offline harness.
       both entries and scenario asserts tuple values.
 - [ ] Map of counters keyed by string — use record of cells and iterate updates
       through handler.
-- [ ] Counter with nested array of objects — update deep path entries via
+- [x] Counter with nested array of objects — update deep path entries via
       handler and assert final structure.
-- [ ] Counter with `OpaqueRef.map` usage — map over array cell to produce
+- [x] Counter with `OpaqueRef.map` usage — map over array cell to produce
       derived array and assert reactivity.
 - [ ] Counter returning render tree with handlers — include `render` helper to
       convert function events to handlers and verify wiring.

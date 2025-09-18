@@ -57,6 +57,9 @@ import {
 import {
   scenarios as counterMutableTupleScenarios,
 } from "./patterns/counter-mutable-tuple.ts";
+import {
+  scenarios as counterNestedArrayObjectsScenarios,
+} from "./patterns/counter-nested-array-objects.ts";
 import { scenarios as listManagerScenarios } from "./patterns/list-manager.ts";
 import {
   scenarios as nestedCounterScenarios,
@@ -67,6 +70,9 @@ import {
 import {
   scenarios as composedCounterScenarios,
 } from "./patterns/composed-counter.ts";
+import {
+  scenarios as counterOpaqueRefMapScenarios,
+} from "./patterns/counter-opaque-ref-map.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -87,8 +93,10 @@ const allScenarios = [
   ...boundedCounterScenarios,
   ...counterLiftFormattingScenarios,
   ...counterMutableTupleScenarios,
+  ...counterNestedArrayObjectsScenarios,
   ...counterNestedStreamScenarios,
   ...counterOptionalFallbackScenarios,
+  ...counterOpaqueRefMapScenarios,
   ...counterPersistenceDefaultsScenarios,
   ...counterRichLabelScenarios,
   ...counterRollingAverageScenarios,
