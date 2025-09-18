@@ -101,6 +101,9 @@ import {
   scenarios as counterRollingAverageScenarios,
 } from "./patterns/counter-rolling-average.ts";
 import {
+  scenarios as counterRangeSliderScenarios,
+} from "./patterns/counter-range-slider.ts";
+import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
@@ -158,6 +161,7 @@ const allScenarios = [
   ...counterRichLabelScenarios,
   ...counterRenderTreeScenarios,
   ...counterRollingAverageScenarios,
+  ...counterRangeSliderScenarios,
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
