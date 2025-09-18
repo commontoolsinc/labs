@@ -229,7 +229,7 @@ current offline harness.
       events, compare snapshot metadata for stability (using available APIs).
 - [ ] Counter with argument-driven handler wiring — dynamically create handlers
       only for arguments provided and ensure missing ones absent.
-- [ ] Counter with nested handler composition — compose handler outputs feeding
+- [x] Counter with nested handler composition — compose handler outputs feeding
       into other handlers to simulate pipelines.
 - [ ] Counter with multi-dimensional counters (x,y,z) — manage vector cell and
       ensure each component updates as expected.
