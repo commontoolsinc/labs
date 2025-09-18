@@ -193,7 +193,7 @@ current offline harness.
       cell.
 - [ ] Counter with nested computed percentages — derive percentage contributions
       of each item relative to total.
-- [ ] Counter with hierarchical key path updates — handler updates deep paths
+- [x] Counter with hierarchical key path updates — handler updates deep paths
       using iterated key calls.
 - [ ] Counter with reference equality assertions — ensure derived cell maintains
       reference stability when inputs unchanged.
