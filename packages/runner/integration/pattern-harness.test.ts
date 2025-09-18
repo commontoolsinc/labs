@@ -69,6 +69,9 @@ import {
 import {
   scenarios as counterNestedArrayObjectsScenarios,
 } from "./patterns/counter-nested-array-objects.ts";
+import {
+  scenarios as counterNestedOptionalCellsScenarios,
+} from "./patterns/counter-nested-optional-cells.ts";
 import { scenarios as listManagerScenarios } from "./patterns/list-manager.ts";
 import {
   scenarios as nestedCounterScenarios,
@@ -104,6 +107,7 @@ const allScenarios = [
   ...counterLiftFormattingScenarios,
   ...counterMutableTupleScenarios,
   ...counterNestedArrayObjectsScenarios,
+  ...counterNestedOptionalCellsScenarios,
   ...counterNestedStreamScenarios,
   ...counterOptionalFallbackScenarios,
   ...counterOpaqueRefMapScenarios,

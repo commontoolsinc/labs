@@ -111,7 +111,7 @@ current offline harness.
       cell.
 - [ ] Counter with computed unique IDs — generate identifier per entry via lift
       and ensure stability across mutations.
-- [ ] Counter with nested optional cells — exercise optional chaining by
+- [x] Counter with nested optional cells — exercise optional chaining by
       omitting intermediate nodes and later creating them.
 - [ ] Counter with deep merge update — handler merges partial object into nested
       state while preserving existing fields.
