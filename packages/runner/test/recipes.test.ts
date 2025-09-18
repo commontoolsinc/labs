@@ -21,10 +21,12 @@ describe("Recipe Runner", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let createCell: ReturnType<typeof createBuilder>["commontools"]["createCell"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let ifElse: ReturnType<typeof createBuilder>["commontools"]["ifElse"];
   let TYPE: ReturnType<typeof createBuilder>["commontools"]["TYPE"];
 
   beforeEach(() => {
@@ -41,10 +43,12 @@ describe("Recipe Runner", () => {
     const { commontools } = createBuilder(runtime);
     ({
       lift,
+      derive,
       recipe,
       createCell,
       handler,
       byRef,
+      ifElse,
       TYPE,
     } = commontools);
   });
@@ -1290,5 +1294,79 @@ describe("Recipe Runner", () => {
     });
     expect(isCell(listCell.get()[0])).toBe(true);
     expect(listCell.get()[0].equals(testCell.get())).toBe(true);
+  });
+
+  it("correctly handles the ifElse values with nested derives", async () => {
+    const InputSchema = {
+      "type": "object",
+      "properties": {
+        "expandChat": { "type": "boolean" },
+      },
+    } as const satisfies JSONSchema;
+
+    const StateSchema = {
+      "type": "object",
+      "properties": {
+        "expandChat": { "type": "boolean" },
+        "text": { "type": "string" },
+      },
+      "asCell": true,
+    } as const satisfies JSONSchema;
+    const expandHandler = handler(
+      InputSchema,
+      StateSchema,
+      ({ expandChat }, state) => {
+        state.key("expandChat").set(expandChat);
+      },
+    );
+
+    const ifElseRecipe = recipe<{ expandChat: boolean }>(
+      "ifElse Recipe",
+      ({ expandChat }) => {
+        const optionA = derive(expandChat, (t) => t ? "A" : "a");
+        const optionB = derive(expandChat, (t) => t ? "B" : "b");
+
+        return {
+          expandChat,
+          text: ifElse(
+            expandChat,
+            optionA,
+            optionB,
+          ),
+          stream: expandHandler({ expandChat }),
+        };
+      },
+    );
+
+    const charmCell = runtime.getCell<
+      { expandChat: boolean; text: string; stream: any }
+    >(
+      space,
+      "ifElse should work",
+      ifElseRecipe.resultSchema,
+      tx,
+    );
+
+    const charm = runtime.run(
+      tx,
+      ifElseRecipe,
+      { expandChat: true },
+      charmCell,
+    );
+
+    tx.commit();
+
+    await runtime.idle();
+
+    // Toggle
+    charm.key("stream").send({ expandChat: true });
+    await runtime.idle();
+
+    expect(charm.key("text").get()).toEqual("A");
+
+    charm.key("stream").send({ expandChat: false });
+    await runtime.idle();
+
+    expect(charm.key("text").get()).toEqual("b");
   });
 });
