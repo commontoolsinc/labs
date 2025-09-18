@@ -26,6 +26,9 @@ import {
   scenarios as counterDerivedMinMaxScenarios,
 } from "./patterns/counter-derived-min-max.ts";
 import {
+  scenarios as counterDynamicHandlerListScenarios,
+} from "./patterns/counter-dynamic-handler-list.ts";
+import {
   scenarios as counterDynamicStepScenarios,
 } from "./patterns/counter-dynamic-step.ts";
 import {
@@ -123,6 +126,7 @@ const allScenarios = [
   ...counterDerivedColorScenarios,
   ...counterDerivedChecksumScenarios,
   ...counterDerivedMinMaxScenarios,
+  ...counterDynamicHandlerListScenarios,
   ...counterDynamicStepScenarios,
   ...counterHandlerSpawnScenarios,
   ...counterHierarchicalDefaultsScenarios,
