@@ -93,4 +93,36 @@ type CalculatorRequest = {
       expect(schema).toEqual({});
     });
   });
+
+  describe("anonymous recursion", () => {
+    it("hoists anonymous recursive types with synthetic definitions", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+type Wrapper = {
+  node: {
+    value: string;
+    next?: Wrapper["node"];
+  };
+};`;
+      const { type, checker } = await getTypeFromCode(code, "Wrapper");
+
+      const schema = generator.generateSchema(type, checker);
+      const root = schema as Record<string, unknown>;
+      const properties = root.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      const definitions = root.definitions as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(properties?.node).toEqual({
+        $ref: "#/definitions/AnonymousType_1",
+      });
+      expect(definitions).toBeDefined();
+      expect(Object.keys(definitions ?? {})).toContain("AnonymousType_1");
+      expect(JSON.stringify(schema)).not.toContain(
+        "Anonymous recursive type",
+      );
+    });
+  });
 });

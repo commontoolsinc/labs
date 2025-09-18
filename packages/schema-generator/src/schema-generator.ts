@@ -54,6 +54,8 @@ export class SchemaGenerator implements ISchemaGenerator {
       // Accumulating state
       definitions: {},
       emittedRefs: new Set(),
+      anonymousNames: new WeakMap(),
+      anonymousNameCounter: 0,
 
       // Stack state
       definitionStack: new Set(),
@@ -118,6 +120,17 @@ export class SchemaGenerator implements ISchemaGenerator {
     return type;
   }
 
+  private ensureSyntheticName(
+    type: ts.Type,
+    context: GenerationContext,
+  ): string {
+    let existing = context.anonymousNames.get(type);
+    if (existing) return existing;
+    const synthetic = `AnonymousType_${++context.anonymousNameCounter}`;
+    context.anonymousNames.set(type, synthetic);
+    return synthetic;
+  }
+
   /**
    * Format a type using the appropriate formatter
    */
@@ -130,7 +143,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
     // into definitions and return $ref for non-root uses. Cycle detection
     // still applies via definitionStack.
-    const namedKey = getNamedTypeKey(type);
+    let namedKey = getNamedTypeKey(type);
+    if (!namedKey) {
+      const synthetic = context.anonymousNames.get(type);
+      if (synthetic) namedKey = synthetic;
+    }
     if (namedKey) {
       if (
         context.inProgressNames.has(namedKey) || context.definitions[namedKey]
@@ -157,14 +174,10 @@ export class SchemaGenerator implements ISchemaGenerator {
         context.emittedRefs.add(namedKey);
         return { "$ref": `#/definitions/${namedKey}` };
       }
-      // Anonymous recursive type - can't create $ref, use permissive fallback
-      // to break the cycle
-      return {
-        type: "object",
-        additionalProperties: true,
-        $comment:
-          "Anonymous recursive type - cannot create named reference to break cycle",
-      };
+      const syntheticKey = this.ensureSyntheticName(type, context);
+      context.inProgressNames.add(syntheticKey);
+      context.emittedRefs.add(syntheticKey);
+      return { "$ref": `#/definitions/${syntheticKey}` };
     }
 
     // Push current type onto the stack
@@ -178,15 +191,16 @@ export class SchemaGenerator implements ISchemaGenerator {
         const result = formatter.formatType(type, context);
 
         // If this is a named type (all-named policy), store in definitions.
-        if (namedKey) {
-          context.definitions[namedKey] = result;
-          context.inProgressNames.delete(namedKey);
+        const keyForDef = namedKey ?? context.anonymousNames.get(type);
+        if (keyForDef) {
+          context.definitions[keyForDef] = result;
+          context.inProgressNames.delete(keyForDef);
           context.definitionStack.delete(
             this.createStackKey(type, context.typeNode, context.typeChecker),
           );
           if (!isRootType) {
-            context.emittedRefs.add(namedKey);
-            return { "$ref": `#/definitions/${namedKey}` };
+            context.emittedRefs.add(keyForDef);
+            return { "$ref": `#/definitions/${keyForDef}` };
           }
           // For root, keep inline; buildFinalSchema may promote if we choose
         }
@@ -230,7 +244,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Decide if we promote root to a $ref
-    const namedKey = getNamedTypeKey(type);
+    const namedKey = getNamedTypeKey(type) ?? context.anonymousNames.get(type);
     const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
     let base: SchemaDefinition;

@@ -24,6 +24,10 @@ export interface GenerationContext {
   definitions: Record<string, SchemaDefinition>;
   /** Which $refs have been emitted */
   emittedRefs: Set<string>;
+  /** Synthetic names for anonymous recursive types */
+  anonymousNames: WeakMap<ts.Type, string>;
+  /** Counter to generate stable synthetic identifiers */
+  anonymousNameCounter: number;
 
   // Stack state (push/pop during recursion)
   /** Current recursion path for cycle detection */
