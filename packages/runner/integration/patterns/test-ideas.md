@@ -237,7 +237,7 @@ current offline harness.
       times using lifts and assert independence.
 - [x] Counter with derived checksum — compute checksum of list values via derive
       and assert after updates.
-- [ ] Counter with scenario covering no-op events — send empty payloads and
+- [x] Counter with scenario covering no-op events — send empty payloads and
       ensure state unchanged.
 - [ ] Counter with fallback defaults for sparse arrays — ensure gaps filled with
       default cells.
