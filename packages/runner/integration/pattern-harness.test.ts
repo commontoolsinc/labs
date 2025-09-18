@@ -2,6 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "./pattern-harness.ts";
 import { scenarios as boundedCounterScenarios } from "./patterns/bounded-counter.ts";
 import {
+  scenarios as counterBatchedHandlerUpdatesScenarios,
+} from "./patterns/counter-batched-handler-updates.ts";
+import {
   scenarios as counterAggregateScenarios,
 } from "./patterns/counter-aggregate.ts";
 import {
@@ -125,6 +128,7 @@ const allScenarios = [
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
+  ...counterBatchedHandlerUpdatesScenarios,
   ...counterDeduplicatedListScenarios,
   ...counterComputedDefaultStringsScenarios,
   ...counterConditionalBranchScenarios,

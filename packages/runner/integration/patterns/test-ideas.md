@@ -135,7 +135,7 @@ current offline harness.
       composed from argument values.
 - [ ] Counter with derived difference — compute delta between primary and
       secondary counters and assert updates.
-- [ ] Counter with batched handler updates — handler updates several cells in
+- [x] Counter with batched handler updates — handler updates several cells in
       one invocation; scenario validates final state.
 - [ ] Counter with nested derive watchers — derive depends on other derive to
       ensure dependency graph works.

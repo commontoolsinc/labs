@@ -10,3 +10,6 @@
 - Re-instantiating child recipes from sanitized parameter lists cleanly resets
   defaults and keeps derived manifests accurate; storing the sanitized manifest
   in a cell ensures parent summaries stay in sync after reconfiguration.
+- Batched handler updates land cleanly when every mutable cell is sanitized via
+  `lift`; `derive` can safely fall back to the sanitized cell to avoid
+  re-running custom defaults.
