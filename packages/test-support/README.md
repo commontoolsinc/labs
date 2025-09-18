@@ -30,5 +30,6 @@ The configuration API is flexible enough to handle text-based outputs,
 structured comparisons, per-suite warmup hooks, grouped fixture descriptions,
 and golden updates controlled via the `UPDATE_GOLDENS` environment variable.
 
-For additional examples see `packages/schema-generator/test/fixtures-runner.test.ts`
-and `packages/js-runtime/test/fixture-based.test.ts` after migration.
+For additional examples see
+`packages/schema-generator/test/fixtures-runner.test.ts` and
+`packages/js-runtime/test/fixture-based.test.ts` after migration.
