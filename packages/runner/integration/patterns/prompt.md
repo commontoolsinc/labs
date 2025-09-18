@@ -21,6 +21,8 @@ Steps:
    - Don't use `.setDefault`, instead use `Default<type, value>` in the type
      declaration.
    - Keep patterns offline-friendly (no network or LLM).
+   - Read `packages/runner/integration/patterns/learnings.md` for any other
+     tips.
 
 2. Update `packages/runner/integration/pattern-harness.test.ts` to include new
    scenario modules if needed.
@@ -31,10 +33,14 @@ Steps:
    `deno test --allow-env --allow-read --allow-write --allow-ffi packages/runner/integration/pattern-harness.test.ts`
    and ensure it passes.
 
-5. Once it passes, check off the completed ideas in `test-ideas.md`. and stage
-   and commit with a message like
-   `Add pattern scenarios for toggle through rolling average`.
+5. Once it passes, check off the completed ideas in `test-ideas.md`. If you
+   can't get it to pass after too many attempts, git stash it with an message
+   noting the issue and exit.
 
-6. If you can't get it work, stash it instead and exit.
+6. Add any learnings about the API or otherwise to
+   `packages/runner/integration/patterns/learnings.md`.
+
+7. Stage and commit with a message like
+   `Add pattern scenarios for toggle through rolling average`.
 
 Please begin.
