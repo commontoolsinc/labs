@@ -5,6 +5,9 @@ import {
   scenarios as counterAggregateScenarios,
 } from "./patterns/counter-aggregate.ts";
 import {
+  scenarios as counterComputedDefaultStringsScenarios,
+} from "./patterns/counter-computed-default-strings.ts";
+import {
   scenarios as counterConditionalBranchScenarios,
 } from "./patterns/counter-conditional-branch.ts";
 import {
@@ -32,46 +35,11 @@ import {
   scenarios as counterHistoryScenarios,
 } from "./patterns/counter-history-tracker.ts";
 import {
-  scenarios as counterLiftFormattingScenarios,
-} from "./patterns/counter-lift-formatting.ts";
-import {
-  scenarios as counterNestedStreamScenarios,
-} from "./patterns/counter-nested-stream.ts";
-import {
-  scenarios as counterOptionalFallbackScenarios,
-} from "./patterns/counter-optional-fallback.ts";
-import {
-  scenarios as counterPersistenceDefaultsScenarios,
-} from "./patterns/counter-persistence-defaults.ts";
-import {
-  scenarios as counterResetScenarios,
-} from "./patterns/counter-reset.ts";
-import {
-  scenarios as counterRichLabelScenarios,
-} from "./patterns/counter-rich-label.ts";
-import {
-  scenarios as counterRollingAverageScenarios,
-} from "./patterns/counter-rolling-average.ts";
-import {
-  scenarios as counterRenderTreeScenarios,
-} from "./patterns/counter-render-tree.ts";
-import {
-  scenarios as counterReplicatorScenarios,
-} from "./patterns/counter-replicator.ts";
-import {
-  scenarios as counterReorderableListScenarios,
-} from "./patterns/counter-reorderable-list.ts";
-import {
-  scenarios as counterSharedAliasScenarios,
-} from "./patterns/counter-shared-alias.ts";
-import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
-import {
-  scenarios as doubleCounterSharedIncrementScenarios,
-} from "./patterns/double-counter-shared-increment.ts";
-import { scenarios as echoScenarios } from "./patterns/echo.ts";
-import {
   scenarios as counterKeyedMapScenarios,
 } from "./patterns/counter-keyed-map.ts";
+import {
+  scenarios as counterLiftFormattingScenarios,
+} from "./patterns/counter-lift-formatting.ts";
 import {
   scenarios as counterMutableTupleScenarios,
 } from "./patterns/counter-mutable-tuple.ts";
@@ -84,6 +52,44 @@ import {
 import {
   scenarios as counterNestedOptionalCellsScenarios,
 } from "./patterns/counter-nested-optional-cells.ts";
+import {
+  scenarios as counterNestedStreamScenarios,
+} from "./patterns/counter-nested-stream.ts";
+import {
+  scenarios as counterOpaqueRefMapScenarios,
+} from "./patterns/counter-opaque-ref-map.ts";
+import {
+  scenarios as counterOptionalFallbackScenarios,
+} from "./patterns/counter-optional-fallback.ts";
+import {
+  scenarios as counterPersistenceDefaultsScenarios,
+} from "./patterns/counter-persistence-defaults.ts";
+import {
+  scenarios as counterRenderTreeScenarios,
+} from "./patterns/counter-render-tree.ts";
+import {
+  scenarios as counterReplicatorScenarios,
+} from "./patterns/counter-replicator.ts";
+import {
+  scenarios as counterReorderableListScenarios,
+} from "./patterns/counter-reorderable-list.ts";
+import {
+  scenarios as counterResetScenarios,
+} from "./patterns/counter-reset.ts";
+import {
+  scenarios as counterRichLabelScenarios,
+} from "./patterns/counter-rich-label.ts";
+import {
+  scenarios as counterRollingAverageScenarios,
+} from "./patterns/counter-rolling-average.ts";
+import {
+  scenarios as counterSharedAliasScenarios,
+} from "./patterns/counter-shared-alias.ts";
+import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
+import {
+  scenarios as doubleCounterSharedIncrementScenarios,
+} from "./patterns/double-counter-shared-increment.ts";
+import { scenarios as echoScenarios } from "./patterns/echo.ts";
 import { scenarios as listManagerScenarios } from "./patterns/list-manager.ts";
 import {
   scenarios as nestedCounterScenarios,
@@ -94,9 +100,6 @@ import {
 import {
   scenarios as composedCounterScenarios,
 } from "./patterns/composed-counter.ts";
-import {
-  scenarios as counterOpaqueRefMapScenarios,
-} from "./patterns/counter-opaque-ref-map.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -107,6 +110,7 @@ const allScenarios = [
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
+  ...counterComputedDefaultStringsScenarios,
   ...counterConditionalBranchScenarios,
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
