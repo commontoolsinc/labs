@@ -5,7 +5,7 @@ import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
-import { LanguageSupport } from "@codemirror/language";
+import { LanguageSupport, indentUnit } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
 import { css as createCss } from "@codemirror/lang-css";
@@ -142,6 +142,7 @@ export class CTCodeEditor extends BaseElement {
   private _tabSizeComp = new Compartment();
   private _tabIndentComp = new Compartment();
   private _maxLineWidthComp = new Compartment();
+  private _indentUnitComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _cellController = createStringCellController(this, {
     timing: {
@@ -526,10 +527,12 @@ export class CTCodeEditor extends BaseElement {
 
     // Update tab size
     if (changedProperties.has("tabSize") && this._editorView) {
+      const size = this.tabSize ?? 2;
       this._editorView.dispatch({
-        effects: this._tabSizeComp.reconfigure(
-          EditorState.tabSize.of(this.tabSize ?? 2),
-        ),
+        effects: [
+          this._tabSizeComp.reconfigure(EditorState.tabSize.of(size)),
+          this._indentUnitComp.reconfigure(indentUnit.of(" ".repeat(size))),
+        ],
       });
     }
 
@@ -625,6 +628,9 @@ export class CTCodeEditor extends BaseElement {
       ),
       // Tab size
       this._tabSizeComp.of(EditorState.tabSize.of(this.tabSize ?? 2)),
+      this._indentUnitComp.of(
+        indentUnit.of(" ".repeat(this.tabSize ?? 2)),
+      ),
       // Optional max line width (in ch)
       this._maxLineWidthComp.of(
         typeof this.maxLineWidth === "number" && this.maxLineWidth > 0
