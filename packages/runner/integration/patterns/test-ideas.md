@@ -59,11 +59,11 @@ current offline harness.
       handler and assert final structure.
 - [x] Counter with `OpaqueRef.map` usage — map over array cell to produce
       derived array and assert reactivity.
-- [ ] Counter returning render tree with handlers — include `render` helper to
+- [x] Counter returning render tree with handlers — include `render` helper to
       convert function events to handlers and verify wiring.
-- [ ] Counter replicator pattern — return array of child patterns produced via
+- [x] Counter replicator pattern — return array of child patterns produced via
       lift and ensure each responds independently.
-- [ ] Counter with hierarchical defaults — default top-level object plus nested
+- [x] Counter with hierarchical defaults — default top-level object plus nested
       defaults; ensure defaults applied when arguments missing.
 - [ ] Counter with computed child selection — derive index to display from list
       of counters and assert selected output.

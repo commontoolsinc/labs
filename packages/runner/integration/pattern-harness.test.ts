@@ -20,6 +20,9 @@ import {
   scenarios as counterHandlerSpawnScenarios,
 } from "./patterns/counter-handler-spawn.ts";
 import {
+  scenarios as counterHierarchicalDefaultsScenarios,
+} from "./patterns/counter-hierarchical-defaults.ts";
+import {
   scenarios as counterHistoryScenarios,
 } from "./patterns/counter-history-tracker.ts";
 import {
@@ -43,6 +46,12 @@ import {
 import {
   scenarios as counterRollingAverageScenarios,
 } from "./patterns/counter-rolling-average.ts";
+import {
+  scenarios as counterRenderTreeScenarios,
+} from "./patterns/counter-render-tree.ts";
+import {
+  scenarios as counterReplicatorScenarios,
+} from "./patterns/counter-replicator.ts";
 import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
@@ -88,6 +97,7 @@ const allScenarios = [
   ...counterDerivedColorScenarios,
   ...counterDynamicStepScenarios,
   ...counterHandlerSpawnScenarios,
+  ...counterHierarchicalDefaultsScenarios,
   ...counterHistoryScenarios,
   ...counterKeyedMapScenarios,
   ...boundedCounterScenarios,
@@ -99,7 +109,9 @@ const allScenarios = [
   ...counterOpaqueRefMapScenarios,
   ...counterPersistenceDefaultsScenarios,
   ...counterRichLabelScenarios,
+  ...counterRenderTreeScenarios,
   ...counterRollingAverageScenarios,
+  ...counterReplicatorScenarios,
   ...counterSharedAliasScenarios,
   ...counterResetScenarios,
 ];
