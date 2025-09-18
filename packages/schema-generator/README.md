@@ -21,6 +21,20 @@ keeping wrapper semantics explicit and simple.
 Implementation: see `src/schema-generator.ts` (`formatType`) and
 `src/type-utils.ts` (`getNamedTypeKey` filtering).
 
+## Function Properties
+
+- Properties whose resolved type is callable or constructable are skipped
+  entirely so we do not emit function shapes in JSON Schema output.
+- Method signatures, declared methods, and properties whose type exposes call
+  signatures are all filtered before we decide on `required` membership or emit
+  attribute metadata (docs, default wrappers, etc.).
+- This keeps schemas focused on serialisable data: JSON Schema cannot describe
+  runtime function values, and downstream tooling expects objects, arrays, and
+  primitives only.
+
+Implementation: see `src/formatters/object-formatter.ts` and
+`src/type-utils.ts:isFunctionLike`.
+
 ## Running
 
 - Check typings: `deno task check`
