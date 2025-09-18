@@ -7,6 +7,7 @@ import type {
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
+import { extractDocFromType } from "../doc-utils.ts";
 
 const logger = getLogger("schema-generator.intersection");
 
@@ -37,7 +38,8 @@ export class IntersectionFormatter implements TypeFormatter {
     }
 
     // Merge object-like constituents: combine properties and required arrays
-    return this.mergeIntersectionParts(parts, context);
+    const merged = this.mergeIntersectionParts(parts, context);
+    return this.applyIntersectionDocs(merged);
   }
 
   private validateIntersectionParts(
@@ -77,11 +79,28 @@ export class IntersectionFormatter implements TypeFormatter {
   private mergeIntersectionParts(
     parts: readonly ts.Type[],
     context: GenerationContext,
-  ): SchemaDefinition {
+  ): {
+    schema: SchemaDefinition;
+    docTexts: string[];
+    documentedSources: string[];
+    missingSources: string[];
+  } {
     const mergedProps: Record<string, SchemaDefinition> = {};
     const requiredSet: Set<string> = new Set();
 
+    const docTexts: string[] = [];
+    const documentedSources: string[] = [];
+    const missingSources: string[] = [];
+
     for (const part of parts) {
+      const docInfo = extractDocFromType(part, context.typeChecker);
+      if (docInfo.firstDoc) {
+        docTexts.push(docInfo.firstDoc);
+        documentedSources.push(docInfo.typeName);
+      } else {
+        missingSources.push(docInfo.typeName);
+      }
+
       const schema = this.schemaGenerator.generateSchema(
         part,
         context.typeChecker,
@@ -145,7 +164,7 @@ export class IntersectionFormatter implements TypeFormatter {
       result.required = Array.from(requiredSet);
     }
 
-    return result;
+    return { schema: result, docTexts, documentedSources, missingSources };
   }
 
   private isObjectSchema(
@@ -159,5 +178,62 @@ export class IntersectionFormatter implements TypeFormatter {
       schema !== null &&
       schema.type === "object"
     );
+  }
+
+  private applyIntersectionDocs(
+    data: {
+      schema: SchemaDefinition;
+      docTexts: string[];
+      documentedSources: string[];
+      missingSources: string[];
+    },
+  ): SchemaDefinition {
+    const { schema, docTexts, documentedSources, missingSources } = data;
+    if (!isRecord(schema)) return schema;
+
+    const uniqueDocTexts = docTexts.filter((doc, index, arr) =>
+      arr.indexOf(doc) === index
+    );
+
+    if (
+      uniqueDocTexts.length > 0 && typeof schema.description !== "string"
+    ) {
+      (schema as Record<string, unknown>).description = uniqueDocTexts.join(
+        "\n\n",
+      );
+    }
+
+    const commentParts: string[] = [];
+    const existingComment = typeof schema.$comment === "string"
+      ? (schema.$comment as string)
+      : undefined;
+
+    const uniqueDocumented = Array.from(new Set(documentedSources)).filter((
+      s,
+    ) => s);
+    const uniqueMissing = Array.from(new Set(missingSources)).filter((s) => s);
+
+    if (uniqueDocTexts.length > 0) {
+      commentParts.push("Docs inherited from intersection constituents.");
+    }
+    if (uniqueDocTexts.length > 1 && uniqueDocumented.length > 0) {
+      commentParts.push(
+        `Sources: ${uniqueDocumented.join(", ")}.`,
+      );
+    }
+    if (uniqueDocTexts.length > 0 && uniqueMissing.length > 0) {
+      commentParts.push(
+        `Missing docs for: ${uniqueMissing.join(", ")}.`,
+      );
+    }
+
+    if (commentParts.length > 0) {
+      const commentMessage = commentParts.join(" ");
+      (schema as Record<string, unknown>).$comment = existingComment
+        ? `${existingComment} ${commentMessage}`
+        : commentMessage;
+    }
+
+    return schema;
   }
 }

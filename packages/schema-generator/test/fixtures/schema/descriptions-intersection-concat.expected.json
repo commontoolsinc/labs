@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "foo": {
+      "type": "string"
+    },
+    "bar": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "foo",
+    "bar"
+  ],
+  "description": "Doc A\n\nDoc B",
+  "$comment": "Docs inherited from intersection constituents. Sources: TypeA, TypeB."
+}

@@ -27,6 +27,7 @@ export function ifElse(
     const ref = inputsWithLog.key(condition ? 1 : 2)
       .getAsLink({ base: result });
 
-    resultWithLog.send(ref);
+    // When writing links, we need to use setRaw
+    resultWithLog.setRaw(ref);
   };
 }

@@ -21,12 +21,17 @@ import {
   recipe,
   str,
   Stream,
+  toSchema,
   UI,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
 
-type Charm = any;
+export type MentionableCharm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: MentionableCharm[];
+};
 
 type NoteResult = {
   content: Default<string, "">;
@@ -34,13 +39,13 @@ type NoteResult = {
 
 export type NoteInput = {
   content: Default<string, "">;
-  allCharms: Cell<Charm[]>;
+  allCharms: Cell<MentionableCharm[]>;
 };
 
 const handleCharmLinkClick = handler<
   {
     detail: {
-      charm: Cell<Charm>;
+      charm: Cell<MentionableCharm>;
     };
   },
   Record<string, never>
@@ -48,22 +53,9 @@ const handleCharmLinkClick = handler<
   return navigateTo(detail.charm);
 });
 
-export const Note = recipe<NoteInput>(
-  "Note",
-  ({ content, allCharms }) => {
-    return {
-      [NAME]: "Note",
-      [UI]: (
-        <ct-code-editor
-          $value={content}
-          $mentionable={allCharms}
-          onbacklink-click={handleCharmLinkClick({})}
-          language="text/markdown"
-          style="min-height: 400px;"
-        />
-      ),
-      content,
-    };
+const handleCharmLinkClicked = handler(
+  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
+    return navigateTo(charm);
   },
 );
 
@@ -72,11 +64,14 @@ type LLMTestInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   expandChat: Default<boolean, false>;
   content: Default<string, "">;
-  allCharms: Cell<Charm[]>;
+  allCharms: Cell<MentionableCharm[]>;
 };
 
 type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
+  mentioned: Default<Array<MentionableCharm>, []>;
+  backlinks: Default<Array<MentionableCharm>, []>;
+  content: Default<string, "">;
 };
 
 // put a note at the end of the outline (by appending to root.children)
@@ -150,6 +145,36 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const chat = Chat({ messages, tools });
     const { addMessage, cancelGeneration, pending } = chat;
 
+    const mentioned = cell<MentionableCharm[]>([]);
+
+    // why does MentionableCharm behave differently than any here?
+    // perhaps optional properties?
+    const computeBacklinks = lift(
+      toSchema<
+        { allCharms: Cell<any[]>; content: Cell<string> }
+      >(),
+      toSchema<any[]>(),
+      ({ allCharms, content }) => {
+        const cs: MentionableCharm[] = allCharms.get();
+        if (!cs) return [];
+
+        const self = cs.find((c) => c.content === content.get());
+
+        const results = self
+          ? cs.filter((c) =>
+            c.mentioned?.some((m) => m.content === self.content) ?? false
+          )
+          : [];
+
+        return results;
+      },
+    );
+
+    const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
+      allCharms,
+      content,
+    });
+
     return {
       [NAME]: title,
       [UI]: (
@@ -170,7 +195,36 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 />
               </div>
 
-              <Note content={content} allCharms={allCharms} />
+              <ct-code-editor
+                $value={content}
+                $mentionable={allCharms}
+                $mentioned={mentioned}
+                onbacklink-click={handleCharmLinkClick({})}
+                language="text/markdown"
+                wordWrap
+                tabIndent
+                lineNumbers
+              />
+              <details>
+                <summary>Mentioned Charms</summary>
+                <ct-vstack>
+                  {mentioned.map((charm: MentionableCharm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
+              <details>
+                <summary>Backlinks</summary>
+                <ct-vstack>
+                  {backlinks.map((charm: MentionableCharm) => (
+                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                      {charm[NAME]}
+                    </ct-button>
+                  ))}
+                </ct-vstack>
+              </details>
             </ct-screen>
 
             {ifElse(
@@ -181,7 +235,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </ct-autolayout>
         </ct-screen>
       ),
+      content,
       messages,
+      mentioned,
+      backlinks,
     };
   },
 );

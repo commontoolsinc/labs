@@ -3,8 +3,9 @@ import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
+import { indentWithTab } from "@codemirror/commands";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
-import { LanguageSupport } from "@codemirror/language";
+import { indentUnit, LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
 import { css as createCss } from "@codemirror/lang-css";
@@ -81,6 +82,13 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {Array} mentionable - Array of mentionable items with Charm structure for backlink autocomplete
+ * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
+ * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
+ * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
+ * @attr {number} maxLineWidth - Optional max line width in ch units
+ *   (default: undefined)
+ * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
+ * @attr {boolean} tabIndent - Indent on Tab key (default: true)
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -102,6 +110,13 @@ export class CTCodeEditor extends BaseElement {
     timingStrategy: { type: String },
     timingDelay: { type: Number },
     mentionable: { type: Array },
+    mentioned: { type: Array },
+    // New editor configuration props
+    wordWrap: { type: Boolean },
+    lineNumbers: { type: Boolean },
+    maxLineWidth: { type: Number },
+    tabSize: { type: Number },
+    tabIndent: { type: Boolean },
   };
 
   declare value: Cell<string> | string;
@@ -112,10 +127,22 @@ export class CTCodeEditor extends BaseElement {
   declare timingStrategy: InputTimingOptions["strategy"];
   declare timingDelay: number;
   declare mentionable: Cell<Charm[]>;
+  declare mentioned?: Cell<Charm[]>;
+  declare wordWrap: boolean;
+  declare lineNumbers: boolean;
+  declare maxLineWidth?: number;
+  declare tabSize: number;
+  declare tabIndent: boolean;
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
+  private _wrap = new Compartment();
+  private _gutters = new Compartment();
+  private _tabSizeComp = new Compartment();
+  private _tabIndentComp = new Compartment();
+  private _maxLineWidthComp = new Compartment();
+  private _indentUnitComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _cellController = createStringCellController(this, {
     timing: {
@@ -128,6 +155,8 @@ export class CTCodeEditor extends BaseElement {
         oldValue,
         language: this.language,
       });
+      // Keep $mentioned in sync with content changes
+      this._updateMentionedFromContent();
     },
   });
 
@@ -140,6 +169,12 @@ export class CTCodeEditor extends BaseElement {
     this.placeholder = "";
     this.timingStrategy = "debounce";
     this.timingDelay = 500;
+    // Defaults for new props
+    this.wordWrap = true;
+    this.lineNumbers = false;
+    this.maxLineWidth = undefined;
+    this.tabSize = 2;
+    this.tabIndent = true;
   }
 
   /**
@@ -170,7 +205,7 @@ export class CTCodeEditor extends BaseElement {
       const options: Completion[] = mentionable.map((charm) => {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
-        const charmName = charm[NAME] || "";
+        const charmName = charm.key(NAME).get() || "";
         const insertText = `${charmName} (${charmId})`;
         return {
           label: charmName,
@@ -192,7 +227,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query
    */
-  private getFilteredMentionable(query: string): Charm[] {
+  private getFilteredMentionable(query: string): Cell<Charm>[] {
     if (!this.mentionable) {
       return [];
     }
@@ -204,12 +239,16 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Charm[] = [];
+    const matches: Cell<Charm>[] = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const mention = this.mentionable.key(i).getAsQueryResult();
-      if (mention && mention[NAME]?.toLowerCase()?.includes(queryLower)) {
-        matches.push(mention);
+      const mention = this.mentionable.key(i).get();
+      if (
+        mention &&
+        this.mentionable.key(i).key(NAME).getAsQueryResult()?.toLowerCase()
+          ?.includes(queryLower)
+      ) {
+        matches.push(this.mentionable.key(i));
       }
     }
 
@@ -279,14 +318,14 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Find a charm by ID in the mentionable list
    */
-  private findCharmById(id: string): Charm | null {
+  private findCharmById(id: string): Cell<Charm> | null {
     if (!this.mentionable) return null;
 
     const mentionableData = this.mentionable.getAsQueryResult();
     if (!mentionableData) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const charm = this.mentionable.key(i).getAsQueryResult();
+      const charm = this.mentionable.key(i);
       if (charm) {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
@@ -387,6 +426,8 @@ export class CTCodeEditor extends BaseElement {
         });
       }
     }
+    // Ensure mentioned charms reflect external value changes
+    this._updateMentionedFromContent();
   }
 
   private _setupCellSyncHandler(): void {
@@ -412,6 +453,18 @@ export class CTCodeEditor extends BaseElement {
         this._cleanupFns.push(unsubscribe);
       }
     }
+  }
+
+  /**
+   * Subscribe to mentionable changes to re-resolve mentioned charms when
+   * the source list updates.
+   */
+  private _setupMentionableSyncHandler(): void {
+    if (!this.mentionable) return;
+    const unsubscribe = this.mentionable.sink(() => {
+      this._updateMentionedFromContent();
+    });
+    this._cleanupFns.push(unsubscribe);
   }
 
   private _cleanup(): void {
@@ -449,6 +502,61 @@ export class CTCodeEditor extends BaseElement {
       });
     }
 
+    // Update word wrap
+    if (changedProperties.has("wordWrap") && this._editorView) {
+      this._editorView.dispatch({
+        effects: this._wrap.reconfigure(
+          this.wordWrap ? EditorView.lineWrapping : [],
+        ),
+      });
+    }
+
+    // Update line numbers visibility (hide gutters when false)
+    if (changedProperties.has("lineNumbers") && this._editorView) {
+      const hideGutters = !this.lineNumbers;
+      const ext = hideGutters
+        ? EditorView.theme({
+          ".cm-gutters": { display: "none" },
+          ".cm-content": { paddingLeft: "0px" },
+        })
+        : [] as unknown as Extension;
+      this._editorView.dispatch({
+        effects: this._gutters.reconfigure(ext),
+      });
+    }
+
+    // Update tab size
+    if (changedProperties.has("tabSize") && this._editorView) {
+      const size = this.tabSize ?? 2;
+      this._editorView.dispatch({
+        effects: [
+          this._tabSizeComp.reconfigure(EditorState.tabSize.of(size)),
+          this._indentUnitComp.reconfigure(indentUnit.of(" ".repeat(size))),
+        ],
+      });
+    }
+
+    // Update tab indent keymap
+    if (changedProperties.has("tabIndent") && this._editorView) {
+      const ext = this.tabIndent ? keymap.of([indentWithTab]) : [];
+      this._editorView.dispatch({
+        effects: this._tabIndentComp.reconfigure(ext),
+      });
+    }
+
+    // Update max line width theme
+    if (changedProperties.has("maxLineWidth") && this._editorView) {
+      const n = this.maxLineWidth;
+      const ext = typeof n === "number" && n > 0
+        ? EditorView.theme({
+          ".cm-content": { maxWidth: `${n}ch` },
+        })
+        : [] as unknown as Extension;
+      this._editorView.dispatch({
+        effects: this._maxLineWidthComp.reconfigure(ext),
+      });
+    }
+
     // Update timing controller if timing options changed
     if (
       changedProperties.has("timingStrategy") ||
@@ -458,6 +566,17 @@ export class CTCodeEditor extends BaseElement {
         strategy: this.timingStrategy,
         delay: this.timingDelay,
       });
+    }
+
+    // Re-subscribe if mentionable cell reference changes
+    if (changedProperties.has("mentionable")) {
+      this._setupMentionableSyncHandler();
+      this._updateMentionedFromContent();
+    }
+
+    // If `$mentioned` binding changes, push current state immediately
+    if (changedProperties.has("mentioned")) {
+      this._updateMentionedFromContent();
     }
   }
 
@@ -476,6 +595,10 @@ export class CTCodeEditor extends BaseElement {
 
     // Set up custom cell sync handler for CodeMirror
     this._setupCellSyncHandler();
+
+    // Set up mentionable sync handler and initialize mentioned list
+    this._setupMentionableSyncHandler();
+    this._updateMentionedFromContent();
   }
 
   private _initializeEditor(): void {
@@ -487,13 +610,41 @@ export class CTCodeEditor extends BaseElement {
     // Create editor extensions
     const extensions: Extension[] = [
       basicSetup,
+      // Tab indentation keymap (toggleable)
+      this._tabIndentComp.of(this.tabIndent ? keymap.of([indentWithTab]) : []),
       oneDark,
       this._lang.of(getLangExtFromMimeType(this.language)),
       this._readonly.of(EditorState.readOnly.of(this.readonly)),
+      // Word wrapping
+      this._wrap.of(this.wordWrap ? EditorView.lineWrapping : []),
+      // Hide gutters when line numbers are disabled
+      this._gutters.of(
+        !this.lineNumbers
+          ? EditorView.theme({
+            ".cm-gutters": { display: "none" },
+            ".cm-content": { paddingLeft: "0px" },
+          })
+          : [] as unknown as Extension,
+      ),
+      // Tab size
+      this._tabSizeComp.of(EditorState.tabSize.of(this.tabSize ?? 2)),
+      this._indentUnitComp.of(
+        indentUnit.of(" ".repeat(this.tabSize ?? 2)),
+      ),
+      // Optional max line width (in ch)
+      this._maxLineWidthComp.of(
+        typeof this.maxLineWidth === "number" && this.maxLineWidth > 0
+          ? EditorView.theme({
+            ".cm-content": { maxWidth: `${this.maxLineWidth}ch` },
+          })
+          : [] as unknown as Extension,
+      ),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
           this.setValue(value);
+          // Keep $mentioned current as user types
+          this._updateMentionedFromContent();
         }
       }),
       // Handle focus/blur events
@@ -564,6 +715,75 @@ export class CTCodeEditor extends BaseElement {
    */
   get editorView(): EditorView | undefined {
     return this._editorView;
+  }
+
+  /**
+   * Extract mentioned charms from current content and write to `$mentioned`.
+   *
+   * Link syntax: [[Name (id)]]. We parse ids and resolve them against
+   * `$mentionable` to produce live Charm instances.
+   */
+  private _updateMentionedFromContent(): void {
+    if (!this.mentioned) return;
+
+    const content = this.getValue() || "";
+    const newMentioned = this._extractMentionedCharms(content);
+
+    // Compare by id set to avoid unnecessary writes
+    const current = this.mentioned.getAsQueryResult?.() || [];
+    const curIds = new Set(
+      current
+        .map((c: Charm) => getEntityId(c)?.["/"] || "")
+        .filter((id: string) => id),
+    );
+    const newIds = new Set(
+      newMentioned
+        .map((c: Charm) => getEntityId(c)?.["/"] || "")
+        .filter((id: string) => id),
+    );
+
+    if (curIds.size === newIds.size) {
+      let same = true;
+      for (const id of newIds) {
+        if (!curIds.has(id)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return; // No change
+    }
+
+    const tx = this.mentioned.runtime.edit();
+    this.mentioned.withTx(tx).set(newMentioned);
+    tx.commit();
+  }
+
+  /**
+   * Parse content to a list of unique Charms referenced by [[...]] links.
+   */
+  private _extractMentionedCharms(content: string): Charm[] {
+    if (!content || !this.mentionable) return [];
+
+    const ids: string[] = [];
+    const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      const id = match[1];
+      if (id) ids.push(id);
+    }
+
+    // Resolve unique ids to charms using mentionable list
+    const seen = new Set<string>();
+    const result: Charm[] = [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      const charm = this.findCharmById(id);
+      if (charm) {
+        result.push(charm);
+        seen.add(id);
+      }
+    }
+    return result;
   }
 }
 
