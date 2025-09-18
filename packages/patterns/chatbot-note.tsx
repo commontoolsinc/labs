@@ -21,6 +21,7 @@ import {
   recipe,
   str,
   Stream,
+  toSchema,
   UI,
 } from "commontools";
 
@@ -165,19 +166,13 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
     const mentioned = cell<MentionableCharm[]>([]);
 
-    // Must use JSONSchema here, CTS doesn't work correctly. See CT-901
+    // why does MentionableCharm behave differently than any here?
+    // perhaps optional properties?
     const computeBacklinks = lift(
-      {
-        type: "object",
-        properties: {
-          allCharms: { type: "array", items: { type: "object" }, asCell: true },
-          content: { type: "string", asCell: true },
-        },
-      } as JSONSchema,
-      {
-        type: "array",
-        items: { type: "object" },
-      } as JSONSchema,
+      toSchema<
+        { allCharms: Cell<any[]>; content: Cell<string> }
+      >(),
+      toSchema<any[]>(),
       ({ allCharms, content }) => {
         const cs: MentionableCharm[] = allCharms.get();
         if (!cs) return [];
