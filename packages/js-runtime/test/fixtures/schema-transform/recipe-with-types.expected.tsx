@@ -43,23 +43,6 @@ const inputSchema = {
                 }
             },
             required: ["text"]
-        },
-        InputSchemaInterface: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string",
-                    default: "untitled"
-                },
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/definitions/Item"
-                    },
-                    default: []
-                }
-            },
-            required: ["title", "items"]
         }
     }
 } as const satisfies JSONSchema;
@@ -93,26 +76,6 @@ const outputSchema = {
                 }
             },
             required: ["text"]
-        },
-        OutputSchemaInterface: {
-            type: "object",
-            properties: {
-                items_count: {
-                    type: "number"
-                },
-                title: {
-                    type: "string",
-                    default: "untitled"
-                },
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/definitions/Item"
-                    },
-                    default: []
-                }
-            },
-            required: ["items_count", "title", "items"]
         }
     }
 } as const satisfies JSONSchema;

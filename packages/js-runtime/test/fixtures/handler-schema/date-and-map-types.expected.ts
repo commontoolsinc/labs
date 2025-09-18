@@ -25,16 +25,45 @@ const timedHandler = handler({
         Map: {
             type: "object",
             properties: {
-                clear: { type: "object", properties: {} },
-                delete: { type: "object", properties: {} },
-                forEach: { type: "object", properties: {} },
-                get: { type: "object", properties: {} },
-                has: { type: "object", properties: {} },
-                set: { type: "object", properties: {} },
-                size: { type: "number" },
-                entries: { type: "object", properties: {} },
-                keys: { type: "object", properties: {} },
-                values: { type: "object", properties: {} }
+                clear: {
+                    type: "object",
+                    properties: {}
+                },
+                delete: {
+                    type: "object",
+                    properties: {}
+                },
+                forEach: {
+                    type: "object",
+                    properties: {}
+                },
+                get: {
+                    type: "object",
+                    properties: {}
+                },
+                has: {
+                    type: "object",
+                    properties: {}
+                },
+                set: {
+                    type: "object",
+                    properties: {}
+                },
+                size: {
+                    type: "number"
+                },
+                entries: {
+                    type: "object",
+                    properties: {}
+                },
+                keys: {
+                    type: "object",
+                    properties: {}
+                },
+                values: {
+                    type: "object",
+                    properties: {}
+                }
             },
             required: ["clear", "delete", "forEach", "get", "has", "set", "size", "entries", "keys", "values"]
         }
@@ -56,16 +85,45 @@ const timedHandler = handler({
         Map: {
             type: "object",
             properties: {
-                clear: { type: "object", properties: {} },
-                delete: { type: "object", properties: {} },
-                forEach: { type: "object", properties: {} },
-                get: { type: "object", properties: {} },
-                has: { type: "object", properties: {} },
-                set: { type: "object", properties: {} },
-                size: { type: "number" },
-                entries: { type: "object", properties: {} },
-                keys: { type: "object", properties: {} },
-                values: { type: "object", properties: {} }
+                clear: {
+                    type: "object",
+                    properties: {}
+                },
+                delete: {
+                    type: "object",
+                    properties: {}
+                },
+                forEach: {
+                    type: "object",
+                    properties: {}
+                },
+                get: {
+                    type: "object",
+                    properties: {}
+                },
+                has: {
+                    type: "object",
+                    properties: {}
+                },
+                set: {
+                    type: "object",
+                    properties: {}
+                },
+                size: {
+                    type: "number"
+                },
+                entries: {
+                    type: "object",
+                    properties: {}
+                },
+                keys: {
+                    type: "object",
+                    properties: {}
+                },
+                values: {
+                    type: "object",
+                    properties: {}
+                }
             },
             required: ["clear", "delete", "forEach", "get", "has", "set", "size", "entries", "keys", "values"]
         }

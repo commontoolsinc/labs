@@ -51,27 +51,6 @@ export default recipe({
                 }
             },
             required: ["id", "name", "price", "active"]
-        },
-        State: {
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/definitions/Item"
-                    }
-                },
-                filter: {
-                    type: "string"
-                },
-                discount: {
-                    type: "number"
-                },
-                taxRate: {
-                    type: "number"
-                }
-            },
-            required: ["items", "filter", "discount", "taxRate"]
         }
     }
 } as const satisfies JSONSchema, (state) => {
