@@ -43,6 +43,16 @@ export function createJsxExpressionRule(): OpaqueRefRule {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          if (context.options.mode === "error") {
+            context.reportDiagnostic({
+              type: "opaque-ref:jsx-expression",
+              message:
+                "JSX expression with OpaqueRef computation should use derive",
+              node: node.expression,
+            });
+            return node;
+          }
+
           const rewriteResult = rewriteExpression({
             expression: node.expression,
             analysis,
