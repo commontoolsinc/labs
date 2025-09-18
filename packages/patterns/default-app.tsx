@@ -7,6 +7,7 @@ import {
   handler,
   NAME,
   navigateTo,
+  OpaqueRef,
   recipe,
   str,
   UI,
@@ -61,11 +62,64 @@ const removeCharm = handler<
   }
 });
 
-const spawnPattern = (recipe: any, params: any) =>
-  handler<Record<string, never>, Record<string, never>>((event, state) => {
-    const charm = recipe(params);
-    return navigateTo(charm);
-  });
+const spawnChatbot = handler<
+  Record<string, never>,
+  Record<string, never>
+>((_, state) => {
+  return navigateTo(Chatbot({
+    messages: [],
+    tools: undefined,
+  }));
+});
+
+const spawnChatbotTools = handler<
+  Record<string, never>,
+  Record<string, never>
+>((_, state) => {
+  return navigateTo(ChatbotTools({
+    title: "Chatbot Tools",
+    messages: [],
+    list: [],
+  }));
+});
+
+const spawnChatbotOutliner = handler<
+  Record<string, never>,
+  { allCharms: Cell<Charm[]> }
+>((_, state) => {
+  return navigateTo(ChatbotOutliner({
+    title: "Chatbot Outliner",
+    expandChat: false,
+    messages: [],
+    outline: {
+      root: { body: "", children: [], attachments: [] },
+    },
+    allCharms: state.allCharms,
+  }));
+});
+
+const spawnChatbotNote = handler<
+  Record<string, never>,
+  { allCharms: Cell<any[]> } // any becaus Charm definition diverge between recipes
+>((_, state) => {
+  return navigateTo(ChatbotNote({
+    title: "New Note",
+    content: "",
+    expandChat: false,
+    messages: [],
+    allCharms: state.allCharms,
+  }));
+});
+
+const spawnNote = handler<
+  Record<string, never>,
+  Record<string, never>
+>((_, state) => {
+  return navigateTo(Note({
+    title: "New Note",
+    content: "",
+  }));
+});
 
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
@@ -79,47 +133,27 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             <ct-hstack gap="2" align="center">
               <h3>Quicklaunch:</h3>
               <ct-button
-                onClick={spawnPattern(Chatbot, {
-                  messages: [],
-                  tools: undefined,
-                })({})}
+                onClick={spawnChatbot({})}
               >
                 💬 Chatbot
               </ct-button>
               <ct-button
-                onClick={spawnPattern(ChatbotTools, {
-                  title: "Chatbot Tools",
-                  chat: [],
-                  list: [],
-                })({})}
+                onClick={spawnChatbotTools({})}
               >
                 🔧 Chatbot Tools
               </ct-button>
               <ct-button
-                onClick={spawnPattern(ChatbotOutliner, {
-                  outline: {
-                    root: { body: "", children: [], attachments: [] },
-                  },
-                  allCharms,
-                })({})}
+                onClick={spawnChatbotOutliner({ allCharms })}
               >
                 📝 Chatbot Outliner
               </ct-button>
               <ct-button
-                onClick={spawnPattern(ChatbotNote, {
-                  title: "New Note",
-                  content: "",
-                  allCharms,
-                })({})}
+                onClick={spawnChatbotNote({ allCharms })}
               >
                 🤖 Chatbot Note
               </ct-button>
               <ct-button
-                onClick={spawnPattern(Note, {
-                  title: "New Note",
-                  content: "",
-                  allCharms,
-                })({})}
+                onClick={spawnNote({})}
               >
                 📄 Note
               </ct-button>
