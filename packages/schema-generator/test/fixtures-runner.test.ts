@@ -30,7 +30,7 @@ defineFixtureSuite<SchemaResult, string>({
     const rerun = await runSchemaTransform(fixture.inputPath);
     expect(actual.serialized).toEqual(rerun.serialized);
   },
-  async compare(actual, expectedText, fixture) {
+  compare(actual, expectedText, fixture) {
     let actualObj;
     let expectedObj;
     try {
