@@ -6,23 +6,22 @@ _Last updated: 2025-09-17_
 
 `@commontools/ts-transformers` now houses our TypeScript AST transformers. The
 package exposes the modular OpaqueRef rewrite we ship to recipe authors (via
-`createModularOpaqueRefTransformer`). The legacy
-`createOpaqueRefTransformer` remains inside `@commontools/js-runtime` only until
-that package migrates; it is no longer re-exported here. This document captures
-the current implementation, outstanding gaps, and the focused roadmap we intend
-to pursue.
+`createModularOpaqueRefTransformer`). The legacy `createOpaqueRefTransformer`
+remains inside `@commontools/js-runtime` only until that package migrates; it is
+no longer re-exported here. This document captures the current implementation,
+outstanding gaps, and the focused roadmap we intend to pursue.
 
 ## Current Implementation
 
 ### Architecture Snapshot
 
-- **Rule-based passes** – We run a small, ordered array of rule modules (currently
-  JSX expressions and schema injection) over each source file. Each rule
-  performs targeted rewrites and requests imports through a shared transformation
-  context.
+- **Rule-based passes** – We run a small, ordered array of rule modules
+  (currently JSX expressions and schema injection) over each source file. Each
+  rule performs targeted rewrites and requests imports through a shared
+  transformation context.
 - **Shared context** – `core/context.ts` centralises the TypeScript checker,
-  cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting, and
-  import management.
+  cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting,
+  and import management.
 - **Dependency analysis** – `opaque-ref/dependency.ts` walks expressions to
   collect reactive dependencies, handles most scope boundaries, and records
   provenance so map callbacks typed as `any` can still be derived.
@@ -46,20 +45,20 @@ to pursue.
 
 ## Known Gaps
 
-| Area | Impact | Notes |
-| --- | --- | --- |
-| **Optional-chain predicates** | `!cellRef?.length` still bypasses `derive`, so
-  runtime may read a `Cell` eagerly. | Need dependency support for
-  `PropertyAccessChain` and a rewrite that preserves optional semantics. |
-| **Closures** | Functions that capture reactive values (e.g.
-  `() => count + 1`) aren’t rewritten, so callbacks read opaque values at
-  runtime. | Requires capture analysis and a closure rewrite rule. |
-| **Destructuring / spread** | Patterns like `const { name } = user` or
-  `{ ...config, count: count + 1 }` still operate on raw refs. |
-| **Async/await & template literals** | Reactive identifiers inside
-  `await` expressions or template strings aren’t wrapped automatically. |
-| **Testing depth** | No unit or perf suites beyond fixtures; closure/optional
-  scenarios lack runtime integration coverage. |
+| Area                                                                    | Impact                                                   | Notes |
+| ----------------------------------------------------------------------- | -------------------------------------------------------- | ----- |
+| **Optional-chain predicates**                                           | `!cellRef?.length` still bypasses `derive`, so           |       |
+| runtime may read a `Cell` eagerly.                                      | Need dependency support for                              |       |
+| `PropertyAccessChain` and a rewrite that preserves optional semantics.  |                                                          |       |
+| **Closures**                                                            | Functions that capture reactive values (e.g.             |       |
+| `() => count + 1`) aren’t rewritten, so callbacks read opaque values at |                                                          |       |
+| runtime.                                                                | Requires capture analysis and a closure rewrite rule.    |       |
+| **Destructuring / spread**                                              | Patterns like `const { name } = user` or                 |       |
+| `{ ...config, count: count + 1 }` still operate on raw refs.            |                                                          |       |
+| **Async/await & template literals**                                     | Reactive identifiers inside                              |       |
+| `await` expressions or template strings aren’t wrapped automatically.   |                                                          |       |
+| **Testing depth**                                                       | No unit or perf suites beyond fixtures; closure/optional |       |
+| scenarios lack runtime integration coverage.                            |                                                          |       |
 
 ## Near-Term Roadmap
 
@@ -97,8 +96,8 @@ to pursue.
   “transformation engine” originally proposed.
 - **Legacy transformer sunset** – Coordinate the timeline for deleting the
   `js-runtime` copy of `createOpaqueRefTransformer` once the modular path covers
-  closures and optional chaining, and `js-runtime` consumes `ts-transformers`
-  by default.
+  closures and optional chaining, and `js-runtime` consumes `ts-transformers` by
+  default.
 
 ## References
 
