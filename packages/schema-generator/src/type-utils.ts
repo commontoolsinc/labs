@@ -1,5 +1,7 @@
 import ts from "typescript";
 
+import type { SchemaDefinition } from "./interface.ts";
+
 /**
  * Safe wrapper for TypeScript checker APIs that may throw in reduced environments
  */
@@ -115,6 +117,28 @@ export interface TypeWithInternals extends ts.Type {
   intrinsicName?: string;
 }
 
+const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
+  Date: { type: "string", format: "date-time" },
+  URL: { type: "string", format: "uri" },
+  ArrayBuffer: true,
+  ArrayBufferLike: true,
+  SharedArrayBuffer: true,
+  ArrayBufferView: true,
+  Uint8Array: true,
+  Uint8ClampedArray: true,
+  Int8Array: true,
+  Uint16Array: true,
+  Int16Array: true,
+  Uint32Array: true,
+  Int32Array: true,
+  Float32Array: true,
+  Float64Array: true,
+  BigInt64Array: true,
+  BigUint64Array: true,
+};
+
+const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
+
 /**
  * Resolve the most relevant symbol for a type, accounting for references,
  * aliases, and internal helper accessors exposed on some compiler objects.
@@ -126,6 +150,58 @@ export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
   const alias = (type as TypeWithInternals).aliasSymbol;
   if (alias) return alias;
   return undefined;
+}
+
+export function cloneSchemaDefinition<T extends SchemaDefinition | boolean>(
+  schema: T,
+): T {
+  return (typeof schema === "boolean" ? schema : structuredClone(schema)) as T;
+}
+
+export function getNativeTypeSchema(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): SchemaDefinition | boolean | undefined {
+  const visited = new Set<ts.Type>();
+
+  const resolve = (
+    current: ts.Type,
+  ): SchemaDefinition | boolean | undefined => {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+
+    if ((current.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const base = checker.getBaseConstraintOfType(current);
+      if (base && base !== current) {
+        const resolved = resolve(base);
+        if (resolved !== undefined) return resolved;
+      }
+      const defaultConstraint = checker.getDefaultFromTypeParameter?.(current);
+      if (defaultConstraint && defaultConstraint !== current) {
+        const resolved = resolve(defaultConstraint);
+        if (resolved !== undefined) return resolved;
+      }
+      return undefined;
+    }
+
+    if ((current.flags & ts.TypeFlags.Intersection) !== 0) {
+      const intersection = current as ts.IntersectionType;
+      for (const part of intersection.types) {
+        const resolved = resolve(part);
+        if (resolved !== undefined) return resolved;
+      }
+    }
+
+    const symbol = getPrimarySymbol(current);
+    const name = symbol?.getName();
+    if (name && NATIVE_TYPE_NAMES.has(name)) {
+      return cloneSchemaDefinition(NATIVE_TYPE_SCHEMAS[name]!);
+    }
+
+    return undefined;
+  };
+
+  return resolve(type);
 }
 
 /**
@@ -175,10 +251,7 @@ export function getNamedTypeKey(
   if (name === "Cell" || name === "Stream" || name === "Default") {
     return undefined;
   }
-  if (
-    name === "Date" || name === "URL" ||
-    name === "Uint8Array" || name === "ArrayBuffer"
-  ) return undefined;
+  if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
   return name;
 }
 
@@ -310,9 +383,8 @@ export function getArrayElementInfo(
     return undefined;
   }
 
-  const primarySymbol = getPrimarySymbol(type);
-  const primaryName = primarySymbol?.name;
-  if (primaryName === "Uint8Array" || primaryName === "ArrayBuffer") {
+  const native = getNativeTypeSchema(type, checker);
+  if (native !== undefined) {
     return undefined;
   }
   // Check ObjectFlags.Reference for Array/ReadonlyArray

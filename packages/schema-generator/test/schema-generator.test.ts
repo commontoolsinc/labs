@@ -204,5 +204,30 @@ interface BufferHolder {
       expect(objectSchema.definitions).toBeUndefined();
       expect(props?.buffer).toBe(true);
     });
+
+    it("collapses unions of native binary types", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasImage {
+  image: string | Uint8Array | ArrayBuffer | URL;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasImage");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown> | boolean>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.image).toEqual({
+        anyOf: [
+          { type: "string" },
+          true,
+          true,
+          { type: "string", format: "uri" },
+        ],
+      });
+    });
   });
 });

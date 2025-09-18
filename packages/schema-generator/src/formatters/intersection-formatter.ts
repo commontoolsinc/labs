@@ -5,6 +5,7 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
@@ -22,6 +23,10 @@ export class IntersectionFormatter implements TypeFormatter {
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
+    const native = getNativeTypeSchema(type, checker);
+    if (native !== undefined) {
+      return cloneSchemaDefinition(native);
+    }
     const inter = type as ts.IntersectionType;
     const parts = inter.types ?? [];
 

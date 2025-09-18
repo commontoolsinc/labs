@@ -6,9 +6,9 @@ Short notes on the JSON Schema generator and ref/definitions behavior.
 
 - Hoists every named type into `definitions` and emits `$ref` for non‑root
   occurrences.
-- Excludes wrapper/container names and native leaf types from hoisting:
-  `Array`, `ReadonlyArray`, `Cell`, `Stream`, `Default`, `Date`, `URL`,
-  `Uint8Array`, `ArrayBuffer`.
+- Excludes wrapper/container names and native leaf types from hoisting: `Array`,
+  `ReadonlyArray`, `Cell`, `Stream`, `Default`, `Date`, `URL`, `Uint8Array`,
+  `ArrayBuffer`.
 - Root types remain inline; `definitions` are included only if at least one
   `$ref` is emitted.
 - Anonymous/type‑literal shapes (including aliases that resolve to anonymous
@@ -27,9 +27,14 @@ Implementation: see `src/schema-generator.ts` (`formatType`) and
 - Maps ECMAScript built-ins directly when they appear as properties:
   - `Date` → `{ type: "string", format: "date-time" }`
   - `URL` → `{ type: "string", format: "uri" }`
-  - `Uint8Array` and `ArrayBuffer` → `true` (permissive JSON Schema leaf)
-- These shortcuts keep schemas inline without emitting `$ref` definitions,
-  while avoiding conflicts with array detection or hoisting.
+  - Typed array family (`Uint8Array`, `Uint8ClampedArray`, `Int8Array`,
+    `Uint16Array`, `Int16Array`, `Uint32Array`, `Int32Array`, `Float32Array`,
+    `Float64Array`, `BigInt64Array`, `BigUint64Array`) plus `ArrayBuffer`,
+    `ArrayBufferLike`, `SharedArrayBuffer`, and `ArrayBufferView` → `true`
+    (permissive JSON Schema leaf)
+- These shortcuts keep schemas inline without emitting `$ref` definitions, while
+  avoiding conflicts with array detection or hoisting, even when the compiler
+  widens them via intersections or aliases.
 
 ## Function Properties
 
