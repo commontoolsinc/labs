@@ -116,11 +116,12 @@ const spawnChatbotNote = handler<
 
 const spawnNote = handler<
   Record<string, never>,
-  Record<string, never>
+  { allCharms: Cell<MentionableCharm[]> }
 >((_, state) => {
   return navigateTo(Note({
     title: "New Note",
     content: "",
+    allCharms: state.allCharms,
   }));
 });
 
@@ -161,7 +162,11 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 🤖 Chatbot Note
               </ct-button>
               <ct-button
-                onClick={spawnNote({})}
+                onClick={spawnNote({ // slight disagreement between Charm types but they are compatible
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
+                })}
               >
                 📄 Note
               </ct-button>
