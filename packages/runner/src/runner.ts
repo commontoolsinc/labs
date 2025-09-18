@@ -585,14 +585,32 @@ export class Runner implements IRunner {
     syncAllMentionedCells(inputs);
     await Promise.all(promises);
 
-    const sourceCell = resultCell.getSourceCell({
+    // TODO(@ubik2): Move this to a more general method in schema.ts or cfc.ts
+    const processCellSchema: any = {
       type: "object",
       properties: {
         [TYPE]: { type: "string" },
-        argument: recipe.argumentSchema ?? {},
+        argument: recipe.argumentSchema ?? true,
       },
       required: [TYPE],
-    });
+    };
+
+    if (
+      isRecord(processCellSchema) && "properties" in processCellSchema &&
+      isObject(recipe.argumentSchema)
+    ) {
+      // extract $defs and definitions and remove them from argumentSchema
+      const { $defs, definitions, ...rest } = recipe.argumentSchema;
+      (processCellSchema as any).properties.argument = rest ?? true;
+      if (isRecord($defs)) {
+        (processCellSchema as any).$defs = $defs;
+      }
+      if (isRecord(definitions)) {
+        (processCellSchema as any).definitions = definitions;
+      }
+    }
+
+    const sourceCell = resultCell.getSourceCell(processCellSchema);
     if (!sourceCell) return false;
 
     await sourceCell.sync();
