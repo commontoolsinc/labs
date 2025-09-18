@@ -7,12 +7,30 @@ import {
   derive,
   h,
   handler,
+  ifElse,
   lift,
   NAME,
   navigateTo,
   recipe,
+  toSchema,
   UI,
 } from "commontools";
+
+// full recipe state
+interface RecipeState {
+  charm: any;
+  cellRef: Cell<{ charm: any }>;
+  isInitialized: Cell<boolean>;
+}
+const RecipeStateSchema = toSchema<RecipeState>();
+
+// what we pass into the recipe as input
+// wraps the charm reference in an object { charm: any }
+// instead of storing the charm directly. This avoids a "pointer of pointers"
+// error that occurs when a Cell directly contains another Cell/charm reference.
+type RecipeInOutput = {
+  cellRef: Default<{ charm: any }, { charm: undefined }>;
+};
 
 // the simple charm (to which we'll store a reference within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
@@ -33,23 +51,7 @@ const SimpleRecipe = recipe("Simple Recipe", () => ({
 // We use a lift() here instead of executing inside of a handler because
 // we want to know the passed in charm is initialized
 const storeCharmAndNavigate = lift(
-  {
-    type: "object",
-    properties: {
-      charm: { type: "object" },
-      cellRef: {
-        type: "object",
-        properties: {
-          charm: { type: "object" },
-        },
-        asCell: true,
-      },
-      isInitialized: {
-        type: "boolean",
-        asCell: true,
-      },
-    },
-  },
+  RecipeStateSchema,
   undefined,
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
@@ -91,18 +93,16 @@ const createSimpleRecipe = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
 const goToStoredCharm = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
   (_, { cellRef }) => {
     console.log("goToStoredCharm clicked");
-    return navigateTo(cellRef.get().charm);
+    const cellValue = cellRef.get();
+    if (!cellValue.charm) {
+      console.error("No charm found in cell!");
+      return;
+    }
+    return navigateTo(cellValue.charm);
   },
 );
 
-// Recipe state wraps the charm reference in an object { charm: any }
-// instead of storing the charm directly. This avoids a "pointer of pointers"
-// error that occurs when a Cell directly contains another Cell/charm reference.
-type RecipeState = {
-  cellRef: Default<{ charm: any }, { charm: undefined }>;
-};
-
-export default recipe<RecipeState, RecipeState>(
+export default recipe<RecipeInOutput, RecipeInOutput>(
   "Launcher",
   ({ cellRef }) => {
     return {
@@ -121,15 +121,18 @@ export default recipe<RecipeState, RecipeState>(
           >
             Create Sub Charm
           </ct-button>
-          {derive(cellRef, (innerCell) => {
-            if (!innerCell) return "no subcharm yet!";
-            if (!innerCell.charm) return "no subcharm yet!";
-            return (
+
+          {ifElse(
+            cellRef.charm,
+            (
               <ct-button onClick={goToStoredCharm({ cellRef })}>
                 Go to Stored Charm
               </ct-button>
-            );
-          })}
+            ),
+            (
+              <div>no subcharm</div>
+            ),
+          )}
         </div>
       ),
       cellRef,
