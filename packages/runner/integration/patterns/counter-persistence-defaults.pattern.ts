@@ -1,9 +1,17 @@
 /// <cts-enable />
-import { Cell, compute, handler, lift, recipe, str } from "commontools";
+import {
+  Cell,
+  compute,
+  Default,
+  handler,
+  lift,
+  recipe,
+  str,
+} from "commontools";
 
 interface PersistenceDefaultsArgs {
-  value?: number;
-  step?: number;
+  value: Default<number, 0>;
+  step: Default<number, 1>;
 }
 
 const applyIncrement = handler(
@@ -22,9 +30,6 @@ const applyIncrement = handler(
 export const counterWithPersistenceDefaults = recipe<PersistenceDefaultsArgs>(
   "Counter With Persistence Defaults",
   ({ value, step }) => {
-    value.setDefault(0);
-    step.setDefault(1);
-
     const initialize = compute(() => {
       if (typeof value.get() !== "number") {
         value.set(0);

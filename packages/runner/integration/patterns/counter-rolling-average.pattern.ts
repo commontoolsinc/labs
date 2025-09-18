@@ -1,10 +1,18 @@
 /// <cts-enable />
-import { Cell, compute, handler, lift, recipe, str } from "commontools";
+import {
+  Cell,
+  compute,
+  Default,
+  handler,
+  lift,
+  recipe,
+  str,
+} from "commontools";
 
 interface RollingAverageArgs {
-  value?: number;
-  history?: number[];
-  window?: number;
+  value: Default<number, 0>;
+  history: Default<number[], []>;
+  window: Default<number, 5>;
 }
 
 const recordAndAverage = handler(
@@ -36,10 +44,6 @@ const recordAndAverage = handler(
 export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
-    value.setDefault(0);
-    history.setDefault([]);
-    window.setDefault(5);
-
     const initialize = compute(() => {
       if (typeof value.get() !== "number") {
         value.set(0);

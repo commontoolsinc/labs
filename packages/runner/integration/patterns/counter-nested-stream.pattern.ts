@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface NestedStreamArgs {
-  value?: number;
+  value: Default<number, 0>;
 }
 
 const nestedIncrement = handler(
@@ -19,8 +19,6 @@ const nestedIncrement = handler(
 export const counterWithNestedStream = recipe<NestedStreamArgs>(
   "Counter With Nested Stream",
   ({ value }) => {
-    value.setDefault(0);
-
     return {
       value,
       label: str`Counter ${value}`,

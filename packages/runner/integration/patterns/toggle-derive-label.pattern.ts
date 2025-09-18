@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, derive, handler, recipe } from "commontools";
+import { Cell, Default, derive, handler, recipe } from "commontools";
 
 interface ToggleArgs {
-  active?: boolean;
+  active: Default<boolean, false>;
 }
 
 const toggleState = handler(
@@ -15,8 +15,6 @@ const toggleState = handler(
 export const toggleWithLabel = recipe<ToggleArgs>(
   "Toggle With Derive Label",
   ({ active }) => {
-    active.setDefault(false);
-
     const status = derive(
       active,
       (isActive) => (isActive ? "enabled" : "disabled"),

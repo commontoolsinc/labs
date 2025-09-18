@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface DynamicStepArgs {
-  value?: number;
-  step?: number;
+  value: Default<number, 0>;
+  step: Default<number, 1>;
 }
 
 const incrementWithStep = handler(
@@ -30,9 +30,6 @@ const updateStep = handler(
 export const counterWithDynamicStep = recipe<DynamicStepArgs>(
   "Counter With Dynamic Step",
   ({ value, step }) => {
-    value.setDefault(0);
-    step.setDefault(1);
-
     return {
       value,
       step,

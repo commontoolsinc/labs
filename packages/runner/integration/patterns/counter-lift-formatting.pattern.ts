@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, handler, lift, recipe } from "commontools";
+import { Cell, Default, handler, lift, recipe } from "commontools";
 
 interface LiftFormattingArgs {
-  value?: number;
+  value: Default<number, 0>;
 }
 
 const addOne = handler(
@@ -19,8 +19,6 @@ const addOne = handler(
 export const counterWithLiftFormatting = recipe<LiftFormattingArgs>(
   "Counter With Lift Formatting",
   ({ value }) => {
-    value.setDefault(0);
-
     const formatted = lift((count: number) => `Value: ${count.toFixed(2)}`)(
       value,
     );
