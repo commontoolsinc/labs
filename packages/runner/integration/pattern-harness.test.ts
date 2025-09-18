@@ -65,6 +65,9 @@ import {
   scenarios as counterNestedStreamScenarios,
 } from "./patterns/counter-nested-stream.ts";
 import {
+  scenarios as counterNoOpEventsScenarios,
+} from "./patterns/counter-no-op-events.ts";
+import {
   scenarios as counterOpaqueRefMapScenarios,
 } from "./patterns/counter-opaque-ref-map.ts";
 import {
@@ -140,6 +143,7 @@ const allScenarios = [
   ...counterNestedHandlerCompositionScenarios,
   ...counterNestedOptionalCellsScenarios,
   ...counterNestedStreamScenarios,
+  ...counterNoOpEventsScenarios,
   ...counterOptionalFallbackScenarios,
   ...counterOpaqueRefMapScenarios,
   ...counterPersistenceDefaultsScenarios,
