@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface CounterState {
-  value: number;
+  value: Default<number, 0>;
 }
 
 interface IncrementEvent {
@@ -19,7 +19,6 @@ const increment = handler(
 export const simpleCounter = recipe<CounterState>(
   "Simple Counter",
   ({ value }) => {
-    value.setDefault(0);
     return {
       label: str`Counter value: ${value}`,
       value,

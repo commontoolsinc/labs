@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface HistoryCounterArgs {
-  value?: number;
-  history?: number[];
+  value: Default<number, 0>;
+  history: Default<number[], []>;
 }
 
 const trackIncrement = handler(
@@ -21,9 +21,6 @@ const trackIncrement = handler(
 export const counterWithHistory = recipe<HistoryCounterArgs>(
   "Counter History Tracker",
   ({ value, history }) => {
-    value.setDefault(0);
-    history.setDefault([]);
-
     const label = str`History size: ${history}`;
 
     return {

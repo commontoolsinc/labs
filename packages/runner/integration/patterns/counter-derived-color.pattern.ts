@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, derive, handler, recipe } from "commontools";
+import { Cell, Default, derive, handler, recipe } from "commontools";
 
 interface DerivedColorArgs {
-  value?: number;
+  value: Default<number, 0>;
 }
 
 const adjustValue = handler(
@@ -26,8 +26,6 @@ function getColor(count: number): string {
 export const counterWithDerivedColor = recipe<DerivedColorArgs>(
   "Counter With Derived Color",
   ({ value }) => {
-    value.setDefault(0);
-
     const color = derive(value, (current) => getColor(current ?? 0));
 
     return {

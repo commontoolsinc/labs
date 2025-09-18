@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface SharedAliasArgs {
-  value?: number;
+  value: Default<number, 0>;
 }
 
 const sharedIncrement = handler(
@@ -19,7 +19,6 @@ const sharedIncrement = handler(
 export const counterWithSharedAlias = recipe<SharedAliasArgs>(
   "Counter With Shared Alias",
   ({ value }) => {
-    value.setDefault(0);
     const safeValue = lift((count: number | undefined) =>
       typeof count === "number" ? count : 0
     )(value);

@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { Cell, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface ResetCounterArgs {
-  value?: number;
-  baseline?: number;
+  value: Default<number, 0>;
+  baseline: Default<number, 0>;
 }
 
 const applyDelta = handler(
@@ -30,9 +30,6 @@ const resetCounter = handler(
 export const counterWithReset = recipe<ResetCounterArgs>(
   "Counter With Reset",
   ({ value, baseline }) => {
-    value.setDefault(0);
-    baseline.setDefault(0);
-
     return {
       value,
       baseline,
