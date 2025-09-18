@@ -274,17 +274,11 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
     if (typeof base === "boolean") {
-      const filtered = this.collectReferencedDefinitions(base, definitions);
-      if (Object.keys(filtered).length === 0) return base;
-      return base === false
-        ? {
-          $schema: "https://json-schema.org/draft-07/schema#",
-          not: true,
-          definitions: filtered,
-        }
+      return base
+        ? { $schema: "https://json-schema.org/draft-07/schema#" }
         : {
           $schema: "https://json-schema.org/draft-07/schema#",
-          definitions: filtered,
+          not: true,
         };
     }
 
