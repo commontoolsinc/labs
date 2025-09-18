@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface AggregatorArgs {
-  counters?: number[];
+  counters: Default<number[], []>;
 }
 
 const adjustCounter = handler(
@@ -21,8 +21,6 @@ const adjustCounter = handler(
 export const counterAggregator = recipe<AggregatorArgs>(
   "Counter Aggregator",
   ({ counters }) => {
-    counters.setDefault([]);
-
     const total = lift((values: number[]) =>
       values.reduce((sum, value) => sum + value, 0)
     )(counters);

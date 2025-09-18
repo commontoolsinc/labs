@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, derive, handler, lift, recipe, str } from "commontools";
 
 interface Item {
   label: string;
@@ -7,7 +7,7 @@ interface Item {
 }
 
 interface ListManagerArgs {
-  items?: Item[];
+  items: Default<Item[], []>;
 }
 
 const addItem = handler(
@@ -38,8 +38,6 @@ const incrementItem = handler(
 export const listManager = recipe<ListManagerArgs>(
   "List Manager",
   ({ items }) => {
-    items.setDefault([]);
-
     const size = lift((collection: Item[]) => collection.length)(items);
     const names = derive(
       items,
