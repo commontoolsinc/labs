@@ -118,6 +118,25 @@ describe("toEqualIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
+  it("should include custom failure messages", () => {
+    let message: string | undefined;
+    try {
+      expect(
+        { name: "test1" },
+        "custom message",
+      ).toEqualIgnoringSymbols({ name: "test2" });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    if (!message) {
+      throw new Error("expected matcher to throw");
+    }
+    expect(message).toContain(
+      "custom message: expected objects to be equal when ignoring symbols",
+    );
+  });
+
   it("should handle arrays with symbols", () => {
     const arr1 = [
       { name: "a", [testSymbol1]: "ignored" },
@@ -191,5 +210,24 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     expect(() => {
       expect(obj1).toMatchObjectIgnoringSymbols(obj2);
     }).toThrow();
+  });
+
+  it("should include custom failure messages for partial matches", () => {
+    let message: string | undefined;
+    try {
+      expect(
+        { name: "test" },
+        "partial custom message",
+      ).toMatchObjectIgnoringSymbols({ value: 42 });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    if (!message) {
+      throw new Error("expected matcher to throw");
+    }
+    expect(message).toContain(
+      "partial custom message: expected object to match when ignoring symbols",
+    );
   });
 });

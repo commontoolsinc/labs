@@ -2,23 +2,6 @@ import { expect } from "@std/expect";
 import type { Async, Expected } from "@std/expect";
 import { isRecord } from "@commontools/utils/types";
 
-// Define MatcherContext interface since it's not exported from @std/expect
-interface MatcherContext<IsAsync = false> extends Expected<IsAsync> {
-  value: unknown;
-  isNot: boolean;
-  equal: (a: unknown, b: unknown) => boolean;
-  customTesters: Array<
-    (a: unknown, b: unknown, customTesters: unknown[]) => void
-  >;
-  customMessage: string | undefined;
-
-  // NOTE: You also need to overrides the following typings to allow modifiers to correctly infer typing
-  not: IsAsync extends true ? Async<MatcherContext<true>>
-    : ExtendedExpected<false>;
-  resolves: Async<MatcherContext<true>>;
-  rejects: Async<MatcherContext<true>>;
-}
-
 /**
  * Strips all symbol properties from an object recursively
  */
@@ -50,13 +33,19 @@ expect.extend({
     const cleanExpected = stripSymbols(expected);
 
     const pass = context.equal(cleanReceived, cleanExpected);
+    const formatMessage = (message: string): string => {
+      if (!context.customMessage) return message;
+      return `${context.customMessage}: ${message}`;
+    };
 
     if (pass) {
       return {
         message: () =>
-          `expected ${JSON.stringify(context.value)} not to equal ${
-            JSON.stringify(expected)
-          } when ignoring symbols`,
+          formatMessage(
+            `expected ${JSON.stringify(context.value)} not to equal ${
+              JSON.stringify(expected)
+            } when ignoring symbols`,
+          ),
         pass: true,
       };
     } else {
@@ -64,7 +53,10 @@ expect.extend({
         message: () => {
           const receivedStr = JSON.stringify(cleanReceived, null, 2);
           const expectedStr = JSON.stringify(cleanExpected, null, 2);
-          return `expected objects to be equal when ignoring symbols\n\nExpected:\n${expectedStr}\n\nReceived:\n${receivedStr}`;
+          const baseMessage =
+            `expected objects to be equal when ignoring symbols` +
+            `\n\nExpected:\n${expectedStr}\n\nReceived:\n${receivedStr}`;
+          return formatMessage(baseMessage);
         },
         pass: false,
       };
@@ -106,13 +98,19 @@ expect.extend({
     };
 
     const pass = matches(cleanReceived, cleanExpected);
+    const formatMessage = (message: string): string => {
+      if (!context.customMessage) return message;
+      return `${context.customMessage}: ${message}`;
+    };
 
     if (pass) {
       return {
         message: () =>
-          `expected ${JSON.stringify(context.value)} not to match object ${
-            JSON.stringify(expected)
-          } when ignoring symbols`,
+          formatMessage(
+            `expected ${JSON.stringify(context.value)} not to match object ${
+              JSON.stringify(expected)
+            } when ignoring symbols`,
+          ),
         pass: true,
       };
     } else {
@@ -120,7 +118,9 @@ expect.extend({
         message: () => {
           const receivedStr = JSON.stringify(cleanReceived, null, 2);
           const expectedStr = JSON.stringify(cleanExpected, null, 2);
-          return `expected object to match when ignoring symbols\n\nExpected subset:\n${expectedStr}\n\nReceived:\n${receivedStr}`;
+          const baseMessage = `expected object to match when ignoring symbols` +
+            `\n\nExpected subset:\n${expectedStr}\n\nReceived:\n${receivedStr}`;
+          return formatMessage(baseMessage);
         },
         pass: false,
       };
