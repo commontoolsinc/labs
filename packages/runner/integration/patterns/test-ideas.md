@@ -213,7 +213,7 @@ current offline harness.
       canonical sorted structure for assertions.
 - [ ] Counter with state machine transitions — implement finite-state
       transitions with handlers and assert allowed moves.
-- [ ] Counter with nested parameterized patterns — pass parameters into child
+- [x] Counter with nested parameterized patterns — pass parameters into child
       pattern factories and validate specialization.
 - [ ] Counter with computed metadata cell — derive metadata map about counters
       (counts, averages) for display.
