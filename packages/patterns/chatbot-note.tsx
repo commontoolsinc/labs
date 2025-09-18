@@ -26,10 +26,10 @@ import {
 
 import Chat from "./chatbot.tsx";
 
-type Charm = {
+export type MentionableCharm = {
   [NAME]: string;
   content?: string;
-  mentioned?: Charm[];
+  mentioned?: MentionableCharm[];
 };
 
 type NoteResult = {
@@ -38,13 +38,13 @@ type NoteResult = {
 
 export type NoteInput = {
   content: Default<string, "">;
-  allCharms: Cell<Charm[]>;
+  allCharms: Cell<MentionableCharm[]>;
 };
 
 const handleCharmLinkClick = handler<
   {
     detail: {
-      charm: Cell<Charm>;
+      charm: Cell<MentionableCharm>;
     };
   },
   Record<string, never>
@@ -72,7 +72,7 @@ export const Note = recipe<NoteInput>(
 );
 
 const handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<Charm> }) => {
+  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },
 );
@@ -82,13 +82,13 @@ type LLMTestInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   expandChat: Default<boolean, false>;
   content: Default<string, "">;
-  allCharms: Cell<Charm[]>;
+  allCharms: Cell<MentionableCharm[]>;
 };
 
 type LLMTestResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  mentioned: Default<Array<Charm>, []>;
-  backlinks: Default<Array<Charm>, []>;
+  mentioned: Default<Array<MentionableCharm>, []>;
+  backlinks: Default<Array<MentionableCharm>, []>;
   content: Default<string, "">;
 };
 
@@ -163,7 +163,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const chat = Chat({ messages, tools });
     const { addMessage, cancelGeneration, pending } = chat;
 
-    const mentioned = cell<Charm[]>([]);
+    const mentioned = cell<MentionableCharm[]>([]);
 
     // Must use JSONSchema here, CTS doesn't work correctly. See CT-901
     const computeBacklinks = lift(
@@ -179,7 +179,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
         items: { type: "object" },
       } as JSONSchema,
       ({ allCharms, content }) => {
-        const cs: Charm[] = allCharms.get();
+        const cs: MentionableCharm[] = allCharms.get();
         if (!cs) return [];
 
         const self = cs.find((c) => c.content === content.get());
@@ -194,7 +194,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     );
 
-    const backlinks: OpaqueRef<Charm[]> = computeBacklinks({
+    const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
       allCharms,
       content,
     });
@@ -230,7 +230,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               <details>
                 <summary>Mentioned Charms</summary>
                 <ct-vstack>
-                  {mentioned.map((charm: Charm) => (
+                  {mentioned.map((charm: MentionableCharm) => (
                     <ct-button onClick={handleCharmLinkClicked({ charm })}>
                       {charm[NAME]}
                     </ct-button>
@@ -240,7 +240,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               <details>
                 <summary>Backlinks</summary>
                 <ct-vstack>
-                  {backlinks.map((charm: Charm) => (
+                  {backlinks.map((charm: MentionableCharm) => (
                     <ct-button onClick={handleCharmLinkClicked({ charm })}>
                       {charm[NAME]}
                     </ct-button>
