@@ -40,20 +40,8 @@ export class ObjectFormatter implements TypeFormatter {
       return { type: "object", additionalProperties: true };
     }
 
-    // Special-case Date to a string with date-time format (match old behavior)
-    if (type.symbol?.name === "Date" && type.symbol?.valueDeclaration) {
-      // Check if this is the built-in Date type (not a user-defined type named "Date")
-      const sourceFile = type.symbol.valueDeclaration.getSourceFile();
-
-      if (
-        sourceFile.fileName.includes("lib.") ||
-        sourceFile.fileName.includes("typescript/lib") ||
-        sourceFile.fileName.includes("ES2023.d.ts") ||
-        sourceFile.fileName.includes("DOM.d.ts")
-      ) {
-        return { type: "string", format: "date-time" };
-      }
-    }
+    const builtin = this.lookupBuiltInSchema(type);
+    if (builtin) return builtin;
 
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
@@ -177,4 +165,38 @@ export class ObjectFormatter implements TypeFormatter {
 
     return schema;
   }
+
+  private lookupBuiltInSchema(type: ts.Type): SchemaDefinition | undefined {
+    const symbol = type.symbol;
+    if (!symbol?.valueDeclaration) return undefined;
+    const builtin = BUILT_IN_SCHEMAS.find((entry) => entry.test(type));
+    return builtin ? structuredClone(builtin.schema) : undefined;
+  }
+}
+
+type BuiltInSchemaEntry = {
+  test: (type: ts.Type) => boolean;
+  schema: SchemaDefinition;
+};
+
+const BUILT_IN_SCHEMAS: BuiltInSchemaEntry[] = [
+  {
+    test: isNativeType("Date"),
+    schema: { type: "string", format: "date-time" },
+  },
+];
+
+function isNativeType(name: string) {
+  return (type: ts.Type) => {
+    const symbol = type.symbol;
+    if (!symbol || symbol.name !== name || !symbol.valueDeclaration) {
+      return false;
+    }
+    const sourceFile = symbol.valueDeclaration.getSourceFile();
+    const fileName = sourceFile.fileName;
+    return fileName.includes("lib.") ||
+      fileName.includes("typescript/lib") ||
+      fileName.includes("ES2023.d.ts") ||
+      fileName.includes("DOM.d.ts");
+  };
 }

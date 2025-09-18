@@ -125,4 +125,27 @@ type Wrapper = {
       );
     });
   });
+
+  describe("built-in mappings", () => {
+    it("formats Date as string with date-time format without hoisting", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasDate {
+  createdAt: Date;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasDate");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.createdAt).toEqual({
+        type: "string",
+        format: "date-time",
+      });
+    });
+  });
 });
