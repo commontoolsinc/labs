@@ -59,6 +59,9 @@ import {
   scenarios as counterNestedHandlerCompositionScenarios,
 } from "./patterns/counter-nested-handler-composition.ts";
 import {
+  scenarios as counterNestedParameterizedScenarios,
+} from "./patterns/counter-nested-parameterized.ts";
+import {
   scenarios as counterNestedOptionalCellsScenarios,
 } from "./patterns/counter-nested-optional-cells.ts";
 import {
@@ -141,6 +144,7 @@ const allScenarios = [
   ...counterMutableTupleScenarios,
   ...counterNestedArrayObjectsScenarios,
   ...counterNestedHandlerCompositionScenarios,
+  ...counterNestedParameterizedScenarios,
   ...counterNestedOptionalCellsScenarios,
   ...counterNestedStreamScenarios,
   ...counterNoOpEventsScenarios,
