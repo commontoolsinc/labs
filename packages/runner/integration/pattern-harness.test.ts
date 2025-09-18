@@ -23,6 +23,9 @@ import {
   scenarios as counterHierarchicalDefaultsScenarios,
 } from "./patterns/counter-hierarchical-defaults.ts";
 import {
+  scenarios as counterHierarchicalKeyPathScenarios,
+} from "./patterns/counter-hierarchical-key-path.ts";
+import {
   scenarios as counterHistoryScenarios,
 } from "./patterns/counter-history-tracker.ts";
 import {
@@ -104,6 +107,7 @@ const allScenarios = [
   ...counterDynamicStepScenarios,
   ...counterHandlerSpawnScenarios,
   ...counterHierarchicalDefaultsScenarios,
+  ...counterHierarchicalKeyPathScenarios,
   ...counterHistoryScenarios,
   ...counterKeyedMapScenarios,
   ...boundedCounterScenarios,
