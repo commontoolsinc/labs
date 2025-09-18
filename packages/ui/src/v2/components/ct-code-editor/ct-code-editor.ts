@@ -18,6 +18,7 @@ import {
   CompletionContext,
   CompletionResult,
 } from "@codemirror/autocomplete";
+import { acceptCompletion } from "@codemirror/autocomplete";
 import {
   Decoration,
   DecorationSet,
@@ -670,6 +671,11 @@ export class CTCodeEditor extends BaseElement {
         activateOnTyping: true,
         closeOnBlur: true,
       }),
+      // Ensure Enter accepts the currently selected completion
+      keymap.of([{
+        key: "Enter",
+        run: (view) => acceptCompletion(view),
+      }]),
     ];
 
     // Add placeholder extension if specified
