@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/context.ts";
 import { isEventHandlerJsxAttribute } from "../types.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
-import { createDataFlowAnalyzer } from "../dependency.ts";
+import { createDataFlowAnalyzer } from "../dataflow.ts";
 import { rewriteExpression } from "../rewrite/rewrite.ts";
 
 export interface OpaqueRefRule {

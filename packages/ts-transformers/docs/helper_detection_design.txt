@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-`dependency.ts` previously special-cased certain call expressions by matching
+`dataflow.ts` previously special-cased certain call expressions by matching
 identifier text:
 
 - `BUILDER_FUNCTIONS` (recipe, lift, handler, derive, compute, render, ifElse,

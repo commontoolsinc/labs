@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { createDataFlowAnalyzer } from "../../src/opaque-ref/dependency.ts";
+import { createDataFlowAnalyzer } from "../../src/opaque-ref/dataflow.ts";
 
 export interface AnalysisHarnessResult {
   readonly sourceFile: ts.SourceFile;

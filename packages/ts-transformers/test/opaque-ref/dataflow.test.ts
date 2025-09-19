@@ -3,7 +3,7 @@ import { assert, assertEquals } from "@std/assert";
 
 import { analyseExpression } from "./harness.ts";
 
-describe("dependency analyzer", () => {
+describe("data flow analyzer", () => {
   it("marks ifElse predicate for selective rewriting", () => {
     const { analysis } = analyseExpression(
       "ifElse(state.count > 3, 'hi', 'bye')",

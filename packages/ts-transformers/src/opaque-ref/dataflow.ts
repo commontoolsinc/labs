@@ -43,7 +43,6 @@ export interface DataFlowAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  nodes: DataFlowNode[];
   graph: DataFlowGraph;
   rewriteHint?: RewriteHint;
 }
@@ -72,7 +71,7 @@ interface DataFlowScopeInternal {
 interface AnalyzerContext {
   nextNodeId: number;
   nextScopeId: number;
-  readonly nodes: DataFlowNode[];
+  readonly collectedNodes: DataFlowNode[];  // All nodes collected during analysis
   readonly scopes: Map<number, DataFlowScopeInternal>;
 }
 
@@ -80,7 +79,7 @@ interface InternalAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  nodes: DataFlowNode[];
+  localNodes: DataFlowNode[];  // Nodes from this expression subtree only
   rewriteHint?: RewriteHint;
 }
 
@@ -88,7 +87,7 @@ const emptyAnalysis = (): InternalAnalysis => ({
   containsOpaqueRef: false,
   requiresRewrite: false,
   dataFlows: [],
-  nodes: [],
+  localNodes: [],
   rewriteHint: undefined,
 });
 
@@ -96,19 +95,19 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   let contains = false;
   let requires = false;
   const dataFlows: ts.Expression[] = [];
-  const nodes: DataFlowNode[] = [];
+  const localNodes: DataFlowNode[] = [];
   for (const analysis of analyses) {
     if (!analysis) continue;
     contains ||= analysis.containsOpaqueRef;
     requires ||= analysis.requiresRewrite;
     dataFlows.push(...analysis.dataFlows);
-    nodes.push(...analysis.nodes);
+    localNodes.push(...analysis.localNodes);
   }
   return {
     containsOpaqueRef: contains,
     requiresRewrite: requires,
     dataFlows,
-    nodes,
+    localNodes,
     rewriteHint: undefined,
   };
 };
@@ -210,7 +209,7 @@ export function createDataFlowAnalyzer(
         parentId,
         scopeId: ownerScope.id,
       };
-      context.nodes.push(node);
+      context.collectedNodes.push(node);
       return node;
     };
 
@@ -297,7 +296,7 @@ export function createDataFlowAnalyzer(
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       if (isOpaqueRefType(type, checker)) {
@@ -306,7 +305,7 @@ export function createDataFlowAnalyzer(
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
@@ -315,7 +314,7 @@ export function createDataFlowAnalyzer(
           containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       return emptyAnalysis();
@@ -329,14 +328,14 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.nodes, expression.expression) ??
+          findParentNodeId(target.localNodes, expression.expression) ??
             null;
         const node = recordDataFlow(expression, scope, parentId);
         return {
           containsOpaqueRef: true,
           requiresRewrite: target.requiresRewrite,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       const propertySymbol = getMemberSymbol(expression, checker);
@@ -345,13 +344,13 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.nodes, expression.expression) ?? null;
+          findParentNodeId(target.localNodes, expression.expression) ?? null;
         const node = recordDataFlow(expression, scope, parentId);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       if (isImplicitOpaqueRefExpression(expression)) {
@@ -359,20 +358,20 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.nodes, expression.expression) ?? null;
+          findParentNodeId(target.localNodes, expression.expression) ?? null;
         const node = recordDataFlow(expression, scope, parentId);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       return {
         containsOpaqueRef: target.containsOpaqueRef,
         requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
         dataFlows: target.dataFlows,
-        nodes: target.nodes,
+        localNodes: target.localNodes,
       };
     }
 
@@ -401,13 +400,13 @@ export function createDataFlowAnalyzer(
           return emptyAnalysis();
         }
         const parentId =
-          findParentNodeId(target.nodes, expression.expression) ?? null;
+          findParentNodeId(target.localNodes, expression.expression) ?? null;
         const node = recordDataFlow(expression, scope, parentId);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
-          nodes: [node],
+          localNodes: [node],
         };
       }
       return {
@@ -415,7 +414,7 @@ export function createDataFlowAnalyzer(
           argument.containsOpaqueRef,
         requiresRewrite: true,
         dataFlows: [...target.dataFlows],
-        nodes: [...target.nodes],
+        localNodes: [...target.localNodes],
       };
     }
 
@@ -449,10 +448,10 @@ export function createDataFlowAnalyzer(
           ...whenTrue.dataFlows,
           ...whenFalse.dataFlows,
         ],
-        nodes: [
-          ...condition.nodes,
-          ...whenTrue.nodes,
-          ...whenFalse.nodes,
+        localNodes: [
+          ...condition.localNodes,
+          ...whenTrue.localNodes,
+          ...whenFalse.localNodes,
         ],
       };
     }
@@ -464,7 +463,7 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: left.containsOpaqueRef || right.containsOpaqueRef,
         requiresRewrite: left.containsOpaqueRef || right.containsOpaqueRef,
         dataFlows: [...left.dataFlows, ...right.dataFlows],
-        nodes: [...left.nodes, ...right.nodes],
+        localNodes: [...left.localNodes, ...right.localNodes],
       });
     }
 
@@ -477,7 +476,7 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: operand.containsOpaqueRef,
         requiresRewrite: operand.containsOpaqueRef,
         dataFlows: operand.dataFlows,
-        nodes: operand.nodes,
+        localNodes: operand.localNodes,
       };
     }
 
@@ -489,7 +488,7 @@ export function createDataFlowAnalyzer(
         containsOpaqueRef: parts.some((part) => part.containsOpaqueRef),
         requiresRewrite: parts.some((part) => part.containsOpaqueRef),
         dataFlows: parts.flatMap((part) => part.dataFlows),
-        nodes: parts.flatMap((part) => part.nodes),
+        localNodes: parts.flatMap((part) => part.localNodes),
       });
     }
 
@@ -554,7 +553,7 @@ export function createDataFlowAnalyzer(
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
           dataFlows: combined.dataFlows,
-          nodes: combined.nodes,
+          localNodes: combined.localNodes,
           rewriteHint,
         };
       }
@@ -567,7 +566,7 @@ export function createDataFlowAnalyzer(
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
           dataFlows: combined.dataFlows,
-          nodes: combined.nodes,
+          localNodes: combined.localNodes,
           rewriteHint,
         };
       }
@@ -577,7 +576,7 @@ export function createDataFlowAnalyzer(
         requiresRewrite: combined.containsOpaqueRef ||
           combined.requiresRewrite,
         dataFlows: combined.dataFlows,
-        nodes: combined.nodes,
+        localNodes: combined.localNodes,
         rewriteHint,
       };
     }
@@ -644,16 +643,17 @@ export function createDataFlowAnalyzer(
     const context: AnalyzerContext = {
       nextNodeId: 0,
       nextScopeId: 0,
-      nodes: [],
+      collectedNodes: [],
       scopes: new Map(),
     };
     const rootScope = createScope(context, null, []);
     const result = analyzeExpression(expression, rootScope, context);
     const scopes = Array.from(context.scopes.values()).map(toDataFlowScope);
+    const { localNodes: _, ...resultWithoutNodes } = result;
     return {
-      ...result,
+      ...resultWithoutNodes,
       graph: {
-        nodes: context.nodes,
+        nodes: context.collectedNodes,
         scopes,
         rootScopeId: rootScope.id,
       },
