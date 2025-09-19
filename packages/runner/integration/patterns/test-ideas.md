@@ -244,3 +244,161 @@ current offline harness.
 - [ ] Counter with derive-driven handler enablement — disable handlers when
       derive indicates invalid state and ensure scenario respects disable
       toggles.
+- [ ] Markdown preview toggle pattern — switch raw text and preview ensure
+      formatting derive updates when handlers change content.
+- [ ] Form wizard stepper pattern — advance gated multi-step flows ensure
+      invalid steps halt progress until fixes arrive.
+- [ ] Dynamic form schema loader pattern — swap field manifests live ensure
+      lifted schemas rebuild inputs without stale defaults.
+- [ ] Address form normalization pattern — standardize address inputs ensure
+      casing and components recombine into formatted output.
+- [ ] Shopping cart aggregation pattern — total line items with rules ensure
+      discounts apply via derived pricing cells consistently.
+- [ ] Inventory reorder threshold pattern — flag low stock entries ensure
+      derived alerts react to threshold and stock adjustments.
+- [ ] Catalog search facets pattern — filter catalog by selections ensure
+      handlers sync facet toggles with filtered result lists.
+- [ ] Saved search subscription pattern — persist saved query payloads ensure
+      appended subscriptions replay triggers in harness runs.
+- [ ] Notification preference pattern — configure channel settings ensure
+      derived schedules reflect per-channel frequency changes.
+- [ ] Chat reaction tracker pattern — track reactions per message ensure nested
+      reaction counts roll up totals on every handler.
+- [ ] Support ticket triage pattern — assign tickets with priority ensure
+      derived SLA countdowns track escalations per queue.
+- [ ] Workflow state machine pattern — enforce allowed transitions ensure
+      history derive records every move and rejected jump.
+- [ ] Kanban board grouping pattern — group tasks into columns ensure handlers
+      move tasks and derived WIP limits flag overloads.
+- [ ] Sprint burndown pattern — project remaining work daily ensure lifted
+      history produces burndown curve after updates.
+- [ ] Issue dependency graph pattern — manage dependency edges ensure derived
+      order validates acyclic structure post updates.
+- [ ] Release checklist pattern — gate releases on task completion ensure
+      readiness flips only when all checklist items pass.
+- [ ] Undo history stack pattern — capture undoable states ensure handlers
+      manage twin stacks and derived pointer location.
+- [ ] Redo stack pattern — replay undone actions orderly ensure redo
+      availability toggles when undo stack mutates.
+- [ ] Template gallery pattern — browse templates by category ensure handlers
+      filter categories and derived tiles refresh.
+- [ ] Email inbox threading pattern — group related emails ensure derived
+      threads reorder by latest timestamp updates.
+- [ ] User permission matrix pattern — toggle role permissions ensure derived
+      per-role summaries stay accurate after changes.
+- [ ] Org chart hierarchy pattern — maintain reporting tree ensure handlers
+      relocate staff and derived chains stay valid.
+- [ ] Calendar availability pattern — merge shared availability ensure derived
+      free slots recompute after block edits.
+- [ ] Meeting scheduler pattern — propose meeting slots ensure vote handlers
+      update consensus pick with tie breakers.
+- [ ] Goal progress tracker pattern — track milestones toward goal ensure
+      derived percent updates when milestone weights shift.
+- [ ] Budget planner pattern — allocate funds across categories ensure derived
+      totals enforce overall balance constraints.
+- [ ] Expense reimbursement pattern — approve expense claims ensure handlers set
+      statuses and derived totals reflect payouts.
+- [ ] Invoice generator pattern — assemble invoices from items ensure derived
+      totals include taxes and discounts accurately.
+- [ ] Subscription billing pattern — manage plan billing cycles ensure derived
+      next invoice date updates after plan changes.
+- [ ] Currency conversion pattern — convert between currencies ensure derived
+      amounts follow handler updates to rate table.
+- [ ] Inventory shipment tracker pattern — track supplier shipments ensure
+      derived ETAs adjust as status or milestone cells change.
+- [ ] Logistics routing pattern — assign packages to routes ensure derived load
+      metrics enforce capacity per route.
+- [ ] Warehouse bin map pattern — map items to storage bins ensure handlers
+      relocate inventory and derived occupancy stays.
+- [ ] Menu planner pattern — plan meals across schedule ensure derived shopping
+      list aggregates ingredients by day.
+- [ ] Recipe ingredient scaler pattern — scale servings easily ensure derived
+      ingredient list multiplies accurately per size.
+- [ ] Nutritional tracker pattern — record nutrient intake ensure derived totals
+      compare against daily goals per nutrient.
+- [ ] Workout routine planner pattern — schedule workouts ensure derived volume
+      per muscle group updates with edits.
+- [ ] Sleep journal pattern — log sleep sessions with tags ensure derived
+      averages compute per tag and weekday grouping.
+- [ ] Mood diary pattern — capture mood entries with context ensure derived
+      sentiment breakdown updates by tag and time.
+- [ ] Medication adherence pattern — track medication schedule ensure derived
+      adherence percentage reflects doses taken.
+- [ ] Patient vitals dashboard pattern — monitor vitals history ensure derived
+      alerts trigger when readings hit critical ranges.
+- [ ] Clinical trial enrollment pattern — screen participants ensure derived
+      eligible list responds to criteria toggles.
+- [ ] Education course planner pattern — arrange course modules ensure derived
+      timeline updates when modules reorder.
+- [ ] Assignment grading matrix pattern — record student grades ensure derived
+      averages compute per student and assignment.
+- [ ] Student attendance tracker pattern — track attendance logs ensure derived
+      summaries highlight absences per session.
+- [ ] Curriculum prerequisite graph pattern — validate readiness ensure derived
+      eligible modules update when completions change.
+- [ ] Library checkout system pattern — manage loans and holds ensure derived
+      availability updates as handlers issue actions.
+- [ ] Research citation manager pattern — organize citations ensure derived
+      bibliographies regroup by topic and style.
+- [ ] Content publishing workflow pattern — shepherd draft review ensure derived
+      queue orders drafts by priority and schedule.
+- [ ] Editorial calendar pattern — schedule publication dates ensure derived
+      calendar view groups entries by channel.
+- [ ] Media playlist curator pattern — curate playlists ensure handlers reorder
+      tracks and derived runtime recalcs.
+- [ ] Podcast episode planner pattern — plan episode segments ensure derived
+      outline strings segment order and timing.
+- [ ] Image gallery variant pattern — manage per-device variants ensure derived
+      selection mirrors active device mode cells.
+- [ ] Design token switcher pattern — toggle design tokens ensure derived token
+      bundle reflects theme swaps instantly.
+- [ ] Component library catalog pattern — catalog UI components ensure derived
+      prop coverage updates when recipes register.
+- [ ] Feature usage analytics pattern — track feature events ensure derived
+      metrics bucket counts by feature and cohort.
+- [ ] Experiment assignment pattern — assign users to tests ensure derived
+      balances hold allocation ratios across groups.
+- [ ] Funnel analytics pattern — model funnel stages ensure derived drop-off
+      metrics update when events stream in.
+- [ ] Heatmap aggregation pattern — aggregate interaction points ensure derived
+      grid normalizes intensity per coordinate bucket.
+- [ ] Search relevance tuning pattern — tweak search weighting ensure derived
+      scoring sample reflects weight adjustments.
+- [ ] Recommendation feedback pattern — collect reactions ensure derived
+      precision metrics update after feedback events.
+- [ ] Segment builder pattern — define audience rules ensure derived membership
+      snapshot refreshes on rule edits.
+- [ ] User journey map pattern — map journey milestones ensure derived timeline
+      strings milestones with annotations.
+- [ ] Survey response analyzer pattern — analyze survey data ensure derived
+      stats compute per question and demographic.
+- [ ] Customer satisfaction tracker pattern — track csat trends ensure derived
+      moving averages update with new survey entries.
+- [ ] Lead scoring pattern — score leads on signals ensure derived weights
+      adjust totals per signal mutation.
+- [ ] CRM pipeline pattern — track deals by stage ensure derived forecasts sum
+      weighted amounts across stages.
+- [ ] Quote configuration pattern — configure quote options ensure derived price
+      recalculates when option cells toggle.
+- [ ] Order fulfillment tracker pattern — monitor order flow ensure derived
+      counts split orders by fulfillment status.
+- [ ] Support macro library pattern — manage canned replies ensure derived
+      filters group macros by topic and usage.
+- [ ] Call center schedule pattern — schedule support shifts ensure derived
+      coverage flags gaps across time blocks.
+- [ ] Incident response playbook pattern — guide incident steps ensure derived
+      escalation flags trigger when tasks stall.
+- [ ] Security vulnerability tracker pattern — track vulns lifecycle ensure
+      derived risk scores roll up by severity and system.
+- [ ] Compliance checklist pattern — track compliance tasks ensure derived gap
+      report highlights overdue obligations.
+- [ ] Document signature workflow pattern — collect signatures ensure derived
+      status shows next signer and outstanding steps.
+- [ ] Legal clause library pattern — curate clause templates ensure derived
+      filters surface clauses by topic and region.
+- [ ] Procurement request pattern — route procurement approvals ensure derived
+      spending summary updates per approval result.
+- [ ] Vendor risk assessment pattern — score vendor responses ensure derived
+      risk tiers update when answers change.
+- [ ] Asset lifecycle tracker pattern — manage asset stages ensure derived
+      depreciation recalculates as lifecycle moves.
