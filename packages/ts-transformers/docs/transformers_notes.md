@@ -21,8 +21,8 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 - **Shared context** – `core/context.ts` centralises the TypeScript checker,
   cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting,
   and import management.
-- **Dependency analysis** – `opaque-ref/dependency.ts` walks expressions to
-  collect reactive dependencies, handles most scope boundaries, and records
+- **Data flow analysis** – `opaque-ref/dependency.ts` walks expressions to
+  collect reactive data flows, handles most scope boundaries, and records
   provenance so map callbacks typed as `any` can still be derived.
 - **Rewrite helpers** – `opaque-ref/rewrite/**` modules handle property access,
   binary/call/template expressions, ternaries, unary `!`, and container rewrites
@@ -47,7 +47,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 | Area                                                                    | Impact                                                   | Notes |
 | ----------------------------------------------------------------------- | -------------------------------------------------------- | ----- |
 | **Optional-chain predicates**                                           | `!cellRef?.length` still bypasses `derive`, so           |       |
-| runtime may read a `Cell` eagerly.                                      | Need dependency support for                              |       |
+| runtime may read a `Cell` eagerly.                                      | Need data flow support for                              |       |
 | `PropertyAccessChain` and a rewrite that preserves optional semantics.  |                                                          |       |
 | **Closures**                                                            | Functions that capture reactive values (e.g.             |       |
 | `() => count + 1`) aren’t rewritten, so callbacks read opaque values at |                                                          |       |
@@ -57,7 +57,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 | **Async/await & template literals**                                     | Reactive identifiers inside                              |       |
 | `await` expressions or template strings aren't wrapped automatically.   |                                                          |       |
 | **Function body analysis**                                              | Only `return` statements analyzed in functions.          |       |
-| Side effects and assignments are missed.                                | Causes reactive dependencies to be overlooked.           |       |
+| Side effects and assignments are missed.                                | Causes reactive data flows to be overlooked.           |       |
 | **Postfix unary operations**                                            | `x++` and `x--` not handled by emitters.                 |       |
 | **Testing depth**                                                       | No unit or perf suites beyond fixtures; closure/optional |       |
 | scenarios lack runtime integration coverage.                            |                                                          |       |
@@ -71,15 +71,15 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 
 ### Phase 1: Foundation Cleanup
 
-1. **Rename "dependency" to "data flow"**
-   - Update all type names (DependencyAnalysis → DataFlowAnalysis, etc.)
-   - Update variable names throughout codebase
-   - Update comments and documentation
+1. **✅ Rename "dependency" to "data flow"**
+   - ✅ Update all type names (DependencyAnalysis → DataFlowAnalysis, etc.)
+   - ✅ Update variable names throughout codebase
+   - ✅ Update comments and documentation
 
 2. **Data structure consolidation**
    - Merge internal/external scope representations
    - Create single canonical DataFlowAnalysis result
-   - Eliminate duplication between nodes/dependencies/graph
+   - Eliminate duplication between nodes/dataFlows/graph
 
 3. **Fix normalization semantics**
    - Stop aggressive property stripping
@@ -96,7 +96,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 1. **Fix function body analysis**
    - Analyze all statements, not just returns
    - Handle side effects and assignments
-   - Track dependencies in intermediate computations
+   - Track data flows in intermediate computations
 
 2. **Improve parameter detection**
    - Build parameter metadata once during analysis
@@ -112,12 +112,12 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 ### Phase 3: Architecture Extensions
 
 1. **Optional-chain predicate support**
-   - Extend dependency normalisation to recognise optional chains
+   - Extend data flow normalisation to recognise optional chains
    - Update unary rule to emit `derive(cellRef, ref => !(ref?.length))`
    - Add fixtures and unit coverage
 
 2. **Closure capture rewriting**
-   - Introduce capture-aware dependency walk
+   - Introduce capture-aware data flow walk
    - Add closure rule for wrapped reactive values
    - Cover map callbacks, inline handlers, nested closures
 
