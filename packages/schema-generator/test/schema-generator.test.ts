@@ -93,4 +93,141 @@ type CalculatorRequest = {
       expect(schema).toEqual({});
     });
   });
+
+  describe("anonymous recursion", () => {
+    it("hoists anonymous recursive types with synthetic definitions", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+type Wrapper = {
+  node: {
+    value: string;
+    next?: Wrapper["node"];
+  };
+};`;
+      const { type, checker } = await getTypeFromCode(code, "Wrapper");
+
+      const schema = generator.generateSchema(type, checker);
+      const root = schema as Record<string, unknown>;
+      const properties = root.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+      const definitions = root.definitions as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(properties?.node).toEqual({
+        $ref: "#/definitions/AnonymousType_1",
+      });
+      expect(definitions).toBeDefined();
+      expect(Object.keys(definitions ?? {})).toContain("AnonymousType_1");
+      expect(JSON.stringify(schema)).not.toContain(
+        "Anonymous recursive type",
+      );
+    });
+  });
+
+  describe("built-in mappings", () => {
+    it("formats Date as string with date-time format without hoisting", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasDate {
+  createdAt: Date;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasDate");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.createdAt).toEqual({
+        type: "string",
+        format: "date-time",
+      });
+    });
+
+    it("formats URL as string with uri format without hoisting", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasUrl {
+  homepage: URL;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasUrl");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.homepage).toEqual({
+        type: "string",
+        format: "uri",
+      });
+    });
+
+    it("formats Uint8Array as permissive true schema", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface BinaryHolder {
+  data: Uint8Array;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "BinaryHolder");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, unknown>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.data).toBe(true);
+    });
+
+    it("formats ArrayBuffer as permissive true schema", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface BufferHolder {
+  buffer: ArrayBuffer;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "BufferHolder");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, unknown>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.buffer).toBe(true);
+    });
+
+    it("collapses unions of native binary types", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasImage {
+  image: string | Uint8Array | ArrayBuffer | URL;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasImage");
+
+      const schema = generator.generateSchema(type, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown> | boolean>
+        | undefined;
+
+      expect(objectSchema.definitions).toBeUndefined();
+      expect(props?.image).toEqual({
+        anyOf: [
+          { type: "string" },
+          true,
+          true,
+          { type: "string", format: "uri" },
+        ],
+      });
+    });
+  });
 });

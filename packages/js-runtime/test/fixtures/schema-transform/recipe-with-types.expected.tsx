@@ -17,6 +17,7 @@ type InputEventType = {
     };
 };
 const inputSchema = {
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         title: {
@@ -26,21 +27,27 @@ const inputSchema = {
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string",
-                        default: ""
-                    }
-                },
-                required: ["text"]
+                $ref: "#/definitions/Item"
             },
             default: []
         }
     },
-    required: ["title", "items"]
+    required: ["title", "items"],
+    definitions: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    default: ""
+                }
+            },
+            required: ["text"]
+        }
+    }
 } as const satisfies JSONSchema;
 const outputSchema = {
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         items_count: {
@@ -53,19 +60,24 @@ const outputSchema = {
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string",
-                        default: ""
-                    }
-                },
-                required: ["text"]
+                $ref: "#/definitions/Item"
             },
             default: []
         }
     },
-    required: ["items_count", "title", "items"]
+    required: ["items_count", "title", "items"],
+    definitions: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    default: ""
+                }
+            },
+            required: ["text"]
+        }
+    }
 } as const satisfies JSONSchema;
 // Handler that logs the message event
 const addItem = handler({
@@ -83,24 +95,30 @@ const addItem = handler({
     },
     required: ["detail"]
 } as const satisfies JSONSchema, {
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string",
-                        default: ""
-                    }
-                },
-                required: ["text"]
+                $ref: "#/definitions/Item"
             },
             asCell: true
         }
     },
-    required: ["items"]
+    required: ["items"],
+    definitions: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    default: ""
+                }
+            },
+            required: ["text"]
+        }
+    }
 } as const satisfies JSONSchema, (event: InputEventType, { items }: {
     items: Cell<Item[]>;
 }) => {
@@ -124,4 +142,3 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
         items_count
     };
 });
-

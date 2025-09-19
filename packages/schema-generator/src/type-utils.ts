@@ -1,5 +1,7 @@
 import ts from "typescript";
 
+import type { SchemaDefinition } from "./interface.ts";
+
 /**
  * Safe wrapper for TypeScript checker APIs that may throw in reduced environments
  */
@@ -115,6 +117,93 @@ export interface TypeWithInternals extends ts.Type {
   intrinsicName?: string;
 }
 
+const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
+  Date: { type: "string", format: "date-time" },
+  URL: { type: "string", format: "uri" },
+  ArrayBuffer: true,
+  ArrayBufferLike: true,
+  SharedArrayBuffer: true,
+  ArrayBufferView: true,
+  Uint8Array: true,
+  Uint8ClampedArray: true,
+  Int8Array: true,
+  Uint16Array: true,
+  Int16Array: true,
+  Uint32Array: true,
+  Int32Array: true,
+  Float32Array: true,
+  Float64Array: true,
+  BigInt64Array: true,
+  BigUint64Array: true,
+};
+
+const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
+
+/**
+ * Resolve the most relevant symbol for a type, accounting for references,
+ * aliases, and internal helper accessors exposed on some compiler objects.
+ */
+export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
+  if (type.symbol) return type.symbol;
+  const ref = type as ts.TypeReference;
+  if (ref.target?.symbol) return ref.target.symbol;
+  const alias = (type as TypeWithInternals).aliasSymbol;
+  if (alias) return alias;
+  return undefined;
+}
+
+export function cloneSchemaDefinition<T extends SchemaDefinition | boolean>(
+  schema: T,
+): T {
+  return (typeof schema === "boolean" ? schema : structuredClone(schema)) as T;
+}
+
+export function getNativeTypeSchema(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): SchemaDefinition | boolean | undefined {
+  const visited = new Set<ts.Type>();
+
+  const resolve = (
+    current: ts.Type,
+  ): SchemaDefinition | boolean | undefined => {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+
+    if ((current.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const base = checker.getBaseConstraintOfType(current);
+      if (base && base !== current) {
+        const resolved = resolve(base);
+        if (resolved !== undefined) return resolved;
+      }
+      const defaultConstraint = checker.getDefaultFromTypeParameter?.(current);
+      if (defaultConstraint && defaultConstraint !== current) {
+        const resolved = resolve(defaultConstraint);
+        if (resolved !== undefined) return resolved;
+      }
+      return undefined;
+    }
+
+    if ((current.flags & ts.TypeFlags.Intersection) !== 0) {
+      const intersection = current as ts.IntersectionType;
+      for (const part of intersection.types) {
+        const resolved = resolve(part);
+        if (resolved !== undefined) return resolved;
+      }
+    }
+
+    const symbol = getPrimarySymbol(current);
+    const name = symbol?.getName();
+    if (name && NATIVE_TYPE_NAMES.has(name)) {
+      return cloneSchemaDefinition(NATIVE_TYPE_SCHEMAS[name]!);
+    }
+
+    return undefined;
+  };
+
+  return resolve(type);
+}
+
 /**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
@@ -124,7 +213,8 @@ export function getNamedTypeKey(
   type: ts.Type,
 ): string | undefined {
   // Prefer direct symbol name; fall back to target symbol for TypeReference
-  let name = type.symbol?.name;
+  const symbol = type.symbol;
+  let name = symbol?.name;
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
   if (!name && (objectFlags & ts.ObjectFlags.Reference)) {
     const ref = type as unknown as ts.TypeReference;
@@ -136,13 +226,55 @@ export function getNamedTypeKey(
     if (aliasName) name = aliasName;
   }
   if (!name || name === "__type") return undefined;
+  // Exclude property/method-like symbols (member names), which are not real named types
+  const symFlags = symbol?.flags ?? 0;
+  if (
+    (symFlags & ts.SymbolFlags.Property) !== 0 ||
+    (symFlags & ts.SymbolFlags.Method) !== 0 ||
+    (symFlags & ts.SymbolFlags.Signature) !== 0 ||
+    (symFlags & ts.SymbolFlags.Function) !== 0 ||
+    (symFlags & ts.SymbolFlags.TypeParameter) !== 0
+  ) {
+    return undefined;
+  }
+  const decls = symbol?.declarations ?? [];
+  if (
+    decls.some((d) =>
+      ts.isPropertySignature(d) || ts.isMethodSignature(d) ||
+      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d)
+    )
+  ) {
+    return undefined;
+  }
   // Avoid promoting wrappers/containers into definitions
   if (name === "Array" || name === "ReadonlyArray") return undefined;
   if (name === "Cell" || name === "Stream" || name === "Default") {
     return undefined;
   }
-  if (name === "Date") return undefined;
+  if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
   return name;
+}
+
+/**
+ * Determine if a type represents a callable/constructable function value.
+ */
+export function isFunctionLike(type: ts.Type): boolean {
+  if (type.getCallSignatures().length > 0) return true;
+  if (type.getConstructSignatures().length > 0) return true;
+
+  const symbol = type.symbol;
+  if (!symbol) return false;
+
+  const flags = symbol.flags;
+  if (
+    (flags & ts.SymbolFlags.Function) !== 0 ||
+    (flags & ts.SymbolFlags.Method) !== 0 ||
+    (flags & ts.SymbolFlags.Signature) !== 0
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -248,6 +380,11 @@ export function getArrayElementInfo(
   // Only object-like types can be arrays. Prevent primitives like string
   // from being treated as array-like due to numeric index access.
   if ((type.flags & ts.TypeFlags.Object) === 0) {
+    return undefined;
+  }
+
+  const native = getNativeTypeSchema(type, checker);
+  if (native !== undefined) {
     return undefined;
   }
   // Check ObjectFlags.Reference for Array/ReadonlyArray
