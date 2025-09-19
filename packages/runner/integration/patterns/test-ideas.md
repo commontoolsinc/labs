@@ -93,7 +93,7 @@ current offline harness.
       metadata, and navigate between stages via handlers.
 - [ ] Counter with dependent defaults — compute default of one cell based on
       argument of another via `lift` during initialization.
-- [ ] Counter with derived summary object — consolidate multiple cells into
+- [x] Counter with derived summary object — consolidate multiple cells into
       derived object and assert deep properties.
 - [ ] Counter with pattern cloning handler — handler replaces child pattern
       instance while preserving state snapshot.

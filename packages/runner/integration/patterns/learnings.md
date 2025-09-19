@@ -16,3 +16,6 @@
 - Building range-style controls benefits from a single helper that clamps values
   and records history, letting both direct value sets and relative nudges share
   consistent percentage calculations.
+- Consolidating multiple reactive slices into a derived summary object works
+  smoothly when `lift` normalizes each input first and a separate `derive`
+  projects string labels for assertions.
