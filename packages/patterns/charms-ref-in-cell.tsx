@@ -15,10 +15,16 @@ import {
   UI,
 } from "commontools";
 
+type Charm = {
+  [NAME]: string;
+  [UI]: string;
+  [key: string]: any;
+};
+
 // Define interfaces for type safety
 interface AddCharmState {
   charm: any;
-  cellRef: Cell<any[]>;
+  cellRef: Cell<Charm[]>;
   isInitialized: Cell<boolean>;
 }
 const AddCharmSchema = toSchema<AddCharmState>();
@@ -52,7 +58,7 @@ const addCharmAndNavigate = lift(
 
 // Handler that creates a new charm instance and adds it to the array.
 // Each invocation creates its own isInitialized cell for tracking.
-const createSimpleRecipe = handler<unknown, { cellRef: Cell<any[]> }>(
+const createSimpleRecipe = handler<unknown, { cellRef: Cell<Charm[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false);
@@ -69,7 +75,7 @@ const createSimpleRecipe = handler<unknown, { cellRef: Cell<any[]> }>(
 );
 
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler<unknown, { charm: any }>(
+const goToCharm = handler<unknown, { charm: Charm }>(
   (_, { charm }) => {
     console.log("goToCharm clicked");
     return navigateTo(charm);
@@ -78,7 +84,7 @@ const goToCharm = handler<unknown, { charm: any }>(
 
 // Recipe input/output type
 type RecipeInOutput = {
-  cellRef: Default<any[], []>;
+  cellRef: Default<Charm[], []>;
 };
 
 // Main recipe that manages an array of charm references
