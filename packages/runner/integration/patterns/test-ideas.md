@@ -155,7 +155,7 @@ current offline harness.
       state via derive and hides others.
 - [ ] Counter with nested str interpolations — strings composed of multiple
       nested str templates.
-- [ ] Counter with parent-child event bubbling simulation — handler in parent
+- [x] Counter with parent-child event bubbling simulation — handler in parent
       forwards event payload into child handler stream.
 - [ ] Counter with stateful derive caching — derive caches prior result array
       and verifies identity when data unchanged.
