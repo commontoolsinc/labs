@@ -22,6 +22,7 @@ import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
 import { extractCommonToolsMetadata } from "../common-tools-metadata.ts";
+import { createBuilder } from "../builder/factory.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -220,9 +221,17 @@ export class Engine extends EventTarget implements Harness {
     source: string,
     metadata?: { helpers?: string[]; aliases?: string[] },
   ): HarnessedFunction {
-    const runtimeExports = this.internals?.runtimeExports;
+    const runtimeCommontools = (() => {
+      const runtimeExports = this.internals?.runtimeExports;
+      if (runtimeExports?.commontools) return runtimeExports.commontools;
+      try {
+        return createBuilder(this.ctRuntime).commontools;
+      } catch {
+        return undefined;
+      }
+    })();
 
-    if (!runtimeExports || !runtimeExports.commontools) {
+    if (!runtimeCommontools) {
       return eval(source);
     }
 
@@ -250,7 +259,7 @@ export class Engine extends EventTarget implements Harness {
       `${prologue}${prologue ? "\n" : ""}return (${source});`,
     );
 
-    return factory(runtimeExports.commontools);
+    return factory(runtimeCommontools);
   }
 
   // Returns a map of runtime module types.
