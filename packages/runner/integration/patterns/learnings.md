@@ -28,3 +28,5 @@
 - Using a normalizing `lift` for union-shaped state keeps loading and ready
   branches aligned so handlers only manage transitions while derived views
   remain stable.
+- Sanitizing ring buffer capacity with a derived cell lets handlers trim history
+  consistently while keeping argument mutations simple.
