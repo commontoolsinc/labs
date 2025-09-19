@@ -197,6 +197,29 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
       content,
     });
 
+    const sidebar = <>
+      <div>
+        <label>Backlinks</label>
+        <ct-vstack>
+          {backlinks.map((charm: MentionableCharm) => (
+            <ct-button onClick={handleCharmLinkClicked({ charm })}>
+              {charm[NAME]}
+            </ct-button>
+          ))}
+        </ct-vstack>
+      </div>
+      <details>
+        <summary>Mentioned Charms</summary>
+        <ct-vstack>
+          {mentioned.map((charm: MentionableCharm) => (
+            <ct-button onClick={handleCharmLinkClicked({ charm })}>
+              {charm[NAME]}
+            </ct-button>
+          ))}
+        </ct-vstack>
+      </details>
+    </>
+
     return {
       [NAME]: title,
       [UI]: (
@@ -242,29 +265,9 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
               {ifElse(
                 expandChat,
                 chat,
-                <>
-                  <div>
-                    <label>Backlinks</label>
-                    <ct-vstack>
-                      {backlinks.map((charm: MentionableCharm) => (
-                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                          {charm[NAME]}
-                        </ct-button>
-                      ))}
-                    </ct-vstack>
-                  </div>
-                  <details>
-                    <summary>Mentioned Charms</summary>
-                    <ct-vstack>
-                      {mentioned.map((charm: MentionableCharm) => (
-                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                          {charm[NAME]}
-                        </ct-button>
-                      ))}
-                    </ct-vstack>
-                  </details>
-                </>,
-              )}
+                sidebar,
+              ) as any }
+              {/* TODO(bf): why is this not compliant with JSX types? */}
             </aside>
           </ct-autolayout>
         </ct-screen>
