@@ -134,6 +134,9 @@ import {
   scenarios as nestedCounterScenarios,
 } from "./patterns/nested-counters.ts";
 import {
+  scenarios as securityVulnerabilityTrackerScenarios,
+} from "./patterns/security-vulnerability-tracker.ts";
+import {
   scenarios as sleepJournalScenarios,
 } from "./patterns/sleep-journal.ts";
 import {
@@ -149,6 +152,7 @@ const allScenarios = [
   ...nestedCounterScenarios,
   ...composedCounterScenarios,
   ...listManagerScenarios,
+  ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
