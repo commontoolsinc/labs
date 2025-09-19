@@ -1,33 +1,33 @@
 import ts from "typescript";
 
-import type { DependencyNode, OpaqueDependencyGraph } from "./dependency.ts";
+import type { DataFlowGraph, DataFlowNode } from "./dependency.ts";
 
-export interface NormalisedDependency {
+export interface NormalisedDataFlow {
   readonly canonicalKey: string;
   readonly expression: ts.Expression;
-  readonly occurrences: readonly DependencyNode[];
+  readonly occurrences: readonly DataFlowNode[];
   readonly scopeId: number;
 }
 
-export interface NormalisedDependencySet {
-  readonly all: readonly NormalisedDependency[];
-  readonly byCanonicalKey: ReadonlyMap<string, NormalisedDependency>;
+export interface NormalisedDataFlowSet {
+  readonly all: readonly NormalisedDataFlow[];
+  readonly byCanonicalKey: ReadonlyMap<string, NormalisedDataFlow>;
 }
 
-export function normaliseDependencies(
-  graph: OpaqueDependencyGraph,
-): NormalisedDependencySet {
-  const nodesById = new Map<number, DependencyNode>();
+export function normaliseDataFlows(
+  graph: DataFlowGraph,
+): NormalisedDataFlowSet {
+  const nodesById = new Map<number, DataFlowNode>();
   for (const node of graph.nodes) nodesById.set(node.id, node);
 
   const grouped = new Map<string, {
     expression: ts.Expression;
-    nodes: DependencyNode[];
+    nodes: DataFlowNode[];
     scopeId: number;
   }>();
   const nodeToGroup = new Map<number, string>();
 
-  const normaliseExpression = (node: DependencyNode): ts.Expression => {
+  const normaliseExpression = (node: DataFlowNode): ts.Expression => {
     let current: ts.Expression = node.expression;
 
     while (true) {
@@ -117,7 +117,7 @@ export function normaliseDependencies(
   const filtered = Array.from(grouped.entries())
     .filter(([canonicalKey]) => !suppressed.has(canonicalKey));
 
-  const all: NormalisedDependency[] = filtered.map(([canonicalKey, value]) => ({
+  const all: NormalisedDataFlow[] = filtered.map(([canonicalKey, value]) => ({
     canonicalKey,
     expression: value.expression,
     occurrences: value.nodes,
@@ -141,12 +141,12 @@ const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
   return inner.pos >= outer.pos && inner.end <= outer.end;
 };
 
-export function selectDependenciesWithin(
-  set: NormalisedDependencySet,
+export function selectDataFlowsWithin(
+  set: NormalisedDataFlowSet,
   node: ts.Node,
-): NormalisedDependency[] {
-  return set.all.filter((dependency) =>
-    dependency.occurrences.some((occurrence) =>
+): NormalisedDataFlow[] {
+  return set.all.filter((dataFlow) =>
+    dataFlow.occurrences.some((occurrence) =>
       isWithin(node, occurrence.expression)
     )
   );

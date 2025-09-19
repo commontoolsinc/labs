@@ -8,14 +8,14 @@ import { detectCallKind } from "../call-kind.ts";
 import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
-import type { NormalisedDependency } from "../normalise.ts";
-import type { OpaqueExpressionAnalysis } from "../dependency.ts";
+import type { NormalisedDataFlow } from "../normalise.ts";
+import type { DataFlowAnalysis } from "../dependency.ts";
 import { isFunctionParameter } from "../types.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
   scopeId: number,
-  analysis: OpaqueExpressionAnalysis,
+  analysis: DataFlowAnalysis,
   checker: ts.TypeChecker,
 ): boolean {
   const scope = analysis.graph.scopes.find((candidate) =>
@@ -122,11 +122,11 @@ function resolvesToMapParameter(
   );
 }
 
-export function filterRelevantDependencies(
-  dependencies: readonly NormalisedDependency[],
-  analysis: OpaqueExpressionAnalysis,
+export function filterRelevantDataFlows(
+  dataFlows: readonly NormalisedDataFlow[],
+  analysis: DataFlowAnalysis,
   context: RewriteContext,
-): NormalisedDependency[] {
+): NormalisedDataFlow[] {
   const isParameterExpression = (expression: ts.Expression): boolean => {
     let current: ts.Expression = expression;
     while (true) {
@@ -154,11 +154,11 @@ export function filterRelevantDependencies(
     }
   };
 
-  return dependencies.filter((dependency) => {
+  return dataFlows.filter((dataFlow) => {
     if (
       originatesFromIgnoredParameter(
-        dependency.expression,
-        dependency.scopeId,
+        dataFlow.expression,
+        dataFlow.scopeId,
         analysis,
         context.checker,
       )
@@ -166,8 +166,8 @@ export function filterRelevantDependencies(
       return false;
     }
     if (
-      isParameterExpression(dependency.expression) &&
-      !resolvesToMapParameter(dependency.expression, context.checker)
+      isParameterExpression(dataFlow.expression) &&
+      !resolvesToMapParameter(dataFlow.expression, context.checker)
     ) {
       return false;
     }
@@ -188,18 +188,18 @@ export function createDeriveIdentifier(
   return context.factory.createIdentifier("derive");
 }
 
-export function createDeriveDependencyObject(
+export function createDeriveDataFlowObject(
   plan: BindingPlan,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression {
   const properties = plan.entries.map((entry, index) => {
-    const dependency = entry.dependency.expression;
-    if (ts.isIdentifier(dependency) && dependency.text === entry.propertyName) {
-      return factory.createShorthandPropertyAssignment(dependency, undefined);
+    const dataFlow = entry.dataFlow.expression;
+    if (ts.isIdentifier(dataFlow) && dataFlow.text === entry.propertyName) {
+      return factory.createShorthandPropertyAssignment(dataFlow, undefined);
     }
     return factory.createPropertyAssignment(
       factory.createIdentifier(entry.propertyName),
-      dependency,
+      dataFlow,
     );
   });
   return factory.createObjectLiteralExpression(properties, false);
@@ -251,7 +251,7 @@ export function createDeriveCallForExpression(
 
   if (!plan.usesObjectBinding && plan.entries.length === 1) {
     const [entry] = plan.entries;
-    if (entry && entry.dependency.expression === expression) {
+    if (entry && entry.dataFlow.expression === expression) {
       return expression;
     }
   }
@@ -275,8 +275,8 @@ export function createDeriveCallForExpression(
 
   const deriveIdentifier = createDeriveIdentifier(context);
   const deriveArgs = plan.usesObjectBinding
-    ? [createDeriveDependencyObject(plan, factory), arrowFunction]
-    : [plan.entries[0]!.dependency.expression, arrowFunction];
+    ? [createDeriveDataFlowObject(plan, factory), arrowFunction]
+    : [plan.entries[0]!.dataFlow.expression, arrowFunction];
 
   const callExpression = factory.createCallExpression(
     deriveIdentifier,

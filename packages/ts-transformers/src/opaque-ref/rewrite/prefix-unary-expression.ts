@@ -5,13 +5,13 @@ import type { Emitter } from "./types.ts";
 import { createBindingPlan } from "./bindings.ts";
 import {
   createDeriveCallForExpression,
-  filterRelevantDependencies,
+  filterRelevantDataFlows,
 } from "./helpers.ts";
-import { normaliseDependencies } from "../normalise.ts";
+import { normaliseDataFlows } from "../normalise.ts";
 
 export const emitPrefixUnaryExpression: Emitter = ({
   expression,
-  dependencies,
+  dataFlows,
   context,
   analysis,
 }) => {
@@ -19,31 +19,31 @@ export const emitPrefixUnaryExpression: Emitter = ({
   if (expression.operator !== ts.SyntaxKind.ExclamationToken) {
     return undefined;
   }
-  if (dependencies.all.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
-  let relevantDependencies = filterRelevantDependencies(
-    dependencies.all,
+  let relevantDataFlows = filterRelevantDataFlows(
+    dataFlows.all,
     analysis,
     context,
   );
 
-  if (relevantDependencies.length === 0 && analysis.containsOpaqueRef) {
+  if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = context.analyze(expression.operand);
-    const fallbackDependencies = normaliseDependencies(
+    const fallbackDataFlows = normaliseDataFlows(
       fallbackAnalysis.graph,
     );
-    relevantDependencies = filterRelevantDependencies(
-      fallbackDependencies.all,
+    relevantDataFlows = filterRelevantDataFlows(
+      fallbackDataFlows.all,
       fallbackAnalysis,
       context,
     );
 
-    if (relevantDependencies.length === 0) return undefined;
-  } else if (relevantDependencies.length === 0) {
+    if (relevantDataFlows.length === 0) return undefined;
+  } else if (relevantDataFlows.length === 0) {
     return undefined;
   }
 
-  const plan = createBindingPlan(relevantDependencies);
+  const plan = createBindingPlan(relevantDataFlows);
   const rewritten = createDeriveCallForExpression(expression, plan, context);
   if (rewritten === expression) return undefined;
 
