@@ -69,7 +69,7 @@ current offline harness.
       of counters and assert selected output.
 - [ ] Counter with cross-field validation — derive boolean error flag based on
       two numeric cells.
-- [ ] Counter with enumeration state — use string union for state transitions
+- [x] Counter with enumeration state — use string union for state transitions
       and handlers for next/previous steps.
 - [x] Counter with reorderable list — handler swaps positions in array and
       scenario checks order.
