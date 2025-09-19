@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "./pattern-harness.ts";
-import { scenarios as boundedCounterScenarios } from "./patterns/bounded-counter.ts";
+import {
+  scenarios as boundedCounterScenarios,
+} from "./patterns/bounded-counter.ts";
 import {
   scenarios as counterBatchedHandlerUpdatesScenarios,
 } from "./patterns/counter-batched-handler-updates.ts";
@@ -19,6 +21,9 @@ import {
 import {
   scenarios as counterConditionalBranchScenarios,
 } from "./patterns/counter-conditional-branch.ts";
+import {
+  scenarios as counterConditionalIfElseScenarios,
+} from "./patterns/counter-conditional-ifelse.ts";
 import {
   scenarios as counterDelayedComputeScenarios,
 } from "./patterns/counter-delayed-compute.ts";
@@ -168,6 +173,7 @@ const allScenarios = [
   ...counterComputedDefaultStringsScenarios,
   ...counterComplexUnionStateScenarios,
   ...counterConditionalBranchScenarios,
+  ...counterConditionalIfElseScenarios,
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
   ...counterDerivedChecksumScenarios,

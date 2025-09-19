@@ -47,7 +47,7 @@ current offline harness.
       template to assert interpolation.
 - [ ] Handler spawning nested pattern — have handler instantiate child pattern
       and merge results into parent cell.
-- [ ] Conditional UI branch using `ifElse` — build pattern that returns
+- [x] Conditional UI branch using `ifElse` — build pattern that returns
       different trees based on argument flag and assert branch swap.
 - [ ] Counter aggregator pattern — accept list of counters and derive sum via
       map + lift.
