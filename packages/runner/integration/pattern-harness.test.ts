@@ -14,6 +14,9 @@ import {
   scenarios as counterComputedDefaultStringsScenarios,
 } from "./patterns/counter-computed-default-strings.ts";
 import {
+  scenarios as counterComplexUnionStateScenarios,
+} from "./patterns/counter-complex-union-state.ts";
+import {
   scenarios as counterConditionalBranchScenarios,
 } from "./patterns/counter-conditional-branch.ts";
 import {
@@ -143,6 +146,7 @@ const allScenarios = [
   ...counterBatchedHandlerUpdatesScenarios,
   ...counterDeduplicatedListScenarios,
   ...counterComputedDefaultStringsScenarios,
+  ...counterComplexUnionStateScenarios,
   ...counterConditionalBranchScenarios,
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
