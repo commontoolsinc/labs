@@ -42,3 +42,6 @@
 - Keeping grouped counters as an append-only log and deriving totals with
   `lift`/`derive` keeps the handler simple while still exposing stable views for
   assertions and labels.
+- Allowing a single `lift` to drive both derived summaries and a `createCell`
+  snapshot makes it easy to expose aggregate risk data while keeping handlers
+  focused on mutations.
