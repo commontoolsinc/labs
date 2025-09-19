@@ -65,10 +65,12 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 ## Near-Term Roadmap
 
 ### Phase 0: Documentation & Planning
+
 - ✅ Document all known gaps and limitations
 - Document planned architectural improvements
 
 ### Phase 1: Foundation Cleanup
+
 1. **Rename "dependency" to "data flow"**
    - Update all type names (DependencyAnalysis → DataFlowAnalysis, etc.)
    - Update variable names throughout codebase
@@ -90,6 +92,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
    - Unify shared functionality
 
 ### Phase 2: Correctness Improvements
+
 1. **Fix function body analysis**
    - Analyze all statements, not just returns
    - Handle side effects and assignments
@@ -107,6 +110,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
    - Test each improvement as it's implemented
 
 ### Phase 3: Architecture Extensions
+
 1. **Optional-chain predicate support**
    - Extend dependency normalisation to recognise optional chains
    - Update unary rule to emit `derive(cellRef, ref => !(ref?.length))`
@@ -118,7 +122,10 @@ outstanding gaps, and the focused roadmap we intend to pursue.
    - Cover map callbacks, inline handlers, nested closures
 
 ### Future Extensions
-- **Proactive OpaqueRef conversion**: Add new rule to automatically wrap non-OpaqueRef values that should be reactive, leveraging the cleaned-up architecture to identify candidates and apply appropriate transformations
+
+- **Proactive OpaqueRef conversion**: Add new rule to automatically wrap
+  non-OpaqueRef values that should be reactive, leveraging the cleaned-up
+  architecture to identify candidates and apply appropriate transformations
 
 ## Longer-Term Considerations
 
