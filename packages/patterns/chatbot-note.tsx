@@ -59,6 +59,28 @@ const handleCharmLinkClicked = handler(
   },
 );
 
+const handleNewBacklink = handler<
+  {
+    detail: {
+      text: string;
+    };
+  },
+  {
+    allCharms: Cell<MentionableCharm[]>;
+  }
+>(({ detail }, { allCharms }) => {
+  console.log("new charm", detail.text);
+  const n = ChatbotNote({
+    title: detail.text,
+    content: "",
+    allCharms,
+    messages: [],
+    expandChat: false,
+  });
+
+  return navigateTo(n);
+});
+
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
@@ -113,8 +135,8 @@ const readNote = handler<
   },
 );
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "Note",
+const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
+  "Chatbot Note",
   ({ title, expandChat, messages, content, allCharms }) => {
     const tools = {
       editNote: {
@@ -175,6 +197,31 @@ export default recipe<LLMTestInput, LLMTestResult>(
       content,
     });
 
+    const sidebar = (
+      <>
+        <div>
+          <label>Backlinks</label>
+          <ct-vstack>
+            {backlinks.map((charm: MentionableCharm) => (
+              <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                {charm[NAME]}
+              </ct-button>
+            ))}
+          </ct-vstack>
+        </div>
+        <details>
+          <summary>Mentioned Charms</summary>
+          <ct-vstack>
+            {mentioned.map((charm: MentionableCharm) => (
+              <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                {charm[NAME]}
+              </ct-button>
+            ))}
+          </ct-vstack>
+        </details>
+      </>
+    );
+
     return {
       [NAME]: title,
       [UI]: (
@@ -200,38 +247,30 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 $mentionable={allCharms}
                 $mentioned={mentioned}
                 onbacklink-click={handleCharmLinkClick({})}
+                onbacklink-create={handleNewBacklink({
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
+                })}
                 language="text/markdown"
                 wordWrap
                 tabIndent
                 lineNumbers
               />
-              <details>
-                <summary>Mentioned Charms</summary>
-                <ct-vstack>
-                  {mentioned.map((charm: MentionableCharm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                      {charm[NAME]}
-                    </ct-button>
-                  ))}
-                </ct-vstack>
-              </details>
-              <details>
-                <summary>Backlinks</summary>
-                <ct-vstack>
-                  {backlinks.map((charm: MentionableCharm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                      {charm[NAME]}
-                    </ct-button>
-                  ))}
-                </ct-vstack>
-              </details>
             </ct-screen>
 
-            {ifElse(
-              expandChat,
-              chat,
-              null,
-            )}
+            <aside slot="left">
+              Coming soon... chat list.
+            </aside>
+
+            <aside slot="right">
+              {ifElse(
+                expandChat,
+                chat,
+                sidebar,
+              ) as any}
+              {/* TODO(bf): why is this not compliant with JSX types? */}
+            </aside>
           </ct-autolayout>
         </ct-screen>
       ),
@@ -242,3 +281,5 @@ export default recipe<LLMTestInput, LLMTestResult>(
     };
   },
 );
+
+export default ChatbotNote;
