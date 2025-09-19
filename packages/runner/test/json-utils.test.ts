@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createJsonSchema } from "../src/builder/json-utils.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+import {
+  createJsonSchema,
+  toJSONWithLegacyAliases,
+} from "../src/builder/json-utils.ts";
+import {
+  isOpaqueRefMarker,
+  type JSONSchema,
+  type Opaque,
+  type OpaqueRef,
+  type ShadowRef,
+} from "../src/builder/types.ts";
+import type { LegacyAlias } from "../src/sigil-types.ts";
+import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -313,6 +325,63 @@ describe("createJsonSchema", () => {
             },
           },
         },
+      },
+    });
+  });
+});
+
+describe("toJSONWithLegacyAliases", () => {
+  it("preserves metadata when expanding shadow ref aliases", () => {
+    const cell = {
+      export: () => ({ frame: undefined }),
+      [isOpaqueRefMarker]: true,
+    } as unknown as OpaqueRef<unknown>;
+    const paths = new Map<OpaqueRef<unknown>, PropertyKey[]>([
+      [cell, ["root"]],
+    ]);
+    const schema = { type: "string" as const };
+    const alias: LegacyAlias = {
+      $alias: {
+        cell: { shadowOf: cell } as ShadowRef,
+        path: ["child"],
+        schema,
+      },
+    };
+
+    const result = toJSONWithLegacyAliases(
+      alias as unknown as Opaque<LegacyAlias>,
+      paths,
+    );
+
+    expect(result).toEqual({
+      $alias: {
+        path: ["root", "child"],
+        schema,
+      },
+    });
+  });
+
+  it("increments numeric alias cells without dropping schemas", () => {
+    const alias: LegacyAlias = {
+      $alias: {
+        cell: 2,
+        path: ["child"],
+        schema: { type: "boolean" as const },
+        rootSchema: { type: "boolean" as const },
+      },
+    };
+
+    const result = toJSONWithLegacyAliases(
+      alias as unknown as Opaque<LegacyAlias>,
+      new Map(),
+    );
+
+    expect(result).toEqual({
+      $alias: {
+        cell: 3,
+        path: ["child"],
+        schema: { type: "boolean" as const },
+        rootSchema: { type: "boolean" as const },
       },
     });
   });

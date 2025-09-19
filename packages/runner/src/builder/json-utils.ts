@@ -29,7 +29,10 @@ export function toJSONWithLegacyAliases(
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
 ): JSONValue | undefined {
-  // Convert regular cells to opaque refs
+  // Turn strongly typed builder values into legacy JSON structures while
+  // preserving alias metadata for consumers that still rely on it.
+
+  // Convert regular cells and results from Cell.get() to opaque refs
   if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
 
   // Verify that opaque refs are not in a parent frame
@@ -45,12 +48,13 @@ export function toJSONWithLegacyAliases(
     if (external) return external as JSONValue;
   }
 
+  // Otherwise it's an internal reference. Extract the schema and output a link.
   if (isOpaqueRef(value) || isShadowRef(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
-      // Get schema from exported value if available
+      // Add schema from exported value if available
       const exported = isOpaqueRef(value) ? value.export() : undefined;
       return {
         $alias: {
@@ -67,8 +71,13 @@ export function toJSONWithLegacyAliases(
     } else throw new Error(`Cell not found in paths`);
   }
 
+  // If we encounter a link, it's from a nested recipe.
   if (isLegacyAlias(value)) {
     const alias = (value as LegacyAlias).$alias;
+    // If this was a shadow ref, i.e. a closed over reference, see whether
+    // we're now at the level that is should be resolved to the actual cell.
+    // (i.e. we're generating the recipe from which the closed over reference
+    // was captured)
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
@@ -81,18 +90,30 @@ export function toJSONWithLegacyAliases(
             `Shadow ref alias with parent cell not found in current frame`,
           );
         }
+        // If we're not at the top level, just emit it again. This will be
+        // converted once the higher level recipe is being processed.
         return value as JSONValue;
       }
       if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
+      // If in top frame, it's an alias to another cell on the process cell. So
+      // we emit the alias without the cell reference (it will be filled in
+      // later with the process cell) and concatenate the path.
+      const { cell: _, ...aliasWithoutCell } = alias;
       return {
         $alias: {
+          // Keep any extra metadata (schema, rootSchema, etc.) that might have
+          // been attached to the legacy alias originally.
+          ...aliasWithoutCell,
           path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
         },
       } satisfies LegacyAlias;
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
+      // If we encounter an existing alias and it isn't an absolute reference
+      // with a cell id, then increase the nesting level.
       return {
         $alias: {
-          cell: ((alias.cell as number) ?? 0) + 1,
+          ...alias, // Preserve existing metadata.
+          cell: ((alias.cell as number) ?? 0) + 1, // Increase nesting level.
           path: alias.path as (string | number)[],
         },
       } satisfies LegacyAlias;
@@ -101,13 +122,17 @@ export function toJSONWithLegacyAliases(
     }
   }
 
+  // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
       toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
   }
 
+  // If this is an object or a recipe, process each key recursively.
   if (isRecord(value) || isRecipe(value)) {
+    // If this is a recipe, call its toJSON method to get the properly
+    // serialized version.
     const valueToProcess = (isRecipe(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
       ? (value as unknown as toJSON).toJSON() as Record<string, any>
@@ -128,8 +153,10 @@ export function toJSONWithLegacyAliases(
       }
     }
 
+    // Retain the original recipe reference for downstream processing.
     if (isRecipe(value)) result[unsafe_originalRecipe] = value;
 
+    // If the object is empty, return undefined instead.
     return hasValue || Object.keys(result).length === 0 ? result : undefined;
   }
 
