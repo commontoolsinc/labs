@@ -54,3 +54,7 @@
 - Keeping `ifElse` branches shaped identically makes it easy to map nested
   fields with `lift`, letting assertions target branch-specific details without
   extra schema helpers.
+- Sequencing multiple events in one scenario step stays predictable when a
+  `start` handler resets sanitized cells before subsequent `apply` handlers run;
+  batch events in the harness will progress in order, so resetting step logs
+  keeps derived counts aligned with the scenario's expectations.
