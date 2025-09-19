@@ -203,10 +203,14 @@ export class CTAutoLayout extends BaseElement {
 
   private _updateChildren() {
     this._children = Array.from(this.children);
-    this._leftEl = this._children.find((el) => el.getAttribute("slot") ===
-      "left") ?? null;
-    this._rightEl = this._children.find((el) => el.getAttribute("slot") ===
-      "right") ?? null;
+    this._leftEl = this._children.find((el) =>
+      el.getAttribute("slot") ===
+        "left"
+    ) ?? null;
+    this._rightEl = this._children.find((el) =>
+      el.getAttribute("slot") ===
+        "right"
+    ) ?? null;
     this._hasLeft = !!this._leftEl;
     this._hasRight = !!this._rightEl;
   }
@@ -274,25 +278,35 @@ export class CTAutoLayout extends BaseElement {
       <!-- Sidebar toggle controls (desktop only) -->
       <div class="controls" part="controls">
         ${this._hasLeft
-          ? html`<button @click=${() => this._toggleLeft()} title="Toggle left">
+          ? html`
+            <button @click="${() => this._toggleLeft()}" title="Toggle left">
               ${this._leftOpen ? "Hide Left" : "Show Left"}
-            </button>`
-          : null}
-        ${this._hasRight
-          ? html`<button @click=${() => this._toggleRight()} title="Toggle right">
+            </button>
+          `
+          : null} ${this._hasRight
+          ? html`
+            <button @click="${() => this._toggleRight()}" title="Toggle right">
               ${this._rightOpen ? "Hide Right" : "Show Right"}
-            </button>`
+            </button>
+          `
           : null}
       </div>
 
       <!-- Tabs (only visible on mobile) -->
       <div class="tabs">
-        ${tabs.map((name, index) => html`
-          <button
-            class="${classMap({ tab: true, active: index === this._activeTab })}"
-            @click="${() => this._handleTabClick(index)}"
-          >${name}</button>
-        `)}
+        ${tabs.map((name, index) =>
+          html`
+            <button
+              class="${classMap({
+                tab: true,
+                active: index === this._activeTab,
+              })}"
+              @click="${() => this._handleTabClick(index)}"
+            >
+              ${name}
+            </button>
+          `
+        )}
       </div>
 
       <!-- Grid layout: left | content | right -->

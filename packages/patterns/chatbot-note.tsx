@@ -223,7 +223,9 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
                 $mentioned={mentioned}
                 onbacklink-click={handleCharmLinkClick({})}
                 onbacklink-create={handleNewBacklink({
-                  allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
                 })}
                 language="text/markdown"
                 wordWrap
@@ -264,8 +266,6 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
                 </>,
               )}
             </aside>
-
-
           </ct-autolayout>
         </ct-screen>
       ),
