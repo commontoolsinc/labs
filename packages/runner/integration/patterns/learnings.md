@@ -34,3 +34,5 @@
   trim history consistently while keeping argument mutations simple.
 - Capturing removal metadata in a dedicated cell makes it easy to restore child
   recipes with the same identifier while keeping summary cells deterministic.
+- Recipes compose well: treat child recipes as reusable components so shared
+  behaviors stay centralized and scenarios stay focused on wiring.
