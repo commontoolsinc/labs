@@ -53,6 +53,9 @@ import {
   scenarios as counterHierarchicalDefaultsScenarios,
 } from "./patterns/counter-hierarchical-defaults.ts";
 import {
+  scenarios as counterGroupedSummaryScenarios,
+} from "./patterns/counter-grouped-summary.ts";
+import {
   scenarios as counterHierarchicalKeyPathScenarios,
 } from "./patterns/counter-hierarchical-key-path.ts";
 import {
@@ -166,6 +169,7 @@ const allScenarios = [
   ...counterFilteredProjectionScenarios,
   ...counterHandlerSpawnScenarios,
   ...counterHierarchicalDefaultsScenarios,
+  ...counterGroupedSummaryScenarios,
   ...counterHierarchicalKeyPathScenarios,
   ...counterHistoryScenarios,
   ...counterKeyedMapScenarios,
