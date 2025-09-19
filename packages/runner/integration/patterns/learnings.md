@@ -36,3 +36,6 @@
   recipes with the same identifier while keeping summary cells deterministic.
 - Recipes compose well: treat child recipes as reusable components so shared
   behaviors stay centralized and scenarios stay focused on wiring.
+- Sanitizing session arrays with a single `lift` before deriving grouped
+  summaries keeps tag and weekday aggregations deterministic while a dedicated
+  cell for the latest entry simplifies scenario assertions.
