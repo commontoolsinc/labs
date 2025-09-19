@@ -29,7 +29,7 @@ const RecipeStateSchema = toSchema<RecipeState>();
 // instead of storing the charm directly. This avoids a "pointer of pointers"
 // error that occurs when a Cell directly contains another Cell/charm reference.
 type RecipeInOutput = {
-  cellRef: Default<{ charm: any }, { charm: undefined }>;
+  cellRef: Default<{ charm: any }, { charm: null }>;
 };
 
 // the simple charm (to which we'll store a reference within a cell)
