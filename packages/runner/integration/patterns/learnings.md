@@ -58,3 +58,6 @@
   `start` handler resets sanitized cells before subsequent `apply` handlers run;
   batch events in the harness will progress in order, so resetting step logs
   keeps derived counts aligned with the scenario's expectations.
+- Enumerations stay deterministic when a `lift` normalizes the state cell and
+  handlers gate mutations; logging each transition via `createCell` yields
+  stable audit trails for the harness assertions.
