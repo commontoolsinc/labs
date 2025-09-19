@@ -75,7 +75,7 @@ export function toJSONWithLegacyAliases(
   if (isLegacyAlias(value)) {
     const alias = (value as LegacyAlias).$alias;
     // If this was a shadow ref, i.e. a closed over reference, see whether
-    // we're now at the level that is should be resolved to the actual cell.
+    // we're now at the level that it should be resolved to the actual cell.
     // (i.e. we're generating the recipe from which the closed over reference
     // was captured)
     if (isShadowRef(alias.cell)) {
