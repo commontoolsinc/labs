@@ -195,7 +195,7 @@ current offline harness.
       of each item relative to total.
 - [x] Counter with hierarchical key path updates — handler updates deep paths
       using iterated key calls.
-- [ ] Counter with reference equality assertions — ensure derived cell maintains
+- [x] Counter with reference equality assertions — ensure derived cell maintains
       reference stability when inputs unchanged.
 - [ ] Counter with scenario-driven multi-step events — send sequence of events
       within single step and assert cumulative result.
