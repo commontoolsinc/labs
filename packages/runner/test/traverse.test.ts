@@ -7,29 +7,8 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import {
-  type BaseMemoryAddress,
-  CompoundCycleTracker,
-  type IAttestation,
-  SchemaObjectTraverser,
-} from "../src/traverse.ts";
-import type { Immutable } from "@commontools/utils/types";
-import type { JSONValue, SchemaContext } from "../src/builder/types.ts";
+import { SchemaObjectTraverser } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
-
-class TestTraverser extends SchemaObjectTraverser<BaseMemoryAddress> {
-  traverseDocument(doc: IAttestation) {
-    const tracker = new CompoundCycleTracker<
-      Immutable<JSONValue>,
-      SchemaContext | undefined
-    >();
-    return this.traverseDAG(doc, tracker);
-  }
-
-  override traverse(doc: IAttestation) {
-    return this.traverseDocument(doc);
-  }
-}
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
