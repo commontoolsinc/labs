@@ -133,6 +133,9 @@ import {
   scenarios as counterReferenceEqualityScenarios,
 } from "./patterns/counter-with-reference-equality-assertions.ts";
 import {
+  scenarios as counterScenarioDrivenMultiStepScenarios,
+} from "./patterns/counter-scenario-driven-multi-step.ts";
+import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
@@ -208,6 +211,7 @@ const allScenarios = [
   ...counterRangeSliderScenarios,
   ...counterRingBufferHistoryScenarios,
   ...counterReferenceEqualityScenarios,
+  ...counterScenarioDrivenMultiStepScenarios,
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,

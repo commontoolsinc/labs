@@ -197,7 +197,7 @@ current offline harness.
       using iterated key calls.
 - [x] Counter with reference equality assertions — ensure derived cell maintains
       reference stability when inputs unchanged.
-- [ ] Counter with scenario-driven multi-step events — send sequence of events
+- [x] Counter with scenario-driven multi-step events — send sequence of events
       within single step and assert cumulative result.
 - [ ] Counter with nested pattern removal and recreation — remove child pattern
       then recreate and ensure fresh state.
