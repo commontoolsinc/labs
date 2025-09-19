@@ -6,6 +6,7 @@ import {
   h,
   handler,
   NAME,
+  OpaqueRef,
   navigateTo,
   recipe,
   toSchema,
@@ -58,7 +59,27 @@ const handleCharmLinkClick = handler<
   return navigateTo(detail.charm);
 });
 
-export default recipe<Input, Output>(
+const handleNewBacklink = handler<
+  {
+    detail: {
+      text: string;
+    };
+  },
+  {
+    allCharms: Cell<MentionableCharm[]>;
+  }
+>(({ detail }, { allCharms }) => {
+  console.log("new charm", detail.text);
+  const n = Note({
+    title: detail.text,
+    content: "",
+    allCharms,
+  });
+
+  return navigateTo(n);
+});
+
+const Note = recipe<Input, Output>(
   "Note",
   ({ title, content, allCharms }) => {
     const mentioned = cell<MentionableCharm[]>([]);
@@ -79,6 +100,9 @@ export default recipe<Input, Output>(
             $mentionable={allCharms}
             $mentioned={mentioned}
             onbacklink-click={handleCharmLinkClick({})}
+            onbacklink-create={handleNewBacklink({
+              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>
+            })}
             language="text/markdown"
             wordWrap
             tabIndent
@@ -92,3 +116,5 @@ export default recipe<Input, Output>(
     };
   },
 );
+
+export default Note;
