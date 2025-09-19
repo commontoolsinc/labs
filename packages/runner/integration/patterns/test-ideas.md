@@ -282,7 +282,7 @@ current offline harness.
       availability toggles when undo stack mutates.
 - [ ] Template gallery pattern — browse templates by category ensure handlers
       filter categories and derived tiles refresh.
-- [ ] Email inbox threading pattern — group related emails ensure derived
+- [x] Email inbox threading pattern — group related emails ensure derived
       threads reorder by latest timestamp updates.
 - [ ] User permission matrix pattern — toggle role permissions ensure derived
       per-role summaries stay accurate after changes.
