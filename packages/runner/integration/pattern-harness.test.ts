@@ -82,6 +82,9 @@ import {
   scenarios as counterNestedArrayObjectsScenarios,
 } from "./patterns/counter-nested-array-objects.ts";
 import {
+  scenarios as counterNestedDeriveWatchersScenarios,
+} from "./patterns/counter-nested-derive-watchers.ts";
+import {
   scenarios as counterNestedHandlerCompositionScenarios,
 } from "./patterns/counter-nested-handler-composition.ts";
 import {
@@ -200,6 +203,7 @@ const allScenarios = [
   ...counterLiftFormattingScenarios,
   ...counterMutableTupleScenarios,
   ...counterNestedArrayObjectsScenarios,
+  ...counterNestedDeriveWatchersScenarios,
   ...counterNestedHandlerCompositionScenarios,
   ...counterNestedParameterizedScenarios,
   ...counterNestedOptionalCellsScenarios,
