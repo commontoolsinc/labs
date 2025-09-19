@@ -21,7 +21,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 - **Shared context** – `core/context.ts` centralises the TypeScript checker,
   cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting,
   and import management.
-- **Data flow analysis** – `opaque-ref/dependency.ts` walks expressions to
+- **Data flow analysis** – `opaque-ref/dataflow.ts` walks expressions to
   collect reactive data flows, handles most scope boundaries, and records
   provenance so map callbacks typed as `any` can still be derived.
 - **Rewrite helpers** – `opaque-ref/rewrite/**` modules handle property access,
@@ -141,7 +141,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 ## References
 
 - `packages/ts-transformers/src/opaque-ref/transformer.ts`
-- `packages/ts-transformers/src/opaque-ref/dependency.ts`
+- `packages/ts-transformers/src/opaque-ref/dataflow.ts`
 - `packages/ts-transformers/src/opaque-ref/rewrite/**`
 - `packages/ts-transformers/test/fixtures`
 - `packages/schema-generator/docs/refactor_plan.md` (historical context; see

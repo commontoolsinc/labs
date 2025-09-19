@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { DataFlowGraph, DataFlowNode } from "./dependency.ts";
+import type { DataFlowGraph, DataFlowNode } from "./dataflow.ts";
 
 export interface NormalisedDataFlow {
   readonly canonicalKey: string;

@@ -10,7 +10,7 @@ import {
   createDataFlowAnalyzer,
   type DataFlowAnalysis,
   dedupeExpressions,
-} from "./dependency.ts";
+} from "./dataflow.ts";
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 

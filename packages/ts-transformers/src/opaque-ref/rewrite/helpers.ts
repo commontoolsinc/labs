@@ -9,7 +9,7 @@ import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
 import type { NormalisedDataFlow } from "../normalise.ts";
-import type { DataFlowAnalysis } from "../dependency.ts";
+import type { DataFlowAnalysis } from "../dataflow.ts";
 import { isFunctionParameter } from "../types.ts";
 
 function originatesFromIgnoredParameter(

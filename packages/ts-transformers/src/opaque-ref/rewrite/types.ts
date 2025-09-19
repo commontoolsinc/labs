@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { DataFlowAnalysis } from "../dependency.ts";
+import type { DataFlowAnalysis } from "../dataflow.ts";
 import type { NormalisedDataFlowSet } from "../normalise.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
 
