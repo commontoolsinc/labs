@@ -15,8 +15,10 @@ Steps:
    unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions in `packages/runner/integration/patterns/`.
-   - Use CTS APIs (`handler`, `recipe`, `lift`, `derive`, `str`, `cell`,
-     `createCell`) to realize the described structure.
+   - Use CTS APIs (`handler`, `recipe`, `lift`, `str`, `cell`, `createCell`) to
+     realize the described structure. You can use `derive` as well, it is just a
+     convenience wrapper around lift: `derive(x, x => x+1)` is the same as
+     `lift(x => x+1)(x)`.
    - Do not use `compute` and `render` as they'll be deprecated.
    - Don't use `.setDefault`, instead use `Default<type, value>` in the type
      declaration.
