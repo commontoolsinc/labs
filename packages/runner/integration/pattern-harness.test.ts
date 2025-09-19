@@ -95,6 +95,9 @@ import {
   scenarios as counterOptionalFallbackScenarios,
 } from "./patterns/counter-optional-fallback.ts";
 import {
+  scenarios as counterParentChildBubbleScenarios,
+} from "./patterns/counter-parent-child-bubble.ts";
+import {
   scenarios as counterPersistenceDefaultsScenarios,
 } from "./patterns/counter-persistence-defaults.ts";
 import {
@@ -191,6 +194,7 @@ const allScenarios = [
   ...counterNoOpEventsScenarios,
   ...counterOptionalFallbackScenarios,
   ...counterOpaqueRefMapScenarios,
+  ...counterParentChildBubbleScenarios,
   ...counterPersistenceDefaultsScenarios,
   ...counterRichLabelScenarios,
   ...counterRenderTreeScenarios,

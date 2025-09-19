@@ -48,3 +48,6 @@
 - Keeping a cached summary cell and returning it when sanitized inputs match
   avoids unnecessary object churn, while an auxiliary memo cell can expose
   reference stability for harness assertions.
+- Parent handlers can bubble events by capturing the child's handler stream and
+  calling `send` directly; a small helper keeps the stream cast typed when
+  wiring parent and child recipes.
