@@ -122,6 +122,9 @@ import {
   scenarios as counterRingBufferHistoryScenarios,
 } from "./patterns/counter-ring-buffer-history.ts";
 import {
+  scenarios as counterReferenceEqualityScenarios,
+} from "./patterns/counter-with-reference-equality-assertions.ts";
+import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
@@ -194,6 +197,7 @@ const allScenarios = [
   ...counterRollingAverageScenarios,
   ...counterRangeSliderScenarios,
   ...counterRingBufferHistoryScenarios,
+  ...counterReferenceEqualityScenarios,
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,

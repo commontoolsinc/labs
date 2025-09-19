@@ -45,3 +45,6 @@
 - Allowing a single `lift` to drive both derived summaries and a `createCell`
   snapshot makes it easy to expose aggregate risk data while keeping handlers
   focused on mutations.
+- Keeping a cached summary cell and returning it when sanitized inputs match
+  avoids unnecessary object churn, while an auxiliary memo cell can expose
+  reference stability for harness assertions.
