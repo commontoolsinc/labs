@@ -388,7 +388,7 @@ current offline harness.
       coverage flags gaps across time blocks.
 - [ ] Incident response playbook pattern — guide incident steps ensure derived
       escalation flags trigger when tasks stall.
-- [ ] Security vulnerability tracker pattern — track vulns lifecycle ensure
+- [x] Security vulnerability tracker pattern — track vulns lifecycle ensure
       derived risk scores roll up by severity and system.
 - [ ] Compliance checklist pattern — track compliance tasks ensure derived gap
       report highlights overdue obligations.
