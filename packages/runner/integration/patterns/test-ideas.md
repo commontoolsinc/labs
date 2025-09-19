@@ -101,7 +101,7 @@ current offline harness.
       subtotal and parent derives grand total.
 - [ ] Counter with parallel arrays — keep names array in sync with counts array
       through handlers.
-- [ ] Counter with ring buffer history — maintain fixed-length history array
+- [x] Counter with ring buffer history — maintain fixed-length history array
       trimming oldest entries.
 - [ ] Counter with paginated segments — maintain page cell and derive slice of
       items for current page.
