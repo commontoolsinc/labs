@@ -209,7 +209,7 @@ current offline harness.
       only when condition true and assert absence otherwise.
 - [ ] Counter with aggregated error list — derive list of validation messages
       based on state.
-- [ ] Counter with derived canonical form — transform nested state into
+- [x] Counter with derived canonical form — transform nested state into
       canonical sorted structure for assertions.
 - [ ] Counter with state machine transitions — implement finite-state
       transitions with handlers and assert allowed moves.

@@ -19,3 +19,6 @@
 - Consolidating multiple reactive slices into a derived summary object works
   smoothly when `lift` normalizes each input first and a separate `derive`
   projects string labels for assertions.
+- Building canonical snapshots of nested counters is easier when handlers keep
+  raw order intact while derived views sort by normalized keys; recording
+  sanitized mutation strings keeps history assertions deterministic.
