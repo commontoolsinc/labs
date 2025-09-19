@@ -22,6 +22,7 @@ import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
+import { extractCommonToolsMetadata } from "../common-tools-metadata.ts";
 
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
@@ -223,12 +224,42 @@ export function createJsonSchema(
 
 export function moduleToJSON(module: Module) {
   const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
-  return {
+  const implementationSource = typeof module.implementation === "function"
+    ? module.implementation.toString()
+    : module.implementation;
+
+  const metadata = typeof implementationSource === "string"
+    ? extractCommonToolsMetadata(implementationSource)
+    : { helpers: [] as string[], aliases: [] as string[] };
+
+  const helperSet = new Set<string>(
+    Array.isArray(rest.helpers) ? rest.helpers : [],
+  );
+  metadata.helpers.forEach((helper) => helperSet.add(helper));
+
+  const aliasSet = new Set<string>(
+    Array.isArray(rest.commontoolsAliases) ? rest.commontoolsAliases : [],
+  );
+  metadata.aliases.forEach((alias) => aliasSet.add(alias));
+
+  const result: Record<string, unknown> = {
     ...rest,
-    implementation: typeof module.implementation === "function"
-      ? module.implementation.toString()
-      : module.implementation,
+    implementation: implementationSource,
   };
+
+  if (helperSet.size > 0) {
+    result.helpers = Array.from(helperSet).sort();
+  } else {
+    delete result.helpers;
+  }
+
+  if (aliasSet.size > 0) {
+    result.commontoolsAliases = Array.from(aliasSet).sort();
+  } else {
+    delete result.commontoolsAliases;
+  }
+
+  return result;
 }
 
 export function recipeToJSON(recipe: Recipe) {

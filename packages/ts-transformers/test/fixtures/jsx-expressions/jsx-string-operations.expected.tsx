@@ -31,25 +31,25 @@ export default recipe({
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
-        <h1>{commontools_1.derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => _v1 + ": " + _v2 + " " + _v3)}</h1>
-        <p>{commontools_1.derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => _v1 + _v2)}</p>
-        <p>{commontools_1.derive(state.firstName, _v1 => "Hello, " + _v1 + "!")}</p>
+        <h1>{derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => _v1 + ": " + _v2 + " " + _v3)}</h1>
+        <p>{derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => _v1 + _v2)}</p>
+        <p>{derive(state.firstName, _v1 => "Hello, " + _v1 + "!")}</p>
         
         <h3>Template Literals</h3>
-        <p>{commontools_1.derive(state.firstName, _v1 => `Welcome, ${_v1}!`)}</p>
-        <p>{commontools_1.derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => `Full name: ${_v1} ${_v2}`)}</p>
-        <p>{commontools_1.derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => `${_v1}: ${_v2} ${_v3}`)}</p>
+        <p>{derive(state.firstName, _v1 => `Welcome, ${_v1}!`)}</p>
+        <p>{derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => `Full name: ${_v1} ${_v2}`)}</p>
+        <p>{derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => `${_v1}: ${_v2} ${_v3}`)}</p>
         
         <h3>String Methods</h3>
-        <p>Uppercase: {commontools_1.derive(state.firstName, _v1 => _v1.toUpperCase())}</p>
-        <p>Lowercase: {commontools_1.derive(state.title, _v1 => _v1.toLowerCase())}</p>
-        <p>Length: {commontools_1.derive(state.message, _v1 => _v1.length)}</p>
-        <p>Substring: {commontools_1.derive(state.message, _v1 => _v1.substring(0, 5))}</p>
+        <p>Uppercase: {derive(state.firstName, _v1 => _v1.toUpperCase())}</p>
+        <p>Lowercase: {derive(state.title, _v1 => _v1.toLowerCase())}</p>
+        <p>Length: {derive(state.message, _v1 => _v1.length)}</p>
+        <p>Substring: {derive(state.message, _v1 => _v1.substring(0, 5))}</p>
         
         <h3>Mixed String and Number</h3>
-        <p>{commontools_1.derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => _v1 + " has " + _v2 + " items")}</p>
-        <p>{commontools_1.derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => `${_v1} has ${_v2} items`)}</p>
-        <p>Count as string: {commontools_1.derive(state.count, _v1 => "Count: " + _v1)}</p>
+        <p>{derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => _v1 + " has " + _v2 + " items")}</p>
+        <p>{derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => `${_v1} has ${_v2} items`)}</p>
+        <p>Count as string: {derive(state.count, _v1 => "Count: " + _v1)}</p>
       </div>),
     };
 });

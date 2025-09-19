@@ -21,6 +21,7 @@ import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
+import { extractCommonToolsMetadata } from "../common-tools-metadata.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -215,8 +216,41 @@ export class Engine extends EventTarget implements Harness {
     return this.internals.isolate.value(fn).invoke().inner();
   }
 
-  getInvocation(source: string): HarnessedFunction {
-    return eval(source);
+  getInvocation(
+    source: string,
+    metadata?: { helpers?: string[]; aliases?: string[] },
+  ): HarnessedFunction {
+    const runtimeExports = this.internals?.runtimeExports;
+
+    if (!runtimeExports || !runtimeExports.commontools) {
+      return eval(source);
+    }
+
+    const helpers = new Set<string>(metadata?.helpers ?? []);
+    const aliases = new Set<string>(metadata?.aliases ?? []);
+
+    const analysed = extractCommonToolsMetadata(source);
+    analysed.helpers.forEach((helper) => helpers.add(helper));
+    analysed.aliases.forEach((alias) => aliases.add(alias));
+
+    if (helpers.size === 0 && aliases.size === 0) {
+      return eval(source);
+    }
+
+    const aliasLines = Array.from(aliases).map((alias) =>
+      `const ${alias} = runtimeCommontools;`
+    );
+    const helperLines = Array.from(helpers).map((helper) =>
+      `const ${helper} = runtimeCommontools.${helper};`
+    );
+    const prologue = [...aliasLines, ...helperLines].join("\n");
+
+    const factory = new Function(
+      "runtimeCommontools",
+      `${prologue}${prologue ? "\n" : ""}return (${source});`,
+    );
+
+    return factory(runtimeExports.commontools);
   }
 
   // Returns a map of runtime module types.

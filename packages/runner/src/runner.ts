@@ -910,9 +910,13 @@ export class Runner implements IRunner {
         fn = cached as (inputs: any) => any;
       } else {
         // Fall back to evaluating and cache it
-        fn = this.runtime.harness.getInvocation(module.implementation) as (
-          inputs: any,
-        ) => any;
+        fn = this.runtime.harness.getInvocation(
+          module.implementation,
+          {
+            helpers: module.helpers,
+            aliases: module.commontoolsAliases,
+          },
+        ) as (inputs: any) => any;
         this.functionCache.set(module, fn);
       }
     } else {

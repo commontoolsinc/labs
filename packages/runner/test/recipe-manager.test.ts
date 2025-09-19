@@ -84,6 +84,64 @@ describe("RecipeManager program persistence", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
   });
 
+  it(
+    "evaluates compiled map helpers with metadata for runtime rehydration",
+    async () => {
+      const program: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents: [
+              "import {",
+              "  recipe,",
+              "  compute,",
+              "  derive,",
+              "  NAME,",
+              "  type Opaque,",
+              "} from 'commontools';",
+              "",
+              "type Charm = { [NAME]: string };",
+              "",
+              "export default recipe('SeededMap', () => {",
+              "  const seeded = compute<Charm[]>(() => ([",
+              "    { [NAME]: 'Alpha' },",
+              "    { [NAME]: 'Beta' },",
+              "  ]));",
+              "  const mapped = seeded.map((cell: Opaque<Charm>) =>",
+              "    derive(cell, (value) => value[NAME] ?? 'anon'),",
+              "  );",
+              "  return { mapped };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const compiled = await runtime.recipeManager.compileRecipe(program);
+      expect(compiled.nodes.some((node) =>
+        node.module.type === "javascript" &&
+        Array.isArray(node.module.helpers) &&
+        node.module.helpers.includes("NAME") &&
+        Array.isArray(node.module.commontoolsAliases) &&
+        node.module.commontoolsAliases.includes("commontools_1")
+      )).toBe(true);
+
+      const resultCell = runtime.getCell<{ mapped: unknown[] }>(
+        space,
+        "recipe-manager: seeded map",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, compiled, undefined, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      expect(result.getAsQueryResult()).toEqual({ mapped: ["Alpha", "Beta"] });
+    },
+  );
+
   it("register/save idempotency: saving same recipe id twice is harmless", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",

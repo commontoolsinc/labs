@@ -5,7 +5,6 @@ import {
   replaceOpaqueRefsWithParams,
 } from "../transforms.ts";
 import { detectCallKind } from "../call-kind.ts";
-import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
 import type { NormalisedDependency } from "../normalise.ts";
@@ -178,13 +177,6 @@ export function filterRelevantDependencies(
 export function createDeriveIdentifier(
   context: RewriteContext,
 ): ts.Expression {
-  const moduleAlias = getCommonToolsModuleAlias(context.sourceFile);
-  if (moduleAlias) {
-    return context.factory.createPropertyAccessExpression(
-      context.factory.createIdentifier(moduleAlias),
-      context.factory.createIdentifier("derive"),
-    );
-  }
   return context.factory.createIdentifier("derive");
 }
 

@@ -172,6 +172,8 @@ declare module "@commontools/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
+    helpers?: string[];
+    commontoolsAliases?: string[];
   }
 }
 
