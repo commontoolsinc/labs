@@ -25,3 +25,6 @@
 - Splitting filtered and excluded projections works best when a single `lift`
   sanitizes the source list so both derived slices stay in sync with threshold
   adjustments.
+- Using a normalizing `lift` for union-shaped state keeps loading and ready
+  branches aligned so handlers only manage transitions while derived views
+  remain stable.

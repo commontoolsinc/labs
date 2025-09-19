@@ -159,7 +159,7 @@ current offline harness.
       forwards event payload into child handler stream.
 - [ ] Counter with stateful derive caching — derive caches prior result array
       and verifies identity when data unchanged.
-- [ ] Counter with complex union state — manage union of shapes (e.g., loading |
+- [x] Counter with complex union state — manage union of shapes (e.g., loading |
       ready) and ensure transitions update cells correctly.
 - [ ] Counter with scenario-driven argument overrides — scenario modifies
       argument mid-test using runtime cell to simulate re-run.
