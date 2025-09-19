@@ -131,6 +131,9 @@ import {
   scenarios as nestedCounterScenarios,
 } from "./patterns/nested-counters.ts";
 import {
+  scenarios as sleepJournalScenarios,
+} from "./patterns/sleep-journal.ts";
+import {
   scenarios as toggleScenarios,
 } from "./patterns/toggle-derive-label.ts";
 import {
@@ -143,6 +146,7 @@ const allScenarios = [
   ...nestedCounterScenarios,
   ...composedCounterScenarios,
   ...listManagerScenarios,
+  ...sleepJournalScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,

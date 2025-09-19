@@ -318,7 +318,7 @@ current offline harness.
       compare against daily goals per nutrient.
 - [ ] Workout routine planner pattern — schedule workouts ensure derived volume
       per muscle group updates with edits.
-- [ ] Sleep journal pattern — log sleep sessions with tags ensure derived
+- [x] Sleep journal pattern — log sleep sessions with tags ensure derived
       averages compute per tag and weekday grouping.
 - [ ] Mood diary pattern — capture mood entries with context ensure derived
       sentiment breakdown updates by tag and time.
