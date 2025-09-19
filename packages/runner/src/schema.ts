@@ -817,8 +817,6 @@ export function generateHandlerSchema(
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  // TODO(@ubik2): Defaults here should be true, but I haven't changed the JSONSchema type
-  // to allow that yet
   return {
     type: "object",
     properties: {
