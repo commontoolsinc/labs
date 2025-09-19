@@ -61,3 +61,6 @@
 - Enumerations stay deterministic when a `lift` normalizes the state cell and
   handlers gate mutations; logging each transition via `createCell` yields
   stable audit trails for the harness assertions.
+- Chaining multiple `lift` transforms works reliably when each stage normalizes
+  its input first; downstream derived cells like parity flags only need to
+  reason about the sanitized shape from the previous lift.
