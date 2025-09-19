@@ -26,6 +26,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
+import Note from "./note.tsx";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -58,28 +59,6 @@ const handleCharmLinkClicked = handler(
     return navigateTo(charm);
   },
 );
-
-const handleNewBacklink = handler<
-  {
-    detail: {
-      text: string;
-    };
-  },
-  {
-    allCharms: Cell<MentionableCharm[]>;
-  }
->(({ detail }, { allCharms }) => {
-  console.log("new charm", detail.text);
-  const n = ChatbotNote({
-    title: detail.text,
-    content: "",
-    allCharms,
-    messages: [],
-    expandChat: false,
-  });
-
-  return navigateTo(n);
-});
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
@@ -135,8 +114,8 @@ const readNote = handler<
   },
 );
 
-const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
-  "Chatbot Note",
+export default recipe<LLMTestInput, LLMTestResult>(
+  "Note",
   ({ title, expandChat, messages, content, allCharms }) => {
     const tools = {
       editNote: {
@@ -167,35 +146,7 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
     const chat = Chat({ messages, tools });
     const { addMessage, cancelGeneration, pending } = chat;
 
-    const mentioned = cell<MentionableCharm[]>([]);
-
-    // why does MentionableCharm behave differently than any here?
-    // perhaps optional properties?
-    const computeBacklinks = lift(
-      toSchema<
-        { allCharms: Cell<any[]>; content: Cell<string> }
-      >(),
-      toSchema<any[]>(),
-      ({ allCharms, content }) => {
-        const cs: MentionableCharm[] = allCharms.get();
-        if (!cs) return [];
-
-        const self = cs.find((c) => c.content === content.get());
-
-        const results = self
-          ? cs.filter((c) =>
-            c.mentioned?.some((m) => m.content === self.content) ?? false
-          )
-          : [];
-
-        return results;
-      },
-    );
-
-    const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
-      allCharms,
-      content,
-    });
+    const note = Note({ title, content, allCharms });
 
     return {
       [NAME]: title,
@@ -209,28 +160,7 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
           </ct-hstack>
 
           <ct-autolayout tabNames={["Chat", "Tools"]}>
-            <ct-screen>
-              <div slot="header">
-                <ct-input
-                  $value={title}
-                  placeholder="Enter title..."
-                />
-              </div>
-
-              <ct-code-editor
-                $value={content}
-                $mentionable={allCharms}
-                $mentioned={mentioned}
-                onbacklink-click={handleCharmLinkClick({})}
-                onbacklink-create={handleNewBacklink({
-                  allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>
-                })}
-                language="text/markdown"
-                wordWrap
-                tabIndent
-                lineNumbers
-              />
-            </ct-screen>
+            {note}
 
             <aside slot="left">
               Coming soon... chat list.
@@ -244,7 +174,7 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
                   <div>
                     <label>Backlinks</label>
                     <ct-vstack>
-                      {backlinks.map((charm: MentionableCharm) => (
+                      {note.backlinks.map((charm: MentionableCharm) => (
                         <ct-button onClick={handleCharmLinkClicked({ charm })}>
                           {charm[NAME]}
                         </ct-button>
@@ -254,7 +184,7 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
                   <details>
                     <summary>Mentioned Charms</summary>
                     <ct-vstack>
-                      {mentioned.map((charm: MentionableCharm) => (
+                      {note.mentioned.map((charm: MentionableCharm) => (
                         <ct-button onClick={handleCharmLinkClicked({ charm })}>
                           {charm[NAME]}
                         </ct-button>
@@ -271,10 +201,8 @@ const ChatbotNote = recipe<LLMTestInput, LLMTestResult>(
       ),
       content,
       messages,
-      mentioned,
-      backlinks,
+      mentioned: note.mentioned,
+      backlinks: note.backlinks,
     };
   },
 );
-
-export default ChatbotNote;
