@@ -51,3 +51,6 @@
 - Parent handlers can bubble events by capturing the child's handler stream and
   calling `send` directly; a small helper keeps the stream cast typed when
   wiring parent and child recipes.
+- Keeping `ifElse` branches shaped identically makes it easy to map nested
+  fields with `lift`, letting assertions target branch-specific details without
+  extra schema helpers.
