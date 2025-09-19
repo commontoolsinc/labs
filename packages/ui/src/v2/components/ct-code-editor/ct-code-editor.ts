@@ -735,6 +735,14 @@ export class CTCodeEditor extends BaseElement {
           return false;
         },
       }]),
+      // Intercept Cmd/Ctrl+S when editor is focused
+      keymap.of([{
+        key: "Mod-s",
+        run: () => {
+          console.log("[ct-code-editor] Intercepted save (Cmd/Ctrl+S).");
+          return true; // prevent default browser save
+        },
+      }]),
     ];
 
     // Add placeholder extension if specified
