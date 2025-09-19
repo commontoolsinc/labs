@@ -26,6 +26,9 @@ import {
   scenarios as counterDerivedChecksumScenarios,
 } from "./patterns/counter-derived-checksum.ts";
 import {
+  scenarios as counterDerivedCanonicalFormScenarios,
+} from "./patterns/counter-derived-canonical-form.ts";
+import {
   scenarios as counterDerivedMinMaxScenarios,
 } from "./patterns/counter-derived-min-max.ts";
 import {
@@ -141,6 +144,7 @@ const allScenarios = [
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
   ...counterDerivedChecksumScenarios,
+  ...counterDerivedCanonicalFormScenarios,
   ...counterDerivedMinMaxScenarios,
   ...counterDerivedSummaryScenarios,
   ...counterDynamicHandlerListScenarios,
