@@ -137,7 +137,7 @@ current offline harness.
       secondary counters and assert updates.
 - [x] Counter with batched handler updates — handler updates several cells in
       one invocation; scenario validates final state.
-- [ ] Counter with nested derive watchers — derive depends on other derive to
+- [x] Counter with nested derive watchers — derive depends on other derive to
       ensure dependency graph works.
 - [ ] Counter with derived boolean gating handlers — disable handlers based on
       derived boolean and assert no-op.
