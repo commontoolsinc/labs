@@ -41,6 +41,9 @@ import {
   scenarios as counterDynamicStepScenarios,
 } from "./patterns/counter-dynamic-step.ts";
 import {
+  scenarios as counterFilteredProjectionScenarios,
+} from "./patterns/counter-filtered-projection.ts";
+import {
   scenarios as counterHandlerSpawnScenarios,
 } from "./patterns/counter-handler-spawn.ts";
 import {
@@ -149,6 +152,7 @@ const allScenarios = [
   ...counterDerivedSummaryScenarios,
   ...counterDynamicHandlerListScenarios,
   ...counterDynamicStepScenarios,
+  ...counterFilteredProjectionScenarios,
   ...counterHandlerSpawnScenarios,
   ...counterHierarchicalDefaultsScenarios,
   ...counterHierarchicalKeyPathScenarios,
