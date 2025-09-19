@@ -2,29 +2,29 @@ import ts from "typescript";
 
 import type { OpaqueRefHelperName } from "../transforms.ts";
 import { createIfElseCall } from "../transforms.ts";
-import { selectDependenciesWithin } from "../normalise.ts";
+import { selectDataFlowsWithin } from "../normalise.ts";
 import { isSimpleOpaqueRefAccess } from "../types.ts";
 import type { Emitter } from "./types.ts";
 import { createBindingPlan } from "./bindings.ts";
 import {
   createDeriveCallForExpression,
-  filterRelevantDependencies,
+  filterRelevantDataFlows,
 } from "./helpers.ts";
 
 export const emitConditionalExpression: Emitter = ({
   expression,
-  dependencies,
+  dataFlows,
   analysis,
   context,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
-  if (dependencies.all.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
-  const predicateDependencies = selectDependenciesWithin(
-    dependencies,
+  const predicateDataFlows = selectDataFlowsWithin(
+    dataFlows,
     expression.condition,
   );
-  const shouldDerivePredicate = predicateDependencies.length > 0 &&
+  const shouldDerivePredicate = predicateDataFlows.length > 0 &&
     !isSimpleOpaqueRefAccess(expression.condition, context.checker);
 
   const helpers = new Set<OpaqueRefHelperName>(["ifElse"]);
@@ -33,7 +33,7 @@ export const emitConditionalExpression: Emitter = ({
   let whenFalse: ts.Expression = expression.whenFalse;
 
   if (shouldDerivePredicate) {
-    const plan = createBindingPlan(predicateDependencies);
+    const plan = createBindingPlan(predicateDataFlows);
     const derivedPredicate = createDeriveCallForExpression(
       expression.condition,
       plan,
@@ -45,13 +45,13 @@ export const emitConditionalExpression: Emitter = ({
     }
   }
 
-  const whenTrueDependencies = filterRelevantDependencies(
-    selectDependenciesWithin(dependencies, expression.whenTrue),
+  const whenTrueDataFlows = filterRelevantDataFlows(
+    selectDataFlowsWithin(dataFlows, expression.whenTrue),
     analysis,
     context,
   );
-  if (whenTrueDependencies.length > 0) {
-    const plan = createBindingPlan(whenTrueDependencies);
+  if (whenTrueDataFlows.length > 0) {
+    const plan = createBindingPlan(whenTrueDataFlows);
     const derivedWhenTrue = createDeriveCallForExpression(
       expression.whenTrue,
       plan,
@@ -69,13 +69,13 @@ export const emitConditionalExpression: Emitter = ({
     if (rewritten !== expression.whenTrue) whenTrue = rewritten;
   }
 
-  const whenFalseDependencies = filterRelevantDependencies(
-    selectDependenciesWithin(dependencies, expression.whenFalse),
+  const whenFalseDataFlows = filterRelevantDataFlows(
+    selectDataFlowsWithin(dataFlows, expression.whenFalse),
     analysis,
     context,
   );
-  if (whenFalseDependencies.length > 0) {
-    const plan = createBindingPlan(whenFalseDependencies);
+  if (whenFalseDataFlows.length > 0) {
+    const plan = createBindingPlan(whenFalseDataFlows);
     const derivedWhenFalse = createDeriveCallForExpression(
       expression.whenFalse,
       plan,

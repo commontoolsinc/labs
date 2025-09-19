@@ -5,18 +5,18 @@ import type { Emitter } from "./types.ts";
 import { createBindingPlan } from "./bindings.ts";
 import {
   createDeriveCallForExpression,
-  filterRelevantDependencies,
+  filterRelevantDataFlows,
 } from "./helpers.ts";
-import { selectDependenciesWithin } from "../normalise.ts";
+import { selectDataFlowsWithin } from "../normalise.ts";
 
 export const emitCallExpression: Emitter = ({
   expression,
-  dependencies,
+  dataFlows,
   context,
   analysis,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
-  if (dependencies.all.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
 
   const hint = analysis.rewriteHint;
 
@@ -27,19 +27,19 @@ export const emitCallExpression: Emitter = ({
   if (hint?.kind === "call-if-else") {
     const helpers = new Set<OpaqueRefHelperName>();
 
-    const predicateDependencies = selectDependenciesWithin(
-      dependencies,
+    const predicateDataFlows = selectDataFlowsWithin(
+      dataFlows,
       hint.predicate,
     );
-    const relevantPredicateDependencies = filterRelevantDependencies(
-      predicateDependencies,
+    const relevantPredicateDataFlows = filterRelevantDataFlows(
+      predicateDataFlows,
       analysis,
       context,
     );
 
     let rewrittenPredicate: ts.Expression = hint.predicate;
-    if (relevantPredicateDependencies.length > 0) {
-      const plan = createBindingPlan(relevantPredicateDependencies);
+    if (relevantPredicateDataFlows.length > 0) {
+      const plan = createBindingPlan(relevantPredicateDataFlows);
       const derivedPredicate = createDeriveCallForExpression(
         hint.predicate,
         plan,
@@ -89,14 +89,14 @@ export const emitCallExpression: Emitter = ({
     };
   }
 
-  const relevantDependencies = filterRelevantDependencies(
-    dependencies.all,
+  const relevantDataFlows = filterRelevantDataFlows(
+    dataFlows.all,
     analysis,
     context,
   );
-  if (relevantDependencies.length === 0) return undefined;
+  if (relevantDataFlows.length === 0) return undefined;
 
-  const plan = createBindingPlan(relevantDependencies);
+  const plan = createBindingPlan(relevantDataFlows);
   const rewritten = createDeriveCallForExpression(expression, plan, context);
   if (rewritten === expression) return undefined;
 

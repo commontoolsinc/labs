@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/context.ts";
 import { isEventHandlerJsxAttribute } from "../types.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
-import { createDependencyAnalyzer } from "../dependency.ts";
+import { createDataFlowAnalyzer } from "../dependency.ts";
 import { rewriteExpression } from "../rewrite/rewrite.ts";
 
 export interface OpaqueRefRule {
@@ -24,7 +24,7 @@ export function createJsxExpressionRule(): OpaqueRefRule {
       transformation,
     ): ts.SourceFile {
       const checker = context.checker;
-      const analyze = createDependencyAnalyzer(checker);
+      const analyze = createDataFlowAnalyzer(checker);
       const helpers = new Set<OpaqueRefHelperName>();
 
       const visit: ts.Visitor = (node) => {

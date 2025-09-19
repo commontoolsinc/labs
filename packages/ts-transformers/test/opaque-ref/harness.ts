@@ -1,12 +1,12 @@
 import ts from "typescript";
 
-import { createDependencyAnalyzer } from "../../src/opaque-ref/dependency.ts";
+import { createDataFlowAnalyzer } from "../../src/opaque-ref/dependency.ts";
 
 export interface AnalysisHarnessResult {
   readonly sourceFile: ts.SourceFile;
   readonly checker: ts.TypeChecker;
   readonly expression: ts.Expression;
-  readonly analysis: ReturnType<ReturnType<typeof createDependencyAnalyzer>>;
+  readonly analysis: ReturnType<ReturnType<typeof createDataFlowAnalyzer>>;
 }
 
 interface AnalyseOptions {
@@ -81,7 +81,7 @@ const result = ${source};
   }
 
   const expression = declaration.initializer;
-  const analyze = createDependencyAnalyzer(checker);
+  const analyze = createDataFlowAnalyzer(checker);
   const analysis = analyze(expression);
 
   return { sourceFile, checker, expression, analysis };

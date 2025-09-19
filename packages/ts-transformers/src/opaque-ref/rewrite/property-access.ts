@@ -5,17 +5,17 @@ import type { EmitterParams, EmitterResult } from "./types.ts";
 import { createBindingPlan } from "./bindings.ts";
 import {
   createDeriveCallForExpression,
-  filterRelevantDependencies,
+  filterRelevantDataFlows,
 } from "./helpers.ts";
 import { isSafeEventHandlerCall } from "./event-handlers.ts";
 
 export function emitPropertyAccess(
   params: EmitterParams,
 ): EmitterResult | undefined {
-  const { expression, dependencies, context } = params;
+  const { expression, dataFlows, context } = params;
   if (!ts.isPropertyAccessExpression(expression)) return undefined;
 
-  if (dependencies.all.length === 0) return undefined;
+  if (dataFlows.all.length === 0) return undefined;
   if (
     expression.parent &&
     ts.isCallExpression(expression.parent) &&
@@ -24,14 +24,14 @@ export function emitPropertyAccess(
     if (!isSafeEventHandlerCall(expression.parent)) return undefined;
   }
 
-  const relevantDependencies = filterRelevantDependencies(
-    dependencies.all,
+  const relevantDataFlows = filterRelevantDataFlows(
+    dataFlows.all,
     params.analysis,
     context,
   );
-  if (relevantDependencies.length === 0) return undefined;
+  if (relevantDataFlows.length === 0) return undefined;
 
-  const plan = createBindingPlan(relevantDependencies);
+  const plan = createBindingPlan(relevantDataFlows);
   const rewritten = createDeriveCallForExpression(expression, plan, context);
   if (rewritten === expression) return undefined;
 

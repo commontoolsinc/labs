@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { normaliseDependencies } from "../normalise.ts";
+import { normaliseDataFlows } from "../normalise.ts";
 import type {
   Emitter,
   EmitterContext,
@@ -61,7 +61,7 @@ function rewriteChildExpressions(
 export function rewriteExpression(
   params: RewriteParams,
 ): EmitterResult | undefined {
-  const dependencies = normaliseDependencies(params.analysis.graph);
+  const dataFlows = normaliseDataFlows(params.analysis.graph);
   const helperSet = new Set<OpaqueRefHelperName>();
   const emitterContext: EmitterContext = {
     ...params.context,
@@ -72,7 +72,7 @@ export function rewriteExpression(
   for (const emitter of EMITTERS) {
     const result = emitter({
       expression: params.expression,
-      dependencies,
+      dataFlows,
       analysis: params.analysis,
       context: emitterContext,
     });

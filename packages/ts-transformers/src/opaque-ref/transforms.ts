@@ -7,9 +7,9 @@ import {
   isSimpleOpaqueRefAccess,
 } from "./types.ts";
 import {
-  createDependencyAnalyzer,
+  createDataFlowAnalyzer,
+  type DataFlowAnalysis,
   dedupeExpressions,
-  type OpaqueExpressionAnalysis,
 } from "./dependency.ts";
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
@@ -96,7 +96,7 @@ export function transformExpressionWithOpaqueRef(
   sourceFile: ts.SourceFile,
   context: ts.TransformationContext,
   registerHelper?: (helper: OpaqueRefHelperName) => void,
-  analyzer?: (expression: ts.Expression) => OpaqueExpressionAnalysis,
+  analyzer?: (expression: ts.Expression) => DataFlowAnalysis,
 ): ts.Expression {
   if (
     ts.isJsxExpression(expression) &&
@@ -107,15 +107,15 @@ export function transformExpressionWithOpaqueRef(
     if (attrName.startsWith("on")) return expression;
   }
 
-  const dependencyAnalyzer = analyzer ?? createDependencyAnalyzer(checker);
-  const analyzeDependencies = (
+  const dataFlowAnalyzer = analyzer ?? createDataFlowAnalyzer(checker);
+  const analyzeDataFlows = (
     expr: ts.Expression,
   ): {
-    analysis: OpaqueExpressionAnalysis;
+    analysis: DataFlowAnalysis;
     dependencies: ts.Expression[];
   } => {
-    const analysis = dependencyAnalyzer(expr);
-    const deduped = dedupeExpressions(analysis.dependencies, sourceFile);
+    const analysis = dataFlowAnalyzer(expr);
+    const deduped = dedupeExpressions(analysis.dataFlows, sourceFile);
     const texts = deduped.map((dep) => dep.getText(sourceFile));
     const filtered = deduped.filter((dep, index) => {
       if (!ts.isIdentifier(dep)) return true;
@@ -150,7 +150,7 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           context,
           registerHelper,
-          dependencyAnalyzer,
+          dataFlowAnalyzer,
         );
       }
       return expr;
@@ -185,7 +185,7 @@ export function transformExpressionWithOpaqueRef(
     ts.isPrefixUnaryExpression(expression) &&
     expression.operator === ts.SyntaxKind.ExclamationToken
   ) {
-    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDataFlows(expression);
     if (opaqueRefs.length === 0) return expression;
 
     if (opaqueRefs.length === 1) {
@@ -321,7 +321,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isPropertyAccessExpression(expression)) {
-    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDataFlows(expression);
     if (opaqueRefs.length === 0) return expression;
     if (opaqueRefs.length === 1) {
       const ref = opaqueRefs[0]!;
@@ -458,7 +458,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isCallExpression(expression)) {
-    const { analysis, dependencies: opaqueRefs } = analyzeDependencies(
+    const { analysis, dependencies: opaqueRefs } = analyzeDataFlows(
       expression,
     );
     if (analysis.rewriteHint?.kind === "call-if-else") {
@@ -596,7 +596,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isTemplateExpression(expression)) {
-    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDataFlows(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();
@@ -737,7 +737,7 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isBinaryExpression(expression)) {
-    const { dependencies: opaqueRefs } = analyzeDependencies(expression);
+    const { dependencies: opaqueRefs } = analyzeDataFlows(expression);
     if (opaqueRefs.length === 0) return expression;
     const uniqueRefs = new Map<string, ts.Expression>();
     const refToParamName = new Map<ts.Expression, string>();

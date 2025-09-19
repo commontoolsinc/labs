@@ -1,9 +1,9 @@
 import ts from "typescript";
 
-import type { NormalisedDependency } from "../normalise.ts";
+import type { NormalisedDataFlow } from "../normalise.ts";
 
 export interface BindingPlanEntry {
-  readonly dependency: NormalisedDependency;
+  readonly dataFlow: NormalisedDataFlow;
   readonly propertyName: string;
   readonly paramName: string;
 }
@@ -82,38 +82,38 @@ function createGeneratedParamName(
 }
 
 export function createBindingPlan(
-  dependencies: readonly NormalisedDependency[],
+  dataFlows: readonly NormalisedDataFlow[],
 ): BindingPlan {
   const usedPropertyNames = new Set<string>();
   const usedParamNames = new Set<string>();
   const entries: BindingPlanEntry[] = [];
   const paramBindings = new Map<ts.Expression, string>();
 
-  dependencies.forEach((dependency, index) => {
-    const base = deriveBaseName(dependency.expression, index);
+  dataFlows.forEach((dataFlow, index) => {
+    const base = deriveBaseName(dataFlow.expression, index);
     const fallback = `ref${index + 1}`;
     const propertyName = sanitiseName(base, fallback, usedPropertyNames);
 
-    const paramName = ts.isIdentifier(dependency.expression)
-      ? createIdentifierParamName(dependency.expression.text, usedParamNames)
+    const paramName = ts.isIdentifier(dataFlow.expression)
+      ? createIdentifierParamName(dataFlow.expression.text, usedParamNames)
       : createGeneratedParamName(index, usedParamNames);
 
-    const sourceFile = dependency.expression.getSourceFile();
-    const dependencyText = dependency.expression.getText(sourceFile);
+    const sourceFile = dataFlow.expression.getSourceFile();
+    const dataFlowText = dataFlow.expression.getText(sourceFile);
 
     entries.push({
-      dependency,
+      dataFlow,
       propertyName,
       paramName,
     });
 
-    paramBindings.set(dependency.expression, paramName);
+    paramBindings.set(dataFlow.expression, paramName);
 
-    for (const occurrence of dependency.occurrences) {
+    for (const occurrence of dataFlow.occurrences) {
       const occurrenceText = occurrence.expression.getText(
         occurrence.expression.getSourceFile(),
       );
-      if (occurrenceText === dependencyText) {
+      if (occurrenceText === dataFlowText) {
         paramBindings.set(occurrence.expression, paramName);
       }
     }
