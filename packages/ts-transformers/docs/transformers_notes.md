@@ -53,37 +53,72 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 | `() => count + 1`) aren’t rewritten, so callbacks read opaque values at |                                                          |       |
 | runtime.                                                                | Requires capture analysis and a closure rewrite rule.    |       |
 | **Destructuring / spread**                                              | Patterns like `const { name } = user` or                 |       |
-| `{ ...config, count: count + 1 }` still operate on raw refs.            |                                                          |       |
+| `{ ...config, count: count + 1 }` still operate on raw refs.            | Object spread not yet supported.                         |       |
 | **Async/await & template literals**                                     | Reactive identifiers inside                              |       |
-| `await` expressions or template strings aren’t wrapped automatically.   |                                                          |       |
+| `await` expressions or template strings aren't wrapped automatically.   |                                                          |       |
+| **Function body analysis**                                              | Only `return` statements analyzed in functions.          |       |
+| Side effects and assignments are missed.                                | Causes reactive dependencies to be overlooked.           |       |
+| **Postfix unary operations**                                            | `x++` and `x--` not handled by emitters.                 |       |
 | **Testing depth**                                                       | No unit or perf suites beyond fixtures; closure/optional |       |
 | scenarios lack runtime integration coverage.                            |                                                          |       |
 
 ## Near-Term Roadmap
 
+### Phase 0: Documentation & Planning
+- ✅ Document all known gaps and limitations
+- Document planned architectural improvements
+
+### Phase 1: Foundation Cleanup
+1. **Rename "dependency" to "data flow"**
+   - Update all type names (DependencyAnalysis → DataFlowAnalysis, etc.)
+   - Update variable names throughout codebase
+   - Update comments and documentation
+
+2. **Data structure consolidation**
+   - Merge internal/external scope representations
+   - Create single canonical DataFlowAnalysis result
+   - Eliminate duplication between nodes/dependencies/graph
+
+3. **Fix normalization semantics**
+   - Stop aggressive property stripping
+   - Preserve semantic differences (e.g., `a` vs `a.length`)
+   - Clarify parent suppression logic
+
+4. **Context type consolidation**
+   - Create base TransformContext interface
+   - Minimize context variants
+   - Unify shared functionality
+
+### Phase 2: Correctness Improvements
+1. **Fix function body analysis**
+   - Analyze all statements, not just returns
+   - Handle side effects and assignments
+   - Track dependencies in intermediate computations
+
+2. **Improve parameter detection**
+   - Build parameter metadata once during analysis
+   - Reuse metadata throughout pipeline
+   - Eliminate redundant AST walks
+
+3. **Test enhancements**
+   - Add unit tests for data flow analysis
+   - Expand fixtures with edge cases
+   - Add runtime integration tests
+   - Test each improvement as it's implemented
+
+### Phase 3: Architecture Extensions
 1. **Optional-chain predicate support**
-   - Extend dependency normalisation to recognise optional property/element
-     chains.
-   - Update the unary rule to emit `derive(cellRef, ref => !(ref?.length))`.
-   - Add fixtures and unit coverage.
+   - Extend dependency normalisation to recognise optional chains
+   - Update unary rule to emit `derive(cellRef, ref => !(ref?.length))`
+   - Add fixtures and unit coverage
 
 2. **Closure capture rewriting**
-   - Introduce a capture-aware dependency walk that builds a lightweight scope
-     tree.
-   - Add a closure rule that wraps captured reactive values in derives inside
-     arrow functions/function expressions.
-   - Cover map callbacks, inline handlers, and nested closures.
+   - Introduce capture-aware dependency walk
+   - Add closure rule for wrapped reactive values
+   - Cover map callbacks, inline handlers, nested closures
 
-3. **Destructuring & spread support (scoped exploration)**
-   - Evaluate the minimal rewrites needed for object/array destructuring and
-     object spreads; prioritise the patterns used in recipes once closure work
-     lands.
-
-4. **Test enhancements**
-   - Add focused unit tests for the new dependency helpers.
-   - Expand fixtures with optional-chain, closure, and destructuring scenarios.
-   - Wire a smoke runtime test that exercises the modular transformer end-to-end
-     (likely in `js-runtime`).
+### Future Extensions
+- **Proactive OpaqueRef conversion**: Add new rule to automatically wrap non-OpaqueRef values that should be reactive, leveraging the cleaned-up architecture to identify candidates and apply appropriate transformations
 
 ## Longer-Term Considerations
 
