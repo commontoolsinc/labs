@@ -165,6 +165,9 @@ import {
 import {
   scenarios as composedCounterScenarios,
 } from "./patterns/composed-counter.ts";
+import {
+  scenarios as emailInboxThreadingScenarios,
+} from "./patterns/email-inbox-threading.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -174,6 +177,7 @@ const allScenarios = [
   ...listManagerScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
+  ...emailInboxThreadingScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,

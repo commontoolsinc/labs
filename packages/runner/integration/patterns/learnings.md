@@ -64,3 +64,7 @@
 - Chaining multiple `lift` transforms works reliably when each stage normalizes
   its input first; downstream derived cells like parity flags only need to
   reason about the sanitized shape from the previous lift.
+- Rebuilding grouped summaries inside a `derive` call keeps thread ordering
+  predictable when each update returns a fresh array sorted by latest
+  timestamps; logging activity via a local `cell` offers an easy assertion
+  surface without adding extra derived dependencies.
