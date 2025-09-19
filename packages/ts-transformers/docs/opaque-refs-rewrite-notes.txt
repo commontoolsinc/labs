@@ -1,0 +1,83 @@
+// the programmer writes:
+lift<I,O>(fn: (a: I) => O)
+// the compiler will infer the types I and O if you don't specify them
+
+// eventually we want to generate:
+lift(inputSchema, outputSchema, ...fn)
+// by the way we want the schema transformer to do this for lift and not just recipe
+
+// this is not true yet but this is where we're going in the runtime:
+recipe<I,O>(arg) = lift(Opaque<I>, O)(arg)
+
+// right now, we basically go from the recipe declaration to the version of
+//  recipe that uses the inputSchema/outputSchema, via the opaque ref transformer
+recipe<I,O>(name, (Opaque<I> => Opaque<O>)) // Opaque = literal | OpaqueRef
+-->
+recipe<I,O>(<toSchema<I>, toSchema<O>, ...?) // 'name' should just go into 'description' of inputSchema
+
+// let's see if we can make the current pipeline work for 'lift' the way it works for 'recipe' (and 'handler')
+// this should be fast and if it's not then i'll re-prioritize
+
+// so yeah that would be:
+lift<I,O>(fn: (a: I) => O)
+// becomes -->
+lift<toSchema<IT>, toSchema<OT>, ...)
+// where IT/OT are input transformed and output transformed, as per the following approach:
+// data analysis on inputs; if there are no reads, x becomes Opaque<x>
+//   allowed: x.y, IF we aren't reading the value of x.y but merely passing it along to a lift/handler/etc
+//   allowed: .map, eventually .filter when it works, because they're exposed on Cell, SOMETIMES;
+              they have return value Opaque<...> so we need to see if we don't read the returned values
+
+// In JSX, tags transform expressions to make things Opaque
+//   example: `<span>x+1</span>`
+//   example: `<... class = { enabled ? ... : ... }>`
+//            enabled && <div>...</div>
+//   ...these should be transformed into a combination of derive/lift and ifElse
+//   for now, we'll expect to output:
+//     <span>lift(toSchema<number>,toSchema<number>,x=>x+1)(x)</span>
+//     <... class = {ifElse(enabled, ..., ...)}> // NOTE: we need to add toSchema support for ifElse
+//     ifElse(enabled, <div>...</div>, null)
+
+// Optional extension:
+//   example: <... onClick={ (ev) => { ... lst ... inc ... }} > // <-- handler closes over 'lst' and 'inc'
+//     currently, you have to define a handler-type function outside the JSX and pass it 'lst' and 'inc' explicitly
+//     what if our transformer turned that into a handler((ev, {lst, inc}) => ... original function ..., {lst, inc})
+// Fly in the ointment: what if we want to modify lst by pushing something into it? Then we need to make it a Cell;
+//  this will need to happen after the OpaqueRef/Cell implementation merge, otherwise this will compile but not do
+//  the right thing at runtime. Eventually you need your outer recipe to declare that 'lst' is Mutable; then the
+//  transformer will make it Opaque everywhere except the actual handler that needs it to be Mutable.
+
+// QUESTIONS
+* We might treat x?.y as not reading x either because the runtime will
+   just treat undefined values specially there anyway and allow x?.y --> undefined
+
+// NOTES
+* derive(x, fn) <=> lift(fn)(x)
+
+// CLOSURES
+A main goal of this project is to enable closures support.
+
+The main case where we use closures right now is in `map`. The function that `map` takes
+  right now is a classic map function. Internally, it transforms the three map parameters
+  into a single object containing each one as a property. In any event, it's common to
+  want to close over values from the context in writing a map.
+
+OpaqueRef.map<T>(fn: (elem: T, index, list: T[]) => OpaqueRef<T[]>)
+// Internally, this creates a Node whose parameter is: recipe(({elem, index, list}) => fn(elem, index, list))
+// Basically it wraps the given mapping function in a recipe and then calls the built-in map on that recipe, ie:
+//   built-in-map({list, op: recipe(...)})
+
+// How do we close over values from the context when we pass in our fn to the OpaqueRef map?
+
+// One long-term path would be to do all the heavy lifting in the AST transformer, so that the original
+//   map call would get transformed into a built-in map where we are passing in the closed-over value
+
+// In the future we could write our own `curry` function.
+Opaque.map(lift(({closed_over_1, closed_over_2}, elem, index, list) => ...original_function...).\
+    curry({closed_over_1, closed_over_2}))
+
+// A thing we can do in the shorter term, lacking a rigorous `curry` function, would be:
+OpaqueRef.map({list, op:recipe(({elem, index, list, params: {closed_over_1, closed_over_2}}) => ...original_function...),
+     params: {closed_over_1, closed_over_2}})
+// Probably best to overload the OpaqueRef map function to accept that signature as well as the
+//  version that takes just a function

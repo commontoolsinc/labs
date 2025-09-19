@@ -41,5 +41,8 @@ export interface Harness extends EventTarget {
 
   invoke(fn: () => any): any;
 
-  getInvocation(source: string): HarnessedFunction;
+  getInvocation(
+    source: string,
+    metadata?: { helpers?: string[]; aliases?: string[] },
+  ): HarnessedFunction;
 }

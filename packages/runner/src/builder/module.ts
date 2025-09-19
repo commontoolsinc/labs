@@ -22,6 +22,7 @@ import { moduleToJSON } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
 import { generateHandlerSchema } from "../schema.ts";
+import { extractCommonToolsMetadata } from "../common-tools-metadata.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -30,6 +31,21 @@ export function createNodeFactory<T = any, R = any>(
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
   };
+  if (typeof module.implementation === "function") {
+    const metadata = extractCommonToolsMetadata(
+      module.implementation.toString(),
+    );
+    if (metadata.helpers.length > 0) {
+      const helpers = new Set<string>(module.helpers ?? []);
+      metadata.helpers.forEach((helper) => helpers.add(helper));
+      module.helpers = Array.from(helpers).sort();
+    }
+    if (metadata.aliases.length > 0) {
+      const aliases = new Set<string>(module.commontoolsAliases ?? []);
+      metadata.aliases.forEach((alias) => aliases.add(alias));
+      module.commontoolsAliases = Array.from(aliases).sort();
+    }
+  }
   // A module with ifc classification on its argument schema should have at least
   // that value on its result schema
   module.resultSchema = applyArgumentIfcToResult(
@@ -155,6 +171,22 @@ export function handler<E, T>(
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
   };
+
+  if (typeof module.implementation === "function") {
+    const metadata = extractCommonToolsMetadata(
+      module.implementation.toString(),
+    );
+    if (metadata.helpers.length > 0) {
+      const helpers = new Set<string>(module.helpers ?? []);
+      metadata.helpers.forEach((helper) => helpers.add(helper));
+      module.helpers = Array.from(helpers).sort();
+    }
+    if (metadata.aliases.length > 0) {
+      const aliases = new Set<string>(module.commontoolsAliases ?? []);
+      metadata.aliases.forEach((alias) => aliases.add(alias));
+      module.commontoolsAliases = Array.from(aliases).sort();
+    }
+  }
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
     const stream = opaqueRef<E>(undefined, eventSchema);

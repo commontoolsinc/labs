@@ -126,8 +126,12 @@ const el = <div>{count > 5 ? "yes" : "no"} {count + 1}</div>;
 `;
       // Test utility applies transformers regardless of directive
       const transformed = await transformSource(source, { types });
-      expect(transformed).toContain("commontools_1.derive");
-      expect(transformed).toContain("commontools_1.ifElse");
+      expect(transformed).toContain(
+        "derive(count, count => count + 1)",
+      );
+      expect(transformed).toContain(
+        'ifElse(derive(count, count => count > 5), "yes", "no")',
+      );
     });
   });
 });
