@@ -139,7 +139,6 @@ export function toJSONWithLegacyAliases(
       : (value as Record<string, any>);
 
     const result: any = {};
-    let hasValue = false;
     for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
@@ -149,15 +148,13 @@ export function toJSONWithLegacyAliases(
       );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
-        hasValue = true;
       }
     }
 
     // Retain the original recipe reference for downstream processing.
     if (isRecipe(value)) result[unsafe_originalRecipe] = value;
 
-    // If the object is empty, return undefined instead.
-    return hasValue || Object.keys(result).length === 0 ? result : undefined;
+    return result;
   }
 
   return value;
