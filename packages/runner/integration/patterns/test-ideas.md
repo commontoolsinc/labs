@@ -73,7 +73,7 @@ current offline harness.
       and handlers for next/previous steps.
 - [x] Counter with reorderable list — handler swaps positions in array and
       scenario checks order.
-- [ ] Counter with filtered projection — derive filtered array based on
+- [x] Counter with filtered projection — derive filtered array based on
       threshold and assert updates after events.
 - [ ] Counter with grouped summary — reduce array of counters into grouped
       totals via derive.
