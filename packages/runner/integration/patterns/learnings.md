@@ -22,3 +22,6 @@
 - Building canonical snapshots of nested counters is easier when handlers keep
   raw order intact while derived views sort by normalized keys; recording
   sanitized mutation strings keeps history assertions deterministic.
+- Splitting filtered and excluded projections works best when a single `lift`
+  sanitizes the source list so both derived slices stay in sync with threshold
+  adjustments.
