@@ -194,8 +194,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 </>,
               )}
             </aside>
-
-
           </ct-autolayout>
         </ct-screen>
       ),

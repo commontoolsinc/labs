@@ -13,11 +13,11 @@ import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
+  acceptCompletion,
   autocompletion,
   Completion,
   CompletionContext,
   CompletionResult,
-  acceptCompletion,
 } from "@codemirror/autocomplete";
 import {
   Decoration,

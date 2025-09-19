@@ -3,12 +3,12 @@ import {
   Cell,
   cell,
   Default,
-  lift,
   h,
   handler,
+  lift,
   NAME,
-  OpaqueRef,
   navigateTo,
+  OpaqueRef,
   recipe,
   toSchema,
   UI,
@@ -123,28 +123,28 @@ const Note = recipe<Input, Output>(
     return {
       [NAME]: title,
       [UI]: (
-          <ct-screen>
-            <div slot="header">
-              <ct-input
-                $value={title}
-                placeholder="Enter title..."
-              />
-            </div>
-
-            <ct-code-editor
-              $value={content}
-              $mentionable={allCharms}
-              $mentioned={mentioned}
-              onbacklink-click={handleCharmLinkClick({})}
-              onbacklink-create={handleNewBacklink({
-                allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>
-              })}
-              language="text/markdown"
-              wordWrap
-              tabIndent
-              lineNumbers
+        <ct-screen>
+          <div slot="header">
+            <ct-input
+              $value={title}
+              placeholder="Enter title..."
             />
-          </ct-screen>
+          </div>
+
+          <ct-code-editor
+            $value={content}
+            $mentionable={allCharms}
+            $mentioned={mentioned}
+            onbacklink-click={handleCharmLinkClick({})}
+            onbacklink-create={handleNewBacklink({
+              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+            })}
+            language="text/markdown"
+            wordWrap
+            tabIndent
+            lineNumbers
+          />
+        </ct-screen>
       ),
       title,
       content,
