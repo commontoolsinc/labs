@@ -17,8 +17,8 @@ import {
   Completion,
   CompletionContext,
   CompletionResult,
+  acceptCompletion,
 } from "@codemirror/autocomplete";
-import { acceptCompletion } from "@codemirror/autocomplete";
 import {
   Decoration,
   DecorationSet,
@@ -95,6 +95,9 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @fires ct-focus - Fired on focus
  * @fires ct-blur - Fired on blur
  * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, charm }
+ * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
+ *   or confirmed with Enter during autocomplete with no matches. Detail:
+ *   { text }
  *
  * @example
  * <ct-code-editor language="text/javascript" placeholder="Enter code..."></ct-code-editor>
@@ -201,8 +204,7 @@ export class CTCodeEditor extends BaseElement {
 
       const mentionable = this.getFilteredMentionable(query);
 
-      if (mentionable.length === 0) return null;
-
+      // Build options from existing mentionable items
       const options: Completion[] = mentionable.map((charm) => {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
@@ -215,6 +217,28 @@ export class CTCodeEditor extends BaseElement {
           info: "Backlink to " + charmName,
         };
       });
+
+      // Inject a "create new" option when the typed text doesn't exactly match
+      // any existing charm. This ensures there's a selectable option for
+      // keyboard users when creating a novel backlink.
+      const raw = query.trim();
+      if (raw.length > 0) {
+        const lower = raw.toLowerCase();
+        const hasExact = options.some((o) => o.label.toLowerCase() === lower);
+        if (!hasExact) {
+          options.push({
+            label: raw,
+            detail: "Create",
+            type: "text",
+            info: "Create new backlink",
+            apply: () => {
+              this.emit("backlink-create", { text: raw });
+            },
+          });
+        }
+      }
+
+      if (options.length === 0) return null;
 
       return {
         from: backlink.from + 2, // Start after [[
@@ -296,11 +320,11 @@ export class CTCodeEditor extends BaseElement {
 
       // Check if cursor is within this backlink
       if (pos >= matchStart && pos <= matchEnd) {
-        const backlinkText = match[1]; // This is "Name (id)" format
+        const backlinkText = match[1];
         // Extract ID from "Name (id)" format
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
-        const backlinkId = idMatch ? idMatch[1] : backlinkText;
-        const charm = this.findCharmById(backlinkId);
+        const backlinkId = idMatch ? idMatch[1] : undefined;
+        const charm = backlinkId ? this.findCharmById(backlinkId) : null;
 
         if (charm) {
           this.emit("backlink-click", {
@@ -310,10 +334,27 @@ export class CTCodeEditor extends BaseElement {
           });
           return true;
         }
+
+        // No ID or no matching item: request creation
+        this.emit("backlink-create", { text: backlinkText });
+        return true;
       }
     }
 
     return false;
+  }
+
+  /**
+   * If the cursor is after an unclosed [[... token on the same line,
+   * return the current query text. Otherwise return null.
+   */
+  private _currentBacklinkQuery(view: EditorView): string | null {
+    const pos = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(pos);
+    const textBefore = view.state.doc.sliceString(line.from, pos);
+    const m = textBefore.match(/\[\[([^\]]*)$/);
+    if (!m) return null;
+    return m[1] ?? "";
   }
 
   /**
@@ -671,10 +712,28 @@ export class CTCodeEditor extends BaseElement {
         activateOnTyping: true,
         closeOnBlur: true,
       }),
-      // Ensure Enter accepts the currently selected completion
+      // Enter: accept selected completion, or create novel backlink
       keymap.of([{
         key: "Enter",
-        run: (view) => acceptCompletion(view),
+        run: (view) => {
+          // Try accepting an active completion first
+          if (acceptCompletion(view)) return true;
+
+          // If typing a backlink with no matches, emit create event
+          const query = this._currentBacklinkQuery(view);
+          if (query != null) {
+            const matches = this.getFilteredMentionable(query);
+            if (matches.length === 0) {
+              const text = query.trim();
+              if (text.length > 0) {
+                this.emit("backlink-create", { text });
+                return true;
+              }
+            }
+          }
+
+          return false;
+        },
       }]),
     ];
 
