@@ -39,3 +39,6 @@
 - Sanitizing session arrays with a single `lift` before deriving grouped
   summaries keeps tag and weekday aggregations deterministic while a dedicated
   cell for the latest entry simplifies scenario assertions.
+- Keeping grouped counters as an append-only log and deriving totals with
+  `lift`/`derive` keeps the handler simple while still exposing stable views for
+  assertions and labels.

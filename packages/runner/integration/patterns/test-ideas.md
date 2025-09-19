@@ -75,7 +75,7 @@ current offline harness.
       scenario checks order.
 - [x] Counter with filtered projection — derive filtered array based on
       threshold and assert updates after events.
-- [ ] Counter with grouped summary — reduce array of counters into grouped
+- [x] Counter with grouped summary — reduce array of counters into grouped
       totals via derive.
 - [ ] Counter with matrix state — maintain 2D array of numbers and update
       row/column cells.
