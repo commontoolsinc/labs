@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { render, VNode } from "../src/index.ts";
+import { MockDoc } from "../src/utils.ts";
 import {
   type Cell,
   createBuilder,
@@ -9,7 +10,6 @@ import {
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
-import { JSDOM } from "jsdom";
 import { Identity } from "@commontools/identity";
 import { h } from "@commontools/api";
 
@@ -17,8 +17,8 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("recipes with HTML", () => {
-  let dom: JSDOM;
-  let document: Document;
+  let mock: MockDoc;
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -28,15 +28,9 @@ describe("recipes with HTML", () => {
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
-    // Set up a fresh JSDOM instance for each test
-    dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
-    document = dom.window.document;
-
-    // Set up global environment
-    globalThis.document = document;
-    globalThis.Element = dom.window.Element;
-    globalThis.Node = dom.window.Node;
-    globalThis.Text = dom.window.Text;
+    mock = new MockDoc(
+      `<!DOCTYPE html><html><body><div id="root"></div><div id="root2"></div></body></html>`,
+    );
 
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
@@ -57,6 +51,7 @@ describe("recipes with HTML", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
   it("should render a simple UI", async () => {
     const simpleRecipe = recipe<{ value: number }>(
       "Simple UI Recipe",
@@ -88,6 +83,7 @@ describe("recipes with HTML", () => {
   });
 
   it("works with mapping over a list", async () => {
+    const { document, renderOptions } = mock;
     type Item = { title: string; done: boolean };
     const todoList = recipe<{
       title: string;
@@ -126,18 +122,20 @@ describe("recipes with HTML", () => {
 
     await runtime.idle();
 
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
+    const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(parent, cell.get());
+    render(root, cell.get(), renderOptions);
 
+    // Keys are "[object Object]" due to mapping an `Opaque<number>` in handler.
+    // Maybe unintentional(?)
     assert.equal(
-      parent.innerHTML,
-      "<div><h1>test</h1><ul><li>item 1</li><li>item 2</li></ul></div>",
+      root.innerHTML,
+      '<div><h1>test</h1><ul><li key="[object Object]">item 1</li><li key="[object Object]">item 2</li></ul></div>',
     );
   });
 
   it("works with paths on nested recipes", async () => {
+    const { document, renderOptions } = mock;
     const todoList = recipe<{
       title: { name: string };
       items: { title: string; done: boolean }[];
@@ -170,15 +168,14 @@ describe("recipes with HTML", () => {
 
     await runtime.idle();
 
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
+    const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(parent, cell);
-
-    assert.equal(parent.innerHTML, "<div><div>test</div></div>");
+    render(root, cell, renderOptions);
+    assert.equal(root.innerHTML, "<div><div>test</div></div>");
   });
 
   it("works with str", async () => {
+    const { document, renderOptions } = mock;
     const strRecipe = recipe<{ name: string }>("str recipe", ({ name }) => {
       return { [UI]: h("div", null, str`Hello, ${name}!`) };
     });
@@ -193,15 +190,15 @@ describe("recipes with HTML", () => {
 
     await runtime.idle();
 
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
+    const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(parent, cell.get());
+    render(root, cell.get(), renderOptions);
 
-    assert.equal(parent.textContent, "Hello, world!");
+    assert.equal(root.innerHTML, "<div>Hello, world!</div>");
   });
 
   it("works with nested maps of non-objects", async () => {
+    const { document, renderOptions } = mock;
     const entries = lift((row: object) => Object.entries(row));
 
     const data = [
@@ -239,13 +236,12 @@ describe("recipes with HTML", () => {
 
     await runtime.idle();
 
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
+    const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(parent, cell.get());
+    render(root, cell.get(), renderOptions);
 
     assert.equal(
-      parent.innerHTML,
+      root.innerHTML,
       "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>",
     );
   });

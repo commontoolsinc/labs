@@ -102,7 +102,6 @@ async function initWorkspace(cwd: string) {
   const types = {
     "commontools": runtimeModuleTypes.commontools,
     "turndown": runtimeModuleTypes.turndown,
-    "dom-parser": runtimeModuleTypes["dom-parser"],
     "ct-env": ctEnv,
     "react/jsx-runtime": jsxRuntime,
   };

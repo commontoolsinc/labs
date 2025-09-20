@@ -19,7 +19,6 @@ const config: Config = {
     sourcemap: !PRODUCTION,
     minify: PRODUCTION,
     external: [
-      "jsdom",
       "source-map-support",
       "canvas",
       "inspector",

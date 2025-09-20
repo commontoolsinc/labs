@@ -3,7 +3,6 @@ export const assets: Readonly<string[]> = [
   "scripts/iframe-bootstrap.js",
   "types/commontools.d.ts",
   "types/dom.d.ts",
-  "types/dom-parser.d.ts",
   "types/es2023.d.ts",
   "types/jsx.d.ts",
   "types/turndown.d.ts",
