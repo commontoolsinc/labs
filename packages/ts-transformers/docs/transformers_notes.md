@@ -21,9 +21,9 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 - **Shared context** – `core/context.ts` centralises the TypeScript checker,
   cached type lookups, flag tracking (e.g., JSX depth), diagnostic reporting,
   and import management.
-- **Data flow analysis** – `opaque-ref/dataflow.ts` walks expressions to
-  collect reactive data flows, handles most scope boundaries, and records
-  provenance so map callbacks typed as `any` can still be derived.
+- **Data flow analysis** – `opaque-ref/dataflow.ts` walks expressions to collect
+  reactive data flows, handles most scope boundaries, and records provenance so
+  map callbacks typed as `any` can still be derived.
 - **Rewrite helpers** – `opaque-ref/rewrite/**` modules handle property access,
   binary/call/template expressions, ternaries, unary `!`, and container rewrites
   using a common binding plan. Import requests are applied at the end of the
@@ -47,7 +47,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 | Area                                                                    | Impact                                                   | Notes |
 | ----------------------------------------------------------------------- | -------------------------------------------------------- | ----- |
 | **Optional-chain predicates**                                           | `!cellRef?.length` still bypasses `derive`, so           |       |
-| runtime may read a `Cell` eagerly.                                      | Need data flow support for                              |       |
+| runtime may read a `Cell` eagerly.                                      | Need data flow support for                               |       |
 | `PropertyAccessChain` and a rewrite that preserves optional semantics.  |                                                          |       |
 | **Closures**                                                            | Functions that capture reactive values (e.g.             |       |
 | `() => count + 1`) aren’t rewritten, so callbacks read opaque values at |                                                          |       |
@@ -57,7 +57,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 | **Async/await & template literals**                                     | Reactive identifiers inside                              |       |
 | `await` expressions or template strings aren't wrapped automatically.   |                                                          |       |
 | **Function body analysis**                                              | Only `return` statements analyzed in functions.          |       |
-| Side effects and assignments are missed.                                | Causes reactive data flows to be overlooked.           |       |
+| Side effects and assignments are missed.                                | Causes reactive data flows to be overlooked.             |       |
 | **Postfix unary operations**                                            | `x++` and `x--` not handled by emitters.                 |       |
 | **Testing depth**                                                       | No unit or perf suites beyond fixtures; closure/optional |       |
 | scenarios lack runtime integration coverage.                            |                                                          |       |

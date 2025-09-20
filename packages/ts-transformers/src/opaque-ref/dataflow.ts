@@ -71,7 +71,7 @@ interface DataFlowScopeInternal {
 interface AnalyzerContext {
   nextNodeId: number;
   nextScopeId: number;
-  readonly collectedNodes: DataFlowNode[];  // All nodes collected during analysis
+  readonly collectedNodes: DataFlowNode[]; // All nodes collected during analysis
   readonly scopes: Map<number, DataFlowScopeInternal>;
 }
 
@@ -79,7 +79,7 @@ interface InternalAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  localNodes: DataFlowNode[];  // Nodes from this expression subtree only
+  localNodes: DataFlowNode[]; // Nodes from this expression subtree only
   rewriteHint?: RewriteHint;
 }
 

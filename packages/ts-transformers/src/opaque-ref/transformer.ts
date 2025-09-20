@@ -75,7 +75,10 @@ export function createModularOpaqueRefTransformer(
         helper,
       );
       if (!importIdentifier) return;
-      const textRange = { pos: importIdentifier.pos, end: importIdentifier.end };
+      const textRange = {
+        pos: importIdentifier.pos,
+        end: importIdentifier.end,
+      };
       const sourceMapRange = ts.getSourceMapRange(importIdentifier);
       for (const identifier of refs) {
         ts.setOriginalNode(identifier, importIdentifier);

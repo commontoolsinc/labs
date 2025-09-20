@@ -11,7 +11,8 @@ export function getCommonToolsModuleAlias(
         moduleSpecifier.text === "commontools"
       ) {
         const clause = statement.importClause;
-        if (clause?.namedBindings &&
+        if (
+          clause?.namedBindings &&
           ts.isNamespaceImport(clause.namedBindings)
         ) {
           return clause.namedBindings.name.text;
@@ -45,7 +46,10 @@ export function getCommonToolsImportIdentifier(
 
       const identifier = factory.createIdentifier(element.name.text);
       ts.setOriginalNode(identifier, element.name);
-      ts.setTextRange(identifier, { pos: element.name.pos, end: element.name.end });
+      ts.setTextRange(identifier, {
+        pos: element.name.pos,
+        end: element.name.end,
+      });
       const sourceMapRange = ts.getSourceMapRange(element.name);
       if (sourceMapRange) {
         ts.setSourceMapRange(identifier, sourceMapRange);

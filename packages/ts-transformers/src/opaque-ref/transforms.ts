@@ -581,11 +581,11 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier("derive"),
         )
         : getHelperIdentifier(
-        sourceFile,
-        factory,
-        "derive",
-        recordHelperReference,
-      );
+          sourceFile,
+          factory,
+          "derive",
+          recordHelperReference,
+        );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -728,11 +728,11 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier("derive"),
         )
         : getHelperIdentifier(
-        sourceFile,
-        factory,
-        "derive",
-        recordHelperReference,
-      );
+          sourceFile,
+          factory,
+          "derive",
+          recordHelperReference,
+        );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -874,11 +874,11 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier("derive"),
         )
         : getHelperIdentifier(
-        sourceFile,
-        factory,
-        "derive",
-        recordHelperReference,
-      );
+          sourceFile,
+          factory,
+          "derive",
+          recordHelperReference,
+        );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
