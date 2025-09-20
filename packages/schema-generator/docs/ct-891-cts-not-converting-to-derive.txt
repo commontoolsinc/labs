@@ -1,0 +1,130 @@
+CT-891: CTS not converting to derive in map callbacks and unary contexts
+
+Summary
+- Running `ct dev --show-transformed ellyse_test.tsx` crashes with:
+  "Can't read value during recipe creation." The failure occurs while
+  rendering `{index + 1}` inside a `cellRef.map(...)` callback.
+- The transformed source still contains raw expressions that should be
+  reactive, e.g. `{index + 1}`, `{charm[NAME] || "Unnamed"}`, and
+  `!cellRef?.length` rather than being wrapped via `derive(...)` (and in
+  some cases `ifElse(...)`).
+
+Repro
+- Command: `deno task ct dev --show-transformed ellyse_test.tsx`
+  - Note: `--show-transformed` does not imply `--no-run` right now, so the
+    recipe still evaluates and crashes. Using
+    `deno task ct dev --no-run --show-transformed ellyse_test.tsx` prints the
+    transformed source without running it.
+
+Observed
+- Stack points to `packages/runner/src/builder/opaque-ref.ts` in
+  `Symbol.toPrimitive` after `unsafe_materialize(...)` fails, triggered by
+  arithmetic on an Opaque value during recipe creation.
+- Location in transformed file corresponds to JSX: `Go to Charm {index + 1}`.
+  This implies `index` is Opaque at runtime, but the transformer did not wrap
+  the expression with `derive(index, v => v + 1)`.
+- Other suspicious spots that remain unwrapped:
+  - `{charm[NAME] || "Unnamed"}` inside the same `map(...)` callback.
+  - `!cellRef?.length` as the first argument to `ifElse(...)`.
+
+Why this happens
+- OpaqueRef transformer relies on the TypeScript type checker to detect
+  Opaque/Ref types. In `cellRef.map((charm: any, index: number) => ...)`, the
+  callback parameters are explicitly typed as `any` and `number`. The checker
+  does not see them as `Opaque`/`OpaqueRef`, so usages like `index + 1` or
+  `charm[NAME]` are not converted.
+- `collectOpaqueRefs()` intentionally skips function parameters to avoid
+  capturing callback locals (e.g., `i` in `.filter(i => ...)`). That rule is
+  correct generally but over-applies here: for callbacks to
+  `OpaqueRef<Array>.map(...)`, those parameters are intentionally Opaque at
+  runtime (the implementation creates a recipe whose params are Opaque).
+- Unary `!` is not currently a covered transformation. Expressions like
+  `!cellRef?.length` should become `derive(cellRef.length, v => !v)` in JSX,
+  but no rule handles `PrefixUnaryExpression` today.
+- CLI flag: `--show-transformed` is not treated as `noRun`, so evaluation still
+  proceeds and trips runtime errors even when only the transformed source was
+  requested.
+
+Impact
+- Immediate crash when evaluating the transformed recipe due to reading an
+  Opaque value during creation.
+- Even where it does not crash, semantics of truthiness/OR on opaque values
+  are wrong or fragile.
+
+Recommendations
+
+1) Make `--show-transformed` imply no execution (noRun)
+   - In `packages/cli/commands/dev.ts` or `packages/cli/lib/dev.ts`, when
+     `showTransformed` is true, pass `run: false` to the engine. Example:
+       - `run: options.run && !options.showTransformed` (commands/dev.ts), or
+       - override inside `process()` before calling `engine.process(...)`.
+   - This matches the help text: "Show only the transformed TypeScript source
+     code without executing the recipe."
+
+2) Treat OpaqueRef.map callback parameters as Opaque for transforms
+   - Goal: allow `{index + 1}` and `{charm[NAME] || "Unnamed"}` inside the
+     `map(...)` callback to be transformed to derive(...).
+   - Suggested implementation path (typescript transformer):
+     - Enhance `collectOpaqueRefs(...)` in
+       `packages/js-runtime/typescript/transformer/types.ts`:
+       - When visiting an `Identifier` or `PropertyAccess`/`ElementAccess`,
+         if we are inside the callback passed to a `.map(...)` call where the
+         callee object is an `OpaqueRef<Array<...>>`, treat the callback
+         parameter identifiers as Opaque sources, even if the type checker says
+         `any`/`number`.
+       - Concretely, detect that the containing function is an argument to a
+         call expression whose `expression` is a property access with name
+         `"map"`, and the object type is OpaqueRef (use existing
+         `isOpaqueRefType(...)`).
+       - In that context, add those parameter identifiers (and property/element
+         accesses off them) to the set of collected Opaque refs.
+     - Keep the general "skip callback locals" rule, but carve out this safe
+       exception for OpaqueRef.map callbacks.
+   - This preserves correctness for other array methods (e.g., filter) while
+     enabling the intended map behavior.
+
+3) Add handling for unary `!` on Opaque expressions in JSX
+   - In `packages/js-runtime/typescript/transformer/opaque-ref.ts`, add a
+     visitor branch for `PrefixUnaryExpression` with `!` that is inside JSX and
+     whose operand contains an Opaque value. Build:
+       `derive(operand, v => !v)` and set `needsDeriveImport = true`.
+   - Alternatively, teach `transformExpressionWithOpaqueRef(...)` in
+     `transforms.ts` to recognize and transform `PrefixUnaryExpression('!')` to
+     a derive form, similar to how binary, call, and template expressions are
+     handled now.
+
+4) Keep existing ternary→ifElse logic
+   - No change needed; current code rewrites JSX ternaries to `ifElse` when the
+     condition is/contains Opaque. The missing piece in this repro is the unary
+     not and map-callback identifiers.
+
+Workarounds for affected recipes
+- In `ellyse_test.tsx`, temporarily wrap with `derive(...)`:
+  - `{derive(index, i => i + 1)}`
+  - `{derive(charm[NAME], n => n || "Unnamed")}`
+  - `ifElse(derive(cellRef.length, l => !l), ..., ...)`
+- Or remove explicit types on `map` parameters and let inference hint the
+  transformer; still brittle and not recommended long term.
+
+Proposed test coverage
+- Add fixtures covering:
+  - `OpaqueRef<Array>.map((element: any, index: number) => index + 1)`
+  - `OpaqueRef<Array>.map((charm: any) => charm[NAME] || "Unnamed")`
+  - `ifElse(!cellRef?.length, ...)` inside JSX should wrap to derive.
+  - `--show-transformed` should not evaluate (no execution side-effects).
+
+Notes
+- The runtime OpaqueRef.map implementation constructs a recipe that passes
+  Opaque parameters (`element`, `index`, `array`) to the user callback. The
+  transformer does not infer that through types when users annotate params as
+  `any`/`number`. The context-aware fallback above resolves this gap.
+- Current transformers are under `packages/js-runtime/...`. We intend to move
+  them to a new `transformers/` package; the above changes still apply.
+
+Appendix: pointers
+- Crash: `packages/runner/src/builder/opaque-ref.ts`, Symbol.toPrimitive
+- Transformer: `packages/js-runtime/typescript/transformer/{opaque-ref.ts,
+  transforms.ts, types.ts}`
+- CLI/engine wiring: `packages/cli/{commands/dev.ts,lib/dev.ts}`,
+  `packages/runner/src/harness/engine.ts`
+

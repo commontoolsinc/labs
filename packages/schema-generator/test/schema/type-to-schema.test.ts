@@ -42,4 +42,34 @@ describe("Schema: type-to-schema parity", () => {
     expect(defU.properties?.newValues?.type).toBe("array");
     expect(defU.properties?.newValues?.items?.type).toBe("string");
   });
+
+  it("handles nested objects with string and number unions", async () => {
+    const code = `
+      interface UserInfo {
+        profile: {
+          name: string;
+          email?: string;
+        };
+        status: "active" | "inactive" | "pending";
+        level: 1 | 2 | 3;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "UserInfo");
+    const schema = createSchemaTransformerV2()(type, checker);
+
+    expect(schema.type).toBe("object");
+    const profile = schema.properties?.profile as Record<string, any>;
+    expect(profile?.type).toBe("object");
+    const profileProps = profile?.properties as Record<string, any>;
+    expect(profileProps?.name?.type).toBe("string");
+    expect(profile.required).toContain("name");
+    expect(profile.required).not.toContain("email");
+
+    const status = schema.properties?.status as Record<string, unknown>;
+    expect(status?.enum).toEqual(["active", "inactive", "pending"]);
+
+    const level = schema.properties?.level as Record<string, unknown>;
+    expect(level?.enum).toEqual([1, 2, 3]);
+  });
 });

@@ -110,6 +110,30 @@ export default add(5, "5");`,
     await expect(compiler.resolveAndCompile(program)).rejects.toThrow(expected);
   });
 
+  it("Skips schema transformation without directive", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+import { toSchema } from "commontools";
+
+export interface Props {
+  count: number;
+}
+
+export default toSchema<Props>();
+`,
+      "commontools.d.ts": types["commontools.d.ts"],
+    });
+
+    const { js } = await compiler.resolveAndCompile(program, {
+      bundleExportAll: true,
+      runtimeModules: ["commontools"],
+    });
+
+    expect(js).toContain("toSchema");
+    expect(js).not.toContain('"type":"object"');
+  });
+
   for (const { name, source, expectedError, ...options } of TESTS) {
     it(name, () => {
       const artifact = {
