@@ -32,7 +32,7 @@ export default recipe({
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {commontools_1.derive(count, count => count + 1)}</span>
+          <span>Count: {derive(count, count => count + 1)}</span>
           
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
           <ct-button onClick={handleClick({ count })}>

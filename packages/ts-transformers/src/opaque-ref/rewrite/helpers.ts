@@ -5,7 +5,10 @@ import {
   replaceOpaqueRefsWithParams,
 } from "../transforms.ts";
 import { detectCallKind } from "../call-kind.ts";
-import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
+import {
+  getCommonToolsImportIdentifier,
+  getCommonToolsModuleAlias,
+} from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
 import type { NormalisedDataFlow } from "../normalise.ts";
@@ -185,7 +188,16 @@ export function createDeriveIdentifier(
       context.factory.createIdentifier("derive"),
     );
   }
-  return context.factory.createIdentifier("derive");
+  const existing = getCommonToolsImportIdentifier(
+    context.sourceFile,
+    context.factory,
+    "derive",
+  );
+  if (existing) return existing;
+
+  const identifier = context.factory.createIdentifier("derive");
+  context.recordHelperReference?.("derive", identifier);
+  return identifier;
 }
 
 export function createDeriveDataFlowObject(
@@ -285,7 +297,13 @@ export function createDeriveCallForExpression(
   );
 
   if (options.wrapConditional && ts.isConditionalExpression(expression)) {
-    return createIfElseCall(expression, factory, context.sourceFile);
+    return createIfElseCall(
+      expression,
+      factory,
+      context.sourceFile,
+      {},
+      context.recordHelperReference,
+    );
   }
 
   return callExpression;

@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { getCommonToolsModuleAlias } from "../core/common-tools.ts";
+import {
+  getCommonToolsImportIdentifier,
+  getCommonToolsModuleAlias,
+} from "../core/common-tools.ts";
 import { assertDefined } from "../core/assert.ts";
 import {
   containsOpaqueRef,
@@ -53,11 +56,36 @@ export interface IfElseOverrides {
   readonly whenFalse?: ts.Expression;
 }
 
+function getHelperIdentifier(
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  helperName: OpaqueRefHelperName,
+  recordHelperReference?: (
+    helper: OpaqueRefHelperName,
+    identifier: ts.Identifier,
+  ) => void,
+): ts.Identifier {
+  const existing = getCommonToolsImportIdentifier(
+    sourceFile,
+    factory,
+    helperName,
+  );
+  if (existing) return existing;
+
+  const identifier = factory.createIdentifier(helperName);
+  recordHelperReference?.(helperName, identifier);
+  return identifier;
+}
+
 export function createIfElseCall(
   ternary: ts.ConditionalExpression,
   factory: ts.NodeFactory,
   sourceFile: ts.SourceFile,
   overrides: IfElseOverrides = {},
+  recordHelperReference?: (
+    helper: OpaqueRefHelperName,
+    identifier: ts.Identifier,
+  ) => void,
 ): ts.CallExpression {
   const moduleAlias = getCommonToolsModuleAlias(sourceFile);
   const ifElseIdentifier = moduleAlias
@@ -65,7 +93,12 @@ export function createIfElseCall(
       factory.createIdentifier(moduleAlias),
       factory.createIdentifier("ifElse"),
     )
-    : factory.createIdentifier("ifElse");
+    : getHelperIdentifier(
+      sourceFile,
+      factory,
+      "ifElse",
+      recordHelperReference,
+    );
 
   let predicate = overrides.predicate ?? ternary.condition;
   let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
@@ -97,6 +130,10 @@ export function transformExpressionWithOpaqueRef(
   context: ts.TransformationContext,
   registerHelper?: (helper: OpaqueRefHelperName) => void,
   analyzer?: (expression: ts.Expression) => DataFlowAnalysis,
+  recordHelperReference?: (
+    helper: OpaqueRefHelperName,
+    identifier: ts.Identifier,
+  ) => void,
 ): ts.Expression {
   if (
     ts.isJsxExpression(expression) &&
@@ -151,6 +188,7 @@ export function transformExpressionWithOpaqueRef(
           context,
           registerHelper,
           dataFlowAnalyzer,
+          recordHelperReference,
         );
       }
       return expr;
@@ -175,7 +213,13 @@ export function transformExpressionWithOpaqueRef(
       visitedCondition !== expression.condition
     ) {
       registerHelper?.("ifElse");
-      return createIfElseCall(updated, factory, sourceFile);
+      return createIfElseCall(
+        updated,
+        factory,
+        sourceFile,
+        {},
+        recordHelperReference,
+      );
     }
 
     return updated;
@@ -219,7 +263,12 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier(moduleAlias),
           factory.createIdentifier("derive"),
         )
-        : factory.createIdentifier("derive");
+        : getHelperIdentifier(
+          sourceFile,
+          factory,
+          "derive",
+          recordHelperReference,
+        );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -308,7 +357,12 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier(moduleAlias),
         factory.createIdentifier("derive"),
       )
-      : factory.createIdentifier("derive");
+      : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -354,7 +408,12 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier(moduleAlias),
           factory.createIdentifier("derive"),
         )
-        : factory.createIdentifier("derive");
+        : getHelperIdentifier(
+          sourceFile,
+          factory,
+          "derive",
+          recordHelperReference,
+        );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -448,7 +507,12 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier(moduleAlias),
         factory.createIdentifier("derive"),
       )
-      : factory.createIdentifier("derive");
+      : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -516,7 +580,12 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier(moduleAlias),
           factory.createIdentifier("derive"),
         )
-        : factory.createIdentifier("derive");
+        : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -586,7 +655,12 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier(moduleAlias),
         factory.createIdentifier("derive"),
       )
-      : factory.createIdentifier("derive");
+      : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -653,7 +727,12 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier(moduleAlias),
           factory.createIdentifier("derive"),
         )
-        : factory.createIdentifier("derive");
+        : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -727,7 +806,12 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier(moduleAlias),
         factory.createIdentifier("derive"),
       )
-      : factory.createIdentifier("derive");
+      : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -789,7 +873,12 @@ export function transformExpressionWithOpaqueRef(
           factory.createIdentifier(moduleAlias),
           factory.createIdentifier("derive"),
         )
-        : factory.createIdentifier("derive");
+        : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -869,7 +958,12 @@ export function transformExpressionWithOpaqueRef(
         factory.createIdentifier(moduleAlias),
         factory.createIdentifier("derive"),
       )
-      : factory.createIdentifier("derive");
+      : getHelperIdentifier(
+        sourceFile,
+        factory,
+        "derive",
+        recordHelperReference,
+      );
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,

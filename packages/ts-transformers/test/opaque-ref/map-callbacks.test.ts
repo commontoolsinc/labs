@@ -47,15 +47,15 @@ describe("OpaqueRef map callbacks", () => {
 
     assertStringIncludes(
       output,
-      "commontools_1.derive(index, index => index + 1)",
+      "derive(index, index => index + 1)",
     );
     assertStringIncludes(
       output,
-      'commontools_1.derive(charm, charm => charm[NAME] || "Unnamed")',
+      'derive(charm, charm => charm[NAME] || "Unnamed")',
     );
     assertStringIncludes(
       output,
-      "ifElse(commontools_1.derive(state.charms, _v1 => !_v1.length)",
+      "ifElse(derive(state.charms, _v1 => !_v1.length)",
     );
   });
 });

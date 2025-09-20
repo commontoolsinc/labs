@@ -102,6 +102,7 @@ export const emitConditionalExpression: Emitter = ({
       whenTrue,
       whenFalse,
     },
+    context.recordHelperReference,
   );
 
   return {

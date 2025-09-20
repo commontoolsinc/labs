@@ -3,8 +3,15 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
 import { detectCallKind } from "../call-kind.ts";
+import { getCommonToolsImportIdentifier } from "../../core/common-tools.ts";
+import type { OpaqueRefHelperName } from "../transforms.ts";
 
-export function createSchemaInjectionRule(): OpaqueRefRule {
+export function createSchemaInjectionRule(
+  recordHelperReference: (
+    helper: OpaqueRefHelperName,
+    identifier: ts.Identifier,
+  ) => void,
+): OpaqueRefRule {
   return {
     name: "schema-injection",
     transform(sourceFile, context, transformation) {
@@ -14,6 +21,21 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
         if (requestedToSchema) return;
         requestedToSchema = true;
         context.imports.request({ name: "toSchema" });
+      };
+
+      const getToSchemaIdentifier = (): ts.Identifier => {
+        const existing = getCommonToolsImportIdentifier(
+          sourceFile,
+          transformation.factory,
+          "toSchema",
+        );
+        if (existing) {
+          return existing;
+        }
+
+        const identifier = transformation.factory.createIdentifier("toSchema");
+        recordHelperReference("toSchema", identifier);
+        return identifier;
       };
 
       const visit = (node: ts.Node): ts.Node => {
@@ -27,11 +49,9 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           const typeArgs = node.typeArguments;
           if (typeArgs && typeArgs.length >= 1) {
             const factory = transformation.factory;
-            const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
-              typeArg,
-            ) =>
+            const schemaArgs = typeArgs.map((typeArg) => typeArg).map((typeArg) =>
               factory.createCallExpression(
-                factory.createIdentifier("toSchema"),
+                getToSchemaIdentifier(),
                 [typeArg],
                 [],
               )
@@ -70,12 +90,12 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               return ts.visitEachChild(node, visit, transformation);
             }
             const toSchemaEvent = factory.createCallExpression(
-              factory.createIdentifier("toSchema"),
+              getToSchemaIdentifier(),
               [eventType],
               [],
             );
             const toSchemaState = factory.createCallExpression(
-              factory.createIdentifier("toSchema"),
+              getToSchemaIdentifier(),
               [stateType],
               [],
             );
@@ -109,12 +129,12 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
 
                 if (eventParam || stateParam) {
                   const toSchemaEvent = factory.createCallExpression(
-                    factory.createIdentifier("toSchema"),
+                    getToSchemaIdentifier(),
                     [eventType],
                     [],
                   );
                   const toSchemaState = factory.createCallExpression(
-                    factory.createIdentifier("toSchema"),
+                    getToSchemaIdentifier(),
                     [stateType],
                     [],
                   );

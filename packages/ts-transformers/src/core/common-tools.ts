@@ -10,10 +10,50 @@ export function getCommonToolsModuleAlias(
         ts.isStringLiteral(moduleSpecifier) &&
         moduleSpecifier.text === "commontools"
       ) {
-        return "commontools_1";
+        const clause = statement.importClause;
+        if (clause?.namedBindings &&
+          ts.isNamespaceImport(clause.namedBindings)
+        ) {
+          return clause.namedBindings.name.text;
+        }
+        if (clause?.name) {
+          return clause.name.text;
+        }
       }
     }
   }
+  return null;
+}
+
+export function getCommonToolsImportIdentifier(
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  importName: string,
+): ts.Identifier | null {
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== "commontools") continue;
+
+    const clause = statement.importClause;
+    if (!clause || !clause.namedBindings) continue;
+    if (!ts.isNamedImports(clause.namedBindings)) continue;
+
+    for (const element of clause.namedBindings.elements) {
+      const importedName = element.propertyName?.text ?? element.name.text;
+      if (importedName !== importName) continue;
+
+      const identifier = factory.createIdentifier(element.name.text);
+      ts.setOriginalNode(identifier, element.name);
+      ts.setTextRange(identifier, { pos: element.name.pos, end: element.name.end });
+      const sourceMapRange = ts.getSourceMapRange(element.name);
+      if (sourceMapRange) {
+        ts.setSourceMapRange(identifier, sourceMapRange);
+      }
+      return identifier;
+    }
+  }
+
   return null;
 }
 

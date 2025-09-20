@@ -15,7 +15,12 @@ export interface OpaqueRefRule {
   ): ts.SourceFile;
 }
 
-export function createJsxExpressionRule(): OpaqueRefRule {
+export function createJsxExpressionRule(
+  recordHelperReference: (
+    helper: OpaqueRefHelperName,
+    identifier: ts.Identifier,
+  ) => void,
+): OpaqueRefRule {
   return {
     name: "jsx-expression",
     transform(
@@ -62,6 +67,7 @@ export function createJsxExpressionRule(): OpaqueRefRule {
               sourceFile,
               transformation,
               analyze,
+              recordHelperReference,
             },
           });
 

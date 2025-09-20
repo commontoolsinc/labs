@@ -16,7 +16,7 @@ export default recipe({
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
-          {commontools_1.ifElse(commontools_1.derive(state.value, _v1 => _v1 + 1), commontools_1.derive(state.value, _v1 => _v1 + 2), "undefined")}
+          {ifElse(derive(state.value, _v1 => _v1 + 1), derive(state.value, _v1 => _v1 + 2), "undefined")}
       </div>),
     };
 });
