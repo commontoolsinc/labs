@@ -143,7 +143,7 @@ current offline harness.
       derived boolean and assert no-op.
 - [ ] Counter with nested recipe-lift recursion — pattern uses lift to produce
       function that instantiates same pattern type for new nodes.
-- [ ] Counter with alternate initial states — run scenario with multiple initial
+- [x] Counter with alternate initial states — run scenario with multiple initial
       argument variations in steps.
 - [ ] Counter with multiply nested arrays — three-level nested arrays storing
       counters and verifying deep updates.
