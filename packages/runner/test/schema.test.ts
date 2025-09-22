@@ -102,7 +102,7 @@ describe("Schema Support", () => {
       // Let type inference work through the schema
       const result = mappingCell.asSchema(schema).get();
 
-      (expect(result) as any).toEqualIgnoringSymbols({
+      expect(result).toEqualIgnoringSymbols({
         id: 1,
         changes: ["2025-01-06"],
         kind: "user",
@@ -179,7 +179,7 @@ describe("Schema Support", () => {
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
-      (expect(first.get()) as any).toEqualIgnoringSymbols({ label: "first" });
+      expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       first.withTx(tx).set({ label: "first - update" });
 
       tx.commit();
@@ -222,24 +222,24 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      (expect(currentByGetValues) as any).toEqualIgnoringSymbols([
+      expect(currentByGetValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "first - updated again",
       ]);
-      (expect(currentByKeyValues) as any).toEqualIgnoringSymbols([
+      expect(currentByKeyValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "second",
         "second - update",
       ]);
-      (expect(currentValues) as any).toEqualIgnoringSymbols([
+      expect(currentValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "second",
         "second - update",
       ]);
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqualIgnoringSymbols([
         "root",
         "cancelled",
         "root",
@@ -247,7 +247,7 @@ describe("Schema Support", () => {
 
       cancel();
 
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqualIgnoringSymbols([
         "root",
         "cancelled",
         "root",
@@ -355,7 +355,7 @@ describe("Schema Support", () => {
       // Find the currently selected cell and read it
       const first = root.key("current").withTx(tx).get();
       expect(isCell(first)).toBe(true);
-      (expect(first.get()) as any).toEqualIgnoringSymbols({ label: "first" });
+      expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
       expect(parseLink(first.getAsLink({ includeSchema: true }))).toEqual({
         id: toURI(initialEntityId),
@@ -392,7 +392,7 @@ describe("Schema Support", () => {
       tx = runtime.edit();
 
       await runtime.idle();
-      (expect(first.get()) as any).toEqualIgnoringSymbols({
+      expect(first.get()).toEqualIgnoringSymbols({
         label: "first - update",
       });
 
@@ -446,7 +446,7 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqualIgnoringSymbols([
         "root",
         "cancelled",
         "root",
@@ -479,13 +479,13 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      (expect(currentByGetValues) as any).toEqualIgnoringSymbols([
+      expect(currentByGetValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "first - updated again",
         "first - updated yet again",
       ]);
-      (expect(currentByKeyValues) as any).toEqualIgnoringSymbols([
+      expect(currentByKeyValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "second",
@@ -493,7 +493,7 @@ describe("Schema Support", () => {
         "third",
         "third - updated",
       ]);
-      (expect(currentValues) as any).toEqualIgnoringSymbols([
+      expect(currentValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
         "second", // That was changing `value` on root
@@ -502,7 +502,7 @@ describe("Schema Support", () => {
         "third",
         "third - updated",
       ]);
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqualIgnoringSymbols([
         "root",
         "cancelled",
         "root",
@@ -623,7 +623,7 @@ describe("Schema Support", () => {
       const cell = c.asSchema(schema);
       const value = cell.get();
 
-      (expect(value.items) as any).toEqualIgnoringSymbols([1, 2, 3]);
+      expect(value.items).toEqualIgnoringSymbols([1, 2, 3]);
     });
   });
 
@@ -1247,11 +1247,11 @@ describe("Schema Support", () => {
       const cellArray = cArray.asSchema(schemaArray);
       const resultArray = cellArray.get();
       // Verify that the array candidate is chosen and returns the intended array.
-      (expect(resultArray) as any).toEqualIgnoringSymbols({
+      expect(resultArray).toEqualIgnoringSymbols({
         mixed: ["bar", "baz"],
       });
       expect(Array.isArray(resultArray.mixed)).toBe(true);
-      (expect(resultArray.mixed) as any).toEqualIgnoringSymbols(["bar", "baz"]);
+      expect(resultArray.mixed).toEqualIgnoringSymbols(["bar", "baz"]);
     });
 
     describe("Array anyOf Support", () => {
@@ -1277,7 +1277,7 @@ describe("Schema Support", () => {
 
         const cell = c.asSchema(schema);
         const result = cell.get();
-        (expect(result.data) as any).toEqualIgnoringSymbols([1, 2, 3]);
+        expect(result.data).toEqualIgnoringSymbols([1, 2, 3]);
       });
 
       it("should merge item schemas when multiple array options exist", () => {
@@ -1303,7 +1303,7 @@ describe("Schema Support", () => {
         const cell = c.asSchema(schema);
         const result = cell.get();
         // Should keep string and number values, drop boolean
-        (expect(result.data) as any).toEqualIgnoringSymbols([
+        expect(result.data).toEqualIgnoringSymbols([
           "hello",
           42,
           undefined,
@@ -1354,7 +1354,7 @@ describe("Schema Support", () => {
 
         const cell = c.asSchema(schema);
         const result = cell.get();
-        (expect(result.data) as any).toEqualIgnoringSymbols([
+        expect(result.data).toEqualIgnoringSymbols([
           { type: "text", value: "hello" },
           { type: "number", value: 42 },
         ]);
@@ -1588,14 +1588,14 @@ describe("Schema Support", () => {
 
       expect(value.name).toBe("John");
       expect(isCell(value.profile)).toBe(true);
-      (expect(value.profile.get()) as any).toEqualIgnoringSymbols({
+      expect(value.profile.get()).toEqualIgnoringSymbols({
         bio: "Default bio",
         avatar: "default.png",
       });
 
       // Verify the profile cell can be updated
       value.profile.set({ bio: "Updated bio", avatar: "new.png" });
-      (expect(value.profile.get()) as any).toEqualIgnoringSymbols({
+      expect(value.profile.get()).toEqualIgnoringSymbols({
         bio: "Updated bio",
         avatar: "new.png",
       });
@@ -1635,14 +1635,14 @@ describe("Schema Support", () => {
 
       expect(value.name).toBe("John");
       expect(isCell(value.tags)).toBe(true);
-      (expect(value.tags.get()) as any).toEqualIgnoringSymbols([
+      expect(value.tags.get()).toEqualIgnoringSymbols([
         "default",
         "tags",
       ]);
 
       // Verify the tags cell can be updated
       value.tags.set(["updated", "tags", "list"]);
-      (expect(value.tags.get()) as any).toEqualIgnoringSymbols([
+      expect(value.tags.get()).toEqualIgnoringSymbols([
         "updated",
         "tags",
         "list",
@@ -1712,7 +1712,7 @@ describe("Schema Support", () => {
       expect(settings.notifications).toBe(true);
       expect(isCell(settings.theme)).toBe(true);
       expect(isCell(settings.theme.get())).toBe(false);
-      (expect(settings.theme.get()) as any).toEqualIgnoringSymbols({
+      expect(settings.theme.get()).toEqualIgnoringSymbols({
         mode: "light",
         color: "red",
       });
@@ -1746,7 +1746,7 @@ describe("Schema Support", () => {
       const settings2 = value2.user.settings.get();
       expect(settings2.notifications).toBe(false);
       expect(isCell(settings2.theme)).toBe(true);
-      (expect(settings2.theme.get()) as any).toEqualIgnoringSymbols({
+      expect(settings2.theme.get()).toEqualIgnoringSymbols({
         mode: "dark",
         color: "blue",
       });
@@ -1829,12 +1829,12 @@ describe("Schema Support", () => {
       expect(isCell(value2.items?.[0].metadata)).toBe(true);
       expect(isCell(value2.items?.[1].metadata)).toBe(true);
 
-      (expect(value2.items?.[0].metadata?.get()) as any).toEqualIgnoringSymbols(
+      expect(value2.items?.[0].metadata?.get()).toEqualIgnoringSymbols(
         {
           createdAt: "2023-01-01",
         },
       );
-      (expect(value2.items?.[1].metadata?.get()) as any).toEqualIgnoringSymbols(
+      expect(value2.items?.[1].metadata?.get()).toEqualIgnoringSymbols(
         {
           createdAt: "2023-01-02",
         },
@@ -1885,11 +1885,11 @@ describe("Schema Support", () => {
       expect(isCell(value.config.feature1)).toBe(true);
       expect(isCell(value.config.feature2)).toBe(true);
 
-      (expect(value.config.feature1?.get()) as any).toEqualIgnoringSymbols({
+      expect(value.config.feature1?.get()).toEqualIgnoringSymbols({
         enabled: true,
         value: "feature1",
       });
-      (expect(value.config.feature2?.get()) as any).toEqualIgnoringSymbols({
+      expect(value.config.feature2?.get()).toEqualIgnoringSymbols({
         enabled: false,
         value: "feature2",
       });
@@ -1976,7 +1976,7 @@ describe("Schema Support", () => {
 
         expect(value.config.knownProp).toBe("in schema");
         expect(isCell(value.config.featureFlag)).toBe(true);
-        (expect(value.config.featureFlag?.get()) as any).toEqualIgnoringSymbols(
+        expect(value.config.featureFlag?.get()).toEqualIgnoringSymbols(
           {
             enabled: true,
             value: "beta",
@@ -2018,7 +2018,7 @@ describe("Schema Support", () => {
       const cellValue = cell.get();
       expect(isCell(cellValue)).toBe(true);
       const value = cellValue.get();
-      (expect(value) as any).toEqualIgnoringSymbols({
+      expect(value).toEqualIgnoringSymbols({
         name: "Default User",
         settings: { theme: "light" },
       });
@@ -2030,7 +2030,7 @@ describe("Schema Support", () => {
           settings: { theme: "dark" },
         }),
       );
-      (expect(cell.get().get()) as any).toEqualIgnoringSymbols({
+      expect(cell.get().get()).toEqualIgnoringSymbols({
         name: "Updated User",
         settings: { theme: "dark" },
       });
