@@ -1,6 +1,6 @@
 import { isDeno } from "@commontools/utils/env";
 import { ProgramResolver, Source } from "./interface.ts";
-import { dirname, join } from "@std/path";
+import { dirname, join } from "@std/path/posix";
 
 export class InMemoryProgram implements ProgramResolver {
   private modules: Record<string, string>;

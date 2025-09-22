@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { Program, ProgramResolver, Source } from "../interface.ts";
-import { dirname, join } from "@std/path";
+import { dirname, join } from "@std/path/posix";
 
 export type UnresolvedModuleHandling =
   | { type: "allow"; identifiers: string[] }

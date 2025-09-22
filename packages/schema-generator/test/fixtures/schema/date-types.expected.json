@@ -1,6 +1,6 @@
 {
-  "properties": {
-    "document": {
+  "definitions": {
+    "Document": {
       "properties": {
         "archivedAt": {
           "anyOf": [
@@ -31,7 +31,7 @@
       ],
       "type": "object"
     },
-    "eventLog": {
+    "EventLog": {
       "properties": {
         "eventType": {
           "type": "string"
@@ -48,7 +48,7 @@
       ],
       "type": "object"
     },
-    "userProfile": {
+    "UserProfile": {
       "properties": {
         "createdAt": {
           "format": "date-time",
@@ -92,6 +92,17 @@
         "preferences"
       ],
       "type": "object"
+    }
+  },
+  "properties": {
+    "document": {
+      "$ref": "#/definitions/Document"
+    },
+    "eventLog": {
+      "$ref": "#/definitions/EventLog"
+    },
+    "userProfile": {
+      "$ref": "#/definitions/UserProfile"
     }
   },
   "required": [

@@ -5,7 +5,11 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
-import { TypeWithInternals } from "../type-utils.ts";
+import {
+  cloneSchemaDefinition,
+  getNativeTypeSchema,
+  TypeWithInternals,
+} from "../type-utils.ts";
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -31,8 +35,13 @@ export class UnionFormatter implements TypeFormatter {
     const hasNull = filtered.some((m) => (m.flags & ts.TypeFlags.Null) !== 0);
     const nonNull = filtered.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
 
-    const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition =>
-      this.schemaGenerator.formatChildType(t, context, typeNode);
+    const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition => {
+      const native = getNativeTypeSchema(t, context.typeChecker);
+      if (native !== undefined) {
+        return cloneSchemaDefinition(native);
+      }
+      return this.schemaGenerator.formatChildType(t, context, typeNode);
+    };
 
     // Case: exactly one non-null member + null => anyOf (nullable type)
     // Note: We use anyOf instead of oneOf for better consumer compatibility.

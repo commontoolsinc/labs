@@ -32,9 +32,67 @@ interface State {
     numbers: number[];
 }
 export default recipe({
+    $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
         user: {
+            $ref: "#/definitions/User"
+        },
+        config: {
+            $ref: "#/definitions/Config"
+        },
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        index: {
+            type: "number"
+        },
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        }
+    },
+    required: ["user", "config", "items", "index", "numbers"],
+    definitions: {
+        Config: {
+            type: "object",
+            properties: {
+                theme: {
+                    type: "object",
+                    properties: {
+                        primaryColor: {
+                            type: "string"
+                        },
+                        secondaryColor: {
+                            type: "string"
+                        },
+                        fontSize: {
+                            type: "number"
+                        }
+                    },
+                    required: ["primaryColor", "secondaryColor", "fontSize"]
+                },
+                features: {
+                    type: "object",
+                    properties: {
+                        darkMode: {
+                            type: "boolean"
+                        },
+                        beta: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["darkMode", "beta"]
+                }
+            },
+            required: ["theme", "features"]
+        },
+        User: {
             type: "object",
             properties: {
                 name: {
@@ -72,57 +130,8 @@ export default recipe({
                 }
             },
             required: ["name", "age", "active", "profile"]
-        },
-        config: {
-            type: "object",
-            properties: {
-                theme: {
-                    type: "object",
-                    properties: {
-                        primaryColor: {
-                            type: "string"
-                        },
-                        secondaryColor: {
-                            type: "string"
-                        },
-                        fontSize: {
-                            type: "number"
-                        }
-                    },
-                    required: ["primaryColor", "secondaryColor", "fontSize"]
-                },
-                features: {
-                    type: "object",
-                    properties: {
-                        darkMode: {
-                            type: "boolean"
-                        },
-                        beta: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["darkMode", "beta"]
-                }
-            },
-            required: ["theme", "features"]
-        },
-        items: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        index: {
-            type: "number"
-        },
-        numbers: {
-            type: "array",
-            items: {
-                type: "number"
-            }
         }
-    },
-    required: ["user", "config", "items", "index", "numbers"]
+    }
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
@@ -170,4 +179,3 @@ export default recipe({
       </div>),
     };
 });
-

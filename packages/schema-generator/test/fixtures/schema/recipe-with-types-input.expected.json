@@ -1,29 +1,34 @@
 {
-  "type": "object",
-  "properties": {
-    "title": {
-      "type": "string",
-      "default": "untitled"
-    },
-    "items": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string",
-            "default": ""
-          }
-        },
-        "required": [
-          "text"
-        ]
+  "definitions": {
+    "Item": {
+      "properties": {
+        "text": {
+          "default": "",
+          "type": "string"
+        }
       },
-      "default": []
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/Item"
+      },
+      "type": "array"
+    },
+    "title": {
+      "default": "untitled",
+      "type": "string"
     }
   },
   "required": [
     "items",
     "title"
-  ]
+  ],
+  "type": "object"
 }

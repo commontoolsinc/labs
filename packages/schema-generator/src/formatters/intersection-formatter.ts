@@ -5,29 +5,37 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
 
 const logger = getLogger("schema-generator.intersection");
+const DOC_CONFLICT_COMMENT =
+  "Conflicting docs across intersection constituents; using first";
 
 export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type, context: GenerationContext): boolean {
+  supportsType(type: ts.Type, _context: GenerationContext): boolean {
     return (type.flags & ts.TypeFlags.Intersection) !== 0;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const checker = context.typeChecker;
+    const native = getNativeTypeSchema(type, checker);
+    if (native !== undefined) {
+      return cloneSchemaDefinition(native);
+    }
     const inter = type as ts.IntersectionType;
     const parts = inter.types ?? [];
 
     if (parts.length === 0) {
-      throw new Error("IntersectionFormatter received empty intersection type");
+      throw new Error(
+        "IntersectionFormatter received empty intersection type",
+      );
     }
 
-    // Validate constituents to ensure safe merging
     const failureReason = this.validateIntersectionParts(parts, checker);
     if (failureReason) {
       return {
@@ -37,7 +45,6 @@ export class IntersectionFormatter implements TypeFormatter {
       };
     }
 
-    // Merge object-like constituents: combine properties and required arrays
     const merged = this.mergeIntersectionParts(parts, context);
     return this.applyIntersectionDocs(merged);
   }
@@ -47,13 +54,11 @@ export class IntersectionFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
   ): string | null {
     for (const part of parts) {
-      // Only support object-like types for safe merging
       if ((part.flags & ts.TypeFlags.Object) === 0) {
         return "non-object constituent";
       }
 
       try {
-        // Reject types with index signatures as they can't be safely merged
         const stringIndex = checker.getIndexTypeOfType(
           part,
           ts.IndexKind.String,
@@ -65,15 +70,12 @@ export class IntersectionFormatter implements TypeFormatter {
         if (stringIndex || numberIndex) {
           return "index signature on constituent";
         }
-
-        // Note: Call/construct signatures are ignored (consistent with other formatters)
-        // They cannot be represented in JSON Schema, so we just extract regular properties
       } catch (error) {
         return `checker error while validating intersection: ${error}`;
       }
     }
 
-    return null; // All parts are valid
+    return null;
   }
 
   private mergeIntersectionParts(
@@ -86,7 +88,7 @@ export class IntersectionFormatter implements TypeFormatter {
     missingSources: string[];
   } {
     const mergedProps: Record<string, SchemaDefinition> = {};
-    const requiredSet: Set<string> = new Set();
+    const requiredSet = new Set<string>();
 
     const docTexts: string[] = [];
     const documentedSources: string[] = [];
@@ -101,56 +103,44 @@ export class IntersectionFormatter implements TypeFormatter {
         missingSources.push(docInfo.typeName);
       }
 
-      const schema = this.schemaGenerator.generateSchema(
-        part,
-        context.typeChecker,
-        undefined, // No specific type node for intersection parts
-      );
+      const schema = this.schemaGenerator.formatChildType(part, context);
+      const objSchema = this.resolveObjectSchema(schema, context);
+      if (!objSchema) continue;
 
-      if (this.isObjectSchema(schema)) {
-        // Merge properties from this part
-        if (schema.properties) {
-          for (const [key, value] of Object.entries(schema.properties)) {
-            const existing = mergedProps[key];
-            if (existing) {
-              // If both are object schemas, check description conflicts
-              if (isRecord(existing) && isRecord(value)) {
-                const aDesc = typeof existing.description === "string"
-                  ? (existing.description as string)
+      if (objSchema.properties) {
+        for (const [key, value] of Object.entries(objSchema.properties)) {
+          const existing = mergedProps[key];
+          if (existing) {
+            if (isRecord(existing) && isRecord(value)) {
+              const aDesc = typeof existing.description === "string"
+                ? existing.description as string
+                : undefined;
+              const bDesc = typeof value.description === "string"
+                ? value.description as string
+                : undefined;
+              if (aDesc && bDesc && aDesc !== bDesc) {
+                const priorComment = typeof existing.$comment === "string"
+                  ? existing.$comment as string
                   : undefined;
-                const bDesc = typeof value.description === "string"
-                  ? (value.description as string)
-                  : undefined;
-                if (aDesc && bDesc && aDesc !== bDesc) {
-                  const priorComment = typeof existing.$comment === "string"
-                    ? (existing.$comment as string)
-                    : undefined;
-                  (existing as Record<string, unknown>).$comment =
-                    priorComment ??
-                      "Conflicting docs across intersection constituents; using first";
-                  logger.warn(() =>
-                    `Intersection doc conflict for '${key}'; using first`
-                  );
-                }
+                (existing as Record<string, unknown>).$comment = priorComment ??
+                  DOC_CONFLICT_COMMENT;
+                logger.warn(() =>
+                  `Intersection doc conflict for '${key}'; using first`
+                );
               }
-              // Prefer the first definition by default; emit debug for visibility
-              logger.debug(() =>
-                `Intersection kept first definition for '${key}'`
-              );
-              // Keep existing
-              continue;
             }
-            mergedProps[key] = value as SchemaDefinition;
+            logger.debug(() =>
+              `Intersection kept first definition for '${key}'`
+            );
+            continue;
           }
+          mergedProps[key] = value as SchemaDefinition;
         }
+      }
 
-        // Merge required properties
-        if (Array.isArray(schema.required)) {
-          for (const req of schema.required) {
-            if (typeof req === "string") {
-              requiredSet.add(req);
-            }
-          }
+      if (Array.isArray(objSchema.required)) {
+        for (const req of objSchema.required) {
+          if (typeof req === "string") requiredSet.add(req);
         }
       }
     }
@@ -180,6 +170,32 @@ export class IntersectionFormatter implements TypeFormatter {
     );
   }
 
+  private resolveObjectSchema(
+    schema: SchemaDefinition,
+    context: GenerationContext,
+  ):
+    | (SchemaDefinition & {
+      properties?: Record<string, SchemaDefinition>;
+      required?: string[];
+    })
+    | undefined {
+    if (this.isObjectSchema(schema)) return schema;
+    if (
+      typeof schema === "object" &&
+      schema !== null &&
+      typeof (schema as Record<string, unknown>).$ref === "string"
+    ) {
+      const ref = (schema as Record<string, unknown>).$ref as string;
+      const prefix = "#/definitions/";
+      if (ref.startsWith(prefix)) {
+        const name = ref.slice(prefix.length);
+        const def = context.definitions[name];
+        if (def && this.isObjectSchema(def)) return def;
+      }
+    }
+    return undefined;
+  }
+
   private applyIntersectionDocs(
     data: {
       schema: SchemaDefinition;
@@ -205,26 +221,24 @@ export class IntersectionFormatter implements TypeFormatter {
 
     const commentParts: string[] = [];
     const existingComment = typeof schema.$comment === "string"
-      ? (schema.$comment as string)
+      ? schema.$comment as string
       : undefined;
 
     const uniqueDocumented = Array.from(new Set(documentedSources)).filter((
-      s,
-    ) => s);
-    const uniqueMissing = Array.from(new Set(missingSources)).filter((s) => s);
+      name,
+    ) => name);
+    const uniqueMissing = Array.from(new Set(missingSources)).filter((name) =>
+      name
+    );
 
     if (uniqueDocTexts.length > 0) {
       commentParts.push("Docs inherited from intersection constituents.");
     }
     if (uniqueDocTexts.length > 1 && uniqueDocumented.length > 0) {
-      commentParts.push(
-        `Sources: ${uniqueDocumented.join(", ")}.`,
-      );
+      commentParts.push(`Sources: ${uniqueDocumented.join(", ")}.`);
     }
     if (uniqueDocTexts.length > 0 && uniqueMissing.length > 0) {
-      commentParts.push(
-        `Missing docs for: ${uniqueMissing.join(", ")}.`,
-      );
+      commentParts.push(`Missing docs for: ${uniqueMissing.join(", ")}.`);
     }
 
     if (commentParts.length > 0) {

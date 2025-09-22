@@ -468,10 +468,6 @@ function followPointer<S extends BaseMemoryAddress>(
   const target: BaseMemoryAddress = (link.id !== undefined)
     ? { id: link.id, type: "application/json" }
     : doc.address;
-  const targetDoc = {
-    address: doc.address,
-    value: doc.value,
-  };
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -492,43 +488,47 @@ function followPointer<S extends BaseMemoryAddress>(
     // Cycle detected - treat this as notFound to avoid traversal
     return [notFound(doc.address), selector];
   }
+  // We may access portions of the doc outside what we have in our doc
+  // attestation, so reload the top level doc from the manager.
+  const valueEntry = manager.load(target);
+  if (valueEntry === null) {
+    return [notFound(doc.address), selector];
+  }
   if (link.id !== undefined) {
-    // We have a reference to a different cell, so track the dependency
+    // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
-    const valueEntry = manager.load(target);
-    if (valueEntry === null) {
-      return [notFound(doc.address), selector];
-    }
     if (schemaTracker !== undefined && selector !== undefined) {
       schemaTracker.add(manager.toKey(target), selector);
     }
-    // If the object we're pointing to is a retracted fact, just return undefined.
-    // We can't do a better match, but we do want to include the result so we watch this doc
-    if (valueEntry.value === undefined) {
-      return [notFound(target), selector];
+    // Load the sources/recipes recursively unless we're a retracted fact.
+    if (valueEntry.value !== undefined) {
+      loadSource(
+        manager,
+        valueEntry,
+        new Set<string>(),
+        schemaTracker,
+      );
     }
-    // Otherwise, we can continue with the target.
-    // an assertion fact.is will be an object with a value property, and
-    // that's what our schema is relative to.
-    targetDoc.address = { ...target, path: ["value"] };
-    targetDoc.value = (valueEntry.value as Immutable<JSONObject>)["value"];
-    // Load any sources (recursively) if they exist and any linked recipes
-    loadSource(
-      manager,
-      valueEntry,
-      new Set<string>(),
-      schemaTracker,
-    );
   }
+  // If the object we're pointing to is a retracted fact, just return undefined.
+  // We can't do a better match, but we do want to include the result so we watch this doc
+  if (valueEntry.value === undefined) {
+    return [notFound(target), selector];
+  }
+  // We can continue with the target, but provide the top level target doc
+  // to getAtPath.
+  // An assertion fact.is will be an object with a value property, and
+  // that's what our schema is relative to, so we'll grab the value part.
+  const targetDoc = {
+    address: { ...target, path: ["value"] },
+    value: (valueEntry.value as Immutable<JSONObject>)["value"],
+  };
 
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
   // then the provided path from the arguments.
   return getAtPath(
     manager,
-    {
-      address: targetDoc.address,
-      value: targetDoc.value,
-    },
+    targetDoc,
     [...link.path, ...path] as string[],
     tracker,
     schemaTracker,

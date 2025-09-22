@@ -1,21 +1,26 @@
 {
+  "definitions": {
+    "TodoItem": {
+      "properties": {
+        "done": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "title"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "emptyItems": {
       "default": [],
       "items": {
-        "properties": {
-          "done": {
-            "type": "boolean"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "done",
-          "title"
-        ],
-        "type": "object"
+        "$ref": "#/definitions/TodoItem"
       },
       "type": "array"
     },

@@ -22,8 +22,18 @@ describe("Schema: Complex defaults", () => {
 
     const empty = s.properties?.emptyItems as any;
     expect(empty.type).toBe("array");
-    expect(empty.items?.type).toBe("object");
-    expect(empty.items?.required).toEqual(["title", "done"]);
+    const emptyItems = empty.items as any;
+    if (emptyItems.$ref) {
+      expect(emptyItems.$ref).toBe("#/definitions/TodoItem");
+      const def = (s as any).definitions?.TodoItem as any;
+      expect(def.type).toBe("object");
+      expect(def.properties?.title?.type).toBe("string");
+      expect(def.properties?.done?.type).toBe("boolean");
+      expect(def.required).toEqual(["title", "done"]);
+    } else {
+      expect(emptyItems.type).toBe("object");
+      expect(emptyItems.required).toEqual(["title", "done"]);
+    }
     expect(Array.isArray(empty.default)).toBe(true);
 
     const pre = s.properties?.prefilledItems as any;
