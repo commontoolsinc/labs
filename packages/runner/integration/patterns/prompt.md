@@ -11,7 +11,7 @@ message.
 
 Steps:
 
-1. Open `packages/runner/integration/patterns/test-ideas.md`, pick a random
+1. Open `packages/runner/integration/patterns/test-ideas.md`, pick ONE random
    unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions in `packages/runner/integration/patterns/`.
@@ -26,8 +26,8 @@ Steps:
    - Read `packages/runner/integration/patterns/learnings.md` for any other
      tips.
 
-2. Update `packages/runner/integration/pattern-harness.test.ts` to include new
-   scenario modules if needed.
+2. Update `packages/runner/integration/pattern-harness.test.ts` to include the
+   new scenario modules if needed.
 
 3. Format with `deno fmt` for the changed files.
 
@@ -44,5 +44,9 @@ Steps:
 
 7. Stage and commit with a message like
    `Add pattern scenarios for toggle through rolling average`.
+
+8. Exit
+
+IMPORTANT: Only build one test case at a time!
 
 Please begin.
