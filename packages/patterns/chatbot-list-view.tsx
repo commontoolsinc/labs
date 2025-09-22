@@ -5,13 +5,13 @@ import {
   Default,
   derive,
   h,
-  OpaqueRef,
   handler,
   ID,
   ifElse,
   lift,
   NAME,
   navigateTo,
+  OpaqueRef,
   recipe,
   UI,
 } from "commontools";
@@ -93,7 +93,11 @@ const storeCharm = lift(
 
 const createChatRecipe = handler<
   unknown,
-  { selectedCharm: Cell<{ charm: any }>; charmsList: Cell<CharmEntry[]>, allCharms: Cell<any[]> }
+  {
+    selectedCharm: Cell<{ charm: any }>;
+    charmsList: Cell<CharmEntry[]>;
+    allCharms: Cell<any[]>;
+  }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
     const isInitialized = cell(false);
@@ -103,7 +107,10 @@ const createChatRecipe = handler<
       messages: [],
       expandChat: false,
       content: "",
-      allCharms: [...allCharms.get(), ...charmsList.get().map(i => i.charm)] as unknown as OpaqueRef<Cell<MentionableCharm[]>>, // TODO(bf): types...
+      allCharms: [
+        ...allCharms.get(),
+        ...charmsList.get().map((i) => i.charm),
+      ] as unknown as OpaqueRef<Cell<MentionableCharm[]>>, // TODO(bf): types...
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({ charm, selectedCharm, charmsList, isInitialized });
@@ -162,7 +169,13 @@ export default recipe<Input, Output>(
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-button onClick={createChatRecipe({ selectedCharm, charmsList, allCharms: allCharms as unknown as any })}>
+            <ct-button
+              onClick={createChatRecipe({
+                selectedCharm,
+                charmsList,
+                allCharms: allCharms as unknown as any,
+              })}
+            >
               Create New Chat
             </ct-button>
           </div>
@@ -171,7 +184,7 @@ export default recipe<Input, Output>(
               selectedCharm.charm.chat[UI] // workaround: CT-987
             }
             {
-              selectedCharm.charm.note[UI]  // workaround: CT-987
+              selectedCharm.charm.note[UI] // workaround: CT-987
             }
 
             <aside slot="left">
@@ -196,27 +209,36 @@ export default recipe<Input, Output>(
             </aside>
 
             <aside slot="right">
-              {ifElse(selectedCharm.charm, <><div>
-                <label>Backlinks</label>
-                <ct-vstack>
-                  {selectedCharm?.charm?.backlinks?.map((charm: MentionableCharm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                      {charm[NAME]}
-                    </ct-button>
-                  ))}
-                </ct-vstack>
-              </div>
-              <details>
-                <summary>Mentioned Charms</summary>
-                <ct-vstack>
-                  {selectedCharm?.charm?.mentioned?.map((charm: MentionableCharm) => (
-                    <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                      {charm[NAME]}
-                    </ct-button>
-                  ))}
-                </ct-vstack>
-              </details></>, null)}
-
+              {ifElse(
+                selectedCharm.charm,
+                <>
+                  <div>
+                    <label>Backlinks</label>
+                    <ct-vstack>
+                      {selectedCharm?.charm?.backlinks?.map((
+                        charm: MentionableCharm,
+                      ) => (
+                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                          {charm[NAME]}
+                        </ct-button>
+                      ))}
+                    </ct-vstack>
+                  </div>
+                  <details>
+                    <summary>Mentioned Charms</summary>
+                    <ct-vstack>
+                      {selectedCharm?.charm?.mentioned?.map((
+                        charm: MentionableCharm,
+                      ) => (
+                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                          {charm[NAME]}
+                        </ct-button>
+                      ))}
+                    </ct-vstack>
+                  </details>
+                </>,
+                null,
+              )}
             </aside>
           </ct-autolayout>
         </ct-screen>
