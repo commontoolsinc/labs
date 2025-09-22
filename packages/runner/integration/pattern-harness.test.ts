@@ -168,6 +168,9 @@ import {
 import {
   scenarios as emailInboxThreadingScenarios,
 } from "./patterns/email-inbox-threading.ts";
+import {
+  scenarios as featureUsageAnalyticsScenarios,
+} from "./patterns/feature-usage-analytics.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -178,6 +181,7 @@ const allScenarios = [
   ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
   ...emailInboxThreadingScenarios,
+  ...featureUsageAnalyticsScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,

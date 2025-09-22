@@ -354,7 +354,7 @@ current offline harness.
       bundle reflects theme swaps instantly.
 - [ ] Component library catalog pattern — catalog UI components ensure derived
       prop coverage updates when recipes register.
-- [ ] Feature usage analytics pattern — track feature events ensure derived
+- [x] Feature usage analytics pattern — track feature events ensure derived
       metrics bucket counts by feature and cohort.
 - [ ] Experiment assignment pattern — assign users to tests ensure derived
       balances hold allocation ratios across groups.
