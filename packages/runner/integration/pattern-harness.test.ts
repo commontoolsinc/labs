@@ -144,6 +144,9 @@ import {
 import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
+import {
+  scenarios as counterTypedHandlerRecordScenarios,
+} from "./patterns/counter-typed-handler-record.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
 import {
   scenarios as doubleCounterSharedIncrementScenarios,
@@ -235,6 +238,7 @@ const allScenarios = [
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
+  ...counterTypedHandlerRecordScenarios,
   ...counterResetScenarios,
 ];
 
