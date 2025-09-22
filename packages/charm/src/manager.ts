@@ -339,22 +339,7 @@ export class CharmManager {
       throw e;
     }
 
-    let resultSchema: JSONSchema | undefined = recipe?.resultSchema;
-
-    // If there is no result schema, create one from top level properties that omits UI, NAME
-    if (!resultSchema) {
-      const resultValue = charm.get();
-      if (isObject(resultValue)) {
-        resultSchema = {
-          type: "object",
-          properties: Object.fromEntries(
-            Object.keys(resultValue).filter((key) => !key.startsWith("$")).map((
-              key,
-            ) => [key, {}]), // Empty schema == any
-          ),
-        };
-      }
-    }
+    const resultSchema = this.#getResultSchema(charm, recipe);
 
     if (runIt) {
       // Make sure the charm is running. This is re-entrant and has no effect if
@@ -367,6 +352,34 @@ export class CharmManager {
     } else {
       return charm.asSchema<T>(asSchema ?? resultSchema);
     }
+  }
+
+  #getResultSchema(
+    charm: Cell<unknown>,
+    recipe: Recipe,
+  ): JSONSchema | undefined {
+    if (
+      isRecord(recipe.resultSchema) &&
+      Object.keys(recipe.resultSchema).length > 0
+    ) return recipe.resultSchema;
+
+    // Ignore default cell schema to get to other values
+    const resultValue = charm.asSchema().get();
+    if (isObject(resultValue)) {
+      const keys = Object.keys(resultValue).filter((key) =>
+        !key.startsWith("$")
+      );
+
+      // Only generate a schema for charms that have more than $ props
+      if (keys.length > 0) {
+        return {
+          type: "object",
+          properties: Object.fromEntries(keys.map((key) => [key, true])),
+        };
+      }
+    }
+
+    return undefined;
   }
 
   getLineage(charm: Cell<Charm>) {
@@ -786,8 +799,20 @@ export class CharmManager {
     if (!recipeId) throw new Error("charm missing recipe ID");
     const recipe = this.runtime.recipeManager.recipeById(recipeId);
     if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
-    // FIXME(ja): return should be Cell<Schema<T>> I think?
     return source.key("argument").asSchema<T>(recipe.argumentSchema);
+  }
+
+  getResult<T = unknown>(
+    charm: Cell<Charm | T>,
+  ): Cell<T> {
+    const source = charm.getSourceCell(processSchema);
+    const recipeId = source?.get()?.[TYPE]!;
+    if (!recipeId) throw new Error("charm missing recipe ID");
+    const recipe = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
+    const resultSchema = this.#getResultSchema(charm, recipe);
+    // FIXME(ja): return should be Cell<Schema<T>> I think?
+    return charm.asSchema<T>(resultSchema);
   }
 
   // note: removing a charm doesn't clean up the charm's cells
