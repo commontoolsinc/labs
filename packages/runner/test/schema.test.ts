@@ -1976,10 +1976,12 @@ describe("Schema Support", () => {
 
         expect(value.config.knownProp).toBe("in schema");
         expect(isCell(value.config.featureFlag)).toBe(true);
-        (expect(value.config.featureFlag?.get()) as any).toEqualIgnoringSymbols({
-          enabled: true,
-          value: "beta",
-        });
+        (expect(value.config.featureFlag?.get()) as any).toEqualIgnoringSymbols(
+          {
+            enabled: true,
+            value: "beta",
+          },
+        );
       },
     );
 
