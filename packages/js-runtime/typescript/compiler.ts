@@ -19,11 +19,8 @@ import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
-import {
-  createLoggingTransformer,
-  createOpaqueRefTransformer,
-  createSchemaTransformer,
-} from "./transformer/mod.ts";
+import { applyCtsTransforms } from "./transformer/apply.ts";
+import { hasCtsEnableDirective } from "./transformer/utils.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -311,86 +308,98 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
-    // beginning of transformation related code
-    // Check if the main source file has the /// <cts-enable /> directive
-    const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
-      const text = sourceFile.getFullText();
-      const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
-
-      for (const comment of tripleSlashDirectives) {
-        const commentText = text.substring(comment.pos, comment.end);
-        if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    // Check if any source file has the CommonTools directive
     const sourceFiles = tsProgram.getSourceFiles();
-    let hasCtsDirective = false;
+    const ctsEnabledFiles = sourceFiles.filter((sourceFile) =>
+      !sourceFile.isDeclarationFile && hasCtsEnableDirective(sourceFile)
+    );
+    const hasCtsDirective = ctsEnabledFiles.length > 0;
 
-    for (const sourceFile of sourceFiles) {
-      if (hasCtsEnableDirective(sourceFile)) {
-        hasCtsDirective = true;
-        break;
-      }
-    }
+    let emitHost: TypeScriptHost = host;
+    let emitProgram = tsProgram;
+    let emitChecker = checker;
+    let emitMainSource = mainSource;
+    let bundleSourceNames = sourceNames;
+    let bundleProgram = program;
 
-    // Build transformers list based on CTS directive and options
-    const beforeTransformers: ts.TransformerFactory<ts.SourceFile>[] = [];
-
-    if (hasCtsDirective) {
-      // Add OpaqueRef and Schema transformers
-      beforeTransformers.push(
-        createOpaqueRefTransformer(tsProgram),
-        createSchemaTransformer(tsProgram),
-      );
-
-      // Only add logging transformer if showTransformed is true
+    if (!hasCtsDirective) {
       if (inputOptions.showTransformed) {
-        beforeTransformers.push(
-          createLoggingTransformer(tsProgram, {
-            logger: (source) => console.log(source),
-            showTransformed: true,
-          }),
+        logger.warn(() =>
+          "Warning: --show-transformed was specified but no " +
+          "/// <cts-enable /> directive found in the main source file"
         );
       }
-    } else if (inputOptions.showTransformed) {
-      // Warn if user requested transformed output but no CTS directive
-      logger.warn(() =>
-        "Warning: --show-transformed was specified but no /// <cts-enable /> directive found in the main source file"
-      );
+    } else {
+      const transformLogger = inputOptions.showTransformed
+        ? (message: string) => console.log(message)
+        : undefined;
+
+      const transformResult = applyCtsTransforms(tsProgram, {
+        compilerOptions: tsOptions,
+        showTransformed: inputOptions.showTransformed,
+        logger: transformLogger,
+      });
+
+      if (transformResult.changed) {
+        const transformedProgram: Program = {
+          main: program.main,
+          files: program.files.map((file) => {
+            const updated = transformResult.printedSources.get(file.name);
+            return updated ? { ...file, contents: updated } : file;
+          }),
+        };
+
+        bundleProgram = transformedProgram;
+        bundleSourceNames = transformedProgram.files.map(({ name }) => name);
+
+        emitHost = new TypeScriptHost(
+          transformedProgram,
+          this.typeLibs,
+          runtimeModules,
+        );
+        emitProgram = ts.createProgram(
+          bundleSourceNames,
+          tsOptions,
+          emitHost,
+        );
+        emitChecker = new Checker(emitProgram);
+        if (!noCheck) {
+          emitChecker.typeCheck();
+        }
+        emitChecker.declarationCheck();
+
+        const maybeMain = emitProgram.getSourceFiles().find((source) =>
+          source.fileName === transformedProgram.main
+        );
+        if (!maybeMain) {
+          throw new Error("Missing main source.");
+        }
+        emitMainSource = maybeMain;
+      }
     }
 
-    const transformers = beforeTransformers.length > 0
-      ? { before: beforeTransformers }
-      : undefined;
-    // end of transformation related code
-
-    const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
-      mainSource,
+    const { diagnostics, emittedFiles, emitSkipped } = emitProgram.emit(
+      emitMainSource,
       undefined,
       undefined,
       undefined,
-      transformers,
+      undefined,
     );
-    checker.check(diagnostics);
+    emitChecker.check(diagnostics);
 
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
     }
 
     // Get written files, should be a JS and source map.
-    const writes = host.getWrites();
+    const writes = emitHost.getWrites();
 
     const source = writes[filename];
     const sourceMap = parseSourceMap(writes[`${filename}.map`]);
     const exportModuleExports = inputOptions.bundleExportAll
-      ? sourceNames.filter((name) => !name.endsWith(".d.ts"))
+      ? bundleSourceNames.filter((name) => !name.endsWith(".d.ts"))
       : undefined;
     const bundled = bundleAMDOutput({
-      mainModule: program.main,
+      mainModule: bundleProgram.main,
       source,
       sourceMap,
       filename,
