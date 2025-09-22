@@ -5,6 +5,7 @@ import {
   Default,
   derive,
   h,
+  OpaqueRef,
   handler,
   ID,
   ifElse,
@@ -102,7 +103,7 @@ const createChatRecipe = handler<
       messages: [],
       expandChat: false,
       content: "",
-      allCharms,
+      allCharms: [...allCharms.get(), ...charmsList.get().map(i => i.charm)] as unknown as OpaqueRef<Cell<MentionableCharm[]>>, // TODO(bf): types...
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({ charm, selectedCharm, charmsList, isInitialized });
