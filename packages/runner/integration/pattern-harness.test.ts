@@ -171,6 +171,7 @@ import {
 import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
+import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -182,6 +183,7 @@ const allScenarios = [
   ...sleepJournalScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...crmPipelineScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
