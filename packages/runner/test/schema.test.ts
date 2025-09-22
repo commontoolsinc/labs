@@ -1895,6 +1895,94 @@ describe("Schema Support", () => {
       });
     });
 
+    it("should drop values blocked by additionalProperties: false", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          config: {
+            type: "object",
+            properties: {
+              allowed: { type: "string" },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ["config"],
+      } as const satisfies JSONSchema;
+
+      const source = runtime.getCell<any>(
+        space,
+        "should drop values blocked by additionalProperties false",
+        undefined,
+        tx,
+      );
+      source.set({
+        config: {
+          allowed: "ok",
+          forbidden: "nope",
+        },
+      });
+
+      const value = source.asSchema(schema).get();
+
+      expect(value.config.allowed).toBe("ok");
+      expect(
+        Object.prototype.hasOwnProperty.call(value.config, "forbidden"),
+      ).toBe(false);
+    });
+
+    it(
+      "should transform explicit additionalProperties objects from data",
+      () => {
+        const schema = {
+          type: "object",
+          properties: {
+            config: {
+              type: "object",
+              properties: {
+                knownProp: { type: "string" },
+              },
+              additionalProperties: {
+                type: "object",
+                properties: {
+                  enabled: { type: "boolean" },
+                  value: { type: "string" },
+                },
+                asCell: true,
+              },
+              required: ["knownProp"],
+            },
+          },
+          required: ["config"],
+        } as const satisfies JSONSchema;
+
+        const source = runtime.getCell<any>(
+          space,
+          "should transform explicit additionalProperties objects from data",
+          undefined,
+          tx,
+        );
+        source.set({
+          config: {
+            knownProp: "in schema",
+            featureFlag: {
+              enabled: true,
+              value: "beta",
+            },
+          },
+        });
+
+        const value = source.asSchema(schema).get();
+
+        expect(value.config.knownProp).toBe("in schema");
+        expect(isCell(value.config.featureFlag)).toBe(true);
+        (expect(value.config.featureFlag?.get()) as any).toEqualIgnoringSymbols({
+          enabled: true,
+          value: "beta",
+        });
+      },
+    );
+
     it("should handle default at the root level with asCell", () => {
       const schema = {
         type: "object",
