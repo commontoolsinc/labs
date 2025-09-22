@@ -73,6 +73,9 @@
   focused on mutation.
 - Normalizing stage probabilities with `clampProbability` allows forecast sums
   to remain stable even as handlers mutate both deal values and stage config.
+- Cloning sanitized cards before exposing them keeps derived template lists
+  stable when filters swap; handlers only adjust the category cell, while
+  downstream assertions compare fresh objects and avoid reference sharing.
 
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
