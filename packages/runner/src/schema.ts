@@ -683,11 +683,11 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    if (resolvedSchema.additionalProperties) {
+    if (resolvedSchema.additionalProperties || !resolvedSchema.properties) {
       for (const key of keys) {
         // Skip properties that were already processed above:
         if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
-          // Will use additionalProperties:
+          // Will use additionalProperties if present
           const childSchema = runtime.cfc.getSchemaAtPath(
             resolvedSchema,
             [key],
