@@ -280,7 +280,7 @@ current offline harness.
       manage twin stacks and derived pointer location.
 - [ ] Redo stack pattern — replay undone actions orderly ensure redo
       availability toggles when undo stack mutates.
-- [ ] Template gallery pattern — browse templates by category ensure handlers
+- [x] Template gallery pattern — browse templates by category ensure handlers
       filter categories and derived tiles refresh.
 - [x] Email inbox threading pattern — group related emails ensure derived
       threads reorder by latest timestamp updates.
