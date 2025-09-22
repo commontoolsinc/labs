@@ -226,7 +226,6 @@ export interface TypeScriptCompilerOptions {
   //
   // Show only the transformed TypeScript source code.
   showTransformed?: boolean;
-  debugLoggingTransformers?: boolean;
   // to
   //
   // ```ts

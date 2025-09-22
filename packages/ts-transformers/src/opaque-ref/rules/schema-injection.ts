@@ -4,14 +4,8 @@ import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
 import { detectCallKind } from "../call-kind.ts";
 import { getCommonToolsImportIdentifier } from "../../core/common-tools.ts";
-import type { OpaqueRefHelperName } from "../transforms.ts";
 
-export function createSchemaInjectionRule(
-  recordHelperReference: (
-    helper: OpaqueRefHelperName,
-    identifier: ts.Identifier,
-  ) => void,
-): OpaqueRefRule {
+export function createSchemaInjectionRule(): OpaqueRefRule {
   return {
     name: "schema-injection",
     transform(sourceFile, context, transformation) {
@@ -33,9 +27,7 @@ export function createSchemaInjectionRule(
           return existing;
         }
 
-        const identifier = transformation.factory.createIdentifier("toSchema");
-        recordHelperReference("toSchema", identifier);
-        return identifier;
+        return transformation.factory.createIdentifier("toSchema");
       };
 
       const visit = (node: ts.Node): ts.Node => {

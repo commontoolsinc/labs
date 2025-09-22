@@ -10,10 +10,6 @@ export interface RewriteContext {
   readonly sourceFile: ts.SourceFile;
   readonly transformation: ts.TransformationContext;
   readonly analyze: (expression: ts.Expression) => DataFlowAnalysis;
-  readonly recordHelperReference?: (
-    helper: OpaqueRefHelperName,
-    identifier: ts.Identifier,
-  ) => void;
 }
 
 export interface EmitterContext extends RewriteContext {

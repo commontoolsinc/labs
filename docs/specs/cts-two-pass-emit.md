@@ -59,7 +59,7 @@ Refactor the compiler pipeline to perform a two-phase compilation:
 
 3. Clean up CTS transformer plumbing:
    - Remove the `recordHelperReference` binding shim once the two-pass emit is
-     in place (the binder will handle imports naturally).
+     in place (done in follow-up cleanup so helpers rely on standard imports).
    - Leave the import manager logic intact; the second pass will respect the
      new import specifiers.
 

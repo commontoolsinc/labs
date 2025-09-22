@@ -11,10 +11,8 @@ Summary
 
 Repro
 - Command: `deno task ct dev --show-transformed ellyse_test.tsx`
-  - Note: `--show-transformed` does not imply `--no-run` right now, so the
-    recipe still evaluates and crashes. Using
-    `deno task ct dev --no-run --show-transformed ellyse_test.tsx` prints the
-    transformed source without running it.
+  - `--show-transformed` automatically suppresses evaluation, so use it alone
+    when you only need the transformed source.
 
 Observed
 - Stack points to `packages/runner/src/builder/opaque-ref.ts` in
@@ -53,13 +51,8 @@ Impact
 
 Recommendations
 
-1) Make `--show-transformed` imply no execution (noRun)
-   - In `packages/cli/commands/dev.ts` or `packages/cli/lib/dev.ts`, when
-     `showTransformed` is true, pass `run: false` to the engine. Example:
-       - `run: options.run && !options.showTransformed` (commands/dev.ts), or
-       - override inside `process()` before calling `engine.process(...)`.
-   - This matches the help text: "Show only the transformed TypeScript source
-     code without executing the recipe."
+1) Make sure `--show-transformed` remains a no-execution mode
+   - Verify the CLI always disables evaluation when this flag is present.
 
 2) Treat OpaqueRef.map callback parameters as Opaque for transforms
    - Goal: allow `{index + 1}` and `{charm[NAME] || "Unnamed"}` inside the
@@ -111,7 +104,6 @@ Proposed test coverage
   - `OpaqueRef<Array>.map((element: any, index: number) => index + 1)`
   - `OpaqueRef<Array>.map((charm: any) => charm[NAME] || "Unnamed")`
   - `ifElse(!cellRef?.length, ...)` inside JSX should wrap to derive.
-  - `--show-transformed` should not evaluate (no execution side-effects).
 
 Notes
 - The runtime OpaqueRef.map implementation constructs a recipe that passes

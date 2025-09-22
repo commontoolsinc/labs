@@ -195,9 +195,7 @@ export function createDeriveIdentifier(
   );
   if (existing) return existing;
 
-  const identifier = context.factory.createIdentifier("derive");
-  context.recordHelperReference?.("derive", identifier);
-  return identifier;
+  return context.factory.createIdentifier("derive");
 }
 
 export function createDeriveDataFlowObject(
@@ -302,7 +300,6 @@ export function createDeriveCallForExpression(
       factory,
       context.sourceFile,
       {},
-      context.recordHelperReference,
     );
   }
 

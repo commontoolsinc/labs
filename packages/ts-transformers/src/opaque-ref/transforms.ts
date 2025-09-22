@@ -60,10 +60,6 @@ function getHelperIdentifier(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   helperName: OpaqueRefHelperName,
-  recordHelperReference?: (
-    helper: OpaqueRefHelperName,
-    identifier: ts.Identifier,
-  ) => void,
 ): ts.Identifier {
   const existing = getCommonToolsImportIdentifier(
     sourceFile,
@@ -72,9 +68,7 @@ function getHelperIdentifier(
   );
   if (existing) return existing;
 
-  const identifier = factory.createIdentifier(helperName);
-  recordHelperReference?.(helperName, identifier);
-  return identifier;
+  return factory.createIdentifier(helperName);
 }
 
 export function createIfElseCall(
@@ -82,10 +76,6 @@ export function createIfElseCall(
   factory: ts.NodeFactory,
   sourceFile: ts.SourceFile,
   overrides: IfElseOverrides = {},
-  recordHelperReference?: (
-    helper: OpaqueRefHelperName,
-    identifier: ts.Identifier,
-  ) => void,
 ): ts.CallExpression {
   const moduleAlias = getCommonToolsModuleAlias(sourceFile);
   const ifElseIdentifier = moduleAlias
@@ -97,7 +87,6 @@ export function createIfElseCall(
       sourceFile,
       factory,
       "ifElse",
-      recordHelperReference,
     );
 
   let predicate = overrides.predicate ?? ternary.condition;
@@ -130,10 +119,6 @@ export function transformExpressionWithOpaqueRef(
   context: ts.TransformationContext,
   registerHelper?: (helper: OpaqueRefHelperName) => void,
   analyzer?: (expression: ts.Expression) => DataFlowAnalysis,
-  recordHelperReference?: (
-    helper: OpaqueRefHelperName,
-    identifier: ts.Identifier,
-  ) => void,
 ): ts.Expression {
   if (
     ts.isJsxExpression(expression) &&
@@ -188,7 +173,6 @@ export function transformExpressionWithOpaqueRef(
           context,
           registerHelper,
           dataFlowAnalyzer,
-          recordHelperReference,
         );
       }
       return expr;
@@ -218,7 +202,6 @@ export function transformExpressionWithOpaqueRef(
         factory,
         sourceFile,
         {},
-        recordHelperReference,
       );
     }
 
@@ -267,7 +250,6 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           factory,
           "derive",
-          recordHelperReference,
         );
       registerHelper?.("derive");
       return factory.createCallExpression(
@@ -361,7 +343,6 @@ export function transformExpressionWithOpaqueRef(
         sourceFile,
         factory,
         "derive",
-        recordHelperReference,
       );
     registerHelper?.("derive");
     return factory.createCallExpression(
@@ -412,7 +393,6 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           factory,
           "derive",
-          recordHelperReference,
         );
       registerHelper?.("derive");
       return factory.createCallExpression(
@@ -511,7 +491,6 @@ export function transformExpressionWithOpaqueRef(
         sourceFile,
         factory,
         "derive",
-        recordHelperReference,
       );
     registerHelper?.("derive");
     return factory.createCallExpression(
@@ -584,7 +563,6 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           factory,
           "derive",
-          recordHelperReference,
         );
       registerHelper?.("derive");
       return factory.createCallExpression(
@@ -659,7 +637,6 @@ export function transformExpressionWithOpaqueRef(
         sourceFile,
         factory,
         "derive",
-        recordHelperReference,
       );
     registerHelper?.("derive");
     return factory.createCallExpression(
@@ -731,7 +708,6 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           factory,
           "derive",
-          recordHelperReference,
         );
       registerHelper?.("derive");
       return factory.createCallExpression(
@@ -810,7 +786,6 @@ export function transformExpressionWithOpaqueRef(
         sourceFile,
         factory,
         "derive",
-        recordHelperReference,
       );
     registerHelper?.("derive");
     return factory.createCallExpression(
@@ -877,7 +852,6 @@ export function transformExpressionWithOpaqueRef(
           sourceFile,
           factory,
           "derive",
-          recordHelperReference,
         );
       registerHelper?.("derive");
       return factory.createCallExpression(
@@ -962,7 +936,6 @@ export function transformExpressionWithOpaqueRef(
         sourceFile,
         factory,
         "derive",
-        recordHelperReference,
       );
     registerHelper?.("derive");
     return factory.createCallExpression(
