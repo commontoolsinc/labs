@@ -376,7 +376,7 @@ current offline harness.
       moving averages update with new survey entries.
 - [ ] Lead scoring pattern — score leads on signals ensure derived weights
       adjust totals per signal mutation.
-- [ ] CRM pipeline pattern — track deals by stage ensure derived forecasts sum
+- [x] CRM pipeline pattern — track deals by stage ensure derived forecasts sum
       weighted amounts across stages.
 - [ ] Quote configuration pattern — configure quote options ensure derived price
       recalculates when option cells toggle.

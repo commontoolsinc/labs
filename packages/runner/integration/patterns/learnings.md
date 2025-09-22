@@ -71,3 +71,5 @@
 - Updating a `createCell` snapshot from the same `lift` that sanitizes metrics
   keeps aggregated analytics accessible for assertions while the handler stays
   focused on mutation.
+- Normalizing stage probabilities with `clampProbability` allows forecast sums
+  to remain stable even as handlers mutate both deal values and stage config.
