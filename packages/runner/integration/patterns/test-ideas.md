@@ -171,7 +171,7 @@ current offline harness.
       same test and ensure previously set defaults reset.
 - [ ] Counter with cross-scenario reuse — ensure pattern reused by multiple
       scenarios yields isolated state each time.
-- [ ] Counter with typed record of handlers — build record where each key maps
+- [x] Counter with typed record of handlers — build record where each key maps
       to handler referencing distinct cell path.
 - [ ] Counter with computed index map — derive index by ID map from array of
       counters.

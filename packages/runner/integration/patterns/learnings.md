@@ -77,3 +77,6 @@
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
   derived sums run on predictable structures.
+- Using a `lift`-produced metadata record alongside a typed handler map keeps
+  event routing ergonomic while giving the harness deterministic surfaces for
+  assertions like call counts and labels.
