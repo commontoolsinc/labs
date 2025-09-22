@@ -7,7 +7,6 @@ export default {
       using: false,
     },
     external: [
-      "jsdom",
       "source-map-support",
       "canvas",
       "inspector",

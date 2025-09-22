@@ -2,27 +2,30 @@ import { beforeEach, describe, it } from "@std/testing/bdd";
 import { h, UI, VNode } from "@commontools/api";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
-import { JSDOM } from "jsdom";
 import { serializableEvent } from "../src/render.ts";
+import { MockDoc } from "../src/utils.ts";
 
-let dom: JSDOM;
+let mock: MockDoc;
+
+class SynthesizedEvent extends Event {
+  constructor(name: string, props: object) {
+    super(name);
+    Object.assign(this, props);
+  }
+}
+class KeyboardEvent extends SynthesizedEvent {}
+class InputEvent extends SynthesizedEvent {}
+class MouseEvent extends SynthesizedEvent {}
 
 beforeEach(() => {
-  dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
-  const { document } = dom.window;
-  globalThis.document = document;
-  globalThis.Element = dom.window.Element;
-  globalThis.Node = dom.window.Node;
-  globalThis.Text = dom.window.Text;
-  globalThis.InputEvent = dom.window.InputEvent;
-  globalThis.KeyboardEvent = dom.window.KeyboardEvent;
-  globalThis.MouseEvent = dom.window.MouseEvent;
-  globalThis.CustomEvent = dom.window.CustomEvent;
-  globalThis.HTMLSelectElement = dom.window.HTMLSelectElement;
+  mock = new MockDoc(
+    `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+  );
 });
 
 describe("render", () => {
   it("renders", () => {
+    const { renderOptions, document } = mock;
     // dom and globals are set up by beforeEach
     const renderable = h(
       "div",
@@ -30,61 +33,69 @@ describe("render", () => {
       h("p", null, "Hello world!"),
     );
 
-    const parent = document.createElement("div");
-    document.body.appendChild(parent);
-    render(parent, renderable);
+    const parent = document.getElementById("root")!;
+    render(parent, renderable, renderOptions);
 
-    // NOTE: JSDOM has a class instead of className :(
-    assert.equal(parent.firstElementChild?.id, "hello");
-    assert.equal(parent.querySelector("p")?.textContent, "Hello world!");
+    assert.equal(
+      parent.getElementsByTagName("div")[0]!.getAttribute("id"),
+      "hello",
+    );
+    assert.equal(
+      parent.getElementsByTagName("p")[0]!.innerHTML,
+      "Hello world!",
+    );
   });
 });
 
 describe("renderImpl", () => {
   it("creates DOM for a simple VNode", () => {
+    const { renderOptions, document } = mock;
     const vnode = {
       type: "vnode" as const,
       name: "span",
       props: { id: "test-span" },
       children: ["hi!"],
     };
-    const parent = document.createElement("div");
-    const cancel = renderImpl(parent, vnode);
-    const span = parent.querySelector("span");
-    assert.equal(span?.id, "test-span");
-    assert.equal(span?.textContent, "hi!");
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const span = parent.getElementsByTagName("span")[0]!;
+    assert.equal(span.getAttribute("id"), "test-span");
+    assert.equal(span.innerHTML, "hi!");
     cancel();
-    assert.equal(parent.querySelector("span"), null);
+    assert.equal(parent.getElementsByTagName("span").length, 0);
   });
 
   it("returns a cancel function that removes the node", () => {
+    const { renderOptions, document } = mock;
     const vnode = {
       type: "vnode" as const,
-      name: "div",
+      name: "span",
       props: {},
       children: [],
     };
-    const parent = document.createElement("div");
-    const cancel = renderImpl(parent, vnode);
-    assert.equal(parent.querySelector("div") !== null, true);
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    assert.equal(parent.getElementsByTagName("span").length, 1);
     cancel();
-    assert.equal(parent.querySelector("div"), null);
+    assert.equal(parent.getElementsByTagName("span").length, 0);
   });
 
   it("handles null/invalid VNode by not appending anything", () => {
+    const { renderOptions, document } = mock;
     const invalidVNode = {
       type: "not-vnode",
       name: "div",
       props: {},
       children: [],
     };
-    const parent = document.createElement("div");
-    const cancel = renderImpl(parent, invalidVNode as VNode);
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, invalidVNode as VNode, renderOptions);
     assert.equal(parent.children.length, 0);
     cancel();
   });
 
   it("renders only the [UI] nested vdom when both [UI] and top-level vdom are present", () => {
+    const { renderOptions, document } = mock;
     // The [UI] property should take precedence over the top-level vdom
     const nestedVNode = {
       type: "vnode" as const,
@@ -103,13 +114,13 @@ describe("renderImpl", () => {
       ...topLevelVNode,
       [UI]: nestedVNode,
     };
-    const parent = document.createElement("div");
-    const cancel = renderImpl(parent, vdomWithUI);
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vdomWithUI, renderOptions);
     // Only the nestedVNode should be rendered
-    const span = parent.querySelector("span#nested");
-    const div = parent.querySelector("div#top");
-    assert.equal(!!span, true);
-    assert.equal(span?.textContent, "nested!");
+    const span = parent.getElementsByTagName("span")[0]!;
+    const div = document.getElementById("top");
+    assert.equal(span.getAttribute("id"), "nested");
+    assert.equal(span.innerHTML, "nested!");
     assert.equal(div, null);
     cancel();
     assert.equal(parent.children.length, 0);
@@ -213,6 +224,7 @@ describe("serializableEvent", () => {
   });
 
   it("serializes an InputEvent with target value", () => {
+    const { document } = mock;
     const input = document.createElement("input");
     input.value = "hello";
     input.id = "should-not-appear";
@@ -266,6 +278,7 @@ describe("serializableEvent", () => {
   });
 
   it("serializes an event with HTMLSelectElement target and selectedOptions", () => {
+    const { document } = mock;
     const select = document.createElement("select");
     select.multiple = true;
     select.id = "should-not-appear";
@@ -285,6 +298,9 @@ describe("serializableEvent", () => {
     // Select multiple options
     option1.selected = true;
     option3.selected = true;
+    // @ts-ignore: These aren't real HTMLSelectElements,
+    // synthesize selectedOptions
+    (select as HTMLSelectElement).selectedOptions = [option1, option3];
     const event = new Event("change");
     Object.defineProperty(event, "target", { value: select });
     const result = serializableEvent(event) as object;
@@ -316,6 +332,7 @@ describe("serializableEvent", () => {
   });
 
   it("serializes an event with single-select HTMLSelectElement target", () => {
+    const { document } = mock;
     const select = document.createElement("select");
     select.multiple = false; // single select
     select.id = "should-not-appear";
@@ -330,7 +347,12 @@ describe("serializableEvent", () => {
     select.appendChild(option2);
     // Select single option
     option2.selected = true;
+    // @ts-ignore: These aren't real HTMLSelectElements,
+    // synthesize selectedOptions
+    (select as HTMLSelectElement).selectedOptions = [option2];
+
     const event = new Event("change");
+
     Object.defineProperty(event, "target", { value: select });
     const result = serializableEvent(event) as object;
     assert.matchObject(result, {

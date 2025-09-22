@@ -8,7 +8,6 @@ import {
   str,
   UI,
 } from "commontools";
-import { DOMParser, type Element } from "dom-parser";
 import TurndownService from "turndown";
 
 const Input = {
@@ -53,14 +52,6 @@ export default recipe(
       </ul>
     </div>
     `;
-    // test dom-parser
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/xml");
-    const root = doc.querySelector("#root");
-    const ul = doc.getElementsByTagName("ul")[0];
-    assert(ul.getAttribute("foo") === "bar", "getAttribute() works");
-    const listitems = doc.getElementsByTagName("li");
-    assert(listitems.length === 3, "getElementsByTagName() selected 3 items");
     const turndown = new TurndownService({
       headingStyle: "atx",
       codeBlockStyle: "fenced",
