@@ -68,3 +68,6 @@
   predictable when each update returns a fresh array sorted by latest
   timestamps; logging activity via a local `cell` offers an easy assertion
   surface without adding extra derived dependencies.
+- Updating a `createCell` snapshot from the same `lift` that sanitizes metrics
+  keeps aggregated analytics accessible for assertions while the handler stays
+  focused on mutation.
