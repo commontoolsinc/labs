@@ -73,3 +73,7 @@
   focused on mutation.
 - Normalizing stage probabilities with `clampProbability` allows forecast sums
   to remain stable even as handlers mutate both deal values and stage config.
+
+- Aggregating shopping lists from sanitized plan entries stays stable when
+  handlers normalize day and meal slots before updating the plan, letting
+  derived sums run on predictable structures.

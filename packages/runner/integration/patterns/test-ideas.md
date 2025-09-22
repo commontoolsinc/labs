@@ -310,7 +310,7 @@ current offline harness.
       metrics enforce capacity per route.
 - [ ] Warehouse bin map pattern — map items to storage bins ensure handlers
       relocate inventory and derived occupancy stays.
-- [ ] Menu planner pattern — plan meals across schedule ensure derived shopping
+- [x] Menu planner pattern — plan meals across schedule ensure derived shopping
       list aggregates ingredients by day.
 - [ ] Recipe ingredient scaler pattern — scale servings easily ensure derived
       ingredient list multiplies accurately per size.
