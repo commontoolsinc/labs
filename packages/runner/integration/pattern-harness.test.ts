@@ -171,6 +171,7 @@ import {
 import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
+import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
 import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 
 const allScenarios = [
@@ -183,6 +184,7 @@ const allScenarios = [
   ...sleepJournalScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...menuPlannerScenarios,
   ...crmPipelineScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
