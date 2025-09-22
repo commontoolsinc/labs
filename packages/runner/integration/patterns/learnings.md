@@ -80,3 +80,7 @@
 - Using a `lift`-produced metadata record alongside a typed handler map keeps
   event routing ergonomic while giving the harness deterministic surfaces for
   assertions like call counts and labels.
+- Sanitizing alternate argument presets with a shared `lift` before selecting a
+  new default keeps reinitialization deterministic: each handler flip can log a
+  `createCell` snapshot using the sanitized entry so harness assertions stay
+  stable across repeated resets.
