@@ -155,8 +155,8 @@ test_value "Nested path set" "userData/user/name" '"Jane"' '"Jane"'
 echo "Testing --input flag operations..."
 
 # Test input flag operations
-test_json_value "Input flag set" "config" '{"inputConfig":"test"}' "--input"
-test_value "Nested input path" "config/inputConfig" '"inputValue"' '"inputValue"' "--input"
+test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
+test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
 
 # Check space has new charm with correct inputs and title
 TITLE="Simple counter 2: 10"

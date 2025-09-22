@@ -1,4 +1,5 @@
 import { JSONSchemaObj } from "@commontools/api";
+import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -15,6 +16,11 @@ import {
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
 import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+
+const logger = getLogger("validateAndTransform", {
+  enabled: true,
+  level: "debug",
+});
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -677,23 +683,35 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    for (const key of keys) {
-      if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
-        const childSchema = runtime.cfc.getSchemaAtPath(
-          resolvedSchema,
-          [key],
-          rootSchema,
-        );
-        if (childSchema === undefined) {
-          continue;
+    if (resolvedSchema.additionalProperties || !resolvedSchema.properties) {
+      for (const key of keys) {
+        // Skip properties that were already processed above:
+        if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
+          // Will use additionalProperties if present
+          const childSchema = runtime.cfc.getSchemaAtPath(
+            resolvedSchema,
+            [key],
+            rootSchema,
+          );
+          if (childSchema === undefined) {
+            // This should never happen
+            logger.warn(() => [
+              "validateAndTransform: unexpected undefined schema for additional property",
+              key,
+              resolvedSchema,
+              rootSchema,
+              link,
+            ]);
+            continue;
+          }
+          result[key] = validateAndTransform(
+            runtime,
+            tx,
+            { ...link, path: [...link.path, key], schema: childSchema },
+            synced,
+            seen,
+          );
         }
-        result[key] = validateAndTransform(
-          runtime,
-          tx,
-          { ...link, path: [...link.path, key], schema: childSchema },
-          synced,
-          seen,
-        );
       }
     }
 

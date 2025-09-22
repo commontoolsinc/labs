@@ -61,7 +61,7 @@ class CharmPropIo implements CharmCellIo {
     if (this.#type === "input") {
       return this.#cc.manager().getArgument(this.#cc.getCell());
     } else if (this.#type === "result") {
-      return this.#cc.getCell();
+      return this.#cc.manager().getResult(this.#cc.getCell());
     }
     throw new Error(`Unknown property type "${this.#type}"`);
   }

@@ -90,7 +90,7 @@ export const renderImpl = (
     return cancel;
   }
   parent.append(root);
-  logger.debug("Rendered", root);
+  logger.debug("Rendered root", root);
   return () => {
     root.remove();
     cancel();

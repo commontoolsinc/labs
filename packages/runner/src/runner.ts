@@ -1259,7 +1259,7 @@ export class Runner implements IRunner {
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(this.cancels.get(this.getDocKey(resultCell.getSourceCell()!)));
+    addCancel(() => this.stop(resultCell));
   }
 }
 
