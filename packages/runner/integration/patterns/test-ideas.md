@@ -107,7 +107,7 @@ current offline harness.
       items for current page.
 - [ ] Counter with search term filter — handler updates search term cell and
       derive filters list accordingly.
-- [ ] Counter with sort direction toggle — derive sorted list based on direction
+- [x] Counter with sort direction toggle — derive sorted list based on direction
       cell.
 - [ ] Counter with computed unique IDs — generate identifier per entry via lift
       and ensure stability across mutations.

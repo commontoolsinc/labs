@@ -79,6 +79,9 @@
 - Recording a difference snapshot after every handler run keeps derived delta
   histories deterministic; reuse the sanitized step cells so audit logs stay in
   sync with `createCell` mirrors for the harness checks.
+- Tracking direction toggles with a history cell while deriving the sorted view
+  from sanitized arrays keeps sort mode reactive; capturing a `createCell`
+  snapshot made it easy to assert mode flips in the harness.
 
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
