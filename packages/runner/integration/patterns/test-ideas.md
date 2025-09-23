@@ -271,7 +271,7 @@ current offline harness.
       metrics update when events stream in.
 - [ ] Heatmap aggregation pattern — aggregate interaction points ensure derived
       grid normalizes intensity per coordinate bucket.
-- [ ] Search relevance tuning pattern — tweak search weighting ensure derived
+- [x] Search relevance tuning pattern — tweak search weighting ensure derived
       scoring sample reflects weight adjustments.
 - [ ] Recommendation feedback pattern — collect reactions ensure derived
       precision metrics update after feedback events.

@@ -193,6 +193,9 @@ import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
 import {
+  scenarios as searchRelevanceTuningScenarios,
+} from "./patterns/search-relevance-tuning.ts";
+import {
   scenarios as budgetPlannerScenarios,
 } from "./patterns/budget-planner.ts";
 import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
@@ -226,6 +229,7 @@ const allScenarios = [
   ...sleepJournalScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...searchRelevanceTuningScenarios,
   ...budgetPlannerScenarios,
   ...menuPlannerScenarios,
   ...notificationPreferenceScenarios,
