@@ -117,3 +117,7 @@
 - Sanitizing handler-provided search terms with `lift` before building filtered
   projections lets derived summaries reuse the same normalized string so both
   match lists and label cells stay deterministic across mixed payload shapes.
+- Keeping weight tuning offline-friendly worked well by storing sanitized raw
+  weights in cells and deriving the normalized view separately; handlers could
+  accept absolute and delta updates while assertions read from the stable
+  normalized slice.
