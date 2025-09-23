@@ -100,3 +100,6 @@
 - Normalizing token catalogs with `lift` before exposing derived colors keeps
   handler logic simple; trimming candidate token names inside the handler makes
   it easy to accept user-provided overrides without leaking invalid state.
+- Building grouped bibliographies worked best when the raw argument cell was
+  sanitized upfront; using `lift` with `toSchema` kept the grouped by-topic and
+  by-style projections deterministic so scenario assertions stayed stable.
