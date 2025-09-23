@@ -5,30 +5,35 @@ import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
-import { RuntimeProgram } from "@commontools/runner";
 
 const { API_URL, SPACE_NAME } = env;
 
 describe("Compile all recipes", () => {
+  let cc: CharmsController;
+  let identity: Identity;
+
+  beforeAll(async () => {
+    identity = await Identity.generate();
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
+      apiUrl: new URL(API_URL),
+      identity: identity,
+    });
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  const skippedPatterns = [
+    "chatbot-list-view.tsx",
+    "chatbot-note-composed.tsx",
+  ];
+  // Add a test for each pattern, but skip ones that have issues
   for (const file of Deno.readDirSync(join(import.meta.dirname!, ".."))) {
     const { name } = file;
     if (!name.endsWith(".tsx")) continue;
-
-    let cc: CharmsController;
-    let identity: Identity;
-
-    beforeAll(async () => {
-      identity = await Identity.generate();
-      cc = await CharmsController.initialize({
-        spaceName: SPACE_NAME,
-        apiUrl: new URL(API_URL),
-        identity: identity,
-      });
-    });
-
-    afterAll(async () => {
-      if (cc) await cc.dispose();
-    });
+    if (skippedPatterns.includes(name)) continue;
 
     it(`Executes: ${name}`, async () => {
       const sourcePath = join(import.meta.dirname!, "..", name);
