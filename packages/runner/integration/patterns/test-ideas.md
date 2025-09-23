@@ -205,7 +205,7 @@ current offline harness.
       derived percent updates when milestone weights shift.
 - [x] Budget planner pattern — allocate funds across categories ensure derived
       totals enforce overall balance constraints.
-- [ ] Expense reimbursement pattern — approve expense claims ensure handlers set
+- [x] Expense reimbursement pattern — approve expense claims ensure handlers set
       statuses and derived totals reflect payouts.
 - [ ] Invoice generator pattern — assemble invoices from items ensure derived
       totals include taxes and discounts accurately.
