@@ -88,8 +88,7 @@
       "docs/",
       "packages/seeder/templates/",
       "packages/static/assets/",
-      "**/test/fixtures/**",
-      "packages/js-runtime/test/fixtures",
+      "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
       "packages/vendor-astral"
     ]
