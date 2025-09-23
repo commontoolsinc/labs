@@ -198,6 +198,9 @@ import {
   scenarios as designTokenSwitcherScenarios,
 } from "./patterns/design-token-switcher.ts";
 import {
+  scenarios as userJourneyMapScenarios,
+} from "./patterns/user-journey-map.ts";
+import {
   scenarios as researchCitationManagerScenarios,
 } from "./patterns/research-citation-manager.ts";
 import {
@@ -219,6 +222,7 @@ const allScenarios = [
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
+  ...userJourneyMapScenarios,
   ...warehouseBinMapScenarios,
   ...researchCitationManagerScenarios,
   ...toggleScenarios,

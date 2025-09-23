@@ -85,6 +85,8 @@
 - Passing a structured object of cells into `lift` let me sanitize placements
   with the latest bin definitions so the relocation handler could stay focused
   on enforcing capacity without duplicating normalization logic.
+- Reusing the same timeline builder inside handlers keeps change logs aligned
+  with derived journey views while anchor sanitization prevents schedule drift.
 
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
