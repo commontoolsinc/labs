@@ -111,3 +111,6 @@
 - Letting a derived summary enforce budget totals while handlers clamp incoming
   requests keeps allocations balanced; assertions can read from the returned
   summary/history cells without duplicating them through `createCell` logs.
+- Gating mutation handlers with a derived boolean works well when the handler
+  reads the derived cell directly; logging blocked attempts in returned cells
+  keeps harness assertions simple without adding extra control branches.
