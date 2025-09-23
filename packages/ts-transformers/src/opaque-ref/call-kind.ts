@@ -23,7 +23,8 @@ const COMMONTOOLS_PATH_FRAGMENT = "commontools";
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
-  | { kind: "array-map"; symbol?: ts.Symbol };
+  | { kind: "array-map"; symbol?: ts.Symbol }
+  | { kind: "derive"; symbol?: ts.Symbol };
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -38,6 +39,20 @@ function resolveExpressionKind(
   seen: Set<ts.Symbol>,
 ): CallKind | undefined {
   const target = stripWrappers(expression);
+
+  // Check for simple identifier names first (for cases where symbol resolution might fail)
+  if (ts.isIdentifier(target)) {
+    const name = target.text;
+    if (name === "derive") {
+      return { kind: "derive" };
+    }
+    if (name === "ifElse") {
+      return { kind: "ifElse" };
+    }
+    if (BUILDER_SYMBOL_NAMES.has(name)) {
+      return { kind: "builder", builderName: name };
+    }
+  }
 
   if (ts.isCallExpression(target)) {
     return resolveExpressionKind(target.expression, checker, seen);
@@ -143,12 +158,20 @@ function resolveSymbolKind(
     return { kind: "ifElse", symbol: resolved };
   }
 
+  if (name === "derive" && symbolIsCommonTools(resolved)) {
+    return { kind: "derive", symbol: resolved };
+  }
+
   if (BUILDER_SYMBOL_NAMES.has(name) && symbolIsCommonTools(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
   if (name === "ifElse") {
     return { kind: "ifElse", symbol: resolved };
+  }
+
+  if (name === "derive") {
+    return { kind: "derive", symbol: resolved };
   }
 
   if (BUILDER_SYMBOL_NAMES.has(name)) {

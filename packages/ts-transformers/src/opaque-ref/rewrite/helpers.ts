@@ -268,6 +268,14 @@ export function createDeriveCallForExpression(
 ): ts.Expression {
   if (plan.entries.length === 0) return expression;
 
+  // Don't wrap expressions that are already derive calls
+  if (ts.isCallExpression(expression)) {
+    const callKind = detectCallKind(expression, context.checker);
+    if (callKind?.kind === "derive") {
+      return expression;
+    }
+  }
+
   if (!plan.usesObjectBinding && plan.entries.length === 1) {
     const [entry] = plan.entries;
     if (entry && entry.dataFlow.expression === expression) {

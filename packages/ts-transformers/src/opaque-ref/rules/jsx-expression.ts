@@ -5,6 +5,7 @@ import { isEventHandlerJsxAttribute } from "../types.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
 import { createDataFlowAnalyzer } from "../dataflow.ts";
 import { rewriteExpression } from "../rewrite/rewrite.ts";
+import { detectCallKind } from "../call-kind.ts";
 
 export interface OpaqueRefRule {
   readonly name: string;
@@ -13,6 +14,37 @@ export interface OpaqueRefRule {
     context: TransformationContext,
     transformation: ts.TransformationContext,
   ): ts.SourceFile;
+}
+
+function isInsideDeriveCallback(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Node | undefined = node.parent;
+
+  while (current) {
+    // Check if we're inside an arrow function or function expression
+    if (
+      ts.isArrowFunction(current) ||
+      ts.isFunctionExpression(current)
+    ) {
+      // Check if this function is an argument to a derive call
+      const functionParent = current.parent;
+      if (
+        functionParent &&
+        ts.isCallExpression(functionParent) &&
+        functionParent.arguments.includes(current as ts.Expression)
+      ) {
+        const callKind = detectCallKind(functionParent, checker);
+        if (callKind?.kind === "derive") {
+          return true;
+        }
+      }
+    }
+    current = current.parent;
+  }
+
+  return false;
 }
 
 export function createJsxExpressionRule(): OpaqueRefRule {
@@ -30,6 +62,12 @@ export function createJsxExpressionRule(): OpaqueRefRule {
       const visit: ts.Visitor = (node) => {
         if (ts.isJsxExpression(node) && node.expression) {
           if (isEventHandlerJsxAttribute(node)) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          // Skip if inside a derive callback
+          const insideDeriveCallback = isInsideDeriveCallback(node, checker);
+          if (insideDeriveCallback) {
             return ts.visitEachChild(node, visit, transformation);
           }
 

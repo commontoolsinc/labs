@@ -297,7 +297,7 @@ export function createDataFlowAnalyzer(
         const node = recordDataFlow(expression, scope, null, true); // Explicit: parameter is a dependency
         return {
           containsOpaqueRef: true,
-          requiresRewrite: true,
+          requiresRewrite: false, // Map parameters themselves don't need wrapping
           dataFlows: [expression],
           localNodes: [node],
         };
