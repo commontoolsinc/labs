@@ -277,7 +277,7 @@ current offline harness.
       precision metrics update after feedback events.
 - [ ] Segment builder pattern — define audience rules ensure derived membership
       snapshot refreshes on rule edits.
-- [ ] User journey map pattern — map journey milestones ensure derived timeline
+- [x] User journey map pattern — map journey milestones ensure derived timeline
       strings milestones with annotations.
 - [ ] Survey response analyzer pattern — analyze survey data ensure derived
       stats compute per question and demographic.
