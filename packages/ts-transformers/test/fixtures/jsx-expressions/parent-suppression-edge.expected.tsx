@@ -322,10 +322,10 @@ export default recipe({
         <p>User info: {state.user.name} (age: {state.user.age}, email: {state.user.email})</p>
 
         {/* String concatenation with multiple property accesses */}
-        <p>Full profile: {commontools_1.derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location, state_user_profile_bio: state.user.profile.bio }, ({ state_user_name: _v1, state_user_profile_location: _v2, state_user_profile_bio: _v3 }) => _v1 + " from " + _v2 + " - " + _v3)}</p>
+        <p>Full profile: {derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location, state_user_profile_bio: state.user.profile.bio }, ({ state_user_name: _v1, state_user_profile_location: _v2, state_user_profile_bio: _v3 }) => _v1 + " from " + _v2 + " - " + _v3)}</p>
 
         {/* Arithmetic with multiple properties from same base */}
-        <p>Age calculation: {commontools_1.derive(state.user.age, _v1 => _v1 * 12)} months, or {commontools_1.derive(state.user.age, _v1 => _v1 * 365)} days</p>
+        <p>Age calculation: {derive(state.user.age, _v1 => _v1 * 12)} months, or {derive(state.user.age, _v1 => _v1 * 365)} days</p>
 
         <h3>Deeply Nested Property Chains</h3>
         {/* Multiple references to deeply nested object */}
@@ -335,7 +335,7 @@ export default recipe({
         <p>Typography: Headings in {state.config.theme.fonts.heading}, body in {state.config.theme.fonts.body}, code in {state.config.theme.fonts.mono}</p>
 
         {/* Mixed depth accesses */}
-        <p>Config summary: Dark mode {commontools_1.ifElse(state.config.features.darkMode, "enabled", "disabled")} with {state.config.theme.colors.primary} primary color</p>
+        <p>Config summary: Dark mode {ifElse(state.config.features.darkMode, "enabled", "disabled")} with {state.config.theme.colors.primary} primary color</p>
 
         <h3>Very Deep Nesting with Multiple References</h3>
         {/* Accessing different properties at same deep level */}
@@ -356,17 +356,17 @@ export default recipe({
 
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
-        <p>Status: {commontools_1.ifElse(state.user.settings.notifications, commontools_1.derive({ state_user_name: state.user.name, state_user_settings_theme: state.user.settings.theme }, ({ state_user_name: _v1, state_user_settings_theme: _v2 }) => _v1 + " has notifications on with " + _v2 + " theme"), commontools_1.derive(state.user.name, _v1 => _v1 + " has notifications off"))}</p>
+        <p>Status: {ifElse(state.user.settings.notifications, derive({ state_user_name: state.user.name, state_user_settings_theme: state.user.settings.theme }, ({ state_user_name: _v1, state_user_settings_theme: _v2 }) => _v1 + " has notifications on with " + _v2 + " theme"), derive(state.user.name, _v1 => _v1 + " has notifications off"))}</p>
 
         {/* Computed expression with shared base */}
-        <p>Spacing calc: {commontools_1.derive({ state_config_theme_spacing_small: state.config.theme.spacing.small, state_config_theme_spacing_medium: state.config.theme.spacing.medium, state_config_theme_spacing_large: state.config.theme.spacing.large }, ({ state_config_theme_spacing_small: _v1, state_config_theme_spacing_medium: _v2, state_config_theme_spacing_large: _v3 }) => _v1 + _v2 + _v3)} total</p>
+        <p>Spacing calc: {derive({ state_config_theme_spacing_small: state.config.theme.spacing.small, state_config_theme_spacing_medium: state.config.theme.spacing.medium, state_config_theme_spacing_large: state.config.theme.spacing.large }, ({ state_config_theme_spacing_small: _v1, state_config_theme_spacing_medium: _v2, state_config_theme_spacing_large: _v3 }) => _v1 + _v2 + _v3)} total</p>
 
         {/* Boolean expressions with multiple properties */}
-        <p>Features: {commontools_1.ifElse(commontools_1.derive({ state_config_features_darkMode: state.config.features.darkMode, state_config_features_animations: state.config.features.animations }, ({ state_config_features_darkMode: _v1, state_config_features_animations: _v2 }) => _v1 && _v2), "Full features", "Limited features")}</p>
+        <p>Features: {ifElse(derive({ state_config_features_darkMode: state.config.features.darkMode, state_config_features_animations: state.config.features.animations }, ({ state_config_features_darkMode: _v1, state_config_features_animations: _v2 }) => _v1 && _v2), "Full features", "Limited features")}</p>
 
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
-        <p>Formatted: {commontools_1.derive(state.user.name, _v1 => _v1.toUpperCase())} - {commontools_1.derive(state.user.email, _v1 => _v1.toLowerCase())}</p>
+        <p>Formatted: {derive(state.user.name, _v1 => _v1.toUpperCase())} - {derive(state.user.email, _v1 => _v1.toLowerCase())}</p>
 
         {/* Property access and method calls mixed */}
         <p>Profile length: {state.user.profile.bio.length} chars in bio, {state.user.profile.location.length} chars in location</p>
@@ -379,13 +379,13 @@ export default recipe({
         <p>Data summary: {state.data.items.length} items with average {state.data.totals.average}</p>
 
         {/* Multiple levels of the same chain */}
-        <p>Nested refs: {state.config.theme.colors.primary} in {state.config.theme.fonts.body} with {commontools_1.ifElse(state.config.features.animations, "animations", "no animations")}</p>
+        <p>Nested refs: {state.config.theme.colors.primary} in {state.config.theme.fonts.body} with {ifElse(state.config.features.animations, "animations", "no animations")}</p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>All levels:
-          Root: {commontools_1.ifElse(state.deeply, "exists", "missing")},
-          Nested: {commontools_1.ifElse(state.deeply.nested, "exists", "missing")},
+          Root: {ifElse(state.deeply, "exists", "missing")},
+          Nested: {ifElse(state.deeply.nested, "exists", "missing")},
           Value: {state.deeply.nested.structure.with.many.levels.value}
         </p>
       </div>),

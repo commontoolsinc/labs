@@ -47,7 +47,7 @@ export default recipe({
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {commontools_1.ifElse(state.value, commontools_1.derive(state.value, _v1 => _v1 + 1), "unknown")}</li>
+          <li>next number: {ifElse(state.value, derive(state.value, _v1 => _v1 + 1), "unknown")}</li>
         </ul>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),

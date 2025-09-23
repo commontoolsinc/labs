@@ -1,22 +1,5 @@
 import ts from "typescript";
 
-export function getCommonToolsModuleAlias(
-  sourceFile: ts.SourceFile,
-): string | null {
-  for (const statement of sourceFile.statements) {
-    if (ts.isImportDeclaration(statement)) {
-      const moduleSpecifier = statement.moduleSpecifier;
-      if (
-        ts.isStringLiteral(moduleSpecifier) &&
-        moduleSpecifier.text === "commontools"
-      ) {
-        return "commontools_1";
-      }
-    }
-  }
-  return null;
-}
-
 export function hasCommonToolsImport(
   sourceFile: ts.SourceFile,
   importName: string,

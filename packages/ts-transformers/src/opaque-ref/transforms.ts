@@ -1,5 +1,4 @@
 import ts from "typescript";
-import { getCommonToolsModuleAlias } from "../core/common-tools.ts";
 import { assertDefined } from "../core/assert.ts";
 import {
   containsOpaqueRef,
@@ -56,16 +55,10 @@ export interface IfElseOverrides {
 export function createIfElseCall(
   ternary: ts.ConditionalExpression,
   factory: ts.NodeFactory,
-  sourceFile: ts.SourceFile,
+  _sourceFile: ts.SourceFile,
   overrides: IfElseOverrides = {},
 ): ts.CallExpression {
-  const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-  const ifElseIdentifier = moduleAlias
-    ? factory.createPropertyAccessExpression(
-      factory.createIdentifier(moduleAlias),
-      factory.createIdentifier("ifElse"),
-    )
-    : factory.createIdentifier("ifElse");
+  const ifElseIdentifier = factory.createIdentifier("ifElse");
 
   let predicate = overrides.predicate ?? ternary.condition;
   let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
@@ -213,13 +206,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-      const deriveIdentifier = moduleAlias
-        ? factory.createPropertyAccessExpression(
-          factory.createIdentifier(moduleAlias),
-          factory.createIdentifier("derive"),
-        )
-        : factory.createIdentifier("derive");
+      const deriveIdentifier = factory.createIdentifier("derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -302,13 +289,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-    const deriveIdentifier = moduleAlias
-      ? factory.createPropertyAccessExpression(
-        factory.createIdentifier(moduleAlias),
-        factory.createIdentifier("derive"),
-      )
-      : factory.createIdentifier("derive");
+    const deriveIdentifier = factory.createIdentifier("derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -348,13 +329,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-      const deriveIdentifier = moduleAlias
-        ? factory.createPropertyAccessExpression(
-          factory.createIdentifier(moduleAlias),
-          factory.createIdentifier("derive"),
-        )
-        : factory.createIdentifier("derive");
+      const deriveIdentifier = factory.createIdentifier("derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -442,13 +417,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-    const deriveIdentifier = moduleAlias
-      ? factory.createPropertyAccessExpression(
-        factory.createIdentifier(moduleAlias),
-        factory.createIdentifier("derive"),
-      )
-      : factory.createIdentifier("derive");
+    const deriveIdentifier = factory.createIdentifier("derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -510,13 +479,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-      const deriveIdentifier = moduleAlias
-        ? factory.createPropertyAccessExpression(
-          factory.createIdentifier(moduleAlias),
-          factory.createIdentifier("derive"),
-        )
-        : factory.createIdentifier("derive");
+      const deriveIdentifier = factory.createIdentifier("derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -580,13 +543,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-    const deriveIdentifier = moduleAlias
-      ? factory.createPropertyAccessExpression(
-        factory.createIdentifier(moduleAlias),
-        factory.createIdentifier("derive"),
-      )
-      : factory.createIdentifier("derive");
+    const deriveIdentifier = factory.createIdentifier("derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -647,13 +604,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-      const deriveIdentifier = moduleAlias
-        ? factory.createPropertyAccessExpression(
-          factory.createIdentifier(moduleAlias),
-          factory.createIdentifier("derive"),
-        )
-        : factory.createIdentifier("derive");
+      const deriveIdentifier = factory.createIdentifier("derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -721,13 +672,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-    const deriveIdentifier = moduleAlias
-      ? factory.createPropertyAccessExpression(
-        factory.createIdentifier(moduleAlias),
-        factory.createIdentifier("derive"),
-      )
-      : factory.createIdentifier("derive");
+    const deriveIdentifier = factory.createIdentifier("derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -783,13 +728,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-      const deriveIdentifier = moduleAlias
-        ? factory.createPropertyAccessExpression(
-          factory.createIdentifier(moduleAlias),
-          factory.createIdentifier("derive"),
-        )
-        : factory.createIdentifier("derive");
+      const deriveIdentifier = factory.createIdentifier("derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -863,13 +802,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-    const deriveIdentifier = moduleAlias
-      ? factory.createPropertyAccessExpression(
-        factory.createIdentifier(moduleAlias),
-        factory.createIdentifier("derive"),
-      )
-      : factory.createIdentifier("derive");
+    const deriveIdentifier = factory.createIdentifier("derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,

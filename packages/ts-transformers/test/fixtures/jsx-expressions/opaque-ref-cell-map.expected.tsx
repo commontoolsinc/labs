@@ -100,9 +100,9 @@ export default recipe("Charms Launcher", () => {
         {ifElse(!cellRef?.length, <div>No charms created yet</div>, <ul>
             {cellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {commontools_1.derive(index, index => index + 1)}
+                  Go to Charm {derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {commontools_1.derive(index, index => index + 1)}: {commontools_1.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
+                <span>Charm {derive(index, index => index + 1)}: {derive(charm, charm => charm[NAME] || "Unnamed")}</span>
               </li>))}
           </ul>)}
 
