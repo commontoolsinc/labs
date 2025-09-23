@@ -91,7 +91,7 @@ current offline harness.
       subtotal and parent derives grand total.
 - [x] Counter with ring buffer history — maintain fixed-length history array
       trimming oldest entries.
-- [ ] Counter with search term filter — handler updates search term cell and
+- [x] Counter with search term filter — handler updates search term cell and
       derive filters list accordingly.
 - [x] Counter with sort direction toggle — derive sorted list based on direction
       cell.

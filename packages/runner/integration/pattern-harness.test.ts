@@ -151,6 +151,9 @@ import {
   scenarios as counterScenarioDrivenMultiStepScenarios,
 } from "./patterns/counter-scenario-driven-multi-step.ts";
 import {
+  scenarios as counterSearchTermFilterScenarios,
+} from "./patterns/counter-search-term-filter.ts";
+import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import {
@@ -281,6 +284,7 @@ const allScenarios = [
   ...counterRingBufferHistoryScenarios,
   ...counterReferenceEqualityScenarios,
   ...counterScenarioDrivenMultiStepScenarios,
+  ...counterSearchTermFilterScenarios,
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
