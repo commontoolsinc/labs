@@ -6,8 +6,8 @@ import {
   h,
   handler,
   NAME,
-  Opaque,
   navigateTo,
+  Opaque,
   OpaqueRef,
   recipe,
   str,
@@ -23,7 +23,7 @@ import {
   type MentionableCharm,
 } from "./chatbot-note.tsx";
 import { default as Note } from "./note.tsx";
-import ChatList from './chatbot-list-view.tsx';
+import ChatList from "./chatbot-list-view.tsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -74,7 +74,7 @@ const spawnChatList = handler<
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
     charmsList: [],
-    allCharms: state.allCharms
+    allCharms: state.allCharms,
   }));
 });
 
@@ -151,8 +151,10 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               <h3>Quicklaunch:</h3>
               <ct-button
                 onClick={spawnChatList({
-                  allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>, })
-                }
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
+                })}
               >
                 📂 Chat List
               </ct-button>
