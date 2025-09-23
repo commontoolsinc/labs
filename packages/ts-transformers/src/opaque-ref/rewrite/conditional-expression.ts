@@ -50,7 +50,11 @@ export const emitConditionalExpression: Emitter = ({
     analysis,
     context,
   );
-  if (whenTrueDataFlows.length > 0) {
+
+  // Check if the whenTrue branch actually requires rewriting
+  const whenTrueAnalysis = context.analyze(expression.whenTrue);
+
+  if (whenTrueDataFlows.length > 0 && whenTrueAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenTrueDataFlows);
     const derivedWhenTrue = createDeriveCallForExpression(
       expression.whenTrue,
@@ -74,7 +78,14 @@ export const emitConditionalExpression: Emitter = ({
     analysis,
     context,
   );
-  if (whenFalseDataFlows.length > 0) {
+
+  // Check if the whenFalse branch actually requires rewriting
+  const whenFalseAnalysis = context.analyze(expression.whenFalse);
+  console.log(`[ConditionalEmit] whenFalse: "${expression.whenFalse.getText()}"`);
+  console.log(`  - whenFalseDataFlows.length: ${whenFalseDataFlows.length}`);
+  console.log(`  - whenFalseAnalysis.requiresRewrite: ${whenFalseAnalysis.requiresRewrite}`);
+
+  if (whenFalseDataFlows.length > 0 && whenFalseAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenFalseDataFlows);
     const derivedWhenFalse = createDeriveCallForExpression(
       expression.whenFalse,

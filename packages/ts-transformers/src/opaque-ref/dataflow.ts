@@ -341,6 +341,23 @@ export function createDataFlowAnalyzer(
             null;
         const node = recordDataFlow(expression, scope, parentId, true);  // Explicit: OpaqueRef property
 
+        // Special case: property access on map callback parameters should be treated as OpaqueRef
+        // but not require rewrite (they're handled by the map transformation)
+        const isMapParameter = target.dataFlows.length === 1 &&
+          target.dataFlows[0] &&
+          ts.isIdentifier(target.dataFlows[0]) &&
+          getOpaqueParameterCallKind(checker.getSymbolAtLocation(target.dataFlows[0])) === "array-map";
+
+        if (isMapParameter) {
+          console.log(`  -> Property on map parameter, not requiring rewrite`);
+          return {
+            containsOpaqueRef: true,
+            requiresRewrite: false,  // Don't wrap simple property access on map params
+            dataFlows: [expression],
+            localNodes: [node],
+          };
+        }
+
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
         if (target.requiresRewrite && target.dataFlows.length > 0) {
@@ -436,8 +453,15 @@ export function createDataFlowAnalyzer(
         (ts.isLiteralExpression(argumentExpression) ||
           ts.isNoSubstitutionTemplateLiteral(argumentExpression));
 
+      console.log(`[ElementAccess] "${expression.getText()}"`);
+      console.log(`  - isStaticIndex: ${isStaticIndex}`);
+      console.log(`  - target.containsOpaqueRef: ${target.containsOpaqueRef}`);
+      console.log(`  - target.requiresRewrite: ${target.requiresRewrite}`);
+
       if (isStaticIndex) {
-        return mergeAnalyses(target, argument);
+        const result = mergeAnalyses(target, argument);
+        console.log(`  -> Static index, merged result requiresRewrite: ${result.requiresRewrite}`);
+        return result;
       }
 
       if (

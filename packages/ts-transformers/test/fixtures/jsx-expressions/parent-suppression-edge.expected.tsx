@@ -350,7 +350,7 @@ export default recipe({
 
         {/* Nested array access with shared base */}
         <p>Nested: {state.arrays.nested[0].items.length} items in first, count is {state.arrays.nested[0].count}</p>
-        
+
         {/* Array and property access mixed */}
         <p>First item: {state.arrays.first[0]} (total: {state.arrays.first.length})</p>
 
