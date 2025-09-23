@@ -43,8 +43,8 @@
   `lift`/`derive` keeps the handler simple while still exposing stable views for
   assertions and labels.
 - Use `createCell` only when the new cell stays in the returned graph (or feeds
-  another node); for diagnostic summaries, reuse existing cells or allocate
-  with `cell()` so we are not leaving orphaned documents behind.
+  another node); for diagnostic summaries, reuse existing cells or allocate with
+  `cell()` so we are not leaving orphaned documents behind.
 - Keeping a cached summary cell and returning it when sanitized inputs match
   avoids unnecessary object churn, while an auxiliary memo cell can expose
   reference stability for harness assertions.
@@ -76,8 +76,8 @@
   stable when filters swap; handlers only adjust the category cell, while
   downstream assertions compare fresh objects and avoid reference sharing.
 - Recording a difference snapshot after every handler run still benefits from
-  reusing sanitized step cells; keep those references in the result graph
-  rather than mirroring them via `createCell`.
+  reusing sanitized step cells; keep those references in the result graph rather
+  than mirroring them via `createCell`.
 - Tracking direction toggles with a history cell while deriving the sorted view
   from sanitized arrays keeps sort mode reactive; the history cell alone is
   sufficient for assertions.
@@ -94,8 +94,8 @@
   event routing ergonomic while giving the harness deterministic surfaces for
   assertions like call counts and labels.
 - Sanitizing alternate argument presets with a shared `lift` before selecting a
-  new default keeps reinitialization deterministic; track flips in the same
-  cell collection you expose rather than spawning extra snapshot cells.
+  new default keeps reinitialization deterministic; track flips in the same cell
+  collection you expose rather than spawning extra snapshot cells.
 - Maintaining sanitized channel preference lists lets derived schedule maps
   react predictably to frequency updates while a single summary `lift` keeps
   textual expectations aligned with handler-driven mutations.
