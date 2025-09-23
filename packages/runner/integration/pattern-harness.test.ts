@@ -40,6 +40,9 @@ import {
   scenarios as counterDerivedCanonicalFormScenarios,
 } from "./patterns/counter-derived-canonical-form.ts";
 import {
+  scenarios as counterDerivedDifferenceScenarios,
+} from "./patterns/counter-derived-difference.ts";
+import {
   scenarios as counterDerivedMinMaxScenarios,
 } from "./patterns/counter-derived-min-max.ts";
 import {
@@ -210,6 +213,7 @@ const allScenarios = [
   ...counterDerivedColorScenarios,
   ...counterDerivedChecksumScenarios,
   ...counterDerivedCanonicalFormScenarios,
+  ...counterDerivedDifferenceScenarios,
   ...counterDerivedMinMaxScenarios,
   ...counterDerivedSummaryScenarios,
   ...counterDynamicHandlerListScenarios,
