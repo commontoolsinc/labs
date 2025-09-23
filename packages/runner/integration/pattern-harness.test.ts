@@ -181,6 +181,9 @@ import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
 import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
+import {
+  scenarios as notificationPreferenceScenarios,
+} from "./patterns/notification-preference.ts";
 import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 import {
   scenarios as templateGalleryScenarios,
@@ -197,6 +200,7 @@ const allScenarios = [
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
   ...menuPlannerScenarios,
+  ...notificationPreferenceScenarios,
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...toggleScenarios,
