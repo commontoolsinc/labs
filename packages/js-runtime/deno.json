@@ -6,8 +6,6 @@
   "imports": {
     "typescript": "npm:typescript",
     "source-map-js": "npm:source-map-js@^1.2.1",
-    "@commontools/test-support": "../test-support/src/mod.ts",
-    "@commontools/test-support/fixture-runner": "../test-support/src/fixture-runner.ts",
     "@commontools/ts-transformers": "../ts-transformers/src/mod.ts"
   },
   "exports": {
