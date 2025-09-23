@@ -10,6 +10,7 @@ import {
   type DataFlowAnalysis,
   dedupeExpressions,
 } from "./dataflow.ts";
+import { getHelperIdentifier } from "./rewrite/import-resolver.ts";
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 
@@ -55,10 +56,10 @@ export interface IfElseOverrides {
 export function createIfElseCall(
   ternary: ts.ConditionalExpression,
   factory: ts.NodeFactory,
-  _sourceFile: ts.SourceFile,
+  sourceFile: ts.SourceFile,
   overrides: IfElseOverrides = {},
 ): ts.CallExpression {
-  const ifElseIdentifier = factory.createIdentifier("ifElse");
+  const ifElseIdentifier = getHelperIdentifier(factory, sourceFile, "ifElse");
 
   let predicate = overrides.predicate ?? ternary.condition;
   let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
@@ -206,7 +207,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = factory.createIdentifier("derive");
+      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -289,7 +290,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const deriveIdentifier = factory.createIdentifier("derive");
+    const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -329,7 +330,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = factory.createIdentifier("derive");
+      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -417,7 +418,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const deriveIdentifier = factory.createIdentifier("derive");
+    const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -479,7 +480,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = factory.createIdentifier("derive");
+      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -543,7 +544,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const deriveIdentifier = factory.createIdentifier("derive");
+    const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -604,7 +605,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = factory.createIdentifier("derive");
+      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -672,7 +673,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const deriveIdentifier = factory.createIdentifier("derive");
+    const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,
@@ -728,7 +729,7 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = factory.createIdentifier("derive");
+      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -802,7 +803,7 @@ export function transformExpressionWithOpaqueRef(
       factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
       lambdaBody,
     );
-    const deriveIdentifier = factory.createIdentifier("derive");
+    const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
     registerHelper?.("derive");
     return factory.createCallExpression(
       deriveIdentifier,

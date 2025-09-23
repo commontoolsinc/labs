@@ -10,6 +10,7 @@ import type { RewriteContext } from "./types.ts";
 import type { NormalizedDataFlow } from "../normalize.ts";
 import type { DataFlowAnalysis } from "../dataflow.ts";
 import { isFunctionParameter } from "../types.ts";
+import { getHelperIdentifier } from "./import-resolver.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
@@ -204,7 +205,11 @@ export function filterRelevantDataFlows(
 export function createDeriveIdentifier(
   context: RewriteContext,
 ): ts.Expression {
-  return context.factory.createIdentifier("derive");
+  return getHelperIdentifier(
+    context.factory,
+    context.sourceFile,
+    "derive",
+  );
 }
 
 export function createDeriveDataFlowObject(
