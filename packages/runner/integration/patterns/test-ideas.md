@@ -217,7 +217,7 @@ current offline harness.
       derived ETAs adjust as status or milestone cells change.
 - [ ] Logistics routing pattern — assign packages to routes ensure derived load
       metrics enforce capacity per route.
-- [ ] Warehouse bin map pattern — map items to storage bins ensure handlers
+- [x] Warehouse bin map pattern — map items to storage bins ensure handlers
       relocate inventory and derived occupancy stays.
 - [x] Menu planner pattern — plan meals across schedule ensure derived shopping
       list aggregates ingredients by day.

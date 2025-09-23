@@ -82,6 +82,9 @@
 - Tracking direction toggles with a history cell while deriving the sorted view
   from sanitized arrays keeps sort mode reactive; capturing a `createCell`
   snapshot made it easy to assert mode flips in the harness.
+- Passing a structured object of cells into `lift` let me sanitize placements
+  with the latest bin definitions so the relocation handler could stay focused
+  on enforcing capacity without duplicating normalization logic.
 
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
