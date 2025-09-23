@@ -121,3 +121,6 @@
   weights in cells and deriving the normalized view separately; handlers could
   accept absolute and delta updates while assertions read from the stable
   normalized slice.
+- Sanitizing reimbursement claims inside a `lift` while handlers rewrite the raw
+  argument cell keeps derived totals and labels aligned; clipping the action
+  history to a handful of entries keeps harness assertions deterministic.

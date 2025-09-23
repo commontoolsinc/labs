@@ -198,6 +198,9 @@ import {
 import {
   scenarios as budgetPlannerScenarios,
 } from "./patterns/budget-planner.ts";
+import {
+  scenarios as expenseReimbursementScenarios,
+} from "./patterns/expense-reimbursement.ts";
 import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
 import {
   scenarios as notificationPreferenceScenarios,
@@ -231,6 +234,7 @@ const allScenarios = [
   ...featureUsageAnalyticsScenarios,
   ...searchRelevanceTuningScenarios,
   ...budgetPlannerScenarios,
+  ...expenseReimbursementScenarios,
   ...menuPlannerScenarios,
   ...notificationPreferenceScenarios,
   ...crmPipelineScenarios,
