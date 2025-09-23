@@ -97,3 +97,6 @@
   cell keeps downstream mapped values stable; toggling a mode handler to flip
   the reference while logging history in a createCell makes pipeline assertions
   straightforward in scenarios.
+- Normalizing token catalogs with `lift` before exposing derived colors keeps
+  handler logic simple; trimming candidate token names inside the handler makes
+  it easy to accept user-provided overrides without leaking invalid state.
