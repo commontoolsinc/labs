@@ -194,6 +194,9 @@ import {
 import {
   scenarios as designTokenSwitcherScenarios,
 } from "./patterns/design-token-switcher.ts";
+import {
+  scenarios as researchCitationManagerScenarios,
+} from "./patterns/research-citation-manager.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -210,6 +213,7 @@ const allScenarios = [
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
+  ...researchCitationManagerScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
