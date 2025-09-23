@@ -93,3 +93,7 @@
 - Maintaining sanitized channel preference lists lets derived schedule maps
   react predictably to frequency updates while a single summary `lift` keeps
   textual expectations aligned with handler-driven mutations.
+- Swapping derive pipelines by storing the active function in a lift-produced
+  cell keeps downstream mapped values stable; toggling a mode handler to flip
+  the reference while logging history in a createCell makes pipeline assertions
+  straightforward in scenarios.

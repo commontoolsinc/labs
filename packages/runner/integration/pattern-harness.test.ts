@@ -151,6 +151,9 @@ import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import {
+  scenarios as counterToggledDerivePipelinesScenarios,
+} from "./patterns/counter-toggled-derive-pipelines.ts";
+import {
   scenarios as counterTypedHandlerRecordScenarios,
 } from "./patterns/counter-typed-handler-record.ts";
 import { scenarios as counterScenarios } from "./patterns/simple-counter.ts";
@@ -254,6 +257,7 @@ const allScenarios = [
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
+  ...counterToggledDerivePipelinesScenarios,
   ...counterTypedHandlerRecordScenarios,
   ...counterResetScenarios,
 ];

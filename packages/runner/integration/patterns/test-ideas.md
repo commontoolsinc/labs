@@ -223,7 +223,7 @@ current offline harness.
       cell under different keys; ensure updates reflected everywhere.
 - [ ] Counter with nested map of arrays — complex structure mixing maps and
       arrays, with handlers updating both dimensions.
-- [ ] Counter with toggled derive pipelines — change derive function reference
+- [x] Counter with toggled derive pipelines — change derive function reference
       based on mode cell.
 - [ ] Counter with scenario verifying graph snapshot stability — after multiple
       events, compare snapshot metadata for stability (using available APIs).
