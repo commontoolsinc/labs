@@ -26,7 +26,7 @@ export interface DataFlowNode {
   readonly canonicalKey: string;
   readonly parentId: number | null;
   readonly scopeId: number;
-  readonly isExplicit: boolean;  // True if this node represents an actual dependency, not a traversal artifact
+  readonly isExplicit: boolean; // True if this node represents an actual dependency, not a traversal artifact
 }
 
 export interface DataFlowGraph {
@@ -72,7 +72,7 @@ interface DataFlowScopeInternal {
 interface AnalyzerContext {
   nextNodeId: number;
   nextScopeId: number;
-  readonly collectedNodes: DataFlowNode[];  // All nodes collected during analysis
+  readonly collectedNodes: DataFlowNode[]; // All nodes collected during analysis
   readonly scopes: Map<number, DataFlowScopeInternal>;
 }
 
@@ -80,7 +80,7 @@ interface InternalAnalysis {
   containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
-  localNodes: DataFlowNode[];  // Nodes from this expression subtree only
+  localNodes: DataFlowNode[]; // Nodes from this expression subtree only
   rewriteHint?: RewriteHint;
 }
 
@@ -294,7 +294,7 @@ export function createDataFlowAnalyzer(
       const type = checker.getTypeAtLocation(expression);
       const parameterCallKind = getOpaqueParameterCallKind(symbol);
       if (parameterCallKind === "array-map") {
-        const node = recordDataFlow(expression, scope, null, true);  // Explicit: parameter is a dependency
+        const node = recordDataFlow(expression, scope, null, true); // Explicit: parameter is a dependency
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
@@ -303,7 +303,7 @@ export function createDataFlowAnalyzer(
         };
       }
       if (isOpaqueRefType(type, checker)) {
-        const node = recordDataFlow(expression, scope, null, true);  // Explicit: direct OpaqueRef
+        const node = recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -312,7 +312,7 @@ export function createDataFlowAnalyzer(
         };
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
-        const node = recordDataFlow(expression, scope, null, true);  // Explicit: CommonTools default
+        const node = recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
@@ -334,19 +334,21 @@ export function createDataFlowAnalyzer(
         const parentId =
           findParentNodeId(target.localNodes, expression.expression) ??
             null;
-        const node = recordDataFlow(expression, scope, parentId, true);  // Explicit: OpaqueRef property
+        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
 
         // Special case: property access on map callback parameters should be treated as OpaqueRef
         // but not require rewrite (they're handled by the map transformation)
         const isMapParameter = target.dataFlows.length === 1 &&
           target.dataFlows[0] &&
           ts.isIdentifier(target.dataFlows[0]) &&
-          getOpaqueParameterCallKind(checker.getSymbolAtLocation(target.dataFlows[0])) === "array-map";
+          getOpaqueParameterCallKind(
+              checker.getSymbolAtLocation(target.dataFlows[0]),
+            ) === "array-map";
 
         if (isMapParameter) {
           return {
             containsOpaqueRef: true,
-            requiresRewrite: false,  // Don't wrap simple property access on map params
+            requiresRewrite: false, // Don't wrap simple property access on map params
             dataFlows: [expression],
             localNodes: [node],
           };
@@ -377,7 +379,7 @@ export function createDataFlowAnalyzer(
         }
         const parentId =
           findParentNodeId(target.localNodes, expression.expression) ?? null;
-        const node = recordDataFlow(expression, scope, parentId, true);  // Explicit: CommonTools property
+        const node = recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
@@ -398,7 +400,10 @@ export function createDataFlowAnalyzer(
 
         // If the target is a complex expression requiring rewrite (ElementAccess or Call),
         // propagate its dataFlows. Otherwise add this property access as a dataFlow.
-        if (isPropertyOnCall || (target.requiresRewrite && target.dataFlows.length > 0)) {
+        if (
+          isPropertyOnCall ||
+          (target.requiresRewrite && target.dataFlows.length > 0)
+        ) {
           // This is a computed expression - use the dependencies from the target
           const node = recordDataFlow(expression, scope, parentId, false);
           return {

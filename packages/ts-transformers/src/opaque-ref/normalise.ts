@@ -26,10 +26,12 @@ export function normaliseDataFlows(
   let nodesToProcess = graph.nodes;
   if (requestedDataFlows && requestedDataFlows.length > 0) {
     const requestedTexts = new Set(
-      requestedDataFlows.map(expr => expr.getText(expr.getSourceFile()))
+      requestedDataFlows.map((expr) => expr.getText(expr.getSourceFile())),
     );
-    nodesToProcess = graph.nodes.filter(node =>
-      requestedTexts.has(node.expression.getText(node.expression.getSourceFile()))
+    nodesToProcess = graph.nodes.filter((node) =>
+      requestedTexts.has(
+        node.expression.getText(node.expression.getSourceFile()),
+      )
     );
   }
 
@@ -130,7 +132,9 @@ export function normaliseDataFlows(
 
         // Check all nodes to see if any child is explicit
         for (const potentialChild of graph.nodes) {
-          if (potentialChild.parentId === node.id && potentialChild.isExplicit) {
+          if (
+            potentialChild.parentId === node.id && potentialChild.isExplicit
+          ) {
             hasExplicitChild = true;
             break;
           }

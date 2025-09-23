@@ -364,14 +364,19 @@ _Added: 2025-09-23_
 ### Problem Statement
 
 The current implementation conflates two distinct concepts:
-1. **Graph traversal nodes** - Every expression encountered while walking the AST
+
+1. **Graph traversal nodes** - Every expression encountered while walking the
+   AST
 2. **Explicit dependencies** - Actual reactive values that need to be tracked
 
-This leads to complex expressions like `state.items.filter(...).length` being incorrectly added as dependencies when only `state.items` and `state.filter` should be tracked.
+This leads to complex expressions like `state.items.filter(...).length` being
+incorrectly added as dependencies when only `state.items` and `state.filter`
+should be tracked.
 
 ### Current Behavior (Problematic)
 
 When analyzing `state.items.filter(i => i.name.includes(state.filter)).length`:
+
 1. Creates nodes for every sub-expression during traversal
 2. Adds many expressions to `dataFlows` array
 3. Relies on text-matching in normalization to suppress parents
@@ -388,7 +393,7 @@ export interface DataFlowNode {
   readonly canonicalKey: string;
   readonly parentId: number | null;
   readonly scopeId: number;
-  readonly isExplicit: boolean;  // NEW: Marks actual dependencies vs traversal artifacts
+  readonly isExplicit: boolean; // NEW: Marks actual dependencies vs traversal artifacts
 }
 ```
 
@@ -403,7 +408,7 @@ if (isOpaqueRefType(type, checker)) {
   return {
     containsOpaqueRef: true,
     requiresRewrite: false,
-    dataFlows: [expression],  // Add to dataFlows
+    dataFlows: [expression], // Add to dataFlows
     localNodes: [node],
   };
 }
@@ -414,7 +419,7 @@ if (ts.isCallExpression(expression.expression)) {
   return {
     containsOpaqueRef: true,
     requiresRewrite: true,
-    dataFlows: target.dataFlows,  // Propagate from target, don't add this expression
+    dataFlows: target.dataFlows, // Propagate from target, don't add this expression
     localNodes: [node],
   };
 }
@@ -428,7 +433,7 @@ Replace fragile text-matching with explicit flag check:
 // In normaliseDataFlows:
 for (const [canonicalKey, group] of grouped.entries()) {
   // Only suppress parents if ALL nodes in the group are non-explicit
-  const hasExplicitNode = group.nodes.some(node => node.isExplicit);
+  const hasExplicitNode = group.nodes.some((node) => node.isExplicit);
 
   if (!hasExplicitNode) {
     // Check if any child is explicit - if so, suppress this parent
@@ -446,11 +451,13 @@ for (const [canonicalKey, group] of grouped.entries()) {
 
 1. **Update DataFlowNode interface** - Add `isExplicit` field
 2. **Update recordDataFlow** - Accept and store `isExplicit` parameter
-3. **Update analyzeExpression** - Pass correct `isExplicit` value based on context:
+3. **Update analyzeExpression** - Pass correct `isExplicit` value based on
+   context:
    - `true` for direct reactive value access (`state.items`)
    - `false` for computed expressions (`state.items.filter(...).length`)
 4. **Update normaliseDataFlows** - Use flag instead of text matching
-5. **Remove workaround** - Delete the `explicitDataFlows` parameter and text-matching logic
+5. **Remove workaround** - Delete the `explicitDataFlows` parameter and
+   text-matching logic
 6. **Clean up logging** - Remove debug console.logs after verification
 
 ### Expected Benefits
@@ -464,14 +471,17 @@ for (const [canonicalKey, group] of grouped.entries()) {
 
 After implementation, these patterns should work correctly:
 
-1. `state.items.filter(...).length` → Only `state.items` and `state.filter` as dependencies
+1. `state.items.filter(...).length` → Only `state.items` and `state.filter` as
+   dependencies
 2. `state.text.trim().length` → Only `state.text` as dependency
 3. `state.arrays.nested[0].items.length` → Appropriate nested dependencies
-4. `(item.price * (1 - state.discount)).toFixed(2)` → Only base values, not method calls
+4. `(item.price * (1 - state.discount)).toFixed(2)` → Only base values, not
+   method calls
 
 ### Migration Risk
 
 Low risk because:
+
 - Changes are localized to dataflow analysis
 - Existing tests will catch regressions
 - Can be rolled back if issues arise
