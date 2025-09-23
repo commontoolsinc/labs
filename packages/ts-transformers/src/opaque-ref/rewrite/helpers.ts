@@ -82,12 +82,14 @@ function getOpaqueCallKindForParameter(
   return undefined;
 }
 
-function resolvesToMapParameter(
+function resolvesToParameterOfKind(
   expression: ts.Expression,
   checker: ts.TypeChecker,
+  kind: "array-map" | "builder",
 ): boolean {
   let current: ts.Expression = expression;
   let symbol: ts.Symbol | undefined;
+  let isRootIdentifierOnly = true;
   while (true) {
     if (ts.isIdentifier(current)) {
       symbol = checker.getSymbolAtLocation(current);
@@ -98,6 +100,7 @@ function resolvesToMapParameter(
       ts.isElementAccessExpression(current) ||
       ts.isCallExpression(current)
     ) {
+      isRootIdentifierOnly = false;
       current = current.expression;
       continue;
     }
@@ -118,8 +121,23 @@ function resolvesToMapParameter(
   if (!declarations) return false;
   return declarations.some((declaration) =>
     ts.isParameter(declaration) &&
-    getOpaqueCallKindForParameter(declaration, checker) === "array-map"
+    getOpaqueCallKindForParameter(declaration, checker) === kind &&
+    isRootIdentifierOnly
   );
+}
+
+function resolvesToMapParameter(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return resolvesToParameterOfKind(expression, checker, "array-map");
+}
+
+function resolvesToBuilderParameter(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  return resolvesToParameterOfKind(expression, checker, "builder");
 }
 
 export function filterRelevantDataFlows(
@@ -165,10 +183,16 @@ export function filterRelevantDataFlows(
     ) {
       return false;
     }
-    if (
-      isParameterExpression(dataFlow.expression) &&
-      !resolvesToMapParameter(dataFlow.expression, context.checker)
-    ) {
+    if (isParameterExpression(dataFlow.expression)) {
+      if (resolvesToMapParameter(dataFlow.expression, context.checker)) {
+        return true;
+      }
+      if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
+        return false;
+      }
+      return false;
+    }
+    if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
       return false;
     }
     return true;

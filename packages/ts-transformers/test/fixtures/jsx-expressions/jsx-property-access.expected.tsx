@@ -148,14 +148,14 @@ export default recipe({
         
         <h3>Property Access with Operations</h3>
         <p>Age + 1: {commontools_1.derive(state.user.age, _v1 => _v1 + 1)}</p>
-        <p>Name length: {commontools_1.derive(state.user.name, _v1 => _v1.length)}</p>
+        <p>Name length: {state.user.name.length}</p>
         <p>Uppercase name: {commontools_1.derive(state.user.name, _v1 => _v1.toUpperCase())}</p>
         <p>Location includes city: {commontools_1.ifElse(commontools_1.derive(state.user.profile.location, _v1 => _v1.includes("City")), "Yes", "No")}</p>
         
         <h3>Array Element Access</h3>
         <p>Item at index: {commontools_1.derive({ state_items: state.items, state_index: state.index }, ({ state_items: _v1, state_index: _v2 }) => _v1[_v2])}</p>
         <p>First item: {state.items[0]}</p>
-        <p>Last item: {commontools_1.derive(state.items, _v1 => _v1[_v1.length - 1])}</p>
+        <p>Last item: {commontools_1.derive({ state_items: state.items, state_items_length: state.items.length }, ({ state_items: _v1, state_items_length: _v2 }) => _v1[_v2 - 1])}</p>
         <p>Number at index: {commontools_1.derive({ state_numbers: state.numbers, state_index: state.index }, ({ state_numbers: _v1, state_index: _v2 }) => _v1[_v2])}</p>
         
         <h3>Config Access with Styles</h3>

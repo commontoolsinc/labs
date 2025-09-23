@@ -57,7 +57,7 @@ export default recipe({
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
-        <p>Total items: {commontools_1.derive(state.items, _v1 => _v1.length)}</p>
+        <p>Total items: {state.items.length}</p>
         <p>Filtered count: {commontools_1.derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter(i => i.name.includes(_v2)).length)}</p>
         
         <h3>Array with Complex Expressions</h3>
@@ -71,7 +71,7 @@ export default recipe({
         </ul>
         
         <h3>Array Methods</h3>
-        <p>Item count: {commontools_1.derive(state.items, _v1 => _v1.length)}</p>
+        <p>Item count: {state.items.length}</p>
         <p>Active items: {commontools_1.derive(state.items, _v1 => _v1.filter(i => i.active).length)}</p>
         
         <h3>Simple Operations</h3>
@@ -84,7 +84,7 @@ export default recipe({
         <p>Has expensive (gt 100): {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.some(i => i.price > 100)), "Yes", "No")}</p>
         
         <h3>Object Operations</h3>
-        <div data-item-count={commontools_1.derive(state.items, _v1 => _v1.length)} data-has-filter={commontools_1.derive(state.filter, _v1 => _v1.length > 0)} data-discount={state.discount}>
+        <div data-item-count={state.items.length} data-has-filter={commontools_1.derive(state.filter.length, _v1 => _v1 > 0)} data-discount={state.discount}>
           Object attributes
         </div>
       </div>),

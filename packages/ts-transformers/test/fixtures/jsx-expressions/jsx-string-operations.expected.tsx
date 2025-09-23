@@ -43,7 +43,7 @@ export default recipe({
         <h3>String Methods</h3>
         <p>Uppercase: {commontools_1.derive(state.firstName, _v1 => _v1.toUpperCase())}</p>
         <p>Lowercase: {commontools_1.derive(state.title, _v1 => _v1.toLowerCase())}</p>
-        <p>Length: {commontools_1.derive(state.message, _v1 => _v1.length)}</p>
+        <p>Length: {state.message.length}</p>
         <p>Substring: {commontools_1.derive(state.message, _v1 => _v1.substring(0, 5))}</p>
         
         <h3>Mixed String and Number</h3>

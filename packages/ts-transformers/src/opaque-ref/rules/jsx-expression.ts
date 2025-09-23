@@ -35,10 +35,7 @@ export function createJsxExpressionRule(): OpaqueRefRule {
 
           const analysis = analyze(node.expression);
 
-          if (!analysis.containsOpaqueRef) {
-            return ts.visitEachChild(node, visit, transformation);
-          }
-
+          // Skip if doesn't require rewriting
           if (!analysis.requiresRewrite) {
             return ts.visitEachChild(node, visit, transformation);
           }

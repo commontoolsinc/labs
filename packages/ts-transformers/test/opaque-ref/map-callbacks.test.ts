@@ -55,7 +55,7 @@ describe("OpaqueRef map callbacks", () => {
     );
     assertStringIncludes(
       output,
-      "ifElse(commontools_1.derive(state.charms, _v1 => !_v1.length)",
+      "ifElse(commontools_1.derive(state.charms.length, _v1 => !_v1)",
     );
   });
 });

@@ -31,6 +31,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
     const fallbackAnalysis = context.analyze(expression.operand);
     const fallbackDataFlows = normaliseDataFlows(
       fallbackAnalysis.graph,
+      fallbackAnalysis.dataFlows,
     );
     relevantDataFlows = filterRelevantDataFlows(
       fallbackDataFlows.all,

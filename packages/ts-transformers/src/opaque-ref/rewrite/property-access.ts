@@ -29,7 +29,9 @@ export function emitPropertyAccess(
     params.analysis,
     context,
   );
-  if (relevantDataFlows.length === 0) return undefined;
+  if (relevantDataFlows.length === 0) {
+    return undefined;
+  }
 
   const plan = createBindingPlan(relevantDataFlows);
   const rewritten = createDeriveCallForExpression(expression, plan, context);

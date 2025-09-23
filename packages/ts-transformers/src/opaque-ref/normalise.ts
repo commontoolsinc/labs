@@ -16,9 +16,22 @@ export interface NormalisedDataFlowSet {
 
 export function normaliseDataFlows(
   graph: DataFlowGraph,
+  requestedDataFlows?: ts.Expression[],
 ): NormalisedDataFlowSet {
   const nodesById = new Map<number, DataFlowNode>();
   for (const node of graph.nodes) nodesById.set(node.id, node);
+
+  // If specific dataFlows were requested, only process nodes corresponding to those expressions
+  // This prevents suppressing nodes that are explicitly needed as dependencies
+  let nodesToProcess = graph.nodes;
+  if (requestedDataFlows && requestedDataFlows.length > 0) {
+    const requestedTexts = new Set(
+      requestedDataFlows.map(expr => expr.getText(expr.getSourceFile()))
+    );
+    nodesToProcess = graph.nodes.filter(node =>
+      requestedTexts.has(node.expression.getText(node.expression.getSourceFile()))
+    );
+  }
 
   const grouped = new Map<string, {
     expression: ts.Expression;
@@ -30,59 +43,63 @@ export function normaliseDataFlows(
   const normaliseExpression = (node: DataFlowNode): ts.Expression => {
     let current: ts.Expression = node.expression;
 
+    // Only normalize away truly meaningless wrappers that don't change semantics
     while (true) {
-      if (ts.isPropertyAccessExpression(current)) {
-        if (
-          ts.isCallExpression(current.parent) &&
-          current.parent.expression === current
-        ) {
-          current = current.expression;
-          continue;
-        }
-        if (ts.isIdentifier(current.name) && current.name.text === "length") {
-          current = current.expression;
-          continue;
-        }
+      // Remove parentheses - purely syntactic, no semantic difference
+      if (ts.isParenthesizedExpression(current)) {
+        current = current.expression;
+        continue;
       }
 
-      if (ts.isElementAccessExpression(current)) {
-        const argument = current.argumentExpression;
-        if (argument && ts.isExpression(argument)) {
-          if (
-            ts.isLiteralExpression(argument) ||
-            ts.isNoSubstitutionTemplateLiteral(argument)
-          ) {
-            current = current.expression;
-            continue;
-          }
-        }
-        if (
-          ts.isCallExpression(current.parent) &&
-          current.parent.expression === current
-        ) {
-          current = current.expression;
-          continue;
-        }
+      // Remove type assertions - don't affect runtime behavior
+      if (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current)) {
+        current = current.expression;
+        continue;
       }
 
+      // Remove non-null assertions - don't affect runtime behavior
+      if (ts.isNonNullExpression(current)) {
+        current = current.expression;
+        continue;
+      }
+
+      // Special case: for method calls like obj.method(), we need to normalize
+      // back to the object so the transformation can wrap it properly
+      // e.g., state.user.name.toUpperCase() -> state.user.name
       if (ts.isCallExpression(current)) {
         const callee = current.expression;
-        if (
-          ts.isPropertyAccessExpression(callee) ||
-          ts.isElementAccessExpression(callee)
-        ) {
+        if (ts.isPropertyAccessExpression(callee)) {
+          // This is a method call - normalize to the object
           current = callee.expression;
           continue;
         }
       }
 
+      // Also handle property access when it's being called as a method
+      // e.g., when we see state.user.name.toUpperCase (without the call),
+      // but it's the callee of a call expression
+      if (ts.isPropertyAccessExpression(current)) {
+        if (
+          current.parent &&
+          ts.isCallExpression(current.parent) &&
+          current.parent.expression === current
+        ) {
+          // This property is being called as a method
+          current = current.expression;
+          continue;
+        }
+      }
+
+      // That's it! Keep all other meaningful distinctions:
+      // - state.items vs state.items.length (different reactive dependencies)
+      // - array[0] vs array (different values)
       break;
     }
 
     return current;
   };
 
-  for (const node of graph.nodes) {
+  for (const node of nodesToProcess) {
     const expression = normaliseExpression(node);
     const sourceFile = expression.getSourceFile();
     const key = `${node.scopeId}:${expression.getText(sourceFile)}`;
@@ -101,15 +118,28 @@ export function normaliseDataFlows(
 
   const suppressed = new Set<string>();
 
-  for (const [canonicalKey, group] of grouped.entries()) {
-    for (const node of group.nodes) {
-      let currentParent = node.parentId;
-      while (currentParent !== null) {
-        const parentGroupKey = nodeToGroup.get(currentParent);
-        if (parentGroupKey && parentGroupKey !== canonicalKey) {
-          suppressed.add(parentGroupKey);
+  // Parent suppression: suppress parents that have more specific children
+  // BUT: If we're working with explicitly requested dataFlows, don't suppress any of them
+  // They were all explicitly requested as dependencies
+  if (!requestedDataFlows || requestedDataFlows.length === 0) {
+    for (const [canonicalKey, group] of grouped.entries()) {
+      // Check if any node in this group has an explicit child
+      // If so, this parent should be suppressed in favor of the more specific child
+      for (const node of group.nodes) {
+        let hasExplicitChild = false;
+
+        // Check all nodes to see if any child is explicit
+        for (const potentialChild of graph.nodes) {
+          if (potentialChild.parentId === node.id && potentialChild.isExplicit) {
+            hasExplicitChild = true;
+            break;
+          }
         }
-        currentParent = nodesById.get(currentParent)?.parentId ?? null;
+
+        if (hasExplicitChild) {
+          suppressed.add(canonicalKey);
+          break;
+        }
       }
     }
   }
