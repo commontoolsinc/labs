@@ -231,7 +231,7 @@ current offline harness.
       averages compute per tag and weekday grouping.
 - [ ] Mood diary pattern — capture mood entries with context ensure derived
       sentiment breakdown updates by tag and time.
-- [ ] Medication adherence pattern — track medication schedule ensure derived
+- [x] Medication adherence pattern — track medication schedule ensure derived
       adherence percentage reflects doses taken.
 - [ ] Patient vitals dashboard pattern — monitor vitals history ensure derived
       alerts trigger when readings hit critical ranges.
