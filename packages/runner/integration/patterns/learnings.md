@@ -76,6 +76,9 @@
 - Cloning sanitized cards before exposing them keeps derived template lists
   stable when filters swap; handlers only adjust the category cell, while
   downstream assertions compare fresh objects and avoid reference sharing.
+- Recording a difference snapshot after every handler run keeps derived delta
+  histories deterministic; reuse the sanitized step cells so audit logs stay in
+  sync with `createCell` mirrors for the harness checks.
 
 - Aggregating shopping lists from sanitized plan entries stays stable when
   handlers normalize day and meal slots before updating the plan, letting
