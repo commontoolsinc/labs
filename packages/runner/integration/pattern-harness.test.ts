@@ -191,6 +191,9 @@ import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 import {
   scenarios as templateGalleryScenarios,
 } from "./patterns/template-gallery.ts";
+import {
+  scenarios as designTokenSwitcherScenarios,
+} from "./patterns/design-token-switcher.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -206,6 +209,7 @@ const allScenarios = [
   ...notificationPreferenceScenarios,
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
+  ...designTokenSwitcherScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
