@@ -114,3 +114,6 @@
 - Gating mutation handlers with a derived boolean works well when the handler
   reads the derived cell directly; logging blocked attempts in returned cells
   keeps harness assertions simple without adding extra control branches.
+- Sanitizing handler-provided search terms with `lift` before building filtered
+  projections lets derived summaries reuse the same normalized string so both
+  match lists and label cells stay deterministic across mixed payload shapes.
