@@ -61,26 +61,10 @@ function rewriteChildExpressions(
 export function rewriteExpression(
   params: RewriteParams,
 ): EmitterResult | undefined {
-  // Log what we have before normalization
-  console.log(`[REWRITE] Expression: "${params.expression.getText()}"`);
-  console.log(`[REWRITE] DataFlows from analysis: ${params.analysis.dataFlows.length}`);
-  for (const df of params.analysis.dataFlows) {
-    console.log(`  - "${df.getText()}"`);
-  }
-  console.log(`[REWRITE] Graph nodes: ${params.analysis.graph.nodes.length}`);
-  for (const node of params.analysis.graph.nodes) {
-    console.log(`  - Node ${node.id}: "${node.expression.getText()}" (parent: ${node.parentId}, explicit: ${node.isExplicit})`);
-  }
-
   const dataFlows = normaliseDataFlows(
     params.analysis.graph,
     params.analysis.dataFlows,
   );
-
-  console.log(`[REWRITE] After normalization: ${dataFlows.all.length} flows`);
-  for (const flow of dataFlows.all) {
-    console.log(`  - "${flow.expression.getText()}"`);
-  }
 
   const helperSet = new Set<OpaqueRefHelperName>();
   const emitterContext: EmitterContext = {

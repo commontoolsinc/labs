@@ -81,9 +81,6 @@ export const emitConditionalExpression: Emitter = ({
 
   // Check if the whenFalse branch actually requires rewriting
   const whenFalseAnalysis = context.analyze(expression.whenFalse);
-  console.log(`[ConditionalEmit] whenFalse: "${expression.whenFalse.getText()}"`);
-  console.log(`  - whenFalseDataFlows.length: ${whenFalseDataFlows.length}`);
-  console.log(`  - whenFalseAnalysis.requiresRewrite: ${whenFalseAnalysis.requiresRewrite}`);
 
   if (whenFalseDataFlows.length > 0 && whenFalseAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenFalseDataFlows);

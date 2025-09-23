@@ -21,6 +21,16 @@ export const emitCallExpression: Emitter = ({
   const hint = analysis.rewriteHint;
 
   if (hint?.kind === "skip-call-rewrite") {
+    if (hint.reason === "array-map") {
+      const rewritten = context.rewriteChildren(expression);
+      if (rewritten !== expression) {
+        return {
+          expression: rewritten,
+          helpers: new Set(),
+        };
+      }
+      return undefined;
+    }
     return undefined;
   }
 

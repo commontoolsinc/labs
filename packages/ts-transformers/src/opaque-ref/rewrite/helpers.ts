@@ -90,6 +90,7 @@ function resolvesToParameterOfKind(
   let current: ts.Expression = expression;
   let symbol: ts.Symbol | undefined;
   let isRootIdentifierOnly = true;
+  const allowPropertyTraversal = kind === "array-map";
   while (true) {
     if (ts.isIdentifier(current)) {
       symbol = checker.getSymbolAtLocation(current);
@@ -100,7 +101,9 @@ function resolvesToParameterOfKind(
       ts.isElementAccessExpression(current) ||
       ts.isCallExpression(current)
     ) {
-      isRootIdentifierOnly = false;
+      if (!allowPropertyTraversal) {
+        isRootIdentifierOnly = false;
+      }
       current = current.expression;
       continue;
     }
@@ -122,7 +125,7 @@ function resolvesToParameterOfKind(
   return declarations.some((declaration) =>
     ts.isParameter(declaration) &&
     getOpaqueCallKindForParameter(declaration, checker) === kind &&
-    isRootIdentifierOnly
+    (kind === "array-map" || isRootIdentifierOnly)
   );
 }
 

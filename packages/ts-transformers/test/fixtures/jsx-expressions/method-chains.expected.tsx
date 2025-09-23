@@ -121,7 +121,7 @@ export default recipe({
 
         {/* Filter then map */}
         <ul>
-          {commontools_1.derive({ state_items: state.items, state_threshold: state.threshold, state_factor: state.factor }, ({ state_items: _v1, state_threshold: _v2, state_factor: _v3 }) => _v1.filter(x => x > _v2).map(x => <li>Value: x * _v3</li>))}
+          {commontools_1.derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter(x => x > _v2)).map(x => (<li>Value: {commontools_1.derive({ x, state_factor: state.factor }, ({ x: x, state_factor: _v2 }) => x * _v2)}</li>))}
         </ul>
 
         {/* Multiple filters */}
@@ -140,7 +140,7 @@ export default recipe({
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.map(name => (<li>{commontools_1.derive( { n: name }, ({ n: _v1 }) => _v1.trim().toLowerCase().replace(" ", "-"))}</li>))}
+          {state.names.map(name => (<li>{commontools_1.derive(name, name => name.trim().toLowerCase().replace(" ", "-"))}</li>))}
         </ul>
 
         {/* Reduce with reactive accumulator */}
@@ -165,7 +165,7 @@ export default recipe({
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.map(u => (<li>{commontools_1.ifElse(u.active, commontools_1.derive({ u_name: u.name }, ({ u_name: _v1 }) => _v1.toUpperCase()), commontools_1.derive({ u_name: u.name }, ({ u_name: _v1 }) => _v1.toLowerCase()))}</li>))}
+          {state.users.map(u => (<li>{commontools_1.ifElse(u.active, commontools_1.derive(u.name, _v1 => _v1.toUpperCase()), commontools_1.derive(u.name, _v1 => u.name.toLowerCase()))}</li>))}
         </ul>
 
         {/* Some/every with reactive predicates */}
@@ -184,4 +184,3 @@ export default recipe({
       </div>),
     };
 });
-

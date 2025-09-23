@@ -327,11 +327,6 @@ export function createDataFlowAnalyzer(
       const target = analyzeExpression(expression.expression, scope, context);
       const propertyType = checker.getTypeAtLocation(expression);
 
-      console.log(`[PropertyAccess] "${expression.getText()}":`);
-      console.log(`  - target.dataFlows.length: ${target.dataFlows.length}`);
-      console.log(`  - target.requiresRewrite: ${target.requiresRewrite}`);
-      console.log(`  - isOpaqueRefType: ${isOpaqueRefType(propertyType, checker)}`);
-
       if (isOpaqueRefType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
@@ -349,7 +344,6 @@ export function createDataFlowAnalyzer(
           getOpaqueParameterCallKind(checker.getSymbolAtLocation(target.dataFlows[0])) === "array-map";
 
         if (isMapParameter) {
-          console.log(`  -> Property on map parameter, not requiring rewrite`);
           return {
             containsOpaqueRef: true,
             requiresRewrite: false,  // Don't wrap simple property access on map params
@@ -361,7 +355,6 @@ export function createDataFlowAnalyzer(
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
         if (target.requiresRewrite && target.dataFlows.length > 0) {
-          console.log(`  -> Complex target requiring rewrite with ${target.dataFlows.length} dataFlows, propagating`);
           return {
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
@@ -369,7 +362,6 @@ export function createDataFlowAnalyzer(
             localNodes: [node],
           };
         } else {
-          console.log(`  -> Adding as OpaqueRef data flow`);
           return {
             containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
@@ -401,9 +393,6 @@ export function createDataFlowAnalyzer(
         // Check if this is a computed expression (property access on call result, etc.)
         const isPropertyOnCall = ts.isCallExpression(expression.expression);
 
-        console.log(`  - isImplicitOpaqueRef: true`);
-        console.log(`  - isPropertyOnCall: ${isPropertyOnCall}`);
-
         const parentId =
           findParentNodeId(target.localNodes, expression.expression) ?? null;
 
@@ -412,7 +401,6 @@ export function createDataFlowAnalyzer(
         if (isPropertyOnCall || (target.requiresRewrite && target.dataFlows.length > 0)) {
           // This is a computed expression - use the dependencies from the target
           const node = recordDataFlow(expression, scope, parentId, false);
-          console.log(`  -> Computed expression "${expression.getText()}", using target's ${target.dataFlows.length} data flows`);
           return {
             containsOpaqueRef: true,
             requiresRewrite: true,
@@ -424,7 +412,6 @@ export function createDataFlowAnalyzer(
         // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
         const node = recordDataFlow(expression, scope, parentId, true);
-        console.log(`  -> Adding "${expression.getText()}" as explicit data flow`);
         return {
           containsOpaqueRef: true,
           requiresRewrite: true,
@@ -453,14 +440,8 @@ export function createDataFlowAnalyzer(
         (ts.isLiteralExpression(argumentExpression) ||
           ts.isNoSubstitutionTemplateLiteral(argumentExpression));
 
-      console.log(`[ElementAccess] "${expression.getText()}"`);
-      console.log(`  - isStaticIndex: ${isStaticIndex}`);
-      console.log(`  - target.containsOpaqueRef: ${target.containsOpaqueRef}`);
-      console.log(`  - target.requiresRewrite: ${target.requiresRewrite}`);
-
       if (isStaticIndex) {
         const result = mergeAnalyses(target, argument);
-        console.log(`  -> Static index, merged result requiresRewrite: ${result.requiresRewrite}`);
         return result;
       }
 
@@ -571,7 +552,6 @@ export function createDataFlowAnalyzer(
     }
 
     if (ts.isCallExpression(expression)) {
-      console.log(`[CallExpression] "${expression.getText()}"`);
       const callee = analyzeExpression(expression.expression, scope, context);
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
@@ -603,10 +583,7 @@ export function createDataFlowAnalyzer(
       }
 
       const combined = mergeAnalyses(...analyses);
-      console.log(`  - combined.dataFlows.length: ${combined.dataFlows.length}`);
-      console.log(`  - combined.requiresRewrite: ${combined.requiresRewrite}`);
       const callKind = detectCallKind(expression, checker);
-      console.log(`  - callKind: ${callKind?.kind || 'none'}`);
       const rewriteHint: RewriteHint | undefined = (() => {
         if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
           const predicate = expression.arguments[0];
@@ -624,19 +601,6 @@ export function createDataFlowAnalyzer(
       })();
 
       if (callKind?.kind === "builder") {
-        return {
-          containsOpaqueRef: combined.containsOpaqueRef,
-          requiresRewrite: false,
-          dataFlows: combined.dataFlows,
-          localNodes: combined.localNodes,
-          rewriteHint,
-        };
-      }
-
-      if (
-        rewriteHint?.kind === "skip-call-rewrite" &&
-        rewriteHint.reason === "array-map"
-      ) {
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
@@ -715,7 +679,6 @@ export function createDataFlowAnalyzer(
   };
 
   return (expression: ts.Expression) => {
-    console.log(`\n[ANALYZER START] Analyzing: "${expression.getText()}"`);
     const context: AnalyzerContext = {
       nextNodeId: 0,
       nextScopeId: 0,
@@ -726,8 +689,6 @@ export function createDataFlowAnalyzer(
     const result = analyzeExpression(expression, rootScope, context);
     const scopes = Array.from(context.scopes.values()).map(toDataFlowScope);
     const { localNodes: _, ...resultWithoutNodes } = result;
-    console.log(`[ANALYZER END] Final dataFlows: ${result.dataFlows.length}`);
-    result.dataFlows.forEach(df => console.log(`  - "${df.getText()}"`));
     return {
       ...resultWithoutNodes,
       graph: {
