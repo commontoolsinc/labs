@@ -181,6 +181,9 @@ import {
   scenarios as sleepJournalScenarios,
 } from "./patterns/sleep-journal.ts";
 import {
+  scenarios as medicationAdherenceScenarios,
+} from "./patterns/medication-adherence.ts";
+import {
   scenarios as toggleScenarios,
 } from "./patterns/toggle-derive-label.ts";
 import {
@@ -233,6 +236,7 @@ const allScenarios = [
   ...listManagerScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
+  ...medicationAdherenceScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
   ...searchRelevanceTuningScenarios,
