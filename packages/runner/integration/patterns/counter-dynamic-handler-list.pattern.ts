@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -28,17 +27,6 @@ type AdjustmentTracker = {
   sequence: Cell<number>;
 };
 
-const adjustmentSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["index", "amount", "nextValue"],
-  properties: {
-    index: { type: "number" },
-    amount: { type: "number" },
-    nextValue: { type: "number" },
-  },
-} as const;
-
 const toInteger = (input: unknown, fallback = 0): number => {
   if (typeof input !== "number" || !Number.isFinite(input)) {
     return fallback;
@@ -59,12 +47,7 @@ const recordAdjustment = (
 ) => {
   tracker.lastAdjustment.set(record);
   tracker.history.push(record);
-  const id = bumpSequence(tracker.sequence);
-  createCell<AdjustmentRecord>(
-    adjustmentSchema,
-    `dynamicHandlerRecord-${id}`,
-    record,
-  );
+  bumpSequence(tracker.sequence);
 };
 
 const adjustValue = handler(
