@@ -43,6 +43,9 @@ import {
   scenarios as counterDerivedDifferenceScenarios,
 } from "./patterns/counter-derived-difference.ts";
 import {
+  scenarios as counterDerivedHandlerGateScenarios,
+} from "./patterns/counter-derived-handler-gate.ts";
+import {
   scenarios as counterDerivedMinMaxScenarios,
 } from "./patterns/counter-derived-min-max.ts";
 import {
@@ -244,6 +247,7 @@ const allScenarios = [
   ...counterDerivedChecksumScenarios,
   ...counterDerivedCanonicalFormScenarios,
   ...counterDerivedDifferenceScenarios,
+  ...counterDerivedHandlerGateScenarios,
   ...counterDerivedMinMaxScenarios,
   ...counterDerivedSummaryScenarios,
   ...counterDynamicHandlerListScenarios,
