@@ -14,6 +14,7 @@ export interface AppState {
   apiUrl: URL;
   showShellCharmListView?: boolean;
   showDebuggerView?: boolean;
+  showQuickJumpView?: boolean;
 }
 
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
@@ -53,6 +54,10 @@ export function applyCommand(
     }
     case "set-show-debugger-view": {
       next.showDebuggerView = command.show;
+      break;
+    }
+    case "set-show-quick-jump-view": {
+      next.showQuickJumpView = command.show;
       break;
     }
   }
