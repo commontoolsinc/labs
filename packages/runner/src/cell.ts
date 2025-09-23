@@ -920,7 +920,7 @@ export function isCell(value: any): value is Cell<any> {
  * @param value - The value to check
  * @returns True if the value is a Stream
  */
-export function isStream(value: any): value is Stream<any> {
+export function isStream<T = any>(value: any): value is Stream<T> {
   return value instanceof StreamCell;
 }
 
