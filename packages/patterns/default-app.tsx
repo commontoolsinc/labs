@@ -6,6 +6,7 @@ import {
   h,
   handler,
   NAME,
+  Opaque,
   navigateTo,
   OpaqueRef,
   recipe,
@@ -22,6 +23,7 @@ import {
   type MentionableCharm,
 } from "./chatbot-note.tsx";
 import { default as Note } from "./note.tsx";
+import ChatList from './chatbot-list-view.tsx';
 
 export type Charm = {
   [NAME]?: string;
@@ -63,6 +65,17 @@ const removeCharm = handler<
     console.log("charmListCopy after", charmListCopy);
     state.allCharms.set(charmListCopy);
   }
+});
+
+const spawnChatList = handler<
+  Record<string, never>,
+  { allCharms: Cell<Charm[]> }
+>((_, state) => {
+  return navigateTo(ChatList({
+    selectedCharm: { charm: undefined },
+    charmsList: [],
+    allCharms: state.allCharms
+  }));
 });
 
 const spawnChatbot = handler<
@@ -136,6 +149,13 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             {/* Quick Launch Toolbar */}
             <ct-hstack gap="2" align="center">
               <h3>Quicklaunch:</h3>
+              <ct-button
+                onClick={spawnChatList({
+                  allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>, })
+                }
+              >
+                📂 Chat List
+              </ct-button>
               <ct-button
                 onClick={spawnChatbot({})}
               >

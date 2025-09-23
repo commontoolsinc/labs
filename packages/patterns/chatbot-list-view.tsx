@@ -107,10 +107,7 @@ const createChatRecipe = handler<
       messages: [],
       expandChat: false,
       content: "",
-      allCharms: [
-        ...allCharms.get(),
-        ...charmsList.get().map((i) => i.charm),
-      ] as unknown as OpaqueRef<Cell<MentionableCharm[]>>, // TODO(bf): types...
+      allCharms
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({ charm, selectedCharm, charmsList, isInitialized });
@@ -158,11 +155,17 @@ const handleCharmLinkClicked = handler(
   },
 );
 
+const combineLists = lift(({ allCharms, charmsList } : { allCharms: any[], charmsList: CharmEntry[] }) => {
+  return [...charmsList.map(c => c.charm), ...allCharms]
+})
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, allCharms }) => {
     logCharmsList({ charmsList });
+
+    const combined = combineLists({ allCharms: allCharms as unknown as any[], charmsList });
 
     return {
       [NAME]: "Launcher",
@@ -173,7 +176,7 @@ export default recipe<Input, Output>(
               onClick={createChatRecipe({
                 selectedCharm,
                 charmsList,
-                allCharms: allCharms as unknown as any,
+                allCharms: combined as unknown as any,
               })}
             >
               Create New Chat
@@ -209,36 +212,38 @@ export default recipe<Input, Output>(
             </aside>
 
             <aside slot="right">
-              {ifElse(
-                selectedCharm.charm,
-                <>
-                  <div>
-                    <label>Backlinks</label>
-                    <ct-vstack>
-                      {selectedCharm?.charm?.backlinks?.map((
-                        charm: MentionableCharm,
-                      ) => (
-                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                          {charm[NAME]}
-                        </ct-button>
-                      ))}
-                    </ct-vstack>
-                  </div>
-                  <details>
-                    <summary>Mentioned Charms</summary>
-                    <ct-vstack>
-                      {selectedCharm?.charm?.mentioned?.map((
-                        charm: MentionableCharm,
-                      ) => (
-                        <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                          {charm[NAME]}
-                        </ct-button>
-                      ))}
-                    </ct-vstack>
-                  </details>
-                </>,
-                null,
-              )}
+              {derive(selectedCharm.charm, selected => {
+                if (selected) {
+                  return <>
+                    <div>
+                      <label>Backlinks</label>
+                      <ct-vstack>
+                        {selected?.backlinks?.map((
+                          charm: MentionableCharm,
+                        ) => (
+                          <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                            {charm[NAME]}
+                          </ct-button>
+                        ))}
+                      </ct-vstack>
+                    </div>
+                    <details>
+                      <summary>Mentioned Charms</summary>
+                      <ct-vstack>
+                        {selected?.mentioned?.map((
+                          charm: MentionableCharm,
+                        ) => (
+                          <ct-button onClick={handleCharmLinkClicked({ charm })}>
+                            {charm[NAME]}
+                          </ct-button>
+                        ))}
+                      </ct-vstack>
+                    </details>
+                  </>
+                } else {
+                  return null;
+                }
+              })}
             </aside>
           </ct-autolayout>
         </ct-screen>
