@@ -207,7 +207,11 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
+      const deriveIdentifier = getHelperIdentifier(
+        factory,
+        sourceFile,
+        "derive",
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -330,7 +334,11 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
+      const deriveIdentifier = getHelperIdentifier(
+        factory,
+        sourceFile,
+        "derive",
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -480,7 +488,11 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
+      const deriveIdentifier = getHelperIdentifier(
+        factory,
+        sourceFile,
+        "derive",
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -605,7 +617,11 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
+      const deriveIdentifier = getHelperIdentifier(
+        factory,
+        sourceFile,
+        "derive",
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
@@ -729,7 +745,11 @@ export function transformExpressionWithOpaqueRef(
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
         lambdaBody,
       );
-      const deriveIdentifier = getHelperIdentifier(factory, sourceFile, "derive");
+      const deriveIdentifier = getHelperIdentifier(
+        factory,
+        sourceFile,
+        "derive",
+      );
       registerHelper?.("derive");
       return factory.createCallExpression(
         deriveIdentifier,
