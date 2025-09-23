@@ -305,7 +305,11 @@ export class XQuickJumpView extends BaseView {
   }
 
   override render() {
-    if (!this.visible) return html``;
+    if (!this.visible) {
+      return html`
+
+      `;
+    }
     const results = this.filtered();
     const selected = this.selectedIndex;
     return html`
@@ -319,20 +323,25 @@ export class XQuickJumpView extends BaseView {
           @input="${this.onInput}"
         />
         <ul class="list" role="listbox">
-          ${results.map((r, idx) => html`
-            <li
-              class="item"
-              role="option"
-              aria-selected="${idx === selected}"
-              @mouseenter="${() => { this.selectedIndex = idx; }}"
-              @click="${() => this.onClickItem(r.id)}"
-            >
-              <div class="name">${r.name}</div>
-              <div class="id">${r.id}</div>
-            </li>
-          `)}
-          ${results.length === 0
-            ? html`<li class="item"><div class="name">No matches</div></li>`
+          ${results.map((r, idx) =>
+            html`
+              <li
+                class="item"
+                role="option"
+                aria-selected="${idx === selected}"
+                @mouseenter="${() => {
+                  this.selectedIndex = idx;
+                }}"
+                @click="${() => this.onClickItem(r.id)}"
+              >
+                <div class="name">${r.name}</div>
+                <div class="id">${r.id}</div>
+              </li>
+            `
+          )} ${results.length === 0
+            ? html`
+              <li class="item"><div class="name">No matches</div></li>
+            `
             : ""}
         </ul>
       </div>

@@ -132,9 +132,14 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
         <ct-screen>
-          <ct-keybind code="KeyN" alt preventDefault onct-keybind={spawnChatbotNote({
-             allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>, })
-          } />
+          <ct-keybind
+            code="KeyN"
+            alt
+            preventDefault
+            onct-keybind={spawnChatbotNote({
+              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+            })}
+          />
 
           <ct-vstack gap="4" padding="6">
             {/* Quick Launch Toolbar */}

@@ -75,7 +75,8 @@ export class XAppView extends BaseView {
     const isMac = navigator.platform.toLowerCase().includes("mac");
     const hasMod = isMac ? this._metaDown : this._ctrlDown;
     const onlyMod = hasMod && !this._shiftDown && !this._altDown;
-    const altOnly = this._altDown && !this._shiftDown && !this._metaDown && !this._ctrlDown;
+    const altOnly = this._altDown && !this._shiftDown && !this._metaDown &&
+      !this._ctrlDown;
     if (onlyMod && e.code === "KeyO") {
       e.preventDefault();
       this.command({ type: "set-show-quick-jump-view", show: true });

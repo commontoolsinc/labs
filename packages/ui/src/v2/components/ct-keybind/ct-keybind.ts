@@ -84,7 +84,9 @@ export class CTKeybind extends BaseElement {
 
   override render() {
     // Non-visual helper component
-    return html``;
+    return html`
+
+    `;
   }
 
   #onKeyUp = (e: KeyboardEvent) => {

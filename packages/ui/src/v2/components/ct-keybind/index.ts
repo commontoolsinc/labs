@@ -6,4 +6,3 @@ if (!customElements.get("ct-keybind")) {
 
 export { CTKeybind };
 export type { CTKeybind as CTKeybindElement } from "./ct-keybind.ts";
-
