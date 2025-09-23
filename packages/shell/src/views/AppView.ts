@@ -56,15 +56,38 @@ export class XAppView extends BaseView {
   private titleSubscription?: CellEventTarget<string | undefined>;
 
   private debuggerController = new DebuggerController(this);
+  private _onGlobalKeyDown = (e: KeyboardEvent) => {
+    // Ignore when focusing editable elements
+    const target = e.target as HTMLElement | null;
+    const tag = (target?.tagName || "").toLowerCase();
+    const isEditable = !!(
+      target &&
+      (target.isContentEditable ||
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select")
+    );
+    if (isEditable) return;
+
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const hasMod = isMac ? e.metaKey : e.ctrlKey;
+    const onlyMod = hasMod && !e.shiftKey && !e.altKey;
+    if (onlyMod && (e.key === "o" || e.key === "O")) {
+      e.preventDefault();
+      this.command({ type: "set-show-quick-jump-view", show: true });
+    }
+  };
 
   override connectedCallback() {
     super.connectedCallback();
     // Listen for clear telemetry events
     this.addEventListener("clear-telemetry", this.handleClearTelemetry);
+    document.addEventListener("keydown", this._onGlobalKeyDown);
   }
 
   override disconnectedCallback() {
     this.removeEventListener("clear-telemetry", this.handleClearTelemetry);
+    document.removeEventListener("keydown", this._onGlobalKeyDown);
     super.disconnectedCallback();
   }
 
@@ -184,6 +207,10 @@ export class XAppView extends BaseView {
             .visible="${this.debuggerController.isVisible()}"
             .telemetryMarkers="${this.debuggerController.getTelemetryMarkers()}"
           ></x-debugger-view>
+          <x-quick-jump-view
+            .visible="${this.app?.showQuickJumpView ?? false}"
+            .rt="${this.rt}"
+          ></x-quick-jump-view>
         `
         : ""}
     `;
