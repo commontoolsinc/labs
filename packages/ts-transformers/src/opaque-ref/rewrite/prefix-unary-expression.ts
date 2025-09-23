@@ -7,7 +7,7 @@ import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "./helpers.ts";
-import { normaliseDataFlows } from "../normalise.ts";
+import { normalizeDataFlows } from "../normalize.ts";
 
 export const emitPrefixUnaryExpression: Emitter = ({
   expression,
@@ -29,7 +29,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = context.analyze(expression.operand);
-    const fallbackDataFlows = normaliseDataFlows(
+    const fallbackDataFlows = normalizeDataFlows(
       fallbackAnalysis.graph,
       fallbackAnalysis.dataFlows,
     );

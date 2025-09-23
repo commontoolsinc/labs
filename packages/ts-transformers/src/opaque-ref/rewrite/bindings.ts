@@ -1,9 +1,9 @@
 import ts from "typescript";
 
-import type { NormalisedDataFlow } from "../normalise.ts";
+import type { NormalizedDataFlow } from "../normalize.ts";
 
 export interface BindingPlanEntry {
-  readonly dataFlow: NormalisedDataFlow;
+  readonly dataFlow: NormalizedDataFlow;
   readonly propertyName: string;
   readonly paramName: string;
 }
@@ -82,7 +82,7 @@ function createGeneratedParamName(
 }
 
 export function createBindingPlan(
-  dataFlows: readonly NormalisedDataFlow[],
+  dataFlows: readonly NormalizedDataFlow[],
 ): BindingPlan {
   const usedPropertyNames = new Set<string>();
   const usedParamNames = new Set<string>();

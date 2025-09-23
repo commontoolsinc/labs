@@ -8,8 +8,6 @@
   },
   "imports": {
     "typescript": "npm:typescript",
-    "@commontools/test-support": "../test-support/src/mod.ts",
-    "@commontools/test-support/fixture-runner": "../test-support/src/fixture-runner.ts",
     "@commontools/static": "../static/index.ts"
   },
   "tasks": {

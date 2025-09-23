@@ -74,5 +74,5 @@ text.
 
 The implementation now lives in `src/opaque-ref/call-kind.ts` as
 `detectCallKind`, which resolves aliases, inspects method declarations (including
-`OpaqueRef.map`), and feeds the result back into both the dependency analyser
+`OpaqueRef.map`), and feeds the result back into both the dependency analyzer
 and the schema-injection rule.

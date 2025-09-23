@@ -2,22 +2,22 @@ import ts from "typescript";
 
 import type { DataFlowGraph, DataFlowNode } from "./dataflow.ts";
 
-export interface NormalisedDataFlow {
+export interface NormalizedDataFlow {
   readonly canonicalKey: string;
   readonly expression: ts.Expression;
   readonly occurrences: readonly DataFlowNode[];
   readonly scopeId: number;
 }
 
-export interface NormalisedDataFlowSet {
-  readonly all: readonly NormalisedDataFlow[];
-  readonly byCanonicalKey: ReadonlyMap<string, NormalisedDataFlow>;
+export interface NormalizedDataFlowSet {
+  readonly all: readonly NormalizedDataFlow[];
+  readonly byCanonicalKey: ReadonlyMap<string, NormalizedDataFlow>;
 }
 
-export function normaliseDataFlows(
+export function normalizeDataFlows(
   graph: DataFlowGraph,
   requestedDataFlows?: ts.Expression[],
-): NormalisedDataFlowSet {
+): NormalizedDataFlowSet {
   const nodesById = new Map<number, DataFlowNode>();
   for (const node of graph.nodes) nodesById.set(node.id, node);
 
@@ -42,7 +42,7 @@ export function normaliseDataFlows(
   }>();
   const nodeToGroup = new Map<number, string>();
 
-  const normaliseExpression = (node: DataFlowNode): ts.Expression => {
+  const normalizeExpression = (node: DataFlowNode): ts.Expression => {
     let current: ts.Expression = node.expression;
 
     // Only normalize away truly meaningless wrappers that don't change semantics
@@ -102,7 +102,7 @@ export function normaliseDataFlows(
   };
 
   for (const node of nodesToProcess) {
-    const expression = normaliseExpression(node);
+    const expression = normalizeExpression(node);
     const sourceFile = expression.getSourceFile();
     const key = `${node.scopeId}:${expression.getText(sourceFile)}`;
     let group = grouped.get(key);
@@ -151,7 +151,7 @@ export function normaliseDataFlows(
   const filtered = Array.from(grouped.entries())
     .filter(([canonicalKey]) => !suppressed.has(canonicalKey));
 
-  const all: NormalisedDataFlow[] = filtered.map(([canonicalKey, value]) => ({
+  const all: NormalizedDataFlow[] = filtered.map(([canonicalKey, value]) => ({
     canonicalKey,
     expression: value.expression,
     occurrences: value.nodes,
@@ -176,9 +176,9 @@ const isWithin = (outer: ts.Node, inner: ts.Node): boolean => {
 };
 
 export function selectDataFlowsWithin(
-  set: NormalisedDataFlowSet,
+  set: NormalizedDataFlowSet,
   node: ts.Node,
-): NormalisedDataFlow[] {
+): NormalizedDataFlow[] {
   return set.all.filter((dataFlow) =>
     dataFlow.occurrences.some((occurrence) =>
       isWithin(node, occurrence.expression)

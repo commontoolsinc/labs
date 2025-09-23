@@ -2,7 +2,7 @@ import ts from "typescript";
 
 import type { OpaqueRefHelperName } from "../transforms.ts";
 import { createIfElseCall } from "../transforms.ts";
-import { selectDataFlowsWithin } from "../normalise.ts";
+import { selectDataFlowsWithin } from "../normalize.ts";
 import { isSimpleOpaqueRefAccess } from "../types.ts";
 import type { Emitter } from "./types.ts";
 import { createBindingPlan } from "./bindings.ts";

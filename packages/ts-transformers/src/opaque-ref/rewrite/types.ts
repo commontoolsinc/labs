@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 import type { DataFlowAnalysis } from "../dataflow.ts";
-import type { NormalisedDataFlowSet } from "../normalise.ts";
+import type { NormalizedDataFlowSet } from "../normalize.ts";
 import type { OpaqueRefHelperName } from "../transforms.ts";
 
 export interface RewriteContext {
@@ -24,7 +24,7 @@ export interface RewriteParams {
 
 export interface EmitterParams {
   readonly expression: ts.Expression;
-  readonly dataFlows: NormalisedDataFlowSet;
+  readonly dataFlows: NormalizedDataFlowSet;
   readonly analysis: DataFlowAnalysis;
   readonly context: EmitterContext;
 }

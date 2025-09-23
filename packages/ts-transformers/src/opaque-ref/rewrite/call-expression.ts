@@ -7,7 +7,7 @@ import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "./helpers.ts";
-import { selectDataFlowsWithin } from "../normalise.ts";
+import { selectDataFlowsWithin } from "../normalize.ts";
 
 export const emitCallExpression: Emitter = ({
   expression,

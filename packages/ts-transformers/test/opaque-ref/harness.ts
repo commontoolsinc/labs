@@ -9,13 +9,13 @@ export interface AnalysisHarnessResult {
   readonly analysis: ReturnType<ReturnType<typeof createDataFlowAnalyzer>>;
 }
 
-interface AnalyseOptions {
+interface AnalyzeOptions {
   readonly prelude?: string;
 }
 
-export function analyseExpression(
+export function analyzeExpression(
   source: string,
-  options: AnalyseOptions = {},
+  options: AnalyzeOptions = {},
 ): AnalysisHarnessResult {
   const fileName = "/analysis.ts";
   const programSource = `

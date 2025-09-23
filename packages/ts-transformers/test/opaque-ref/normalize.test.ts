@@ -3,18 +3,18 @@ import { assertEquals } from "@std/assert";
 import { assertDefined } from "../../src/core/assert.ts";
 
 import {
-  normaliseDataFlows,
+  normalizeDataFlows,
   selectDataFlowsWithin,
-} from "../../src/opaque-ref/normalise.ts";
-import { analyseExpression } from "./harness.ts";
+} from "../../src/opaque-ref/normalize.ts";
+import { analyzeExpression } from "./harness.ts";
 
-describe("normaliseDataFlows", () => {
+describe("normalizeDataFlows", () => {
   it("filters data flows within a specific node", () => {
-    const { analysis } = analyseExpression(
+    const { analysis } = analyzeExpression(
       "ifElse(state.count > 3, 'hi', 'bye')",
     );
 
-    const dataFlows = normaliseDataFlows(analysis.graph);
+    const dataFlows = normalizeDataFlows(analysis.graph);
     const predicate =
       analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else"
         ? analysis.rewriteHint.predicate

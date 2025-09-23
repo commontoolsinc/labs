@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { normaliseDataFlows } from "../normalise.ts";
+import { normalizeDataFlows } from "../normalize.ts";
 import type {
   Emitter,
   EmitterContext,
@@ -61,7 +61,7 @@ function rewriteChildExpressions(
 export function rewriteExpression(
   params: RewriteParams,
 ): EmitterResult | undefined {
-  const dataFlows = normaliseDataFlows(
+  const dataFlows = normalizeDataFlows(
     params.analysis.graph,
     params.analysis.dataFlows,
   );

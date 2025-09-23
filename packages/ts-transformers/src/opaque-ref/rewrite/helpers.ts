@@ -8,7 +8,7 @@ import { detectCallKind } from "../call-kind.ts";
 import { getCommonToolsModuleAlias } from "../../core/common-tools.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
-import type { NormalisedDataFlow } from "../normalise.ts";
+import type { NormalizedDataFlow } from "../normalize.ts";
 import type { DataFlowAnalysis } from "../dataflow.ts";
 import { isFunctionParameter } from "../types.ts";
 
@@ -144,10 +144,10 @@ function resolvesToBuilderParameter(
 }
 
 export function filterRelevantDataFlows(
-  dataFlows: readonly NormalisedDataFlow[],
+  dataFlows: readonly NormalizedDataFlow[],
   analysis: DataFlowAnalysis,
   context: RewriteContext,
-): NormalisedDataFlow[] {
+): NormalizedDataFlow[] {
   const isParameterExpression = (expression: ts.Expression): boolean => {
     let current: ts.Expression = expression;
     while (true) {

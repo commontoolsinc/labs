@@ -143,7 +143,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 
 ### Problem Statement
 
-The normalization phase (`opaque-ref/normalise.ts`) is responsible for:
+The normalization phase (`opaque-ref/normalize.ts`) is responsible for:
 
 1. Deduplicating expressions that refer to the same reactive value
 2. Suppressing parent expressions when child expressions are more specific
@@ -161,7 +161,7 @@ indirect information flow.
    - Separately tracks `dataFlows` array of expressions that should become
      dependencies
 
-2. **Normalization Phase** (`normalise.ts`):
+2. **Normalization Phase** (`normalize.ts`):
    - Groups nodes by normalized expression text
    - Applies parent suppression: if `state.items.length` exists, suppress
      `state.items`
@@ -188,7 +188,7 @@ indirect information flow.
 2. **Implementation Fragility**:
    ```typescript
    // Creating fake nodes just for text comparison
-   const normalized = normaliseExpression({ expression: expr } as DataFlowNode);
+   const normalized = normalizeExpression({ expression: expr } as DataFlowNode);
    const text = normalized.getText(normalized.getSourceFile());
    ```
 
@@ -283,7 +283,7 @@ See "Test Coverage Analysis" section below for comprehensive testing strategy.
 
 #### 1. Unit Tests for Normalization
 
-Create `test/opaque-ref/normalise.test.ts`:
+Create `test/opaque-ref/normalize.test.ts`:
 
 ```typescript
 // Test parent suppression logic directly
@@ -430,7 +430,7 @@ if (ts.isCallExpression(expression.expression)) {
 Replace fragile text-matching with explicit flag check:
 
 ```typescript
-// In normaliseDataFlows:
+// In normalizeDataFlows:
 for (const [canonicalKey, group] of grouped.entries()) {
   // Only suppress parents if ALL nodes in the group are non-explicit
   const hasExplicitNode = group.nodes.some((node) => node.isExplicit);
@@ -455,7 +455,7 @@ for (const [canonicalKey, group] of grouped.entries()) {
    context:
    - `true` for direct reactive value access (`state.items`)
    - `false` for computed expressions (`state.items.filter(...).length`)
-4. **Update normaliseDataFlows** - Use flag instead of text matching
+4. **Update normalizeDataFlows** - Use flag instead of text matching
 5. **Remove workaround** - Delete the `explicitDataFlows` parameter and
    text-matching logic
 6. **Clean up logging** - Remove debug console.logs after verification
@@ -491,7 +491,7 @@ Low risk because:
 - `packages/ts-transformers/src/opaque-ref/transformer.ts`
 - `packages/ts-transformers/src/opaque-ref/dataflow.ts`
 - `packages/ts-transformers/src/opaque-ref/rewrite/**`
-- `packages/ts-transformers/src/opaque-ref/normalise.ts` (needs refactor)
+- `packages/ts-transformers/src/opaque-ref/normalize.ts` (needs refactor)
 - `packages/ts-transformers/test/fixtures`
 - `packages/schema-generator/docs/refactor_plan.md` (historical context; see
   Linear tickets for remaining work)
