@@ -105,7 +105,7 @@ current offline harness.
       one invocation; scenario validates final state.
 - [x] Counter with nested derive watchers — derive depends on other derive to
       ensure dependency graph works.
-- [ ] Counter with derived boolean gating handlers — disable handlers based on
+- [x] Counter with derived boolean gating handlers — disable handlers based on
       derived boolean and assert no-op.
 - [x] Counter with alternate initial states — run scenario with multiple initial
       argument variations in steps.
