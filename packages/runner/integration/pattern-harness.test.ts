@@ -151,6 +151,9 @@ import {
   scenarios as counterSharedAliasScenarios,
 } from "./patterns/counter-shared-alias.ts";
 import {
+  scenarios as counterSortDirectionToggleScenarios,
+} from "./patterns/counter-sort-direction-toggle.ts";
+import {
   scenarios as counterToggledDerivePipelinesScenarios,
 } from "./patterns/counter-toggled-derive-pipelines.ts";
 import {
@@ -265,6 +268,7 @@ const allScenarios = [
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
+  ...counterSortDirectionToggleScenarios,
   ...counterToggledDerivePipelinesScenarios,
   ...counterTypedHandlerRecordScenarios,
   ...counterResetScenarios,
