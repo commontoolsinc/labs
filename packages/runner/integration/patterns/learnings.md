@@ -124,3 +124,6 @@
 - Sanitizing reimbursement claims inside a `lift` while handlers rewrite the raw
   argument cell keeps derived totals and labels aligned; clipping the action
   history to a handful of entries keeps harness assertions deterministic.
+- Normalizing inventory adjustments with shared sanitizers kept reorder alerts
+  deterministic as both stock changes and threshold updates flowed through the
+  same filtered list.

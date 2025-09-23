@@ -163,7 +163,7 @@ current offline harness.
       casing and components recombine into formatted output.
 - [ ] Shopping cart aggregation pattern — total line items with rules ensure
       discounts apply via derived pricing cells consistently.
-- [ ] Inventory reorder threshold pattern — flag low stock entries ensure
+- [x] Inventory reorder threshold pattern — flag low stock entries ensure
       derived alerts react to threshold and stock adjustments.
 - [ ] Catalog search facets pattern — filter catalog by selections ensure
       handlers sync facet toggles with filtered result lists.
