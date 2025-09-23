@@ -10,9 +10,8 @@
  * 6. Spell search and casting
  */
 
-import { Cell, Runtime } from "@commontools/runner";
+import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
 import { Charm, charmId, CharmManager } from "./manager.ts";
-import { JSONSchema } from "@commontools/runner";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -1068,9 +1067,10 @@ export function executeImagineWorkflow(
   ) {
     try {
       const charmData = form.input.existingCharm.get();
-      const charmName = charmData && charmData["NAME"]
-        ? charmData["NAME"]
-        : "currentCharm";
+      const charmName =
+        charmData && NAME in charmData && typeof charmData[NAME] === "string"
+          ? charmData[NAME]
+          : "currentCharm";
       const camelCaseId = toCamelCase(charmName);
 
       // Make sure the ID is unique

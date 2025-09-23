@@ -44,7 +44,7 @@ class CharmPropIo implements CharmCellIo {
       // Build the path with transaction context
       let txCell = targetCell.withTx(tx);
       for (const segment of (path ?? [])) {
-        txCell = txCell.key(segment);
+        txCell = txCell.key(segment as keyof unknown);
       }
 
       // Set the value
@@ -57,7 +57,7 @@ class CharmPropIo implements CharmCellIo {
     await manager.synced();
   }
 
-  #getTargetCell(): Cell<Charm> {
+  #getTargetCell(): Cell<unknown> {
     if (this.#type === "input") {
       return this.#cc.manager().getArgument(this.#cc.getCell());
     } else if (this.#type === "result") {

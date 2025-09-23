@@ -34,20 +34,15 @@ export function charmId(charm: Cell<Charm>): string | undefined {
 }
 
 export type Charm = {
-  [NAME]?: string;
-  [UI]?: unknown;
-  // FIXME: types
-  // Turning this into `unknown` causes cascading type failures.
-  [key: string]: any;
+  [NAME]: string;
 };
 
 export const charmSchema = {
   type: "object",
   properties: {
     [NAME]: { type: "string" },
-    [UI]: { type: "object" },
   },
-  required: [UI, NAME],
+  required: [NAME],
 } as const satisfies JSONSchema;
 
 export const charmListSchema = {

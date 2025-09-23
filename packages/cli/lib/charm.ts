@@ -6,6 +6,7 @@ import {
   isStream,
   Runtime,
   RuntimeProgram,
+  Stream,
   UI,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
@@ -17,7 +18,7 @@ import {
 } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
-import { isVNode } from "@commontools/html";
+import { isVNode, type VNode } from "@commontools/html";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
 
 export interface EntryConfig {
@@ -396,14 +397,14 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectCharm(
+export async function inspectCharm<I = Charm, R = Charm>(
   config: CharmConfig,
 ): Promise<{
   id: string;
   name?: string;
   recipeName?: string;
-  source: Readonly<Charm>;
-  result: Readonly<Charm>;
+  source: Readonly<I>;
+  result: Readonly<R>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
@@ -414,8 +415,8 @@ export async function inspectCharm(
   const id = charm.id;
   const name = charm.name();
   const recipeName = (await charm.getRecipeMeta()).recipeName;
-  const source = charm.input.get() as Readonly<Charm>;
-  const result = charm.result.get() as Readonly<Charm>;
+  const source = charm.input.get() as Readonly<I>;
+  const result = charm.result.get() as Readonly<R>;
   const readingFrom = charm.readingFrom().map((charm) => ({
     id: charm.id,
     name: charm.name(),
@@ -439,7 +440,7 @@ export async function inspectCharm(
 export async function getCharmView(
   config: CharmConfig,
 ): Promise<unknown> {
-  const data = await inspectCharm(config);
+  const data = await inspectCharm<unknown, { [UI]: VNode }>(config);
   return data.result?.[UI];
 }
 
@@ -502,21 +503,27 @@ export async function setCellValue(
 /**
  * Calls a handler within a charm by sending an event to its stream.
  */
-export async function callCharmHandler(
+export async function callCharmHandler<T = any>(
   config: CharmConfig,
   handlerName: string,
-  args: unknown,
+  args: T,
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
 
   // Get the cell and traverse to the handler using .key()
-  const cell = charm.getCell();
+  const cell = charm.getCell().asSchema({
+    type: "object",
+    properties: {
+      [handlerName]: { asStream: true },
+    },
+    required: [handlerName],
+  });
   const handlerStream = cell.key(handlerName);
 
   // The handlerStream should be the actual stream object
-  if (!handlerStream || !isStream(handlerStream)) {
+  if (!isStream<T>(handlerStream)) {
     throw new Error(`Handler "${handlerName}" not found or not a stream`);
   }
 

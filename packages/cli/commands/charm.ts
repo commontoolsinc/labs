@@ -26,6 +26,7 @@ import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commontools/charm/ops";
+import { UI } from "commontools";
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
@@ -232,7 +233,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     if (charmData.result) {
       // Filter out large UI objects that clutter the output
       const filteredResult = { ...charmData.result };
-      if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
+      if (UI in filteredResult && typeof filteredResult[UI] === "object") {
         filteredResult.$UI = "<large UI object - use --json to see full UI>";
       }
       output += `\n${safeStringify(filteredResult)}`;
