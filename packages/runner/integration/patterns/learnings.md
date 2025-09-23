@@ -42,9 +42,9 @@
 - Keeping grouped counters as an append-only log and deriving totals with
   `lift`/`derive` keeps the handler simple while still exposing stable views for
   assertions and labels.
-- Allowing a single `lift` to drive both derived summaries and a `createCell`
-  snapshot makes it easy to expose aggregate risk data while keeping handlers
-  focused on mutations.
+- Use `createCell` only when the new cell stays in the returned graph (or feeds
+  another node); for diagnostic summaries, reuse existing cells or allocate
+  with `cell()` so we are not leaving orphaned documents behind.
 - Keeping a cached summary cell and returning it when sanitized inputs match
   avoids unnecessary object churn, while an auxiliary memo cell can expose
   reference stability for harness assertions.
@@ -59,8 +59,8 @@
   batch events in the harness will progress in order, so resetting step logs
   keeps derived counts aligned with the scenario's expectations.
 - Enumerations stay deterministic when a `lift` normalizes the state cell and
-  handlers gate mutations; logging each transition via `createCell` yields
-  stable audit trails for the harness assertions.
+  handlers gate mutations; append transitions to an existing history cell
+  instead of minting extra `createCell` snapshots.
 - Chaining multiple `lift` transforms works reliably when each stage normalizes
   its input first; downstream derived cells like parity flags only need to
   reason about the sanitized shape from the previous lift.
@@ -68,20 +68,19 @@
   predictable when each update returns a fresh array sorted by latest
   timestamps; logging activity via a local `cell` offers an easy assertion
   surface without adding extra derived dependencies.
-- Updating a `createCell` snapshot from the same `lift` that sanitizes metrics
-  keeps aggregated analytics accessible for assertions while the handler stays
-  focused on mutation.
+- Keep aggregated analytics in the same cells you return so assertions observe
+  the live reactive data, without duplicating it through `createCell`.
 - Normalizing stage probabilities with `clampProbability` allows forecast sums
   to remain stable even as handlers mutate both deal values and stage config.
 - Cloning sanitized cards before exposing them keeps derived template lists
   stable when filters swap; handlers only adjust the category cell, while
   downstream assertions compare fresh objects and avoid reference sharing.
-- Recording a difference snapshot after every handler run keeps derived delta
-  histories deterministic; reuse the sanitized step cells so audit logs stay in
-  sync with `createCell` mirrors for the harness checks.
+- Recording a difference snapshot after every handler run still benefits from
+  reusing sanitized step cells; keep those references in the result graph
+  rather than mirroring them via `createCell`.
 - Tracking direction toggles with a history cell while deriving the sorted view
-  from sanitized arrays keeps sort mode reactive; capturing a `createCell`
-  snapshot made it easy to assert mode flips in the harness.
+  from sanitized arrays keeps sort mode reactive; the history cell alone is
+  sufficient for assertions.
 - Passing a structured object of cells into `lift` let me sanitize placements
   with the latest bin definitions so the relocation handler could stay focused
   on enforcing capacity without duplicating normalization logic.
@@ -95,19 +94,20 @@
   event routing ergonomic while giving the harness deterministic surfaces for
   assertions like call counts and labels.
 - Sanitizing alternate argument presets with a shared `lift` before selecting a
-  new default keeps reinitialization deterministic: each handler flip can log a
-  `createCell` snapshot using the sanitized entry so harness assertions stay
-  stable across repeated resets.
+  new default keeps reinitialization deterministic; track flips in the same
+  cell collection you expose rather than spawning extra snapshot cells.
 - Maintaining sanitized channel preference lists lets derived schedule maps
   react predictably to frequency updates while a single summary `lift` keeps
   textual expectations aligned with handler-driven mutations.
 - Swapping derive pipelines by storing the active function in a lift-produced
-  cell keeps downstream mapped values stable; toggling a mode handler to flip
-  the reference while logging history in a createCell makes pipeline assertions
-  straightforward in scenarios.
+  cell keeps downstream mapped values stable; log mode changes in the shared
+  history cell that scenarios already inspect.
 - Normalizing token catalogs with `lift` before exposing derived colors keeps
   handler logic simple; trimming candidate token names inside the handler makes
   it easy to accept user-provided overrides without leaking invalid state.
 - Building grouped bibliographies worked best when the raw argument cell was
   sanitized upfront; using `lift` with `toSchema` kept the grouped by-topic and
   by-style projections deterministic so scenario assertions stayed stable.
+- Letting a derived summary enforce budget totals while handlers clamp incoming
+  requests keeps allocations balanced; assertions can read from the returned
+  summary/history cells without duplicating them through `createCell` logs.
