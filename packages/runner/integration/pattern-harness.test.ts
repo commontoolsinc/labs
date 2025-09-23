@@ -200,6 +200,9 @@ import {
 import {
   scenarios as researchCitationManagerScenarios,
 } from "./patterns/research-citation-manager.ts";
+import {
+  scenarios as warehouseBinMapScenarios,
+} from "./patterns/warehouse-bin-map.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -216,6 +219,7 @@ const allScenarios = [
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
+  ...warehouseBinMapScenarios,
   ...researchCitationManagerScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
