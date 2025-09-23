@@ -350,7 +350,7 @@ current offline harness.
       outline strings segment order and timing.
 - [ ] Image gallery variant pattern — manage per-device variants ensure derived
       selection mirrors active device mode cells.
-- [ ] Design token switcher pattern — toggle design tokens ensure derived token
+- [x] Design token switcher pattern — toggle design tokens ensure derived token
       bundle reflects theme swaps instantly.
 - [ ] Component library catalog pattern — catalog UI components ensure derived
       prop coverage updates when recipes register.
