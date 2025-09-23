@@ -338,7 +338,7 @@ current offline harness.
       eligible modules update when completions change.
 - [ ] Library checkout system pattern — manage loans and holds ensure derived
       availability updates as handlers issue actions.
-- [ ] Research citation manager pattern — organize citations ensure derived
+- [x] Research citation manager pattern — organize citations ensure derived
       bibliographies regroup by topic and style.
 - [ ] Content publishing workflow pattern — shepherd draft review ensure derived
       queue orders drafts by priority and schedule.
