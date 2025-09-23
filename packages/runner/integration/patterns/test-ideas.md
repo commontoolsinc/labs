@@ -203,7 +203,7 @@ current offline harness.
       update consensus pick with tie breakers.
 - [ ] Goal progress tracker pattern — track milestones toward goal ensure
       derived percent updates when milestone weights shift.
-- [ ] Budget planner pattern — allocate funds across categories ensure derived
+- [x] Budget planner pattern — allocate funds across categories ensure derived
       totals enforce overall balance constraints.
 - [ ] Expense reimbursement pattern — approve expense claims ensure handlers set
       statuses and derived totals reflect payouts.
