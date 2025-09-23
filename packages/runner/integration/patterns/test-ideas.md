@@ -260,7 +260,7 @@ current offline harness.
       handlers sync facet toggles with filtered result lists.
 - [ ] Saved search subscription pattern — persist saved query payloads ensure
       appended subscriptions replay triggers in harness runs.
-- [ ] Notification preference pattern — configure channel settings ensure
+- [x] Notification preference pattern — configure channel settings ensure
       derived schedules reflect per-channel frequency changes.
 - [ ] Chat reaction tracker pattern — track reactions per message ensure nested
       reaction counts roll up totals on every handler.

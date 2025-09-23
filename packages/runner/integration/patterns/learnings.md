@@ -90,3 +90,6 @@
   new default keeps reinitialization deterministic: each handler flip can log a
   `createCell` snapshot using the sanitized entry so harness assertions stay
   stable across repeated resets.
+- Maintaining sanitized channel preference lists lets derived schedule maps
+  react predictably to frequency updates while a single summary `lift` keeps
+  textual expectations aligned with handler-driven mutations.
