@@ -133,7 +133,7 @@ current offline harness.
       percentage and label.
 - [ ] Counter with composite key updates — handler targets nested map key
       composed from argument values.
-- [ ] Counter with derived difference — compute delta between primary and
+- [x] Counter with derived difference — compute delta between primary and
       secondary counters and assert updates.
 - [x] Counter with batched handler updates — handler updates several cells in
       one invocation; scenario validates final state.
