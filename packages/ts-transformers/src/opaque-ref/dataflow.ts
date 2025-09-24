@@ -1,12 +1,12 @@
 import ts from "typescript";
 
 import {
+  getMemberSymbol,
   isFunctionParameter,
   isOpaqueRefType,
   symbolDeclaresCommonToolsDefault,
 } from "./types.ts";
 import { detectCallKind } from "./call-kind.ts";
-import { getMemberSymbol } from "../core/commontools.ts";
 
 export interface DataFlowScopeParameter {
   readonly name: string;

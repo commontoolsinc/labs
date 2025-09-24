@@ -3,7 +3,7 @@ import {
   addCommonToolsImport,
   hasCommonToolsImport,
   removeCommonToolsImport,
-} from "../core/common-tools.ts";
+} from "../core/common-tools-imports.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 
 export interface SchemaTransformerOptions {

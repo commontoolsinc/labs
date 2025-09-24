@@ -1,6 +1,6 @@
 # OpaqueRef Transformer Status & Roadmap
 
-_Last updated: 2025-09-17_
+_Last updated: 2025-09-23_
 
 ## Overview
 
@@ -41,6 +41,15 @@ outstanding gaps, and the focused roadmap we intend to pursue.
   we keep coverage on the new transformer.
 - **Optional import handling** – the modular path defers import insertion until
   all rules run, preventing duplicate helper imports.
+- **Double-derive prevention** – User-written `derive` calls are no longer
+  wrapped in additional `derive` calls.
+- **AMD module qualification** – Injected `derive` and `ifElse` calls now
+  properly reuse existing import identifiers for correct AMD output.
+- **Import resolver** – New system to find and reuse existing CommonTools
+  imports rather than creating bare identifiers.
+- **Normalization refactor** – Implemented explicit dependency tracking with
+  `isExplicit` flag, removing text-matching workarounds and fixing parent
+  suppression issues.
 
 ## Known Gaps
 
@@ -64,30 +73,14 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 
 ## Near-Term Roadmap
 
-### Phase 0: Documentation & Planning
-
-- ✅ Document all known gaps and limitations
-- Document planned architectural improvements
-
 ### Phase 1: Foundation Cleanup
 
-1. **✅ Rename "dependency" to "data flow"**
-   - ✅ Update all type names (DependencyAnalysis → DataFlowAnalysis, etc.)
-   - ✅ Update variable names throughout codebase
-   - ✅ Update comments and documentation
-
-2. **Data structure consolidation**
+1. **Data structure consolidation**
    - Merge internal/external scope representations
    - Create single canonical DataFlowAnalysis result
    - Eliminate duplication between nodes/dataFlows/graph
 
-3. **✅ Fix normalization semantics** _(Partially complete, needs refactor)_
-   - ✅ Stop aggressive property stripping
-   - ✅ Preserve semantic differences (e.g., `a` vs `a.length`)
-   - ✅ Fix parent suppression for element access
-   - ⚠️ Current solution works but is architecturally unclear (see below)
-
-4. **Context type consolidation**
+2. **Context type consolidation**
    - Create base TransformContext interface
    - Minimize context variants
    - Unify shared functionality
@@ -356,135 +349,6 @@ Use a property-based testing framework to:
    - Verify no regressions
    - Add tests for new architecture
    - Document new invariants
-
-## Architectural Refactor Plan: Explicit Dependency Tracking
-
-_Added: 2025-09-23_
-
-### Problem Statement
-
-The current implementation conflates two distinct concepts:
-
-1. **Graph traversal nodes** - Every expression encountered while walking the
-   AST
-2. **Explicit dependencies** - Actual reactive values that need to be tracked
-
-This leads to complex expressions like `state.items.filter(...).length` being
-incorrectly added as dependencies when only `state.items` and `state.filter`
-should be tracked.
-
-### Current Behavior (Problematic)
-
-When analyzing `state.items.filter(i => i.name.includes(state.filter)).length`:
-
-1. Creates nodes for every sub-expression during traversal
-2. Adds many expressions to `dataFlows` array
-3. Relies on text-matching in normalization to suppress parents
-4. Results in incorrect dependencies being added
-
-### Proposed Solution: Explicit Dependency Marking
-
-#### 1. Add `isExplicit` Flag to DataFlowNode
-
-```typescript
-export interface DataFlowNode {
-  readonly id: number;
-  readonly expression: ts.Expression;
-  readonly canonicalKey: string;
-  readonly parentId: number | null;
-  readonly scopeId: number;
-  readonly isExplicit: boolean; // NEW: Marks actual dependencies vs traversal artifacts
-}
-```
-
-#### 2. Set Flag During Analysis
-
-Mark nodes as explicit ONLY when they represent actual reactive dependencies:
-
-```typescript
-// In analyzeExpression, when we identify a reactive value:
-if (isOpaqueRefType(type, checker)) {
-  const node = recordDataFlow(expression, scope, parentId, true); // isExplicit = true
-  return {
-    containsOpaqueRef: true,
-    requiresRewrite: false,
-    dataFlows: [expression], // Add to dataFlows
-    localNodes: [node],
-  };
-}
-
-// For computed expressions (like property access on call results):
-if (ts.isCallExpression(expression.expression)) {
-  const node = recordDataFlow(expression, scope, parentId, false); // isExplicit = false
-  return {
-    containsOpaqueRef: true,
-    requiresRewrite: true,
-    dataFlows: target.dataFlows, // Propagate from target, don't add this expression
-    localNodes: [node],
-  };
-}
-```
-
-#### 3. Update Normalization Logic
-
-Replace fragile text-matching with explicit flag check:
-
-```typescript
-// In normalizeDataFlows:
-for (const [canonicalKey, group] of grouped.entries()) {
-  // Only suppress parents if ALL nodes in the group are non-explicit
-  const hasExplicitNode = group.nodes.some((node) => node.isExplicit);
-
-  if (!hasExplicitNode) {
-    // Check if any child is explicit - if so, suppress this parent
-    for (const node of group.nodes) {
-      if (hasExplicitChildInGraph(node, nodesById)) {
-        suppressed.add(canonicalKey);
-        break;
-      }
-    }
-  }
-}
-```
-
-#### 4. Implementation Steps
-
-1. **Update DataFlowNode interface** - Add `isExplicit` field
-2. **Update recordDataFlow** - Accept and store `isExplicit` parameter
-3. **Update analyzeExpression** - Pass correct `isExplicit` value based on
-   context:
-   - `true` for direct reactive value access (`state.items`)
-   - `false` for computed expressions (`state.items.filter(...).length`)
-4. **Update normalizeDataFlows** - Use flag instead of text matching
-5. **Remove workaround** - Delete the `explicitDataFlows` parameter and
-   text-matching logic
-6. **Clean up logging** - Remove debug console.logs after verification
-
-### Expected Benefits
-
-1. **Correctness**: Only actual dependencies are tracked
-2. **Clarity**: Explicit distinction between traversal and dependencies
-3. **Maintainability**: No more fragile text-matching
-4. **Performance**: Simpler normalization logic
-
-### Test Cases to Verify
-
-After implementation, these patterns should work correctly:
-
-1. `state.items.filter(...).length` → Only `state.items` and `state.filter` as
-   dependencies
-2. `state.text.trim().length` → Only `state.text` as dependency
-3. `state.arrays.nested[0].items.length` → Appropriate nested dependencies
-4. `(item.price * (1 - state.discount)).toFixed(2)` → Only base values, not
-   method calls
-
-### Migration Risk
-
-Low risk because:
-
-- Changes are localized to dataflow analysis
-- Existing tests will catch regressions
-- Can be rolled back if issues arise
 
 ## References
 

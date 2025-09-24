@@ -1,12 +1,15 @@
 import ts from "typescript";
-
 import {
   getMemberSymbol,
   resolvesToCommonToolsSymbol,
   symbolDeclaresCommonToolsDefault,
-} from "../core/commontools.ts";
+} from "../core/common-tools-symbols.ts";
 
-export { symbolDeclaresCommonToolsDefault } from "../core/commontools.ts";
+// Re-export commonly used functions
+export {
+  getMemberSymbol,
+  symbolDeclaresCommonToolsDefault,
+} from "../core/common-tools-symbols.ts";
 
 export function isOpaqueRefType(
   type: ts.Type,

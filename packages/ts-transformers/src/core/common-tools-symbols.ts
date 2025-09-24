@@ -1,14 +1,23 @@
 import ts from "typescript";
 
+// Constants for identifying CommonTools declarations
 const COMMONTOOLS_FILENAME_FRAGMENT = "/commontools/";
 const COMMONTOOLS_DECLARATION = "commontools.d.ts";
 
-export function isCommonToolsDeclaration(declaration: ts.Declaration): boolean {
+/**
+ * Checks if a declaration comes from the CommonTools library
+ */
+export function isCommonToolsDeclaration(
+  declaration: ts.Declaration,
+): boolean {
   const fileName = declaration.getSourceFile().fileName.replace(/\\/g, "/");
   return fileName.endsWith(COMMONTOOLS_DECLARATION) ||
     fileName.includes(COMMONTOOLS_FILENAME_FRAGMENT);
 }
 
+/**
+ * Resolves a symbol to check if it represents a CommonTools export
+ */
 export function resolvesToCommonToolsSymbol(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
@@ -60,6 +69,9 @@ export function resolvesToCommonToolsSymbol(
   return false;
 }
 
+/**
+ * Helper to resolve the base type of an expression
+ */
 function resolveBaseType(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -80,6 +92,9 @@ function resolveBaseType(
   return baseType;
 }
 
+/**
+ * Gets the symbol for a property or element access expression
+ */
 export function getMemberSymbol(
   expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   checker: ts.TypeChecker,
@@ -105,7 +120,10 @@ export function getMemberSymbol(
   return checker.getSymbolAtLocation(expression) ?? undefined;
 }
 
-export function isCommonToolsDefaultTypeNode(
+/**
+ * Checks if a type node represents a CommonTools Default type
+ */
+function isCommonToolsDefaultTypeNode(
   typeNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
   visited: Set<ts.Symbol> = new Set(),
@@ -138,6 +156,9 @@ export function isCommonToolsDefaultTypeNode(
   return false;
 }
 
+/**
+ * Checks if a symbol declares a CommonTools Default type
+ */
 export function symbolDeclaresCommonToolsDefault(
   symbol: ts.Symbol | undefined,
   checker: ts.TypeChecker,
