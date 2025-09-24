@@ -295,7 +295,7 @@ current offline harness.
       filters group macros by topic and usage.
 - [ ] Call center schedule pattern — schedule support shifts ensure derived
       coverage flags gaps across time blocks.
-- [ ] Incident response playbook pattern — guide incident steps ensure derived
+- [x] Incident response playbook pattern — guide incident steps ensure derived
       escalation flags trigger when tasks stall.
 - [x] Security vulnerability tracker pattern — track vulns lifecycle ensure
       derived risk scores roll up by severity and system.
