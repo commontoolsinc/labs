@@ -48,6 +48,7 @@ export * from "./components/ct-resizable-panel-group/index.ts";
 export * from "./components/ct-screen/index.ts";
 export * from "./components/ct-toolbar/index.ts";
 export * from "./components/ct-kbd/index.ts";
+export * from "./components/ct-theme/index.ts";
 export * from "./components/ct-scroll-area/index.ts";
 export * from "./components/ct-separator/index.ts";
 export * from "./components/ct-skeleton/index.ts";

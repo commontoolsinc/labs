@@ -180,8 +180,8 @@ export class CTListItem extends BaseElement {
   }
 
   #applyTheme() {
-    const current = this.theme || defaultTheme;
-    applyThemeToElement(this, current);
+    if (!this.theme) return;
+    applyThemeToElement(this, this.theme);
   }
 
   override connectedCallback(): void {
