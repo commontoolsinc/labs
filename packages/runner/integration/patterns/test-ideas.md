@@ -265,7 +265,7 @@ current offline harness.
       prop coverage updates when recipes register.
 - [x] Feature usage analytics pattern — track feature events ensure derived
       metrics bucket counts by feature and cohort.
-- [ ] Experiment assignment pattern — assign users to tests ensure derived
+- [x] Experiment assignment pattern — assign users to tests ensure derived
       balances hold allocation ratios across groups.
 - [ ] Funnel analytics pattern — model funnel stages ensure derived drop-off
       metrics update when events stream in.
