@@ -206,7 +206,7 @@ export default recipe<Input, Output>(
                   })}
                 >
                   Create New Chat
-                  <ct-kbd>⌘N</ct-kbd>
+                  <ct-kbd>alt+N</ct-kbd>
                 </ct-button>
               </div>
             </ct-toolbar>
@@ -214,18 +214,7 @@ export default recipe<Input, Output>(
             {/* Keyboard shortcuts */}
             <ct-keybind
               name="new-chat-meta-n"
-              meta
-              key="n"
-              preventDefault
-              onct-keybind={createChatRecipe({
-                selectedCharm,
-                charmsList,
-                allCharms: combined as unknown as any,
-              })}
-            />
-            <ct-keybind
-              name="new-chat-ctrl-n"
-              ctrl
+              alt
               key="n"
               preventDefault
               onct-keybind={createChatRecipe({
