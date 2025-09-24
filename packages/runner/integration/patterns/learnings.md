@@ -174,3 +174,6 @@
 - Passing multiple cells into a single `lift` invocation (by supplying an object
   that contains each dependency) ensured threshold updates recomputed alert
   derives without resorting to manual `.get()` calls.
+- Guarding conditional child creation with a dedicated `cell` and a side-effect
+  `lift` keeps activations idempotent; the guard reinstantiates the child on
+  demand while the status derive can simply mirror the active flag.
