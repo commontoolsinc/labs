@@ -35,21 +35,75 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           return ts.visitEachChild(node, visit, transformation);
         }
 
+        const factory = transformation.factory;
         const callKind = detectCallKind(node, context.checker);
 
+        const isToSchemaCall = (expr: ts.Expression): boolean => {
+          if (!ts.isCallExpression(expr)) return false;
+          const inner = expr.expression;
+          return ts.isIdentifier(inner) && inner.text === "toSchema";
+        };
+
+        const getTypeArgumentFromToSchema = (
+          expr: ts.Expression,
+        ): ts.TypeNode | undefined => {
+          if (!ts.isCallExpression(expr)) return undefined;
+          if (!isToSchemaCall(expr)) return undefined;
+          return expr.typeArguments && expr.typeArguments.length > 0
+            ? expr.typeArguments[0]
+            : undefined;
+        };
+
+        const createToSchemaCall = (
+          typeNode: ts.TypeNode,
+        ): ts.CallExpression => {
+          ensureToSchemaImport();
+          return factory.createCallExpression(
+            getToSchemaIdentifier(),
+            [typeNode],
+            [],
+          );
+        };
+
         if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
-          const typeArgs = node.typeArguments;
-          if (typeArgs && typeArgs.length >= 1) {
-            const factory = transformation.factory;
-            const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
-              typeArg,
-            ) =>
-              factory.createCallExpression(
-                getToSchemaIdentifier(),
-                [typeArg],
-                [],
-              )
-            );
+          const existingTypeArgs = node.typeArguments;
+          const alreadyInjected = node.arguments.length >= 1 &&
+            isToSchemaCall(node.arguments[0]!);
+
+          if (alreadyInjected) {
+            if (!existingTypeArgs || existingTypeArgs.length === 0) {
+              const inferredInputType = getTypeArgumentFromToSchema(
+                node.arguments[0]!,
+              );
+              const inferredOutputType = node.arguments.length >= 2
+                ? getTypeArgumentFromToSchema(node.arguments[1]!)
+                : undefined;
+              if (inferredInputType) {
+                const updated = factory.createCallExpression(
+                  node.expression,
+                  inferredOutputType
+                    ? [inferredInputType, inferredOutputType]
+                    : [inferredInputType],
+                  [...node.arguments],
+                );
+                return ts.visitEachChild(updated, visit, transformation);
+              }
+            }
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          if (existingTypeArgs && existingTypeArgs.length >= 1) {
+            const inputType = existingTypeArgs[0]!;
+            const outputType = existingTypeArgs.length >= 2
+              ? existingTypeArgs[1]
+              : undefined;
+
+            const schemaArgs: ts.Expression[] = [
+              createToSchemaCall(inputType),
+            ];
+            if (outputType) {
+              schemaArgs.push(createToSchemaCall(outputType));
+            }
 
             const argsArray = Array.from(node.arguments);
             let remainingArgs = argsArray;
@@ -60,12 +114,54 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               remainingArgs = argsArray.slice(1);
             }
 
-            ensureToSchemaImport();
+            const updated = factory.createCallExpression(
+              node.expression,
+              existingTypeArgs,
+              [...schemaArgs, ...remainingArgs],
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+
+        if (callKind?.kind === "builder" && callKind.builderName === "lift") {
+          const existingTypeArgs = node.typeArguments;
+          const alreadyInjected = node.arguments.length >= 2 &&
+            isToSchemaCall(node.arguments[0]!) &&
+            isToSchemaCall(node.arguments[1]!);
+
+          if (alreadyInjected) {
+            if (!existingTypeArgs || existingTypeArgs.length < 2) {
+              const inferredInputType = getTypeArgumentFromToSchema(
+                node.arguments[0]!,
+              );
+              const inferredOutputType = getTypeArgumentFromToSchema(
+                node.arguments[1]!,
+              );
+              if (inferredInputType && inferredOutputType) {
+                const updated = factory.createCallExpression(
+                  node.expression,
+                  [inferredInputType, inferredOutputType],
+                  [...node.arguments],
+                );
+                return ts.visitEachChild(updated, visit, transformation);
+              }
+            }
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          if (existingTypeArgs && existingTypeArgs.length >= 2) {
+            const inputType = existingTypeArgs[0]!;
+            const outputType = existingTypeArgs[1]!;
 
             const updated = factory.createCallExpression(
               node.expression,
-              undefined,
-              [...schemaArgs, ...remainingArgs],
+              existingTypeArgs,
+              [
+                createToSchemaCall(inputType),
+                createToSchemaCall(outputType),
+                ...node.arguments,
+              ],
             );
 
             return ts.visitEachChild(updated, visit, transformation);
@@ -75,31 +171,43 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
         if (
           callKind?.kind === "builder" && callKind.builderName === "handler"
         ) {
-          const factory = transformation.factory;
+          const existingTypeArgs = node.typeArguments;
+          const alreadyInjected = node.arguments.length >= 2 &&
+            isToSchemaCall(node.arguments[0]!) &&
+            isToSchemaCall(node.arguments[1]!);
 
-          if (node.typeArguments && node.typeArguments.length >= 2) {
-            const eventType = node.typeArguments[0];
-            const stateType = node.typeArguments[1];
-            if (!eventType || !stateType) {
-              return ts.visitEachChild(node, visit, transformation);
+          if (alreadyInjected) {
+            if (!existingTypeArgs || existingTypeArgs.length < 2) {
+              const inferredEventType = getTypeArgumentFromToSchema(
+                node.arguments[0]!,
+              );
+              const inferredStateType = getTypeArgumentFromToSchema(
+                node.arguments[1]!,
+              );
+              if (inferredEventType && inferredStateType) {
+                const updated = factory.createCallExpression(
+                  node.expression,
+                  [inferredEventType, inferredStateType],
+                  [...node.arguments],
+                );
+                return ts.visitEachChild(updated, visit, transformation);
+              }
             }
-            const toSchemaEvent = factory.createCallExpression(
-              getToSchemaIdentifier(),
-              [eventType],
-              [],
-            );
-            const toSchemaState = factory.createCallExpression(
-              getToSchemaIdentifier(),
-              [stateType],
-              [],
-            );
+            return ts.visitEachChild(node, visit, transformation);
+          }
 
-            ensureToSchemaImport();
+          if (existingTypeArgs && existingTypeArgs.length >= 2) {
+            const eventType = existingTypeArgs[0]!;
+            const stateType = existingTypeArgs[1]!;
 
             const updated = factory.createCallExpression(
               node.expression,
-              undefined,
-              [toSchemaEvent, toSchemaState, ...node.arguments],
+              existingTypeArgs,
+              [
+                createToSchemaCall(eventType),
+                createToSchemaCall(stateType),
+                ...node.arguments,
+              ],
             );
 
             return ts.visitEachChild(updated, visit, transformation);
@@ -122,22 +230,12 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
                   factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
                 if (eventParam || stateParam) {
-                  const toSchemaEvent = factory.createCallExpression(
-                    getToSchemaIdentifier(),
-                    [eventType],
-                    [],
-                  );
-                  const toSchemaState = factory.createCallExpression(
-                    getToSchemaIdentifier(),
-                    [stateType],
-                    [],
-                  );
-
-                  ensureToSchemaImport();
+                  const toSchemaEvent = createToSchemaCall(eventType);
+                  const toSchemaState = createToSchemaCall(stateType);
 
                   const updated = factory.createCallExpression(
                     node.expression,
-                    undefined,
+                    [eventType, stateType],
                     [toSchemaEvent, toSchemaState, handlerFn],
                   );
 

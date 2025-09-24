@@ -77,6 +77,8 @@ export type {
   RenderNode,
   Stream,
   StripCell,
+  StripStream,
+  NormalizeSchemaType,
   toJSON,
   VNode,
 } from "@commontools/api";

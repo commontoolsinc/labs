@@ -234,6 +234,8 @@ export interface BuiltInCompileAndRunState<T> {
     }>;
 }
 export type RecipeFunction = {
+    <TParams, TResult, TSchema extends JSONSchema = JSONSchema>(argumentSchema: TSchema, fn: (input: OpaqueRef<Required<TParams>>) => TResult): RecipeFactory<TParams, TResult>;
+    <TParams, TResult, TSchema extends JSONSchema = JSONSchema, RSchema extends JSONSchema = JSONSchema>(argumentSchema: TSchema, resultSchema: RSchema, fn: (input: OpaqueRef<Required<TParams>>) => Opaque<TResult>): RecipeFactory<TParams, TResult>;
     <S extends JSONSchema>(argumentSchema: S, fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
     <S extends JSONSchema, R>(argumentSchema: S, fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>): RecipeFactory<SchemaWithoutCell<S>, R>;
     <S extends JSONSchema, RS extends JSONSchema>(argumentSchema: S, resultSchema: RS, fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<SchemaWithoutCell<RS>>): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
@@ -242,6 +244,7 @@ export type RecipeFunction = {
     <T, R>(argumentSchema: string | JSONSchema, resultSchema: JSONSchema, fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): RecipeFactory<T, R>;
 };
 export type LiftFunction = {
+    <TParams, TResult, TSchema extends JSONSchema = JSONSchema, RSchema extends JSONSchema = JSONSchema>(argumentSchema: TSchema, resultSchema: RSchema, implementation: (input: TParams) => TResult): ModuleFactory<TParams, TResult>;
     <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(argumentSchema: T, resultSchema: R, implementation: (input: Schema<T>) => Schema<R>): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
     <T, R>(implementation: (input: T) => R): ModuleFactory<T, R>;
     <T>(implementation: (input: T) => any): ModuleFactory<T, ReturnType<typeof implementation>>;
@@ -252,6 +255,7 @@ export type HandlerState<T> = T extends Cell<any> ? T : T extends Stream<any> ? 
     readonly [K in keyof T]: HandlerState<T[K]>;
 } : T;
 export type HandlerFunction = {
+    <EEvent, TState, ESchema extends JSONSchema = JSONSchema, TSchema extends JSONSchema = JSONSchema>(eventSchema: ESchema, stateSchema: TSchema, handler: (event: EEvent, props: TState) => any): ModuleFactory<StripCell<TState>, EEvent>;
     <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any): ModuleFactory<StripCell<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
     <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<StripCell<T>, E>;
     <E, T>(handler: (event: E, props: T) => any, options: {

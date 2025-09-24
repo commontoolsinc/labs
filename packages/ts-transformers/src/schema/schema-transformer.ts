@@ -55,16 +55,8 @@ export function createSchemaTransformer(
         const finalSchema = { ...schema, ...optionsObj };
         const schemaAst = createSchemaAst(finalSchema, context.factory);
 
-        const constAssertion = context.factory.createAsExpression(
-          schemaAst,
-          context.factory.createTypeReferenceNode(
-            context.factory.createIdentifier("const"),
-            undefined,
-          ),
-        );
-
         const satisfiesExpression = context.factory.createSatisfiesExpression(
-          constAssertion,
+          schemaAst,
           context.factory.createTypeReferenceNode(
             context.factory.createIdentifier("JSONSchema"),
             undefined,

@@ -155,7 +155,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       >(),
       toSchema<any[]>(),
       ({ allCharms, content }) => {
-        const cs: MentionableCharm[] = allCharms.get();
+        const cs: readonly MentionableCharm[] = allCharms.get();
         if (!cs) return [];
 
         const self = cs.find((c) => c.content === content.get());

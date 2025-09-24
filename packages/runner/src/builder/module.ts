@@ -10,6 +10,7 @@ import type {
   Schema,
   SchemaWithoutCell,
   StripCell,
+  NormalizeSchemaType,
   toJSON,
 } from "./types.ts";
 import { isModule } from "./types.ts";
@@ -54,6 +55,29 @@ export function createNodeFactory<T = any, R = any>(
  * @returns A module node factory that also serializes as module.
  */
 export function lift<
+  TParams,
+  TResult,
+  TSchema extends JSONSchema = JSONSchema,
+  RSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: TSchema,
+  resultSchema: RSchema,
+  implementation: (input: TParams) => TResult,
+): ModuleFactory<TParams, TResult>;
+export function lift<
+  TParams,
+  TResult,
+  TSchema extends JSONSchema = JSONSchema,
+  RSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: TSchema,
+  resultSchema: RSchema,
+  implementation: (input: TParams) => TResult,
+): ModuleFactory<
+  NormalizeSchemaType<TParams>,
+  NormalizeSchemaType<TResult>
+>;
+export function lift<
   T extends JSONSchema = JSONSchema,
   R extends JSONSchema = JSONSchema,
 >(
@@ -95,6 +119,19 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
+export function handler<
+  EEvent,
+  TState,
+  ESchema extends JSONSchema = JSONSchema,
+  TSchema extends JSONSchema = JSONSchema,
+>(
+  eventSchema: ESchema,
+  stateSchema: TSchema,
+  handler: (event: EEvent, props: TState) => any,
+): HandlerFactory<
+  NormalizeSchemaType<TState>,
+  NormalizeSchemaType<EEvent>
+>;
 export function handler<
   E extends JSONSchema = JSONSchema,
   T extends JSONSchema = JSONSchema,

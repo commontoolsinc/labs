@@ -17,6 +17,7 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
   type toJSON,
+  type NormalizeSchemaType,
   UI,
   type UnsafeBinding,
 } from "./types.ts";
@@ -55,6 +56,26 @@ import { sanitizeSchemaForLinks } from "../link-utils.ts";
  * @returns A recipe node factory that also serializes as recipe.
  */
 
+export function recipe<
+  TParams,
+  TResult,
+  TSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: TSchema,
+  fn: (input: OpaqueRef<Required<TParams>>) => TResult,
+): RecipeFactory<NormalizeSchemaType<TParams>, NormalizeSchemaType<TResult>>;
+export function recipe<
+  TParams,
+  TResult,
+  TSchema extends JSONSchema = JSONSchema,
+  RSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: TSchema,
+  resultSchema: RSchema,
+  fn: (
+    input: OpaqueRef<Required<TParams>>,
+  ) => Opaque<TResult>,
+): RecipeFactory<NormalizeSchemaType<TParams>, NormalizeSchemaType<TResult>>;
 export function recipe<S extends JSONSchema>(
   argumentSchema: S,
   fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,

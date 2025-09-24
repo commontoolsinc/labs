@@ -347,6 +347,28 @@ export interface BuiltInCompileAndRunState<T> {
 
 // Function type definitions
 export type RecipeFunction = {
+  <
+    TParams,
+    TResult,
+    TSchema extends JSONSchema = JSONSchema,
+  >(
+    argumentSchema: TSchema,
+    fn: (input: OpaqueRef<Required<TParams>>) => TResult,
+  ): RecipeFactory<NormalizeSchemaType<TParams>, NormalizeSchemaType<TResult>>;
+
+  <
+    TParams,
+    TResult,
+    TSchema extends JSONSchema = JSONSchema,
+    RSchema extends JSONSchema = JSONSchema,
+  >(
+    argumentSchema: TSchema,
+    resultSchema: RSchema,
+    fn: (
+      input: OpaqueRef<Required<TParams>>,
+    ) => Opaque<TResult>,
+  ): RecipeFactory<NormalizeSchemaType<TParams>, NormalizeSchemaType<TResult>>;
+
   <S extends JSONSchema>(
     argumentSchema: S,
     fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
@@ -383,6 +405,20 @@ export type RecipeFunction = {
 };
 
 export type LiftFunction = {
+  <
+    TParams,
+    TResult,
+    TSchema extends JSONSchema = JSONSchema,
+    RSchema extends JSONSchema = JSONSchema,
+  >(
+    argumentSchema: TSchema,
+    resultSchema: RSchema,
+    implementation: (input: TParams) => TResult,
+  ): ModuleFactory<
+    NormalizeSchemaType<TParams>,
+    NormalizeSchemaType<TResult>
+  >;
+
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
     argumentSchema: T,
     resultSchema: R,
@@ -416,6 +452,20 @@ export type HandlerState<T> = T extends Cell<any> ? T
   : T;
 
 export type HandlerFunction = {
+  <
+    EEvent,
+    TState,
+    ESchema extends JSONSchema = JSONSchema,
+    TSchema extends JSONSchema = JSONSchema,
+  >(
+    eventSchema: ESchema,
+    stateSchema: TSchema,
+    handler: (event: EEvent, props: TState) => any,
+  ): ModuleFactory<
+    StripCell<NormalizeSchemaType<TState>>,
+    NormalizeSchemaType<EEvent>
+  >;
+
   // With schemas
 
   <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
@@ -590,6 +640,13 @@ export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>
   : T extends Array<infer U> ? StripCell<U>[]
   : T extends object ? { [K in keyof T]: StripCell<T[K]> }
   : T;
+
+export type StripStream<T> = T extends Stream<infer U> ? StripStream<U>
+  : T extends Array<infer U> ? StripStream<U>[]
+  : T extends object ? { [K in keyof T]: StripStream<T[K]> }
+  : T;
+
+export type NormalizeSchemaType<T> = StripStream<StripCell<T>>;
 
 export type Schema<
   T extends JSONSchema,
