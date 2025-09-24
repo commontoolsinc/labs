@@ -17,9 +17,14 @@ export default recipe<TodoState>((state) => {
   return {
     [UI]: (
       <div>
-        <button onClick={addTodo({ items: state.items })}>Add</button>
+        <button
+          type="button"
+          onClick={addTodo({ items: state.items })}
+        >
+          Add
+        </button>
         <ul>
-          {state.items.map((item) => <li>{item}</li>)}
+          {state.items.map((item) => <li key={item}>{item}</li>)}
         </ul>
       </div>
     ),
