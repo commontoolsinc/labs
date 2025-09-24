@@ -153,3 +153,6 @@
 - Balancing weighted assignments worked well once variants were sanitized with
   `lift`, leaving the handler to mutate the raw map while a history cell kept
   ordering deterministic for harness assertions.
+- Building schedule-style patterns benefits from reusing the same coverage
+  helper inside both handlers and derives; keeping slot order sanitized once
+  makes gap arrays deterministic for harness assertions after each update.
