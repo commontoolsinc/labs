@@ -32,13 +32,13 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
+  apiUrl: new URL("https://example.com/"),
   storageManager: new StorageManager({
     address: "https://example.com/storage",
     signer: myIdentitySigner,
   }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
-  blobbyServerUrl: "https://example.com/blobby", // Optional
   recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
   debug: false, // Optional
 });
@@ -174,8 +174,8 @@ const storageManager = StorageManager.emulate({ as: signer });
 
 // Create a runtime instance first
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: loaction.origin,
 });
 ```
 
@@ -256,8 +256,8 @@ const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: location.origin,
 });
 ```
 
@@ -334,8 +334,8 @@ const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: import.meta.url,
 });
 ```
 
@@ -411,8 +411,8 @@ const storageManager = StorageManager.open({
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: "https://example.com/blobby", // Optional
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
   recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
@@ -452,8 +452,8 @@ const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: import.meta.url,
 });
 ```
 
@@ -543,8 +543,8 @@ const storageManager = StorageManager.emulate({ as: signer });
 
 // Create runtime instance
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: import.meta.url,
 });
 ```
 
@@ -629,8 +629,8 @@ const signer = await Identity.fromPassphrase("my-passphrase");
 const storageManager = StorageManager.emulate({ as: signer });
 
 const runtime = new Runtime({
+  apiUrl: new URL("https://examplehost.com"),
   storageManager,
-  blobbyServerUrl: import.meta.url,
 });
 const cell = runtime.getCell(space, cause, schema);
 await cell.sync();
@@ -653,10 +653,10 @@ The Runtime constructor accepts a configuration object:
 
 ```typescript
 interface RuntimeOptions {
+  apiUrl: URL; // Required: runtime host
   storageManager: IStorageManager; // Required: storage manager implementation
   consoleHandler?: ConsoleHandler; // Optional: custom console handling
   errorHandlers?: ErrorHandler[]; // Optional: error handling
-  blobbyServerUrl?: string; // Optional: blob storage URL
   recipeEnvironment?: RecipeEnvironment; // Optional: recipe env vars
   debug?: boolean; // Optional: debug logging
 }

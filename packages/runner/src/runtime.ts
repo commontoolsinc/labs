@@ -76,13 +76,12 @@ export interface CharmMetadata {
 }
 
 export interface RuntimeOptions {
+  apiUrl: URL;
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
-  blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
   navigateCallback?: NavigateCallback;
-  staticAssetServerUrl?: URL;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
 }
@@ -94,7 +93,6 @@ export interface IRuntime {
   readonly moduleRegistry: IModuleRegistry;
   readonly harness: Engine;
   readonly runner: IRunner;
-  readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
@@ -298,7 +296,7 @@ export interface IRunner {
  * Usage:
  * ```typescript
  * const runtime = new Runtime({
- *   remoteStorageUrl: 'https://storage.example.com',
+ *   apiUrl: 'https://storage.example.com',
  *   consoleHandler: customConsoleHandler,
  *   errorHandlers: [customErrorHandler]
  * });
@@ -316,28 +314,24 @@ export class Runtime implements IRuntime {
   readonly moduleRegistry: IModuleRegistry;
   readonly harness: Engine;
   readonly runner: IRunner;
-  readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  readonly apiUrl: URL;
 
   constructor(options: RuntimeOptions) {
     this.id = options.storageManager.id;
-    this.staticCache = options.staticAssetServerUrl
-      ? new StaticCache({
-        baseUrl: options.staticAssetServerUrl,
-      })
-      : new StaticCache();
+    this.apiUrl = new URL(options.apiUrl);
+    this.staticCache = new StaticCache({
+      baseUrl: new URL("/static", this.apiUrl),
+    });
+
     this.telemetry = options.telemetry ?? new RuntimeTelemetry();
 
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
-
-    if (!options.blobbyServerUrl) {
-      throw new Error("blobbyServerUrl is required");
-    }
 
     this.storageManager = options.storageManager;
     this.moduleRegistry = new ModuleRegistry(this);
@@ -357,12 +351,6 @@ export class Runtime implements IRuntime {
 
     // Set this runtime as the current runtime for global cell compatibility
     // Removed setCurrentRuntime call - no longer using singleton pattern
-
-    // The blobby server URL would be used by recipe manager for publishing
-    this.blobbyServerUrl = new URL(
-      "/api/storage/blobby",
-      options.blobbyServerUrl,
-    ).toString();
 
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
@@ -628,5 +616,14 @@ export class Runtime implements IRuntime {
 
   start<T = any>(resultCell: Cell<T>): void {
     return this.runner.start(resultCell);
+  }
+
+  async healthCheck(): Promise<boolean> {
+    try {
+      const res = await fetch(new URL("/_health", this.apiUrl));
+      return res.ok;
+    } catch (_) {
+      return false;
+    }
   }
 }

@@ -11,7 +11,10 @@ async function createRuntime() {
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
-  return new Runtime({ storageManager, blobbyServerUrl: import.meta.url });
+  return new Runtime({
+    storageManager,
+    apiUrl: new URL(import.meta.url),
+  });
 }
 
 export interface ProcessOptions {

@@ -27,7 +27,7 @@ export const createMockTreeCellAsync = async (
 
   const runtime = new Runtime({
     storageManager,
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
   });
 
   const tx = runtime.edit();
