@@ -140,3 +140,7 @@
   derived grid and normalized intensities stay stable when handlers clamp new
   points into bounds, while reusing the same grid for peak lookup keeps summary
   labels deterministic.
+- Normalizing matrix dimensions with a shared `derive` helper keeps row and
+  column totals aligned while handlers focus on targeted cell, row, or column
+  updates; the sanitized matrix view becomes the single source for summary
+  strings and assertions.

@@ -88,6 +88,9 @@ import {
   scenarios as counterMutableTupleScenarios,
 } from "./patterns/counter-mutable-tuple.ts";
 import {
+  scenarios as counterMatrixStateScenarios,
+} from "./patterns/counter-matrix-state.ts";
+import {
   scenarios as counterNestedArrayObjectsScenarios,
 } from "./patterns/counter-nested-array-objects.ts";
 import {
@@ -294,6 +297,7 @@ const allScenarios = [
   ...boundedCounterScenarios,
   ...counterLiftFormattingScenarios,
   ...counterMutableTupleScenarios,
+  ...counterMatrixStateScenarios,
   ...counterNestedArrayObjectsScenarios,
   ...counterNestedDeriveWatchersScenarios,
   ...counterNestedHandlerCompositionScenarios,
