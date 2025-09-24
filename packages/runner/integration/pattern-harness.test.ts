@@ -127,6 +127,9 @@ import {
   scenarios as counterRenderTreeScenarios,
 } from "./patterns/counter-render-tree.ts";
 import {
+  scenarios as counterRedoStackScenarios,
+} from "./patterns/counter-redo-stack.ts";
+import {
   scenarios as counterReplicatorScenarios,
 } from "./patterns/counter-replicator.ts";
 import {
@@ -321,6 +324,7 @@ const allScenarios = [
   ...counterReferenceEqualityScenarios,
   ...counterScenarioDrivenMultiStepScenarios,
   ...counterSearchTermFilterScenarios,
+  ...counterRedoStackScenarios,
   ...counterReplicatorScenarios,
   ...counterReorderableListScenarios,
   ...counterSharedAliasScenarios,
