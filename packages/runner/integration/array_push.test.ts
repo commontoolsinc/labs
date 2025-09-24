@@ -54,7 +54,7 @@ async function runTest() {
 
   // Create runtime
   const runtime = new Runtime({
-    blobbyServerUrl: API_URL,
+    apiUrl: new URL(API_URL),
     storageManager,
   });
 

@@ -82,7 +82,7 @@ function resolveModulePath(moduleRef: string | URL): string {
 export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
 
