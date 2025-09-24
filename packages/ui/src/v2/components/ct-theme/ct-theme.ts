@@ -4,12 +4,12 @@ import { provide } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
+  type CTTheme,
   defaultTheme,
   mergeWithDefaultTheme,
-  type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import { isCell, type Cell } from "@commontools/runner";
+import { type Cell, isCell } from "@commontools/runner";
 
 /**
  * ct-theme — Provides a theme to a subtree and applies CSS vars.
@@ -85,7 +85,9 @@ export class CTThemeProvider extends BaseElement {
   }
 
   override render() {
-    return html`<slot></slot>`;
+    return html`
+      <slot></slot>
+    `;
   }
 }
 

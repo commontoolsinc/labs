@@ -5,4 +5,3 @@ if (!customElements.get("ct-kbd")) {
 }
 
 export type { CTKbd as CTKbdElement } from "./ct-kbd.ts";
-

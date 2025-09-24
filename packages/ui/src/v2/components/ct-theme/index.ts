@@ -5,4 +5,3 @@ if (!customElements.get("ct-theme")) {
 }
 
 export type { CTThemeProvider as CTThemeElement } from "./ct-theme.ts";
-

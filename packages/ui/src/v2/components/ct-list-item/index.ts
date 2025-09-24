@@ -5,4 +5,3 @@ if (!customElements.get("ct-list-item")) {
 }
 
 export type { CTListItem as CTListItemElement } from "./ct-list-item.ts";
-

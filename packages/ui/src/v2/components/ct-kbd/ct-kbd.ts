@@ -41,9 +41,10 @@ export class CTKbd extends BaseElement {
   ];
 
   override render() {
-    return html`<span class="kbd" part="kbd"><slot></slot></span>`;
+    return html`
+      <span class="kbd" part="kbd"><slot></slot></span>
+    `;
   }
 }
 
 globalThis.customElements.define("ct-kbd", CTKbd);
-

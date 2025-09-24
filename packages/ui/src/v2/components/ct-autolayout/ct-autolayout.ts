@@ -123,10 +123,11 @@ export class CTAutoLayout extends BaseElement {
       border: none;
     }
     .sidebar-left {
-      border-right: 1px solid var(
-        --ct-theme-color-border,
-        #e5e7eb
-      );
+      border-right: 1px solid
+        var(
+          --ct-theme-color-border,
+          #e5e7eb
+        );
       border-top-right-radius: var(
         --ct-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
@@ -137,10 +138,11 @@ export class CTAutoLayout extends BaseElement {
       );
     }
     .sidebar-right {
-      border-left: 1px solid var(
-        --ct-theme-color-border,
-        #e5e7eb
-      );
+      border-left: 1px solid
+        var(
+          --ct-theme-color-border,
+          #e5e7eb
+        );
       border-top-left-radius: var(
         --ct-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
@@ -187,10 +189,11 @@ export class CTAutoLayout extends BaseElement {
       /* Visual separators for default content items */
       .content > ::slotted(:not([slot])) {
         background: transparent;
-        border: 1px solid var(
-          --ct-theme-color-border,
-          #e5e7eb
-        );
+        border: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e5e7eb
+          );
         border-radius: var(
           --ct-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
@@ -278,7 +281,7 @@ export class CTAutoLayout extends BaseElement {
           --ct-theme-color-surface,
           var(--ct-surface, #f1f5f9)
         );
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
         transition: transform 0.25s ease;
         will-change: transform;
         z-index: 30;
@@ -322,7 +325,7 @@ export class CTAutoLayout extends BaseElement {
         pointer-events: auto;
       }
 
-    /* Bottom/Top toolbar with centered tabs */
+      /* Bottom/Top toolbar with centered tabs */
       .mobile-bar {
         --ct-mobile-bar-height: 3rem;
         position: absolute;
@@ -338,10 +341,11 @@ export class CTAutoLayout extends BaseElement {
           --ct-theme-color-surface,
           var(--ct-surface, #f1f5f9)
         );
-        border-top: 1px solid var(
-          --ct-theme-color-border,
-          #e0e0e0
-        );
+        border-top: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e0e0e0
+          );
         padding: 0 var(--ct-theme-spacing-normal, 0.5rem);
         z-index: 40;
       }
@@ -349,303 +353,326 @@ export class CTAutoLayout extends BaseElement {
         top: 0;
         bottom: auto;
         border-top: none;
-        border-bottom: 1px solid var(
-          --ct-theme-color-border,
-          #e0e0e0
-        );
-      }
-      .mobile-bar .tabs {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        overflow-x: auto;
-        scrollbar-width: thin;
-        border: 0;
-      }
-      .mobile-bar .tab {
-        padding: var(--ct-theme-spacing-tight, 0.25rem)
-          var(--ct-theme-spacing-normal, 0.5rem);
-        border: none;
-        background: none;
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        font-size: 0.9rem;
-      }
-      .mobile-bar .tab.active {
-        border-bottom-color: #007acc;
-        font-weight: 500;
-      }
+        border-bottom: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e0e0e0
+          );
+        }
+        .mobile-bar .tabs {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          overflow-x: auto;
+          scrollbar-width: thin;
+          border: 0;
+        }
+        .mobile-bar .tab {
+          padding: var(--ct-theme-spacing-tight, 0.25rem)
+            var(--ct-theme-spacing-normal, 0.5rem);
+          border: none;
+          background: none;
+          cursor: pointer;
+          border-bottom: 2px solid transparent;
+          font-size: 0.9rem;
+        }
+        .mobile-bar .tab.active {
+          border-bottom-color: #007acc;
+          font-weight: 500;
+        }
 
-      /* Reserve space for the mobile bar so content is full height */
-      .layout {
-        padding-bottom: var(--ct-mobile-bar-height, 3rem);
-      }
-      :host([tabsposition="top"]) .layout {
-        padding-bottom: 0;
-        padding-top: var(--ct-mobile-bar-height, 3rem);
-      }
-      /* Show the bar on mobile */
-      .mobile-bar {
-        display: grid;
-      }
+        /* Reserve space for the mobile bar so content is full height */
+        .layout {
+          padding-bottom: var(--ct-mobile-bar-height, 3rem);
+        }
+        :host([tabsposition="top"]) .layout {
+          padding-bottom: 0;
+          padding-top: var(--ct-mobile-bar-height, 3rem);
+        }
+        /* Show the bar on mobile */
+        .mobile-bar {
+          display: grid;
+        }
 
-      /* Hide desktop floating toggles on mobile */
-      .desktop-toggle {
-        display: none;
+        /* Hide desktop floating toggles on mobile */
+        .desktop-toggle {
+          display: none;
+        }
       }
+    `;
+
+    private _activeTab = 0;
+    private _children: Element[] = [];
+    private _leftEl: Element | null = null;
+    private _rightEl: Element | null = null;
+    private _hasLeft = false;
+    private _hasRight = false;
+    private _lastToggleEl: Element | null = null;
+
+    declare tabNames: string[];
+    declare leftTabName?: string;
+    declare rightTabName?: string;
+    declare tabsPosition: "top" | "bottom";
+    declare leftOpen: boolean;
+    declare rightOpen: boolean;
+
+    constructor() {
+      super();
+      this.tabNames = [];
+      this.leftTabName = "Left";
+      this.rightTabName = "Right";
+      this.tabsPosition = "bottom";
+      this.leftOpen = true;
+      this.rightOpen = true;
     }
-  `;
 
-  private _activeTab = 0;
-  private _children: Element[] = [];
-  private _leftEl: Element | null = null;
-  private _rightEl: Element | null = null;
-  private _hasLeft = false;
-  private _hasRight = false;
-  private _lastToggleEl: Element | null = null;
+    override connectedCallback() {
+      super.connectedCallback();
+      this._updateChildren();
+      this._updateActiveTab();
+      this._onKeydown = this._onKeydown.bind(this);
+      globalThis.addEventListener("keydown", this._onKeydown);
+    }
 
-  declare tabNames: string[];
-  declare leftTabName?: string;
-  declare rightTabName?: string;
-  declare tabsPosition: "top" | "bottom";
-  declare leftOpen: boolean;
-  declare rightOpen: boolean;
+    override disconnectedCallback(): void {
+      super.disconnectedCallback();
+      globalThis.removeEventListener("keydown", this._onKeydown);
+    }
 
-  constructor() {
-    super();
-    this.tabNames = [];
-    this.leftTabName = "Left";
-    this.rightTabName = "Right";
-    this.tabsPosition = "bottom";
-    this.leftOpen = true;
-    this.rightOpen = true;
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-    this._updateChildren();
-    this._updateActiveTab();
-    this._onKeydown = this._onKeydown.bind(this);
-    globalThis.addEventListener("keydown", this._onKeydown);
-  }
-
-  override disconnectedCallback(): void {
-    super.disconnectedCallback();
-    globalThis.removeEventListener("keydown", this._onKeydown);
-  }
-
-  // Keep attributes/props as the single source of truth and
-  // enforce mobile exclusivity even when set programmatically.
-  override updated(changed: Map<string, unknown>) {
-    if (changed.has("leftOpen") || changed.has("rightOpen")) {
-      // Enforce exclusivity on mobile when both become true.
-      if (this._isMobile() && this.leftOpen && this.rightOpen) {
-        const last = changed.has("leftOpen") ? "left" : "right";
-        if (last === "left") this.rightOpen = false;
-        else this.leftOpen = false;
+    // Keep attributes/props as the single source of truth and
+    // enforce mobile exclusivity even when set programmatically.
+    override updated(changed: Map<string, unknown>) {
+      if (changed.has("leftOpen") || changed.has("rightOpen")) {
+        // Enforce exclusivity on mobile when both become true.
+        if (this._isMobile() && this.leftOpen && this.rightOpen) {
+          const last = changed.has("leftOpen") ? "left" : "right";
+          if (last === "left") this.rightOpen = false;
+          else this.leftOpen = false;
+        }
+        // Emit change events so hosts can react even on attribute changes.
+        if (changed.has("leftOpen")) {
+          this.dispatchEvent(
+            new CustomEvent("ct-toggle-left", {
+              bubbles: true,
+              composed: true,
+              detail: { open: this.leftOpen },
+            }),
+          );
+        }
+        if (changed.has("rightOpen")) {
+          this.dispatchEvent(
+            new CustomEvent("ct-toggle-right", {
+              bubbles: true,
+              composed: true,
+              detail: { open: this.rightOpen },
+            }),
+          );
+        }
       }
-      // Emit change events so hosts can react even on attribute changes.
-      if (changed.has("leftOpen")) {
-        this.dispatchEvent(new CustomEvent("ct-toggle-left", {
+      super.updated?.(changed as any);
+    }
+
+    private _updateChildren() {
+      this._children = Array.from(this.children);
+      this._leftEl = this._children.find((el) =>
+        el.getAttribute("slot") ===
+          "left"
+      ) ?? null;
+      this._rightEl = this._children.find((el) =>
+        el.getAttribute("slot") ===
+          "right"
+      ) ?? null;
+      this._hasLeft = !!this._leftEl;
+      this._hasRight = !!this._rightEl;
+    }
+
+    private _handleTabClick(index: number) {
+      this._activeTab = index;
+      this._updateActiveTab();
+      this.requestUpdate();
+    }
+
+    private _toggleLeft(trigger?: Element) {
+      if (!this._hasLeft) return;
+      this._lastToggleEl = trigger ?? null;
+      const opening = !this.leftOpen;
+      this.leftOpen = opening;
+      if (opening && this._isMobile()) {
+        this.rightOpen = false;
+      }
+      this.dispatchEvent(
+        new CustomEvent("ct-toggle-left", {
           bubbles: true,
           composed: true,
           detail: { open: this.leftOpen },
-        }));
+        }),
+      );
+      this.requestUpdate();
+    }
+
+    private _toggleRight(trigger?: Element) {
+      if (!this._hasRight) return;
+      this._lastToggleEl = trigger ?? null;
+      const opening = !this.rightOpen;
+      this.rightOpen = opening;
+      if (opening && this._isMobile()) {
+        this.leftOpen = false;
       }
-      if (changed.has("rightOpen")) {
-        this.dispatchEvent(new CustomEvent("ct-toggle-right", {
+      this.dispatchEvent(
+        new CustomEvent("ct-toggle-right", {
           bubbles: true,
           composed: true,
           detail: { open: this.rightOpen },
-        }));
+        }),
+      );
+      this.requestUpdate();
+    }
+
+    private _isMobile(): boolean {
+      try {
+        return globalThis.matchMedia?.("(max-width: 768px)")?.matches ?? false;
+      } catch {
+        return false;
       }
     }
-    super.updated?.(changed as any);
-  }
 
-  private _updateChildren() {
-    this._children = Array.from(this.children);
-    this._leftEl = this._children.find((el) =>
-      el.getAttribute("slot") ===
-        "left"
-    ) ?? null;
-    this._rightEl = this._children.find((el) =>
-      el.getAttribute("slot") ===
-        "right"
-    ) ?? null;
-    this._hasLeft = !!this._leftEl;
-    this._hasRight = !!this._rightEl;
-  }
-
-  private _handleTabClick(index: number) {
-    this._activeTab = index;
-    this._updateActiveTab();
-    this.requestUpdate();
-  }
-
-  private _toggleLeft(trigger?: Element) {
-    if (!this._hasLeft) return;
-    this._lastToggleEl = trigger ?? null;
-    const opening = !this.leftOpen;
-    this.leftOpen = opening;
-    if (opening && this._isMobile()) {
-      this.rightOpen = false;
-    }
-    this.dispatchEvent(new CustomEvent("ct-toggle-left", {
-      bubbles: true,
-      composed: true,
-      detail: { open: this.leftOpen },
-    }));
-    this.requestUpdate();
-  }
-
-  private _toggleRight(trigger?: Element) {
-    if (!this._hasRight) return;
-    this._lastToggleEl = trigger ?? null;
-    const opening = !this.rightOpen;
-    this.rightOpen = opening;
-    if (opening && this._isMobile()) {
+    private _closePanels() {
+      const wasOpen = this.leftOpen || this.rightOpen;
       this.leftOpen = false;
+      this.rightOpen = false;
+      if (wasOpen && this._lastToggleEl instanceof HTMLElement) {
+        // Return focus to the last toggle trigger
+        this._lastToggleEl.focus();
+      }
+      this.requestUpdate();
     }
-    this.dispatchEvent(new CustomEvent("ct-toggle-right", {
-      bubbles: true,
-      composed: true,
-      detail: { open: this.rightOpen },
-    }));
-    this.requestUpdate();
-  }
 
-  private _isMobile(): boolean {
-    try {
-      return globalThis.matchMedia?.("(max-width: 768px)")?.matches ?? false;
-    } catch {
-      return false;
-    }
-  }
-
-  private _closePanels() {
-    const wasOpen = this.leftOpen || this.rightOpen;
-    this.leftOpen = false;
-    this.rightOpen = false;
-    if (wasOpen && this._lastToggleEl instanceof HTMLElement) {
-      // Return focus to the last toggle trigger
-      this._lastToggleEl.focus();
-    }
-    this.requestUpdate();
-  }
-
-  private _onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      if (this.leftOpen || this.rightOpen) {
-        e.stopPropagation();
-        this._closePanels();
+    private _onKeydown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (this.leftOpen || this.rightOpen) {
+          e.stopPropagation();
+          this._closePanels();
+        }
       }
     }
-  }
 
-  private _updateActiveTab() {
-    // Only default (content) panes participate in tab switching
-    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-    const panes: Element[] = [...defaults];
+    private _updateActiveTab() {
+      // Only default (content) panes participate in tab switching
+      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+      const panes: Element[] = [...defaults];
 
-    // Remove active-tab class from all children
-    this._children.forEach((child) => child.classList.remove("active-tab"));
+      // Remove active-tab class from all children
+      this._children.forEach((child) => child.classList.remove("active-tab"));
 
-    // Add active-tab class to current pane
-    const active = panes[this._activeTab];
-    if (active) active.classList.add("active-tab");
-  }
+      // Add active-tab class to current pane
+      const active = panes[this._activeTab];
+      if (active) active.classList.add("active-tab");
+    }
 
-  override render() {
-    this._updateChildren();
+    override render() {
+      this._updateChildren();
 
-    // Build tab names for content panes only (exclude sidebars)
-    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-    const contentTabs: string[] = (this.tabNames.length === defaults.length)
-      ? this.tabNames
-      : defaults.map((_, i) => `Pane ${i + 1}`);
+      // Build tab names for content panes only (exclude sidebars)
+      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+      const contentTabs: string[] = (this.tabNames.length === defaults.length)
+        ? this.tabNames
+        : defaults.map((_, i) => `Pane ${i + 1}`);
 
-    const layoutClass = classMap({
-      layout: true,
-      "has-left": this._hasLeft,
-      "has-right": this._hasRight,
-      "left-open": this._hasLeft && this.leftOpen,
-      "right-open": this._hasRight && this.rightOpen,
-      // On mobile, we always show the content container and only swap
-      // which default child is marked active.
-      "active-content": true,
-    });
+      const layoutClass = classMap({
+        layout: true,
+        "has-left": this._hasLeft,
+        "has-right": this._hasRight,
+        "left-open": this._hasLeft && this.leftOpen,
+        "right-open": this._hasRight && this.rightOpen,
+        // On mobile, we always show the content container and only swap
+        // which default child is marked active.
+        "active-content": true,
+      });
 
-    return html`
-      <!-- Grid layout: left | content | right -->
-      <div class="${layoutClass}">
-        <div class="sidebar-left">
-          <slot name="left"></slot>
-        </div>
-        <div class="content">
-          <slot></slot>
-        </div>
-        <div class="sidebar-right">
-          <slot name="right"></slot>
-        </div>
-        <!-- Mobile-only overlays and toolbar (scoped within layout) -->
-        <div
-          class="scrim"
-          @click="${() => this._closePanels()}"
-          aria-hidden="true"
-        ></div>
-
-        <div class="mobile-bar ${classMap({ top: this.tabsPosition === "top" })}">
-          <ct-button
-            size="icon"
-            variant="secondary"
-            aria-label="Toggle left sidebar"
-            @click="${(e: Event) => this._toggleLeft(e.currentTarget as Element)}"
-          >
-            ←
-          </ct-button>
-          <div class="tabs">
-            ${contentTabs.map((name, index) => html`
-              <button
-                class="${classMap({ tab: true, active: index === this._activeTab })}"
-                @click="${() => this._handleTabClick(index)}"
-              >${name}</button>
-            `)}
+      return html`
+        <!-- Grid layout: left | content | right -->
+        <div class="${layoutClass}">
+          <div class="sidebar-left">
+            <slot name="left"></slot>
           </div>
-          <ct-button
-            size="icon"
-            variant="secondary"
-            aria-label="Toggle right sidebar"
-            @click="${(e: Event) => this._toggleRight(e.currentTarget as Element)}"
+          <div class="content">
+            <slot></slot>
+          </div>
+          <div class="sidebar-right">
+            <slot name="right"></slot>
+          </div>
+          <!-- Mobile-only overlays and toolbar (scoped within layout) -->
+          <div
+            class="scrim"
+            @click="${() => this._closePanels()}"
+            aria-hidden="true"
           >
-            →
-          </ct-button>
-        </div>
+          </div>
 
-        <!-- Desktop floating toggles -->
-        <div class="desktop-toggle desktop-toggle-left">
-          <ct-button
-            size="icon"
-            variant="secondary"
-            aria-label="Toggle left sidebar"
-            @click="${(e: Event) => this._toggleLeft(e.currentTarget as Element)}"
-          >
-            ←
-          </ct-button>
+          <div class="mobile-bar ${classMap({
+            top: this.tabsPosition === "top",
+          })}">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle left sidebar"
+              @click="${(e: Event) =>
+                this._toggleLeft(e.currentTarget as Element)}"
+            >
+              ←
+            </ct-button>
+            <div class="tabs">
+              ${contentTabs.map((name, index) =>
+                html`
+                  <button
+                    class="${classMap({
+                      tab: true,
+                      active: index === this._activeTab,
+                    })}"
+                    @click="${() => this._handleTabClick(index)}"
+                  >
+                    ${name}
+                  </button>
+                `
+              )}
+            </div>
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle right sidebar"
+              @click="${(e: Event) =>
+                this._toggleRight(e.currentTarget as Element)}"
+            >
+              →
+            </ct-button>
+          </div>
+
+          <!-- Desktop floating toggles -->
+          <div class="desktop-toggle desktop-toggle-left">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle left sidebar"
+              @click="${(e: Event) =>
+                this._toggleLeft(e.currentTarget as Element)}"
+            >
+              ←
+            </ct-button>
+          </div>
+          <div class="desktop-toggle desktop-toggle-right">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle right sidebar"
+              @click="${(e: Event) =>
+                this._toggleRight(e.currentTarget as Element)}"
+            >
+              →
+            </ct-button>
+          </div>
         </div>
-        <div class="desktop-toggle desktop-toggle-right">
-          <ct-button
-            size="icon"
-            variant="secondary"
-            aria-label="Toggle right sidebar"
-            @click="${(e: Event) => this._toggleRight(e.currentTarget as Element)}"
-          >
-            →
-          </ct-button>
-        </div>
-      </div>
-    `;
+      `;
+    }
   }
-}
 
-globalThis.customElements.define("ct-autolayout", CTAutoLayout);
+  globalThis.customElements.define("ct-autolayout", CTAutoLayout);

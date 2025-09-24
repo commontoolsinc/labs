@@ -5,4 +5,3 @@ if (!customElements.get("ct-toolbar")) {
 }
 
 export type { CTToolbar as CTToolbarElement } from "./ct-toolbar.ts";
-

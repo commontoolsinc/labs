@@ -221,7 +221,9 @@ export class CTChat extends BaseElement {
     }
 
     // If the theme property or provided theme changed, recompute
-    if (changedProperties.has("theme") || changedProperties.has("parentTheme")) {
+    if (
+      changedProperties.has("theme") || changedProperties.has("parentTheme")
+    ) {
       const source = this.theme && Object.keys(this.theme).length > 0
         ? this.theme
         : this.parentTheme;
