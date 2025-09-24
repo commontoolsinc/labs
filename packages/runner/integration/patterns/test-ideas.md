@@ -77,7 +77,7 @@ current offline harness.
       threshold and assert updates after events.
 - [x] Counter with grouped summary — reduce array of counters into grouped
       totals via derive.
-- [ ] Counter with matrix state — maintain 2D array of numbers and update
+- [x] Counter with matrix state — maintain 2D array of numbers and update
       row/column cells.
 - [ ] Counter with pattern arguments referencing parent cells — pass parent cell
       references into child pattern and verify shared state.
