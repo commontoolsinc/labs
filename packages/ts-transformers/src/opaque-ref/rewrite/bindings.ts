@@ -27,51 +27,27 @@ function deriveBaseName(
   return `ref${index + 1}`;
 }
 
-function sanitiseName(
+interface UniqueNameOptions {
+  readonly trimLeadingUnderscores?: boolean;
+}
+
+function createUniqueIdentifier(
   candidate: string,
   fallback: string,
   used: Set<string>,
+  options: UniqueNameOptions = {},
 ): string {
   let base = candidate.replace(/[^A-Za-z0-9_]/g, "_");
-  base = base.replace(/^_+/, "");
-  if (base.length === 0) base = fallback;
-  const firstChar = base.charAt(0);
-  if (!/[A-Za-z_]/.test(firstChar)) {
-    base = `${fallback}_${used.size + 1}`;
+  if (options.trimLeadingUnderscores) {
+    base = base.replace(/^_+/, "");
   }
-  let name = base;
-  let suffix = 1;
-  while (used.has(name)) {
-    name = `${base}_${suffix++}`;
+  if (base.length === 0) {
+    base = fallback;
   }
-  used.add(name);
-  return name;
-}
+  if (!/^[A-Za-z_]/.test(base.charAt(0))) {
+    base = fallback;
+  }
 
-function createIdentifierParamName(
-  raw: string,
-  used: Set<string>,
-): string {
-  let base = raw.replace(/[^A-Za-z0-9_]/g, "_");
-  if (base.length === 0) base = "ref";
-  const firstChar = base.charAt(0);
-  if (!/[A-Za-z_]/.test(firstChar)) {
-    base = `_${base}`;
-  }
-  let name = base;
-  let suffix = 1;
-  while (used.has(name)) {
-    name = `${base}_${suffix++}`;
-  }
-  used.add(name);
-  return name;
-}
-
-function createGeneratedParamName(
-  index: number,
-  used: Set<string>,
-): string {
-  const base = `_v${index + 1}`;
   let name = base;
   let suffix = 1;
   while (used.has(name)) {
@@ -92,14 +68,24 @@ export function createBindingPlan(
   dataFlows.forEach((dataFlow, index) => {
     const base = deriveBaseName(dataFlow.expression, index);
     const fallback = `ref${index + 1}`;
-    const propertyName = sanitiseName(base, fallback, usedPropertyNames);
+    const propertyName = createUniqueIdentifier(
+      base,
+      fallback,
+      usedPropertyNames,
+      { trimLeadingUnderscores: true },
+    );
 
     const paramName = ts.isIdentifier(dataFlow.expression)
-      ? createIdentifierParamName(dataFlow.expression.text, usedParamNames)
-      : createGeneratedParamName(index, usedParamNames);
-
-    const sourceFile = dataFlow.expression.getSourceFile();
-    const dataFlowText = dataFlow.expression.getText(sourceFile);
+      ? createUniqueIdentifier(
+        dataFlow.expression.text,
+        `_v${index + 1}`,
+        usedParamNames,
+      )
+      : createUniqueIdentifier(
+        `_v${index + 1}`,
+        `_v${index + 1}`,
+        usedParamNames,
+      );
 
     entries.push({
       dataFlow,
@@ -108,14 +94,8 @@ export function createBindingPlan(
     });
 
     paramBindings.set(dataFlow.expression, paramName);
-
     for (const occurrence of dataFlow.occurrences) {
-      const occurrenceText = occurrence.expression.getText(
-        occurrence.expression.getSourceFile(),
-      );
-      if (occurrenceText === dataFlowText) {
-        paramBindings.set(occurrence.expression, paramName);
-      }
+      paramBindings.set(occurrence.expression, paramName);
     }
   });
 

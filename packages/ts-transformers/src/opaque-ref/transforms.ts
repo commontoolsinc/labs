@@ -262,6 +262,28 @@ function deriveWhenNecessary(
   return createDeriveCall(expression, opaqueRefs, options);
 }
 
+function createDataFlowResolver(
+  analyzer: (expr: ts.Expression) => DataFlowAnalysis,
+  sourceFile: ts.SourceFile,
+): (expr: ts.Expression) => {
+  analysis: DataFlowAnalysis;
+  dataFlows: ts.Expression[];
+} {
+  return (expr) => {
+    const analysis = analyzer(expr);
+    const deduped = dedupeExpressions(analysis.dataFlows, sourceFile);
+    const texts = deduped.map((dep) => dep.getText(sourceFile));
+    const filtered = deduped.filter((dep, index) => {
+      if (!ts.isIdentifier(dep)) return true;
+      const text = texts[index];
+      return !texts.some((other, otherIndex) =>
+        otherIndex !== index && other.startsWith(`${text}.`)
+      );
+    });
+    return { analysis, dataFlows: filtered };
+  };
+}
+
 export function transformExpressionWithOpaqueRef(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -281,24 +303,10 @@ export function transformExpressionWithOpaqueRef(
   }
 
   const dataFlowAnalyzer = analyzer ?? createDataFlowAnalyzer(checker);
-  const analyzeDataFlows = (
-    expr: ts.Expression,
-  ): {
-    analysis: DataFlowAnalysis;
-    dataFlows: ts.Expression[];
-  } => {
-    const analysis = dataFlowAnalyzer(expr);
-    const deduped = dedupeExpressions(analysis.dataFlows, sourceFile);
-    const texts = deduped.map((dep) => dep.getText(sourceFile));
-    const filtered = deduped.filter((dep, index) => {
-      if (!ts.isIdentifier(dep)) return true;
-      const text = texts[index];
-      return !texts.some((other, otherIndex) =>
-        otherIndex !== index && other.startsWith(`${text}.`)
-      );
-    });
-    return { analysis, dataFlows: filtered };
-  };
+  const resolveDataFlows = createDataFlowResolver(
+    dataFlowAnalyzer,
+    sourceFile,
+  );
 
   const deriveOptions = createDeriveCallOptions(
     factory,
@@ -367,7 +375,7 @@ export function transformExpressionWithOpaqueRef(
   ) {
     const deriveCall = deriveWhenNecessary(
       expression,
-      analyzeDataFlows,
+      resolveDataFlows,
       deriveOptions,
     );
     return deriveCall ?? expression;
@@ -376,24 +384,22 @@ export function transformExpressionWithOpaqueRef(
   if (ts.isPropertyAccessExpression(expression)) {
     const deriveCall = deriveWhenNecessary(
       expression,
-      analyzeDataFlows,
+      resolveDataFlows,
       deriveOptions,
     );
     return deriveCall ?? expression;
   }
 
   if (ts.isCallExpression(expression)) {
-    const { analysis, dataFlows: opaqueRefs } = analyzeDataFlows(
-      expression,
-    );
-    if (analysis.rewriteHint?.kind === "call-if-else") {
+    const analysisResult = resolveDataFlows(expression);
+    if (analysisResult.analysis.rewriteHint?.kind === "call-if-else") {
       return expression;
     }
     const deriveCall = deriveWhenNecessary(
       expression,
-      analyzeDataFlows,
+      resolveDataFlows,
       deriveOptions,
-      { analysis, dataFlows: opaqueRefs },
+      analysisResult,
     );
     return deriveCall ?? expression;
   }
@@ -401,7 +407,7 @@ export function transformExpressionWithOpaqueRef(
   if (ts.isTemplateExpression(expression)) {
     const deriveCall = deriveWhenNecessary(
       expression,
-      analyzeDataFlows,
+      resolveDataFlows,
       deriveOptions,
     );
     return deriveCall ?? expression;
@@ -410,7 +416,7 @@ export function transformExpressionWithOpaqueRef(
   if (ts.isBinaryExpression(expression)) {
     const deriveCall = deriveWhenNecessary(
       expression,
-      analyzeDataFlows,
+      resolveDataFlows,
       deriveOptions,
     );
     return deriveCall ?? expression;
