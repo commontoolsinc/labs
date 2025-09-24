@@ -15,16 +15,11 @@ describe("list-operations simple test", () => {
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;
-  let spaceName: string;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    // Use a unique space name to avoid conflicts between test runs
-    spaceName = `${SPACE_NAME}-${Date.now()}-${
-      Math.random().toString(36).slice(2)
-    }`;
     cc = await CharmsController.initialize({
-      spaceName: spaceName,
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
@@ -48,7 +43,7 @@ describe("list-operations simple test", () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName: spaceName,
+      spaceName: SPACE_NAME,
       charmId: charm.id,
       identity,
     });
