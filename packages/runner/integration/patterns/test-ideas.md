@@ -165,7 +165,7 @@ current offline harness.
       discounts apply via derived pricing cells consistently.
 - [x] Inventory reorder threshold pattern — flag low stock entries ensure
       derived alerts react to threshold and stock adjustments.
-- [ ] Catalog search facets pattern — filter catalog by selections ensure
+- [x] Catalog search facets pattern — filter catalog by selections ensure
       handlers sync facet toggles with filtered result lists.
 - [ ] Saved search subscription pattern — persist saved query payloads ensure
       appended subscriptions replay triggers in harness runs.
