@@ -193,7 +193,7 @@ current offline harness.
       filter categories and derived tiles refresh.
 - [x] Email inbox threading pattern — group related emails ensure derived
       threads reorder by latest timestamp updates.
-- [ ] User permission matrix pattern — toggle role permissions ensure derived
+- [x] User permission matrix pattern — toggle role permissions ensure derived
       per-role summaries stay accurate after changes.
 - [ ] Org chart hierarchy pattern — maintain reporting tree ensure handlers
       relocate staff and derived chains stay valid.
