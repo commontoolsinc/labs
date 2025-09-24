@@ -19,6 +19,8 @@ export {
   type SchemaTransformerOptions,
 } from "./schema/schema-transformer.ts";
 
+export { createCaptureTransformer } from "./capture-transformer.ts";
+
 export { collectOpaqueRefs } from "./opaque-ref/dataflow.ts";
 
 export {
