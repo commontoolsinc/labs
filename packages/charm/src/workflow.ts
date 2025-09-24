@@ -1067,11 +1067,10 @@ export function executeImagineWorkflow(
   ) {
     try {
       const charmData = form.input.existingCharm.get();
-      const charmName =
-        isRecord(charmData) && NAME in charmData &&
+      const charmName = isRecord(charmData) && NAME in charmData &&
           typeof charmData[NAME] === "string"
-          ? charmData[NAME]
-          : "currentCharm";
+        ? charmData[NAME]
+        : "currentCharm";
       const camelCaseId = toCamelCase(charmName);
 
       // Make sure the ID is unique
