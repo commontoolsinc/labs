@@ -20,10 +20,11 @@ import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
 import {
-  createOpaqueRefTransformer,
+  createCaptureTransformer,
+  createModularOpaqueRefTransformer,
   createSchemaTransformer,
-} from "./transformer/mod.ts";
-import { createCaptureTransformer } from "@commontools/ts-transformers";
+  hasCtsEnableDirective,
+} from "@commontools/ts-transformers";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -313,19 +314,6 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 
     // beginning of transformation related code
     // Check if the main source file has the /// <cts-enable /> directive
-    const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
-      const text = sourceFile.getFullText();
-      const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
-
-      for (const comment of tripleSlashDirectives) {
-        const commentText = text.substring(comment.pos, comment.end);
-        if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
     // Check if any source file has the CommonTools directive
     const sourceFiles = tsProgram.getSourceFiles();
     let hasCtsDirective = false;
@@ -347,7 +335,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     if (hasCtsDirective) {
       // Add OpaqueRef and Schema transformers
       beforeTransformers.push(
-        createOpaqueRefTransformer(tsProgram),
+        createModularOpaqueRefTransformer(tsProgram),
         createSchemaTransformer(tsProgram),
       );
 

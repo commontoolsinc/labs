@@ -1,8 +1,8 @@
 import ts from "typescript";
 import {
-  createOpaqueRefTransformer,
+  createModularOpaqueRefTransformer,
   createSchemaTransformer,
-} from "../typescript/transformer/mod.ts";
+} from "@commontools/ts-transformers";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
 import { join } from "@std/path";
 import { StaticCache } from "@commontools/static";
@@ -176,7 +176,7 @@ export async function transformSource(
   const transformers: ts.TransformerFactory<ts.SourceFile>[] = [];
 
   // Always add OpaqueRef transformer first
-  transformers.push(createOpaqueRefTransformer(program, {
+  transformers.push(createModularOpaqueRefTransformer(program, {
     mode,
   }));
 
