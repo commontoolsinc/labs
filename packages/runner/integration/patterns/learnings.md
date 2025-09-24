@@ -159,3 +159,6 @@
 - Matching route capacity checks with the same helper used for derived load
   metrics keeps handler guard rails and harness assertions aligned, while a
   small history cell surfaces blocked attempts for deterministic tests.
+- Normalizing role and permission identifiers with shared `lift` helpers keeps
+  matrix summaries deterministic while handler toggles reuse the sanitized order
+  for assertions.

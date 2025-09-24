@@ -234,6 +234,9 @@ import {
   scenarios as userJourneyMapScenarios,
 } from "./patterns/user-journey-map.ts";
 import {
+  scenarios as userPermissionMatrixScenarios,
+} from "./patterns/user-permission-matrix.ts";
+import {
   scenarios as inventoryReorderThresholdScenarios,
 } from "./patterns/inventory-reorder-threshold.ts";
 import {
@@ -278,6 +281,7 @@ const allScenarios = [
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...userJourneyMapScenarios,
+  ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,
   ...incidentResponsePlaybookScenarios,
   ...calendarAvailabilityScenarios,
