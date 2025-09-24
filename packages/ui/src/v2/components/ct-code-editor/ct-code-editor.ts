@@ -35,6 +35,11 @@ import {
 } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import {
+  Mentionable,
+  MentionableArray,
+  mentionableArraySchema,
+} from "../../core/mentionable.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -74,21 +79,6 @@ langRegistry.set(MimeType.json, createJson());
 const getLangExtFromMimeType = (mime: MimeType) => {
   return langRegistry.get(mime) ?? defaultLang;
 };
-
-const mentionableArraySchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      [NAME]: { type: "string" },
-      items: { $ref: "#", asCell: true },
-    },
-    required: [NAME],
-  },
-} as const satisfies JSONSchema;
-
-type MentionableArray = Schema<typeof mentionableArraySchema>;
-type Mentionable = MentionableArray[0];
 
 /**
  * CTCodeEditor - Code editor component with syntax highlighting and debounced changes

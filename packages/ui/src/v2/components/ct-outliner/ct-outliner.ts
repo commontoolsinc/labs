@@ -4,6 +4,11 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import {
+  Mentionable,
+  MentionableArray,
+  mentionableArraySchema,
+} from "../../core/mentionable.ts";
 
 /**
  * Executes a mutation on a Cell within a transaction
@@ -143,7 +148,7 @@ export class CTOutliner extends BaseElement
 
   declare value: Cell<Tree> | null;
   declare readonly: boolean;
-  declare mentionable: Cell<unknown[]>;
+  declare mentionable: Cell<MentionableArray>;
 
   // Direct tree access from Cell
   get tree(): Tree {
@@ -670,8 +675,9 @@ export class CTOutliner extends BaseElement
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
       handleCharmLinkClick: (event: MouseEvent) =>
         this.handleCharmLinkClick(event),
-      encodeCharmForHref: (charm: unknown) => this.encodeCharmForHref(charm),
-      insertMention: (mention: unknown) => this.insertMention(mention),
+      encodeCharmForHref: (charm: Mentionable) =>
+        this.encodeCharmForHref(charm),
+      insertMention: (mention: Mentionable) => this.insertMention(mention),
     };
   }
 
@@ -1556,12 +1562,13 @@ export class CTOutliner extends BaseElement
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private getFilteredMentions(): unknown[] {
+  private getFilteredMentions(): MentionableArray {
     if (!this.mentionable) {
       return [];
     }
 
-    const mentionableData = this.mentionable.getAsQueryResult();
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get();
     if (!mentionableData || mentionableData.length === 0) {
       return [];
     }
@@ -1573,16 +1580,16 @@ export class CTOutliner extends BaseElement
     // we need to resolve each one individually
     for (let i = 0; i < mentionableData.length; i++) {
       // Use key(i).getAsQueryResult() to properly resolve LINK references
-      const mention = this.mentionable.key(i).getAsQueryResult();
+      const mention = mentionableArray.key(i).get();
       if (mention && mention[NAME]?.toLowerCase()?.includes(query)) {
         matches.push(i);
       }
     }
 
-    return matches.map((i) => this.mentionable.key(i).getAsQueryResult());
+    return matches.map((i) => mentionableArray.key(i).get());
   }
 
-  private insertMention(mention: unknown) {
+  private insertMention(mention: Mentionable) {
     if (!this.editingNodePath) return;
 
     const editingNode = getNodeByPath(this.tree, this.editingNodePath);
@@ -1605,7 +1612,7 @@ export class CTOutliner extends BaseElement
 
     // Create markdown link with encoded charm reference
     const charmHref = this.encodeCharmForHref(mention);
-    const mentionText = `[${(mention as any)[NAME]}](${charmHref})`;
+    const mentionText = `[${mention[NAME]}](${charmHref})`;
 
     this.editingContent = beforeMention + mentionText + afterMention;
     textarea.value = this.editingContent;
@@ -1622,7 +1629,7 @@ export class CTOutliner extends BaseElement
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: unknown): string {
+  private encodeCharmForHref(charm: Mentionable): string {
     // Simply use the entity ID as the href
     const entityId = getEntityId(charm);
     return encodeURIComponent(JSON.stringify(entityId)) || "";
@@ -1631,14 +1638,15 @@ export class CTOutliner extends BaseElement
   /**
    * Decode charm reference from href (entity ID)
    */
-  private decodeCharmFromHref(href: string | null): unknown | null {
+  private decodeCharmFromHref(href: string | null): Mentionable | null {
     if (!href || !this.mentionable) return null;
 
-    const mentionableData = this.mentionable.getAsQueryResult() || [];
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get() || [];
 
     for (let i = 0; i < mentionableData.length; i++) {
       // Properly resolve each LINK reference
-      const mention = this.mentionable.key(i).getAsQueryResult();
+      const mention = mentionableArray.key(i).get();
       if (mention) {
         const mentionEntityId = encodeURIComponent(
           JSON.stringify(getEntityId(mention)),
@@ -2040,7 +2048,7 @@ export class CTOutliner extends BaseElement
                 this.requestUpdate();
               }}"
             >
-              <div class="mention-name">${(mention as any)[NAME]}</div>
+              <div class="mention-name">${mention[NAME]}</div>
             </div>
           `
         )}
