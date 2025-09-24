@@ -187,7 +187,7 @@ current offline harness.
       readiness flips only when all checklist items pass.
 - [ ] Undo history stack pattern — capture undoable states ensure handlers
       manage twin stacks and derived pointer location.
-- [ ] Redo stack pattern — replay undone actions orderly ensure redo
+- [x] Redo stack pattern — replay undone actions orderly ensure redo
       availability toggles when undo stack mutates.
 - [x] Template gallery pattern — browse templates by category ensure handlers
       filter categories and derived tiles refresh.

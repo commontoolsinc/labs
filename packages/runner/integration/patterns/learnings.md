@@ -147,3 +147,6 @@
 - Passing an object of cells into `lift` makes it easy to derive shared calendar
   availability from both participant lists and blocked windows, keeping
   reactivity without reaching for imperative `get()` calls.
+- Clearing the redo stack inside the apply handler keeps the derived
+  availability flags aligned with undo history; stacking the current value
+  before rewinding ensures replay stays deterministic for the harness.
