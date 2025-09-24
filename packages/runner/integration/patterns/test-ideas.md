@@ -229,7 +229,7 @@ current offline harness.
       per muscle group updates with edits.
 - [x] Sleep journal pattern — log sleep sessions with tags ensure derived
       averages compute per tag and weekday grouping.
-- [ ] Mood diary pattern — capture mood entries with context ensure derived
+- [x] Mood diary pattern — capture mood entries with context ensure derived
       sentiment breakdown updates by tag and time.
 - [x] Medication adherence pattern — track medication schedule ensure derived
       adherence percentage reflects doses taken.
