@@ -11,7 +11,7 @@ const space = signer.did();
 function setup() {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();

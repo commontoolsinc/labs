@@ -57,7 +57,7 @@ describe("Storage Subscription", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
 
@@ -471,7 +471,7 @@ describe("Storage Subscription", () => {
       storageManager = StorageManager.emulate({ as: signer });
 
       runtime = new Runtime({
-        blobbyServerUrl: import.meta.url,
+        apiUrl: new URL(import.meta.url),
         storageManager,
       });
 

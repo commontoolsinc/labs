@@ -22,7 +22,7 @@ describe("StorageTransaction", () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       storageManager,
-      blobbyServerUrl: "http://localhost:8080",
+      apiUrl: new URL("http://localhost:8000"),
     });
   });
 
@@ -494,7 +494,7 @@ describe("DocImpl shim notifications", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -605,7 +605,7 @@ describe("root value rewriting", () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       storageManager,
-      blobbyServerUrl: "http://localhost:8080",
+      apiUrl: new URL("http://localhost:8000"),
     });
   });
 
@@ -695,7 +695,7 @@ describe("data: URI behaviors", () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       storageManager,
-      blobbyServerUrl: "http://localhost:8080",
+      apiUrl: new URL("http://localhost:8000"),
     });
   });
 

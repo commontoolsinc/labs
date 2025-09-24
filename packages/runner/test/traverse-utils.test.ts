@@ -17,7 +17,7 @@ describe("traverseValue with query result proxies", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();

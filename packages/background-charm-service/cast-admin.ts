@@ -55,11 +55,11 @@ async function castRecipe() {
 
   // Create runtime with proper configuration
   const runtime = new Runtime({
+    apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", toolshedUrl),
     }),
-    blobbyServerUrl: toolshedUrl,
   });
 
   try {
