@@ -226,6 +226,9 @@ import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
 import {
   scenarios as notificationPreferenceScenarios,
 } from "./patterns/notification-preference.ts";
+import {
+  scenarios as quoteConfigurationScenarios,
+} from "./patterns/quote-configuration.ts";
 import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 import {
   scenarios as templateGalleryScenarios,
@@ -281,6 +284,7 @@ const allScenarios = [
   ...currencyConversionScenarios,
   ...menuPlannerScenarios,
   ...notificationPreferenceScenarios,
+  ...quoteConfigurationScenarios,
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,

@@ -287,7 +287,7 @@ current offline harness.
       adjust totals per signal mutation.
 - [x] CRM pipeline pattern — track deals by stage ensure derived forecasts sum
       weighted amounts across stages.
-- [ ] Quote configuration pattern — configure quote options ensure derived price
+- [x] Quote configuration pattern — configure quote options ensure derived price
       recalculates when option cells toggle.
 - [ ] Order fulfillment tracker pattern — monitor order flow ensure derived
       counts split orders by fulfillment status.
