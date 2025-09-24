@@ -130,3 +130,6 @@
 - Tracking medication adherence stays reliable when the sanitized schedule and
   taken log share a `lift` snapshot so percentage and remaining counts stay in
   sync for assertions.
+- Normalizing currency rate maps with a shared `lift` kept derived conversion
+  tables and summary strings stable while handlers only touched the raw rate and
+  target cells.
