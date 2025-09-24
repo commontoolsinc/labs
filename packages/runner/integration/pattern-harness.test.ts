@@ -225,6 +225,9 @@ import {
   scenarios as inventoryReorderThresholdScenarios,
 } from "./patterns/inventory-reorder-threshold.ts";
 import {
+  scenarios as incidentResponsePlaybookScenarios,
+} from "./patterns/incident-response-playbook.ts";
+import {
   scenarios as researchCitationManagerScenarios,
 } from "./patterns/research-citation-manager.ts";
 import {
@@ -253,6 +256,7 @@ const allScenarios = [
   ...designTokenSwitcherScenarios,
   ...userJourneyMapScenarios,
   ...inventoryReorderThresholdScenarios,
+  ...incidentResponsePlaybookScenarios,
   ...warehouseBinMapScenarios,
   ...researchCitationManagerScenarios,
   ...toggleScenarios,
