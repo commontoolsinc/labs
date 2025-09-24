@@ -269,7 +269,7 @@ current offline harness.
       balances hold allocation ratios across groups.
 - [ ] Funnel analytics pattern — model funnel stages ensure derived drop-off
       metrics update when events stream in.
-- [ ] Heatmap aggregation pattern — aggregate interaction points ensure derived
+- [x] Heatmap aggregation pattern — aggregate interaction points ensure derived
       grid normalizes intensity per coordinate bucket.
 - [x] Search relevance tuning pattern — tweak search weighting ensure derived
       scoring sample reflects weight adjustments.
