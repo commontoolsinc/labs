@@ -9,6 +9,7 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
+import { isCell, type Cell } from "@commontools/runner";
 
 /**
  * ct-theme — Provides a theme to a subtree and applies CSS vars.
@@ -38,6 +39,8 @@ export class CTThemeProvider extends BaseElement {
   @property({ attribute: false })
   _computedTheme: CTTheme = defaultTheme;
 
+  #unsubs: Array<() => void> = [];
+
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
     super.firstUpdated(changed);
     this._recomputeAndApply();
@@ -53,6 +56,32 @@ export class CTThemeProvider extends BaseElement {
   private _recomputeAndApply() {
     this._computedTheme = mergeWithDefaultTheme(this.theme);
     applyThemeToElement(this, this._computedTheme);
+    this.#setupSubscriptions();
+  }
+
+  #setupSubscriptions() {
+    // Clear previous subscriptions
+    for (const off of this.#unsubs) off();
+    this.#unsubs = [];
+
+    const t = this.theme as Record<string, unknown> | undefined;
+    if (!t) return;
+
+    // Subscribe to top-level cell properties to refresh CSS vars on change
+    for (const key of Object.keys(t)) {
+      const val = (t as any)[key];
+      if (isCell && isCell(val)) {
+        const cellVal = val as Cell<any>;
+        const off = cellVal.sink(() => this._recomputeAndApply());
+        this.#unsubs.push(off);
+      }
+    }
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    for (const off of this.#unsubs) off();
+    this.#unsubs = [];
   }
 
   override render() {
@@ -61,4 +90,3 @@ export class CTThemeProvider extends BaseElement {
 }
 
 customElements.define("ct-theme", CTThemeProvider);
-

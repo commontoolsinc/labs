@@ -1,6 +1,13 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { consume } from "@lit/context";
+import {
+  applyThemeToElement,
+  defaultTheme,
+  type CTTheme,
+  themeContext,
+} from "../theme-context.ts";
 import { type Cell } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
@@ -129,45 +136,50 @@ export class CTInput extends BaseElement {
       padding: 0.5rem 0.75rem;
       font-size: 0.875rem;
       line-height: 1.25rem;
-      color: var(--foreground, hsl(0, 0%, 9%));
-      background-color: var(--background, hsl(0, 0%, 100%));
-      border: 1px solid var(--border, hsl(0, 0%, 89%));
-      border-radius: var(--radius, 0.375rem);
+      color: var(--ct-theme-color-text, #111827);
+      background-color: var(--ct-theme-color-background, #ffffff);
+      border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+      border-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
       transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
-      font-family: inherit;
+      font-family: var(--ct-theme-font-family, inherit);
     }
 
     input::placeholder {
-      color: var(--muted-foreground, hsl(0, 0%, 45%));
+      color: var(--ct-theme-color-text-muted, #6b7280);
     }
 
     input:hover:not(:disabled):not(:focus) {
-      border-color: var(--border-hover, hsl(0, 0%, 78%));
+      border-color: var(--ct-theme-color-border, #d1d5db);
     }
 
     input:focus {
       outline: none;
-      border-color: var(--ring, hsl(212, 100%, 47%));
-      box-shadow: 0 0 0 3px var(--ring-alpha, hsla(212, 100%, 47%, 0.1));
+      border-color: var(--ct-theme-color-primary, #3b82f6);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
     }
 
     input:disabled {
       cursor: not-allowed;
       opacity: 0.5;
-      background-color: var(--muted, hsl(0, 0%, 96%));
+      background-color: var(--ct-theme-color-surface, #f1f5f9);
     }
 
     input[readonly] {
-      background-color: var(--muted, hsl(0, 0%, 96%));
+      background-color: var(--ct-theme-color-surface, #f1f5f9);
     }
 
     input.error {
-      border-color: var(--destructive, hsl(0, 100%, 50%));
+      border-color: var(--ct-theme-color-error, #dc2626);
     }
 
     input.error:focus {
-      border-color: var(--destructive, hsl(0, 100%, 50%));
-      box-shadow: 0 0 0 3px var(--destructive-alpha, hsla(0, 100%, 50%, 0.1));
+      border-color: var(--ct-theme-color-error, #dc2626);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-error, rgba(220, 38, 38, 0.15));
     }
 
     /* Remove spinner buttons from number inputs in Chrome/Safari/Edge */
@@ -234,7 +246,7 @@ export class CTInput extends BaseElement {
     input[type="range"]::-webkit-slider-track {
       width: 100%;
       height: 4px;
-      background: var(--muted, hsl(0, 0%, 96%));
+      background: var(--ct-theme-color-surface, #f1f5f9);
       border-radius: 2px;
     }
 
@@ -243,7 +255,7 @@ export class CTInput extends BaseElement {
       appearance: none;
       width: 16px;
       height: 16px;
-      background: var(--primary, hsl(212, 100%, 47%));
+      background: var(--ct-theme-color-primary, #3b82f6);
       border-radius: 50%;
       cursor: pointer;
     }
@@ -251,14 +263,14 @@ export class CTInput extends BaseElement {
     input[type="range"]::-moz-range-track {
       width: 100%;
       height: 4px;
-      background: var(--muted, hsl(0, 0%, 96%));
+      background: var(--ct-theme-color-surface, #f1f5f9);
       border-radius: 2px;
     }
 
     input[type="range"]::-moz-range-thumb {
       width: 16px;
       height: 16px;
-      background: var(--primary, hsl(212, 100%, 47%));
+      background: var(--ct-theme-color-primary, #3b82f6);
       border-radius: 50%;
       border: none;
       cursor: pointer;
@@ -271,12 +283,13 @@ export class CTInput extends BaseElement {
 
     /* Valid state (when showValidation is true) */
     input:valid:not(:placeholder-shown) {
-      border-color: var(--success, hsl(120, 60%, 40%));
+      border-color: var(--ct-theme-color-success, #16a34a);
     }
 
     input:valid:not(:placeholder-shown):focus {
-      border-color: var(--success, hsl(120, 60%, 40%));
-      box-shadow: 0 0 0 3px var(--success-alpha, hsla(120, 60%, 40%, 0.1));
+      border-color: var(--ct-theme-color-success, #16a34a);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-success, rgba(22, 163, 74, 0.15));
     }
   `;
 
@@ -381,6 +394,11 @@ export class CTInput extends BaseElement {
     this.timingStrategy = "debounce";
     this.timingDelay = 300;
   }
+
+  // Theme consumption
+  @consume({ context: themeContext, subscribe: true })
+  // deno-lint-ignore no-explicit-any
+  declare theme?: CTTheme;
 
   private get input(): HTMLInputElement | null {
     if (!this._input) {
@@ -495,6 +513,10 @@ export class CTInput extends BaseElement {
         delay: this.timingDelay,
       });
     }
+
+    if (changedProperties.has("theme")) {
+      applyThemeToElement(this, this.theme ?? defaultTheme);
+    }
   }
 
   override firstUpdated() {
@@ -513,6 +535,9 @@ export class CTInput extends BaseElement {
     if (this.autofocus) {
       this._input?.focus();
     }
+
+    // Apply theme after first render
+    applyThemeToElement(this, this.theme ?? defaultTheme);
   }
 
   override render() {
