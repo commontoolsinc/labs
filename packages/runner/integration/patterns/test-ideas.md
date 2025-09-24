@@ -135,7 +135,7 @@ current offline harness.
       within single step and assert cumulative result.
 - [ ] Counter with nested pattern removal and recreation — remove child pattern
       then recreate and ensure fresh state.
-- [ ] Counter with conditional child instantiation — instantiate child pattern
+- [x] Counter with conditional child instantiation — instantiate child pattern
       only when condition true and assert absence otherwise.
 - [x] Counter with derived canonical form — transform nested state into
       canonical sorted structure for assertions.
