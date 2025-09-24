@@ -9,7 +9,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { Runtime } from "../src/index.ts";
+import { Cell, Runtime, Stream } from "../src/index.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;
@@ -80,11 +80,40 @@ async function runTest() {
   );
   console.log("Recipe compiled successfully");
 
-  let charm = await charmManager.runPersistent(
-    recipe,
-    {},
-  );
-  charm = (await charmManager.get(charm))!; // Attach result schema
+  const charm = (await charmManager.runPersistent(recipe, {})).asSchema({
+    type: "object",
+    properties: {
+      my_numbers_array: {
+        type: "array",
+        items: { type: "number" },
+      },
+      my_objects_array: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { count: { type: "number" } },
+        },
+      },
+      pushNumbersHandler: {
+        type: "object",
+        properties: { value: { type: "number" } },
+        asStream: true,
+      },
+      pushObjectsHandler: {
+        type: "object",
+        properties: {
+          value: { type: "object", properties: { count: { type: "number" } } },
+        },
+        asStream: true,
+      },
+    },
+    required: [
+      "my_numbers_array",
+      "my_objects_array",
+      "pushNumbersHandler",
+      "pushObjectsHandler",
+    ],
+  });
   console.log("Result charm ID:", charm.entityId);
   console.log("Result charm schema:", charm.schema);
 

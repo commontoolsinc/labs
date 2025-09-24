@@ -52,7 +52,6 @@ import {
   pathToString,
   stringToPath,
 } from "./node-path.ts";
-import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -144,7 +143,7 @@ export class CTOutliner extends BaseElement
 
   declare value: Cell<Tree> | null;
   declare readonly: boolean;
-  declare mentionable: Cell<Charm[]>;
+  declare mentionable: Cell<unknown[]>;
 
   // Direct tree access from Cell
   get tree(): Tree {
@@ -671,8 +670,8 @@ export class CTOutliner extends BaseElement
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
       handleCharmLinkClick: (event: MouseEvent) =>
         this.handleCharmLinkClick(event),
-      encodeCharmForHref: (charm: Charm) => this.encodeCharmForHref(charm),
-      insertMention: (mention: Charm) => this.insertMention(mention),
+      encodeCharmForHref: (charm: unknown) => this.encodeCharmForHref(charm),
+      insertMention: (mention: unknown) => this.insertMention(mention),
     };
   }
 
@@ -1557,7 +1556,7 @@ export class CTOutliner extends BaseElement
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private getFilteredMentions(): Charm[] {
+  private getFilteredMentions(): unknown[] {
     if (!this.mentionable) {
       return [];
     }
@@ -1583,7 +1582,7 @@ export class CTOutliner extends BaseElement
     return matches.map((i) => this.mentionable.key(i).getAsQueryResult());
   }
 
-  private insertMention(mention: Charm) {
+  private insertMention(mention: unknown) {
     if (!this.editingNodePath) return;
 
     const editingNode = getNodeByPath(this.tree, this.editingNodePath);
@@ -1606,7 +1605,7 @@ export class CTOutliner extends BaseElement
 
     // Create markdown link with encoded charm reference
     const charmHref = this.encodeCharmForHref(mention);
-    const mentionText = `[${mention[NAME]}](${charmHref})`;
+    const mentionText = `[${(mention as any)[NAME]}](${charmHref})`;
 
     this.editingContent = beforeMention + mentionText + afterMention;
     textarea.value = this.editingContent;
@@ -1623,7 +1622,7 @@ export class CTOutliner extends BaseElement
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: Charm): string {
+  private encodeCharmForHref(charm: unknown): string {
     // Simply use the entity ID as the href
     const entityId = getEntityId(charm);
     return encodeURIComponent(JSON.stringify(entityId)) || "";
@@ -1632,7 +1631,7 @@ export class CTOutliner extends BaseElement
   /**
    * Decode charm reference from href (entity ID)
    */
-  private decodeCharmFromHref(href: string | null): Charm | null {
+  private decodeCharmFromHref(href: string | null): unknown | null {
     if (!href || !this.mentionable) return null;
 
     const mentionableData = this.mentionable.getAsQueryResult() || [];
@@ -2041,7 +2040,7 @@ export class CTOutliner extends BaseElement
                 this.requestUpdate();
               }}"
             >
-              <div class="mention-name">${mention[NAME]}</div>
+              <div class="mention-name">${(mention as any)[NAME]}</div>
             </div>
           `
         )}
@@ -2123,7 +2122,7 @@ export class CTOutliner extends BaseElement
    * Render attachments for a node using ct-render
    */
   private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
-    const attachments = node.key("attachments").getAsQueryResult() as Charm[];
+    const attachments = node.key("attachments").getAsQueryResult() as unknown[];
 
     if (!attachments || attachments.length === 0) {
       return "";
@@ -2138,7 +2137,7 @@ export class CTOutliner extends BaseElement
     const space = tree.space;
 
     // Create proper charm cell references from attachment charm objects
-    const charmCells = attachments.map((attachment: Charm) => {
+    const charmCells = attachments.map((attachment: unknown) => {
       try {
         // Extract entity ID from the charm object
         const entityId = getEntityId(attachment);
@@ -2149,11 +2148,11 @@ export class CTOutliner extends BaseElement
         }
 
         // Create a proper charm cell reference using the runtime
-        const charmCell = runtime.getCellFromEntityId<Charm>(
+        const charmCell = runtime.getCellFromEntityId<unknown>(
           space,
           entityId,
           [],
-          charmSchema,
+          undefined,
         );
 
         return charmCell;
@@ -2165,11 +2164,11 @@ export class CTOutliner extends BaseElement
         );
         return null;
       }
-    }).filter((cell): cell is Cell<Charm> => cell !== null);
+    }).filter((cell): cell is Cell<unknown> => cell !== null);
 
     return html`
       <div class="attachments">
-        ${charmCells.map((charmCell: Cell<Charm>) => {
+        ${charmCells.map((charmCell: Cell<unknown>) => {
           return html`
             <div class="attachment">
               <ct-render .cell="${charmCell}"></ct-render>

@@ -11,6 +11,7 @@ import { Task } from "@lit/task";
 import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { NAME } from "@commontools/runner";
+import { type NameSchema, nameSchema } from "@commontools/charm";
 import { navigate, updatePageTitle } from "../lib/navigate.ts";
 
 export class XAppView extends BaseView {
@@ -148,7 +149,7 @@ export class XAppView extends BaseView {
       ) {
         return current;
       }
-      const activeCharm = await rt.cc().get(app.activeCharmId);
+      const activeCharm = await rt.cc().get(app.activeCharmId, nameSchema);
       this.#setTitleSubscription(activeCharm);
 
       return activeCharm;
@@ -156,7 +157,7 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt],
   });
 
-  #setTitleSubscription(activeCharm?: CharmController) {
+  #setTitleSubscription(activeCharm?: CharmController<NameSchema>) {
     if (!activeCharm) {
       if (this.titleSubscription) {
         this.titleSubscription.removeEventListener(
@@ -169,7 +170,7 @@ export class XAppView extends BaseView {
     } else {
       const cell = activeCharm.getCell();
       this.titleSubscription = new CellEventTarget(cell.key(NAME));
-      this.charmTitle = cell.get()[NAME];
+      this.charmTitle = cell.key(NAME).get();
     }
   }
 

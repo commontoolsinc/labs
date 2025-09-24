@@ -1,4 +1,9 @@
-import { Runtime, RuntimeProgram } from "@commontools/runner";
+import {
+  type JSONSchema,
+  Runtime,
+  RuntimeProgram,
+  type Schema,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
@@ -10,7 +15,7 @@ export interface CreateCharmOptions {
   start?: boolean;
 }
 
-export class CharmsController {
+export class CharmsController<T = unknown> {
   #manager: CharmManager;
   #disposed = false;
 
@@ -26,10 +31,10 @@ export class CharmsController {
   async create(
     program: RuntimeProgram | string,
     options: CreateCharmOptions = {},
-  ): Promise<CharmController> {
+  ): Promise<CharmController<T>> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent(
+    const charm = await this.#manager.runPersistent<T>(
       recipe,
       options.input,
       undefined,
@@ -38,13 +43,20 @@ export class CharmsController {
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
-    return new CharmController(this.#manager, charm);
+    return new CharmController<T>(this.#manager, charm);
   }
 
-  // Why is `CharmManager.get` async but `getCharms` sync?
-  async get(charmId: string): Promise<CharmController> {
+  async get<S extends JSONSchema = JSONSchema>(
+    charmId: string,
+    schema: S,
+  ): Promise<CharmController<Schema<S>>>;
+  async get<T = unknown>(
+    charmId: string,
+    schema?: JSONSchema,
+  ): Promise<CharmController<T>>;
+  async get(charmId: string, schema?: JSONSchema): Promise<CharmController> {
     this.disposeCheck();
-    const cell = await this.#manager.get(charmId);
+    const cell = await this.#manager.get(charmId, false, schema);
     if (!cell) {
       throw new Error(`Charm "${charmId}" not found.`);
     }

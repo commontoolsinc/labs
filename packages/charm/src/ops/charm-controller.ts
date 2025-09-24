@@ -6,7 +6,12 @@ import {
   RuntimeProgram,
   TYPE,
 } from "@commontools/runner";
-import { Charm, charmId, CharmManager, processSchema } from "../manager.ts";
+import {
+  charmId,
+  CharmManager,
+  nameSchema,
+  processSchema,
+} from "../manager.ts";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
@@ -44,13 +49,10 @@ class CharmPropIo implements CharmCellIo {
       // Build the path with transaction context
       let txCell = targetCell.withTx(tx);
       for (const segment of (path ?? [])) {
-        txCell = txCell.key(segment as keyof unknown);
+        txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
       }
 
-      // Set the value
-      // FIXME: types
-      // Charm input is not a Charm
-      txCell.set(value as Charm);
+      txCell.set(value);
     });
 
     await manager.runtime.idle();
@@ -67,15 +69,15 @@ class CharmPropIo implements CharmCellIo {
   }
 }
 
-export class CharmController {
-  #cell: Cell<Charm>;
+export class CharmController<T = unknown> {
+  #cell: Cell<T>;
   #manager: CharmManager;
   readonly id: string;
 
   input: CharmCellIo;
   result: CharmCellIo;
 
-  constructor(manager: CharmManager, cell: Cell<Charm>) {
+  constructor(manager: CharmManager, cell: Cell<T>) {
     const id = charmId(cell);
     if (!id) {
       throw new Error("Could not get an ID from a Cell<Charm>");
@@ -88,10 +90,10 @@ export class CharmController {
   }
 
   name(): string | undefined {
-    return this.#cell.get()[NAME];
+    return this.#cell.asSchema(nameSchema).get()[NAME];
   }
 
-  getCell(): Cell<Charm> {
+  getCell(): Cell<T> {
     return this.#cell;
   }
 
@@ -173,7 +175,7 @@ async function execute(
   await manager.synced();
 }
 
-export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
+export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
   const sourceCell = charm.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE];

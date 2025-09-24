@@ -22,7 +22,6 @@ import type { ElementHandle } from "@astral/astral";
 import { Identity } from "@commontools/identity";
 import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { type XAppView } from "../src/views/AppView.ts";
-import { Charm } from "@commontools/charm";
 
 const { SPACE_NAME, API_URL, FRONTEND_URL } = env;
 
@@ -56,7 +55,7 @@ async function clickDecrementBtn(counterIframe: ElementHandle): Promise<void> {
 }
 
 // Helper function to get the active charm's result from the app
-async function getCharmResult(page: Page): Promise<Charm> {
+async function getCharmResult(page: Page): Promise<{ count: number }> {
   // First get the app view element using pierce selector
   const appView = await page.$("x-app-view", { strategy: "pierce" });
   if (!appView) {
@@ -80,9 +79,9 @@ async function getCharmResult(page: Page): Promise<Charm> {
     const charmController = activeCharmTask.value;
 
     // Get the result from the charm controller
-    const result = charmController.result.get() as Charm;
+    const result = charmController.result.get();
 
-    return result;
+    return result as { count: number };
   });
 }
 

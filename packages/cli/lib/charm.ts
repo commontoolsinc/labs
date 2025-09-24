@@ -6,16 +6,10 @@ import {
   isStream,
   Runtime,
   RuntimeProgram,
-  Stream,
   UI,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
-import {
-  Charm,
-  charmId,
-  CharmManager,
-  extractUserCode,
-} from "@commontools/charm";
+import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { isVNode, type VNode } from "@commontools/html";
@@ -52,7 +46,7 @@ function parseSpace(
   return space;
 }
 
-function getCharmIdSafe(charm: Cell<Charm>): string {
+function getCharmIdSafe(charm: Cell<unknown>): string {
   const id = charmId(charm);
   if (!id) {
     throw new Error("Could not get an ID from a Cell<Charm>");
@@ -78,7 +72,6 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 }
 
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
-  const spaceName = parseSpace(config.space);
   const session = await makeSession(config);
   // Use a const ref object so we can assign later while keeping const binding
   const charmManagerRef: { current?: CharmManager } = {};
@@ -397,14 +390,14 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectCharm<I = Charm, R = Charm>(
+export async function inspectCharm(
   config: CharmConfig,
 ): Promise<{
   id: string;
   name?: string;
   recipeName?: string;
-  source: Readonly<I>;
-  result: Readonly<R>;
+  source: Readonly<unknown>;
+  result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
@@ -415,8 +408,8 @@ export async function inspectCharm<I = Charm, R = Charm>(
   const id = charm.id;
   const name = charm.name();
   const recipeName = (await charm.getRecipeMeta()).recipeName;
-  const source = charm.input.get() as Readonly<I>;
-  const result = charm.result.get() as Readonly<R>;
+  const source = charm.input.get() as Readonly<unknown>;
+  const result = charm.result.get() as Readonly<unknown>;
   const readingFrom = charm.readingFrom().map((charm) => ({
     id: charm.id,
     name: charm.name(),
@@ -440,8 +433,8 @@ export async function inspectCharm<I = Charm, R = Charm>(
 export async function getCharmView(
   config: CharmConfig,
 ): Promise<unknown> {
-  const data = await inspectCharm<unknown, { [UI]: VNode }>(config);
-  return data.result?.[UI];
+  const data = await inspectCharm(config) as any;
+  return data.result?.[UI] as VNode;
 }
 
 export function formatViewTree(view: unknown): string {

@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
-import { type Charm, charmId } from "@commontools/charm";
+import { charmId } from "@commontools/charm";
 import {
   type ArrayCellController,
   createArrayCellController,
@@ -53,7 +53,7 @@ export interface KanbanItemAction {
  * Drag and drop state tracking
  */
 interface DragState {
-  draggedItem: Cell<Charm> | null;
+  draggedItem: Cell<unknown> | null;
   draggedFromColumn: string | null;
   dragOverColumn: string | null;
   isDragging: boolean;
@@ -68,7 +68,7 @@ interface DragState {
  *
  * @element ct-kanban
  *
- * @attr {Cell<Charm[]>} value - Cell containing array of charms with status property
+ * @attr {Cell<unknown[]>} value - Cell containing array of charms with status property
  * @attr {string} title - Kanban board title
  * @attr {boolean} readonly - Whether the kanban is read-only
  * @attr {KanbanColumn[]} columns - Column configuration array
@@ -89,7 +89,7 @@ interface DragState {
  */
 export class CTKanban extends BaseElement {
   @property()
-  value: Cell<Charm[]> | null = null;
+  value: Cell<unknown[]> | null = null;
 
   @property()
   override title: string = "";
@@ -113,7 +113,7 @@ export class CTKanban extends BaseElement {
   itemAction: KanbanItemAction | null = { type: "remove" };
 
   // The main cell containing the array of charms
-  private charmsCell: Cell<Charm[]> | null = null;
+  private charmsCell: Cell<unknown[]> | null = null;
   private cellSubscription: (() => void) | null = null;
 
   // Drag and drop state
@@ -451,7 +451,7 @@ export class CTKanban extends BaseElement {
     }
   }
 
-  private getCharmCells(): Cell<Charm>[] {
+  private getCharmCells(): Cell<unknown>[] {
     if (!this.charmsCell) {
       console.log("[ct-kanban] No charmsCell");
       return [];
@@ -469,13 +469,13 @@ export class CTKanban extends BaseElement {
       return [];
     }
 
-    // Use .key(index) to get Cell<Charm> for each charm
+    // Use .key(index) to get Cell<unknown> for each charm
     const charmCells = charms.map((_, index) => this.charmsCell!.key(index));
     console.log("[ct-kanban] Created charmCells:", charmCells.length);
     return charmCells;
   }
 
-  private setValue(newValue: Charm[]): void {
+  private setValue(newValue: unknown[]): void {
     if (this.charmsCell) {
       this.charmsCell.set(newValue);
     }
@@ -485,7 +485,7 @@ export class CTKanban extends BaseElement {
    * Get items for a specific column by status
    * Special case: status === 'no-status' returns items with no status
    */
-  getColumnItems(status: string): Cell<Charm>[] {
+  getColumnItems(status: string): Cell<unknown>[] {
     console.log(`[ct-kanban] Getting items for status: ${status}`);
     const charmCells = this.getCharmCells();
     console.log(`[ct-kanban] Have ${charmCells.length} charm cells to filter`);
@@ -590,7 +590,7 @@ export class CTKanban extends BaseElement {
   /**
    * Move an item to a different column (status)
    */
-  moveItem(charmCell: Cell<Charm>, toStatus: string): void {
+  moveItem(charmCell: Cell<unknown>, toStatus: string): void {
     const charm = charmCell.get();
     if (!charm) return;
 
@@ -629,11 +629,11 @@ export class CTKanban extends BaseElement {
   /**
    * Update an item's status
    */
-  updateItemStatus(charmCell: Cell<Charm>, newStatus: string): void {
+  updateItemStatus(charmCell: Cell<unknown>, newStatus: string): void {
     this.moveItem(charmCell, newStatus);
   }
 
-  private removeItem(charmCellToRemove: Cell<Charm>): void {
+  private removeItem(charmCellToRemove: Cell<unknown>): void {
     if (!this.charmsCell) return;
 
     const charms = this.charmsCell.get();
@@ -642,7 +642,7 @@ export class CTKanban extends BaseElement {
     this.charmsCell.set(newCharms);
   }
 
-  private handleItemAction(charmCell: Cell<Charm>, event: MouseEvent) {
+  private handleItemAction(charmCell: Cell<unknown>, event: MouseEvent) {
     event.stopPropagation();
 
     if (!this.itemAction) return;
@@ -664,7 +664,7 @@ export class CTKanban extends BaseElement {
   }
 
   // Drag and Drop Implementation
-  private handleMouseDown(charmCell: Cell<Charm>, event: MouseEvent) {
+  private handleMouseDown(charmCell: Cell<unknown>, event: MouseEvent) {
     if (this.readonly || event.button !== 0) return;
 
     event.preventDefault();
@@ -758,7 +758,7 @@ export class CTKanban extends BaseElement {
       this.dragState.dragOverColumn !== this.dragState.draggedFromColumn
     ) {
       this.moveItem(
-        this.dragState.draggedItem as Cell<Charm>,
+        this.dragState.draggedItem as Cell<unknown>,
         this.dragState.dragOverColumn,
       );
     }
@@ -851,7 +851,7 @@ export class CTKanban extends BaseElement {
     `;
   }
 
-  private renderColumn(column: KanbanColumn, allItems: Cell<Charm>[]) {
+  private renderColumn(column: KanbanColumn, allItems: Cell<unknown>[]) {
     const columnItems = this.getColumnItems(column.status);
     const isDragOver = this.dragState.dragOverColumn === column.status;
     const isMaxReached = column.maxItems &&
@@ -905,7 +905,7 @@ export class CTKanban extends BaseElement {
     `;
   }
 
-  private renderItem(charmCell: Cell<Charm>) {
+  private renderItem(charmCell: Cell<unknown>) {
     const isDragging = this.dragState.draggedItem === charmCell;
 
     return html`
@@ -939,7 +939,7 @@ export class CTKanban extends BaseElement {
     `;
   }
 
-  private renderItemMetadata(charmCell: Cell<Charm>) {
+  private renderItemMetadata(charmCell: Cell<unknown>) {
     const charm = charmCell.get();
     const hasStatusBadge = charm.statusBadge || charm.status;
     const hasSubtasks = charm.subtaskCount ||
@@ -956,7 +956,7 @@ export class CTKanban extends BaseElement {
     `;
   }
 
-  private renderStatusBadge(charmCell: Cell<Charm>) {
+  private renderStatusBadge(charmCell: Cell<unknown>) {
     const charm = charmCell.get();
     const status = charm.status || "no-status";
     const badge = charm.statusBadge || {
@@ -976,7 +976,7 @@ export class CTKanban extends BaseElement {
     `;
   }
 
-  private renderSubtaskBadge(charmCell: Cell<Charm>) {
+  private renderSubtaskBadge(charmCell: Cell<unknown>) {
     const charm = charmCell.get();
     const subtaskCount = charm.subtaskCount ||
       (charm.items ? charm.items.length : 0);

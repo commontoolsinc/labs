@@ -281,6 +281,8 @@ export type { MemorySpace } from "@commontools/memory/interface";
 export type Cellify<T> =
   // Handle existing Cell<> types, allowing unwrapping
   T extends Cell<infer U> ? Cellify<U> | Cell<Cellify<U>>
+    // Handle Stream<> types, allowing unwrapping
+    : T extends Stream<infer U> ? Cellify<U> | Stream<Cellify<U>>
     // Handle arrays
     : T extends Array<infer U> ? Array<Cellify<U>> | Cell<Array<Cellify<U>>>
     // Handle objects (excluding null), adding optional ID fields

@@ -2,7 +2,6 @@
  * Type definitions for the CT Outliner component
  */
 
-import { Charm } from "@commontools/charm";
 import type { TreeOperationResult } from "./tree-diff.ts";
 
 /**
@@ -10,13 +9,13 @@ import type { TreeOperationResult } from "./tree-diff.ts";
  */
 export interface MentionableItem {
   name: string;
-  charm: Charm;
+  charm: unknown;
 }
 
 /**
  * Attachment to a node - for future extensibility
  */
-export type Attachment = Charm;
+export type Attachment = unknown;
 
 /**
  * Node - represents both the tree structure and content
