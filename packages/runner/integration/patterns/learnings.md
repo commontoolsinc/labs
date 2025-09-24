@@ -2,6 +2,9 @@
 
 - Avoid sending `undefined` payloads in scenarios; the harness expects an object
   and may attempt DOM style handling when it receives `undefined`.
+- Sequencing invoice-style totals works best when item discounts are sanitized
+  before invoice-level rates run through `lift`; rounding once per stage keeps
+  derived totals stable in the harness.
 - Prefer working directly with `lift`; `derive(cell, fn)` is just
   `lift(fn)(cell)`, so staying with the `lift` form keeps code consistent.
 - Sanitize cells with `lift` before computing status booleans so validation
