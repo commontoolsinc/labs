@@ -164,7 +164,11 @@ async function runCharm(data: RunData): Promise<void> {
     if (!runningCharm) {
       // If not loaded yet, get it from the manager
       console.log(`Loading charm ${charmId} for the first time`);
-      runningCharm = await manager.get(charmsEntryCell, true, { type: "object", properties: { bgUpdater: { asStream: true } }, required: ["bgUpdater"] });
+      runningCharm = await manager.get(charmsEntryCell, true, {
+        type: "object",
+        properties: { bgUpdater: { asStream: true } },
+        required: ["bgUpdater"],
+      });
 
       if (!runningCharm) {
         throw new Error(`Charm not found: ${charmId}`);
