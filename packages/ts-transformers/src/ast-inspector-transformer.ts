@@ -1,10 +1,10 @@
 import ts from "typescript";
 
-export function createCaptureTransformer(
-  capture: (sourceFile: ts.SourceFile) => void,
+export function createAstInspectorTransformer(
+  inspect: (sourceFile: ts.SourceFile) => void,
 ): ts.TransformerFactory<ts.SourceFile> {
   return () => (sourceFile) => {
-    capture(sourceFile);
+    inspect(sourceFile);
     return sourceFile;
   };
 }

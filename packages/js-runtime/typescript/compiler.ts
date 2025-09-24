@@ -20,7 +20,7 @@ import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
 import {
-  createCaptureTransformer,
+  createAstInspectorTransformer,
   createModularOpaqueRefTransformer,
   createSchemaTransformer,
   hasCtsEnableDirective,
@@ -339,10 +339,10 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
         createSchemaTransformer(tsProgram),
       );
 
-      // Only add capture transformer if showTransformed is true
+      // Only add AST inspector transformer if showTransformed is true
       if (inputOptions.showTransformed) {
         beforeTransformers.push(
-          createCaptureTransformer((sourceFile) => {
+          createAstInspectorTransformer((sourceFile) => {
             if (!hasCtsEnableDirective(sourceFile)) return;
             if (capturedFileMap.has(sourceFile.fileName)) return;
             capturedFileMap.set(sourceFile.fileName, sourceFile.fileName);
