@@ -221,16 +221,57 @@ export function createDeriveCallForExpression(
   }
 
   const refs: ts.Expression[] = [];
+  const seen = new Set<ts.Node>();
+  const addRef = (expr: ts.Expression): void => {
+    if (seen.has(expr)) return;
+    seen.add(expr);
+    refs.push(expr);
+  };
+  const normalizeForCanonical = (expr: ts.Expression): ts.Expression => {
+    let current: ts.Expression = expr;
+    while (true) {
+      if (ts.isParenthesizedExpression(current)) {
+        current = current.expression;
+        continue;
+      }
+      if (
+        ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) ||
+        ts.isNonNullExpression(current)
+      ) {
+        current = current.expression;
+        continue;
+      }
+      if (ts.isCallExpression(current)) {
+        const callee = current.expression;
+        if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
+          current = callee.expression;
+          continue;
+        }
+      }
+      if (
+        ts.isPropertyAccessExpression(current) &&
+        current.parent &&
+        ts.isCallExpression(current.parent) &&
+        current.parent.expression === current
+      ) {
+        current = current.expression;
+        continue;
+      }
+      break;
+    }
+    return current;
+  };
   for (const entry of plan.entries) {
     const canonical = entry.dataFlow.expression;
-    refs.push(canonical);
     const canonicalText = canonical.getText(canonical.getSourceFile());
+    addRef(canonical);
     for (const occurrence of entry.dataFlow.occurrences) {
-      const occurrenceExpr = occurrence.expression;
+      const normalized = normalizeForCanonical(occurrence.expression);
       if (
-        occurrenceExpr.getText(occurrenceExpr.getSourceFile()) === canonicalText
+        normalized.getText(normalized.getSourceFile()) === canonicalText
       ) {
-        refs.push(occurrenceExpr);
+        addRef(normalized);
       }
     }
   }

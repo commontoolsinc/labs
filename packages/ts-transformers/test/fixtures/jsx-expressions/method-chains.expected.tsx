@@ -165,7 +165,7 @@ export default recipe({
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.map(u => (<li>{ifElse(u.active, derive(u.name, _v1 => _v1.toUpperCase()), derive(u.name, _v1 => u.name.toLowerCase()))}</li>))}
+          {state.users.map(u => (<li>{ifElse(u.active, derive(u.name, _v1 => _v1.toUpperCase()), derive(u.name, _v1 => _v1.toLowerCase()))}</li>))}
         </ul>
 
         {/* Some/every with reactive predicates */}
