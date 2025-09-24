@@ -197,7 +197,7 @@ current offline harness.
       per-role summaries stay accurate after changes.
 - [ ] Org chart hierarchy pattern — maintain reporting tree ensure handlers
       relocate staff and derived chains stay valid.
-- [ ] Calendar availability pattern — merge shared availability ensure derived
+- [x] Calendar availability pattern — merge shared availability ensure derived
       free slots recompute after block edits.
 - [ ] Meeting scheduler pattern — propose meeting slots ensure vote handlers
       update consensus pick with tie breakers.

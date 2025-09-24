@@ -144,3 +144,6 @@
   column totals aligned while handlers focus on targeted cell, row, or column
   updates; the sanitized matrix view becomes the single source for summary
   strings and assertions.
+- Passing an object of cells into `lift` makes it easy to derive shared calendar
+  availability from both participant lists and blocked windows, keeping
+  reactivity without reaching for imperative `get()` calls.
