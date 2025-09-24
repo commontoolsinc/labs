@@ -150,3 +150,6 @@
 - Clearing the redo stack inside the apply handler keeps the derived
   availability flags aligned with undo history; stacking the current value
   before rewinding ensures replay stays deterministic for the harness.
+- Balancing weighted assignments worked well once variants were sanitized with
+  `lift`, leaving the handler to mutate the raw map while a history cell kept
+  ordering deterministic for harness assertions.
