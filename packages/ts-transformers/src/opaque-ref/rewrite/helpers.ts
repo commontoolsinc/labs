@@ -244,7 +244,10 @@ export function createDeriveCallForExpression(
       }
       if (ts.isCallExpression(current)) {
         const callee = current.expression;
-        if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
+        if (
+          ts.isPropertyAccessExpression(callee) ||
+          ts.isElementAccessExpression(callee)
+        ) {
           current = callee.expression;
           continue;
         }

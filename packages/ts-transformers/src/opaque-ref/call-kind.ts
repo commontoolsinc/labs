@@ -20,7 +20,6 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRef",
 ]);
 
-
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
