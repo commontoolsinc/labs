@@ -156,3 +156,6 @@
 - Building schedule-style patterns benefits from reusing the same coverage
   helper inside both handlers and derives; keeping slot order sanitized once
   makes gap arrays deterministic for harness assertions after each update.
+- Matching route capacity checks with the same helper used for derived load
+  metrics keeps handler guard rails and harness assertions aligned, while a
+  small history cell surfaces blocked attempts for deterministic tests.
