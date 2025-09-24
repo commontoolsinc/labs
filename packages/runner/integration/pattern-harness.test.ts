@@ -186,6 +186,7 @@ import {
 import {
   scenarios as sleepJournalScenarios,
 } from "./patterns/sleep-journal.ts";
+import { scenarios as moodDiaryScenarios } from "./patterns/mood-diary.ts";
 import {
   scenarios as medicationAdherenceScenarios,
 } from "./patterns/medication-adherence.ts";
@@ -272,6 +273,7 @@ const allScenarios = [
   ...listManagerScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
+  ...moodDiaryScenarios,
   ...medicationAdherenceScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,

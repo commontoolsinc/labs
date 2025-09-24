@@ -2,6 +2,9 @@
 
 - Avoid sending `undefined` payloads in scenarios; the harness expects an object
   and may attempt DOM style handling when it receives `undefined`.
+- Sanitizing mood tags to lowercase and normalizing timestamps keeps tag and
+  time bucket summaries stable for sentiment breakdown derives even as handlers
+  append new entries.
 - Sequencing invoice-style totals works best when item discounts are sanitized
   before invoice-level rates run through `lift`; rounding once per stage keeps
   derived totals stable in the harness.
