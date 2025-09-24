@@ -204,7 +204,7 @@ function createDeriveArgs(
   return [factory.createObjectLiteralExpression(properties, false)];
 }
 
-function createDeriveCall(
+export function createDeriveCall(
   expression: ts.Expression,
   refs: readonly ts.Expression[],
   options: DeriveCallOptions,

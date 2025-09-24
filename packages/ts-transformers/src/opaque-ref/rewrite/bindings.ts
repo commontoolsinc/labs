@@ -10,7 +10,6 @@ export interface BindingPlanEntry {
 
 export interface BindingPlan {
   readonly entries: readonly BindingPlanEntry[];
-  readonly paramBindings: ReadonlyMap<ts.Expression, string>;
   readonly usesObjectBinding: boolean;
 }
 
@@ -63,7 +62,6 @@ export function createBindingPlan(
   const usedPropertyNames = new Set<string>();
   const usedParamNames = new Set<string>();
   const entries: BindingPlanEntry[] = [];
-  const paramBindings = new Map<ts.Expression, string>();
 
   dataFlows.forEach((dataFlow, index) => {
     const base = deriveBaseName(dataFlow.expression, index);
@@ -87,21 +85,11 @@ export function createBindingPlan(
         usedParamNames,
       );
 
-    entries.push({
-      dataFlow,
-      propertyName,
-      paramName,
-    });
-
-    paramBindings.set(dataFlow.expression, paramName);
-    for (const occurrence of dataFlow.occurrences) {
-      paramBindings.set(occurrence.expression, paramName);
-    }
+    entries.push({ dataFlow, propertyName, paramName });
   });
 
   return {
     entries,
-    paramBindings,
     usesObjectBinding: entries.length > 1,
   };
 }

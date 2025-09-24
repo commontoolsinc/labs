@@ -1,16 +1,12 @@
 import ts from "typescript";
 
-import {
-  createIfElseCall,
-  replaceOpaqueRefsWithParams,
-} from "../transforms.ts";
+import { createDeriveCall } from "../transforms.ts";
 import { detectCallKind } from "../call-kind.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
 import type { NormalizedDataFlow } from "../normalize.ts";
 import type { DataFlowAnalysis } from "../dataflow.ts";
 import { isFunctionParameter } from "../types.ts";
-import { getHelperIdentifier } from "./import-resolver.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
@@ -202,74 +198,10 @@ export function filterRelevantDataFlows(
   });
 }
 
-export function createDeriveIdentifier(
-  context: RewriteContext,
-): ts.Expression {
-  return getHelperIdentifier(
-    context.factory,
-    context.sourceFile,
-    "derive",
-  );
-}
-
-export function createDeriveDataFlowObject(
-  plan: BindingPlan,
-  factory: ts.NodeFactory,
-): ts.ObjectLiteralExpression {
-  const properties = plan.entries.map((entry, index) => {
-    const dataFlow = entry.dataFlow.expression;
-    if (ts.isIdentifier(dataFlow) && dataFlow.text === entry.propertyName) {
-      return factory.createShorthandPropertyAssignment(dataFlow, undefined);
-    }
-    return factory.createPropertyAssignment(
-      factory.createIdentifier(entry.propertyName),
-      dataFlow,
-    );
-  });
-  return factory.createObjectLiteralExpression(properties, false);
-}
-
-function createLambdaParameter(
-  plan: BindingPlan,
-  factory: ts.NodeFactory,
-): ts.ParameterDeclaration {
-  if (!plan.usesObjectBinding) {
-    const firstEntry = plan.entries[0];
-    const paramName = firstEntry?.paramName ?? "_v1";
-    return factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      factory.createIdentifier(paramName),
-      undefined,
-      undefined,
-      undefined,
-    );
-  }
-
-  const bindings = plan.entries.map((entry) =>
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier(entry.propertyName),
-      factory.createIdentifier(entry.paramName),
-      undefined,
-    )
-  );
-
-  return factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindings),
-    undefined,
-    undefined,
-    undefined,
-  );
-}
-
 export function createDeriveCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
   context: RewriteContext,
-  options: { wrapConditional?: boolean } = {},
 ): ts.Expression {
   if (plan.entries.length === 0) return expression;
 
@@ -288,37 +220,26 @@ export function createDeriveCallForExpression(
     }
   }
 
-  const factory = context.factory;
-  const lambdaBody = replaceOpaqueRefsWithParams(
-    expression,
-    new Map(plan.paramBindings),
-    factory,
-    context.transformation,
-  );
-
-  const arrowFunction = factory.createArrowFunction(
-    undefined,
-    undefined,
-    [createLambdaParameter(plan, factory)],
-    undefined,
-    factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-    lambdaBody,
-  );
-
-  const deriveIdentifier = createDeriveIdentifier(context);
-  const deriveArgs = plan.usesObjectBinding
-    ? [createDeriveDataFlowObject(plan, factory), arrowFunction]
-    : [plan.entries[0]!.dataFlow.expression, arrowFunction];
-
-  const callExpression = factory.createCallExpression(
-    deriveIdentifier,
-    undefined,
-    deriveArgs,
-  );
-
-  if (options.wrapConditional && ts.isConditionalExpression(expression)) {
-    return createIfElseCall(expression, factory, context.sourceFile);
+  const refs: ts.Expression[] = [];
+  for (const entry of plan.entries) {
+    const canonical = entry.dataFlow.expression;
+    refs.push(canonical);
+    const canonicalText = canonical.getText(canonical.getSourceFile());
+    for (const occurrence of entry.dataFlow.occurrences) {
+      const occurrenceExpr = occurrence.expression;
+      if (
+        occurrenceExpr.getText(occurrenceExpr.getSourceFile()) === canonicalText
+      ) {
+        refs.push(occurrenceExpr);
+      }
+    }
   }
 
-  return callExpression;
+  const deriveCall = createDeriveCall(expression, refs, {
+    factory: context.factory,
+    sourceFile: context.sourceFile,
+    context: context.transformation,
+  });
+
+  return deriveCall ?? expression;
 }
