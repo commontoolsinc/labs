@@ -171,3 +171,6 @@
 - Syncing option catalogs into a dedicated `cell` via a light `lift` watcher
   lets handlers toggle selections safely while still respecting future argument
   updates, avoiding the need for `compute`-style initialization.
+- Passing multiple cells into a single `lift` invocation (by supplying an object
+  that contains each dependency) ensured threshold updates recomputed alert
+  derives without resorting to manual `.get()` calls.
