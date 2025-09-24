@@ -215,7 +215,7 @@ current offline harness.
       amounts follow handler updates to rate table.
 - [ ] Inventory shipment tracker pattern — track supplier shipments ensure
       derived ETAs adjust as status or milestone cells change.
-- [ ] Logistics routing pattern — assign packages to routes ensure derived load
+- [x] Logistics routing pattern — assign packages to routes ensure derived load
       metrics enforce capacity per route.
 - [x] Warehouse bin map pattern — map items to storage bins ensure handlers
       relocate inventory and derived occupancy stays.

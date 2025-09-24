@@ -246,6 +246,9 @@ import {
   scenarios as warehouseBinMapScenarios,
 } from "./patterns/warehouse-bin-map.ts";
 import {
+  scenarios as logisticsRoutingScenarios,
+} from "./patterns/logistics-routing.ts";
+import {
   scenarios as calendarAvailabilityScenarios,
 } from "./patterns/calendar-availability.ts";
 import {
@@ -280,6 +283,7 @@ const allScenarios = [
   ...calendarAvailabilityScenarios,
   ...callCenterScheduleScenarios,
   ...warehouseBinMapScenarios,
+  ...logisticsRoutingScenarios,
   ...researchCitationManagerScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
