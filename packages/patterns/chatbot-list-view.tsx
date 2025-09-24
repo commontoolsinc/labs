@@ -224,7 +224,11 @@ export default recipe<Input, Output>(
               })}
             />
           </div>
-          <ct-autolayout tabNames={["Chat", "Tools"]}>
+          <ct-autolayout
+            leftOpen
+            rightOpen={false}
+            tabNames={["Chat", "Tools"]}
+          >
             {
               selected.chat // workaround: CT-987
             }
@@ -236,19 +240,17 @@ export default recipe<Input, Output>(
               <div>
                 <h3>Chat List</h3>
               </div>
-              <div>
-                {charmsList.map((charmEntry, i) => (
-                  <div>
-                    index={i} chat ID: {charmEntry.local_id}
-                    <ct-button
-                      onClick={selectCharm({
-                        selectedCharm: selectedCharm,
-                        charm: charmEntry.charm,
-                      })}
-                    >
-                      LOAD
-                    </ct-button>
-                  </div>
+              <div role="list">
+                {charmsList.map((charmEntry) => (
+                  <ct-list-item
+                    onct-activate={selectCharm({
+                      selectedCharm,
+                      charm: charmEntry.charm,
+                    })}
+                  >
+                    <span>{charmEntry.charm[NAME]}</span>
+                    <span slot="meta">{charmEntry.local_id}</span>
+                  </ct-list-item>
                 ))}
               </div>
             </aside>

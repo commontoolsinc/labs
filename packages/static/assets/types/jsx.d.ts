@@ -57,6 +57,13 @@ declare global {
         "title"?: string,
         "onct-remove-item"?: OpaqueRef<HandlerEvent<{ item: CtListItem }>>,
       } & Children & HTMLElementProps;
+      "ct-list-item": {
+        "selected"?: boolean,
+        "active"?: boolean,
+        "disabled"?: boolean,
+        /** Fired when the row is activated (click/Enter/Space) */
+        "onct-activate"?: any,
+      } & Children & HTMLElementProps;
       "ct-input": {
         "$value"?: OpaqueRef<string>,
         "customStyle"?: string, // bf: I think this is going to go away one day soon

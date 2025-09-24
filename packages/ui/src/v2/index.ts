@@ -58,6 +58,7 @@ export * from "./components/ct-tab-list/index.ts";
 export * from "./components/ct-tab-panel/index.ts";
 export * from "./components/ct-tabs/index.ts";
 export * from "./components/ct-list/index.ts";
+export * from "./components/ct-list-item/index.ts";
 export * from "./components/ct-tags/index.ts";
 export * from "./components/ct-table/index.ts";
 export * from "./components/ct-tile/index.ts";
