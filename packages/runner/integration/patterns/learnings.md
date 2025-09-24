@@ -177,3 +177,6 @@
 - Guarding conditional child creation with a dedicated `cell` and a side-effect
   `lift` keeps activations idempotent; the guard reinstantiates the child on
   demand while the status derive can simply mirror the active flag.
+- Reusing a generic facet toggle handler keeps category and brand filters in
+  sync; sanitizing the payload within the handler prevents whitespace or case
+  noise from destabilizing the derived filtered list.
