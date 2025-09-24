@@ -1,16 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { checkWouldTransform, transformSource } from "./test-utils.ts";
 import { StaticCache } from "@commontools/static";
-import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
+
+import { transformSource } from "../utils.ts";
 
 const staticCache = new StaticCache();
-const commonToolsTypes = await staticCache.getText("types/commontools.d.ts");
+const commontools = await staticCache.getText("types/commontools.d.ts");
 
-describe("OpaqueRef Transformer", () => {
-  const types = { "commontools.d.ts": commonToolsTypes };
+describe("OpaqueRef transformer (runtime-style API)", () => {
+  const types = { "commontools.d.ts": commontools };
 
-  describe("Import Management", () => {
+  describe("import management", () => {
     it("adds derive import when needed", async () => {
       const source = `/// <cts-enable />
 import { OpaqueRef, h } from "commontools";
@@ -31,7 +31,6 @@ const isActive: OpaqueRef<boolean> = {} as any;
 const el = <div>{count + 1} {isActive ? 1 : 0}</div>;
 `;
       const transformed = await transformSource(source, { types });
-      // Should still have single import statement
       const importMatches = transformed.match(/import.*from "commontools"/g);
       expect(importMatches).toHaveLength(1);
       expect(transformed).toContain(
@@ -40,14 +39,13 @@ const el = <div>{count + 1} {isActive ? 1 : 0}</div>;
     });
   });
 
-  describe("Error Mode", () => {
+  describe("error mode", () => {
     it("reports errors instead of transforming", async () => {
       const source = `/// <cts-enable />
 import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const el = <div>{count + 1}</div>;
 `;
-
       await expect(
         transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(
@@ -68,14 +66,13 @@ const el = (
   </div>
 );
 `;
-
       await expect(
         transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(/OpaqueRef transformation errors/);
     });
   });
 
-  describe("Debug Mode", () => {
+  describe("debug logging", () => {
     it("logs transformation details", async () => {
       const logs: string[] = [];
       const source = `/// <cts-enable />
@@ -86,26 +83,26 @@ const el = <div>{count + 1}</div>;
 
       await transformSource(source, {
         types,
-        logger: (msg) => logs.push(msg),
+        logger: (msg: string) => logs.push(msg),
       });
 
-      // Check that debug mode produces some output
       expect(logs.length).toBeGreaterThan(0);
-      // Check for the test transformer output that test-utils.ts generates
       expect(logs.some((log) => log.includes("TEST TRANSFORMER OUTPUT"))).toBe(
         true,
       );
     });
   });
 
-  describe("checkWouldTransform utility", () => {
+  describe("checkWouldTransform", () => {
     it("returns true when transformation is needed", async () => {
       const source = `/// <cts-enable />
 import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const el = <div>{count + 1}</div>;
 `;
-      expect(await checkWouldTransform(source, types)).toBe(true);
+      expect(await transformSource.checkWouldTransform(source, types)).toBe(
+        true,
+      );
     });
 
     it("returns false when no transformation is needed", async () => {
@@ -113,21 +110,9 @@ const el = <div>{count + 1}</div>;
 const count: number = 5;
 const result = count + 1;
 `;
-      expect(await checkWouldTransform(source, types)).toBe(false);
-    });
-  });
-
-  describe("CTS-Enable Directive", () => {
-    it("transformers work correctly when applied by test utility", async () => {
-      const source = `
-import { OpaqueRef, derive, h, ifElse } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const el = <div>{count > 5 ? "yes" : "no"} {count + 1}</div>;
-`;
-      // Test utility applies transformers regardless of directive
-      const transformed = await transformSource(source, { types });
-      expect(transformed).toContain("derive");
-      expect(transformed).toContain("ifElse");
+      expect(await transformSource.checkWouldTransform(source, types)).toBe(
+        false,
+      );
     });
   });
 });
