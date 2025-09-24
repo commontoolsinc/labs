@@ -1,7 +1,6 @@
 import ts from "typescript";
 
-// Constants for identifying CommonTools declarations
-const COMMONTOOLS_FILENAME_FRAGMENT = "/commontools/";
+// Constant for identifying CommonTools declarations
 const COMMONTOOLS_DECLARATION = "commontools.d.ts";
 
 /**
@@ -11,8 +10,7 @@ export function isCommonToolsDeclaration(
   declaration: ts.Declaration,
 ): boolean {
   const fileName = declaration.getSourceFile().fileName.replace(/\\/g, "/");
-  return fileName.endsWith(COMMONTOOLS_DECLARATION) ||
-    fileName.includes(COMMONTOOLS_FILENAME_FRAGMENT);
+  return fileName.endsWith(COMMONTOOLS_DECLARATION);
 }
 
 /**

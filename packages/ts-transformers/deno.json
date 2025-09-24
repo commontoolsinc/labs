@@ -7,8 +7,7 @@
     "./core/imports": "./src/core/imports.ts"
   },
   "imports": {
-    "typescript": "npm:typescript",
-    "@commontools/static": "../static/index.ts"
+    "typescript": "npm:typescript"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-env test/**/*.test.ts",

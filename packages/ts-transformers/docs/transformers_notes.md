@@ -120,6 +120,14 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 - **Proactive OpaqueRef conversion**: Add new rule to automatically wrap
   non-OpaqueRef values that should be reactive, leveraging the cleaned-up
   architecture to identify candidates and apply appropriate transformations
+- **Import flexibility**: Expand helper resolution so the rewrite pipeline works
+  when authors:
+  - Glob-import (`import * as ct from "commontools"`) and access helpers via
+    namespace members.
+  - Rename specific imports (`import { derive as ctDerive } from
+    "commontools"`) without breaking helper detection.
+  - Omit any CommonTools import in `cts`-enabled files, by inserting a safe
+    namespace import during a preprocessing pass if none is detected.
 
 ## Longer-Term Considerations
 

@@ -1,5 +1,7 @@
 import ts from "typescript";
 
+import { isCommonToolsDeclaration } from "../core/common-tools-symbols.ts";
+
 const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
   "handler",
@@ -18,7 +20,6 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRef",
 ]);
 
-const COMMONTOOLS_PATH_FRAGMENT = "commontools";
 
 export type CallKind =
   | { kind: "ifElse"; symbol?: ts.Symbol }
@@ -273,7 +274,5 @@ function getSignatureSymbol(signature: ts.Signature): ts.Symbol | undefined {
 
 function symbolIsCommonTools(symbol: ts.Symbol): boolean {
   const declarations = symbol.declarations ?? [];
-  return declarations.some((declaration) =>
-    declaration.getSourceFile().fileName.includes(COMMONTOOLS_PATH_FRAGMENT)
-  );
+  return declarations.some(isCommonToolsDeclaration);
 }

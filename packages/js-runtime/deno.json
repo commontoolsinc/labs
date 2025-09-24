@@ -5,8 +5,7 @@
   },
   "imports": {
     "typescript": "npm:typescript",
-    "source-map-js": "npm:source-map-js@^1.2.1",
-    "@commontools/ts-transformers": "../ts-transformers/src/mod.ts"
+    "source-map-js": "npm:source-map-js@^1.2.1"
   },
   "exports": {
     ".": "./mod.ts",
