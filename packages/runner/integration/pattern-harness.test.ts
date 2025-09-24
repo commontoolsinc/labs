@@ -214,6 +214,9 @@ import {
   scenarios as expenseReimbursementScenarios,
 } from "./patterns/expense-reimbursement.ts";
 import {
+  scenarios as experimentAssignmentScenarios,
+} from "./patterns/experiment-assignment.ts";
+import {
   scenarios as currencyConversionScenarios,
 } from "./patterns/currency-conversion.ts";
 import { scenarios as menuPlannerScenarios } from "./patterns/menu-planner.ts";
@@ -261,6 +264,7 @@ const allScenarios = [
   ...searchRelevanceTuningScenarios,
   ...budgetPlannerScenarios,
   ...expenseReimbursementScenarios,
+  ...experimentAssignmentScenarios,
   ...currencyConversionScenarios,
   ...menuPlannerScenarios,
   ...notificationPreferenceScenarios,
