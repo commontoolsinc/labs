@@ -20,10 +20,11 @@ import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
 import {
-  createLoggingTransformer,
-  createOpaqueRefTransformer,
+  createAstInspectorTransformer,
+  createModularOpaqueRefTransformer,
   createSchemaTransformer,
-} from "./transformer/mod.ts";
+  hasCtsEnableDirective,
+} from "@commontools/ts-transformers";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -313,19 +314,6 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 
     // beginning of transformation related code
     // Check if the main source file has the /// <cts-enable /> directive
-    const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
-      const text = sourceFile.getFullText();
-      const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
-
-      for (const comment of tripleSlashDirectives) {
-        const commentText = text.substring(comment.pos, comment.end);
-        if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
-          return true;
-        }
-      }
-      return false;
-    };
-
     // Check if any source file has the CommonTools directive
     const sourceFiles = tsProgram.getSourceFiles();
     let hasCtsDirective = false;
@@ -339,20 +327,29 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 
     // Build transformers list based on CTS directive and options
     const beforeTransformers: ts.TransformerFactory<ts.SourceFile>[] = [];
+    const capturedSources: Array<
+      { file: ts.SourceFile; normalizedPath: string }
+    > = [];
+    const capturedFileMap = new Map<string, string>();
 
     if (hasCtsDirective) {
       // Add OpaqueRef and Schema transformers
       beforeTransformers.push(
-        createOpaqueRefTransformer(tsProgram),
+        createModularOpaqueRefTransformer(tsProgram),
         createSchemaTransformer(tsProgram),
       );
 
-      // Only add logging transformer if showTransformed is true
+      // Only add AST inspector transformer if showTransformed is true
       if (inputOptions.showTransformed) {
         beforeTransformers.push(
-          createLoggingTransformer(tsProgram, {
-            logger: (source) => console.log(source),
-            showTransformed: true,
+          createAstInspectorTransformer((sourceFile) => {
+            if (!hasCtsEnableDirective(sourceFile)) return;
+            if (capturedFileMap.has(sourceFile.fileName)) return;
+            capturedFileMap.set(sourceFile.fileName, sourceFile.fileName);
+            capturedSources.push({
+              file: sourceFile,
+              normalizedPath: path.normalize(sourceFile.fileName),
+            });
           }),
         );
       }
@@ -379,6 +376,17 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
+    }
+
+    if (inputOptions.showTransformed && capturedSources.length > 0) {
+      const printer = ts.createPrinter({
+        newLine: ts.NewLineKind.LineFeed,
+        removeComments: false,
+      });
+      for (const { file, normalizedPath } of capturedSources) {
+        console.log(`/* transformed: ${normalizedPath} */`);
+        console.log(printer.printFile(file));
+      }
     }
 
     // Get written files, should be a JS and source map.
