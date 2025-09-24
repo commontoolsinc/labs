@@ -482,6 +482,7 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
+  // Notifies a subscriber of a commit that has been applied
   commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
   close(): AwaitResult<Unit, SystemError>;
 }
