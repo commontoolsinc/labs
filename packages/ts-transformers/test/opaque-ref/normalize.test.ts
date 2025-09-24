@@ -1,0 +1,34 @@
+import { describe, it } from "@std/testing/bdd";
+import { assertEquals } from "@std/assert";
+import { assertDefined } from "../../src/core/assert.ts";
+
+import {
+  normalizeDataFlows,
+  selectDataFlowsWithin,
+} from "../../src/opaque-ref/normalize.ts";
+import { analyzeExpression } from "./harness.ts";
+
+describe("normalizeDataFlows", () => {
+  it("filters data flows within a specific node", () => {
+    const { analysis } = analyzeExpression(
+      "ifElse(state.count > 3, 'hi', 'bye')",
+    );
+
+    const dataFlows = normalizeDataFlows(analysis.graph);
+    const predicate =
+      analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else"
+        ? analysis.rewriteHint.predicate
+        : undefined;
+    if (!predicate) {
+      throw new Error("Expected predicate hint");
+    }
+
+    const filtered = selectDataFlowsWithin(dataFlows, predicate);
+    assertEquals(filtered.length, 1);
+    const firstDependency = assertDefined(
+      filtered[0],
+      "Expected dataFlow inside predicate",
+    );
+    assertEquals(firstDependency.expression.getText(), "state.count");
+  });
+});

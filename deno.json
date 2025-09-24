@@ -12,6 +12,8 @@
     "./packages/integration",
     "./packages/js-runtime",
     "./packages/js-sandbox",
+    "./packages/ts-transformers",
+    "./packages/test-support",
     "./packages/schema-generator",
     "./packages/llm",
     "./packages/memory",
@@ -86,7 +88,7 @@
       "docs/",
       "packages/seeder/templates/",
       "packages/static/assets/",
-      "packages/js-runtime/test/fixtures",
+      "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
       "packages/vendor-astral"
     ]

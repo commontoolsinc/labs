@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler } from "commontools";
+import { Cell, derive, handler } from "commontools";
 
 export const increment = handler<unknown, { value: Cell<number> }>(
   (_, state) => {

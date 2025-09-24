@@ -1,7 +1,7 @@
 {
   "name": "@commontools/js-runtime",
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env=UPDATE_GOLDENS,API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
     "typescript": "npm:typescript",
