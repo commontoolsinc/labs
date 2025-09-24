@@ -211,7 +211,7 @@ current offline harness.
       totals include taxes and discounts accurately.
 - [ ] Subscription billing pattern — manage plan billing cycles ensure derived
       next invoice date updates after plan changes.
-- [ ] Currency conversion pattern — convert between currencies ensure derived
+- [x] Currency conversion pattern — convert between currencies ensure derived
       amounts follow handler updates to rate table.
 - [ ] Inventory shipment tracker pattern — track supplier shipments ensure
       derived ETAs adjust as status or milestone cells change.
