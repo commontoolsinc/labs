@@ -41,7 +41,11 @@ const TESTS: TestDef[] = [
   },
 ];
 
-const types = await getTypeScriptEnvironmentTypes(new StaticCache());
+const staticCache = new StaticCache();
+const types = await getTypeScriptEnvironmentTypes(staticCache);
+types["commontools.d.ts"] = await staticCache.getText(
+  "types/commontools.d.ts",
+);
 
 describe("TypeScriptCompiler", () => {
   it("compiles a filesystem graph", async () => {
