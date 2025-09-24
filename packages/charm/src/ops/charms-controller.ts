@@ -56,7 +56,7 @@ export class CharmsController<T = unknown> {
   ): Promise<CharmController<T>>;
   async get(charmId: string, schema?: JSONSchema): Promise<CharmController> {
     this.disposeCheck();
-    const cell = await this.#manager.get(charmId, false, schema);
+    const cell = await this.#manager.get(charmId, true, schema);
     if (!cell) {
       throw new Error(`Charm "${charmId}" not found.`);
     }
