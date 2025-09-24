@@ -196,6 +196,9 @@ import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
 import {
+  scenarios as heatmapAggregationScenarios,
+} from "./patterns/heatmap-aggregation.ts";
+import {
   scenarios as searchRelevanceTuningScenarios,
 } from "./patterns/search-relevance-tuning.ts";
 import {
@@ -245,6 +248,7 @@ const allScenarios = [
   ...medicationAdherenceScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
   ...budgetPlannerScenarios,
   ...expenseReimbursementScenarios,

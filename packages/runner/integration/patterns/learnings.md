@@ -136,3 +136,7 @@
 - Keeping an incident playbook responsive was easier after sanitizing step lists
   with a shared `lift`; handlers could mutate the raw cell while a small derived
   latest-log view read the active-step cell without breaking determinism.
+- Keeping heatmap buckets tied to sanitized width and height cells ensures the
+  derived grid and normalized intensities stay stable when handlers clamp new
+  points into bounds, while reusing the same grid for peak lookup keeps summary
+  labels deterministic.
