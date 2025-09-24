@@ -25,6 +25,9 @@ import {
   scenarios as counterConditionalBranchScenarios,
 } from "./patterns/counter-conditional-branch.ts";
 import {
+  scenarios as counterConditionalChildInstantiationScenarios,
+} from "./patterns/counter-conditional-child-instantiation.ts";
+import {
   scenarios as counterConditionalIfElseScenarios,
 } from "./patterns/counter-conditional-ifelse.ts";
 import {
@@ -312,6 +315,7 @@ const allScenarios = [
   ...counterComputedDefaultStringsScenarios,
   ...counterComplexUnionStateScenarios,
   ...counterConditionalBranchScenarios,
+  ...counterConditionalChildInstantiationScenarios,
   ...counterConditionalIfElseScenarios,
   ...counterDelayedComputeScenarios,
   ...counterDerivedColorScenarios,
