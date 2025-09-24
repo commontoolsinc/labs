@@ -239,6 +239,9 @@ import {
 import {
   scenarios as warehouseBinMapScenarios,
 } from "./patterns/warehouse-bin-map.ts";
+import {
+  scenarios as calendarAvailabilityScenarios,
+} from "./patterns/calendar-availability.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -264,6 +267,7 @@ const allScenarios = [
   ...userJourneyMapScenarios,
   ...inventoryReorderThresholdScenarios,
   ...incidentResponsePlaybookScenarios,
+  ...calendarAvailabilityScenarios,
   ...warehouseBinMapScenarios,
   ...researchCitationManagerScenarios,
   ...toggleScenarios,
