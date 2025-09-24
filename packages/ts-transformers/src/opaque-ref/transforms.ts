@@ -252,8 +252,12 @@ function deriveWhenNecessary(
     dataFlows: ts.Expression[];
   },
   options: DeriveCallOptions,
+  precomputed?: {
+    analysis: DataFlowAnalysis;
+    dataFlows: ts.Expression[];
+  },
 ): ts.Expression | undefined {
-  const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
+  const { dataFlows: opaqueRefs } = precomputed ?? analyzeDataFlows(expression);
   if (opaqueRefs.length === 0) return undefined;
   return createDeriveCall(expression, opaqueRefs, options);
 }
@@ -295,6 +299,13 @@ export function transformExpressionWithOpaqueRef(
     });
     return { analysis, dataFlows: filtered };
   };
+
+  const deriveOptions = createDeriveCallOptions(
+    factory,
+    sourceFile,
+    context,
+    registerHelper,
+  );
 
   if (ts.isConditionalExpression(expression)) {
     const conditionType = checker.getTypeAtLocation(expression.condition);
@@ -357,12 +368,7 @@ export function transformExpressionWithOpaqueRef(
     const deriveCall = deriveWhenNecessary(
       expression,
       analyzeDataFlows,
-      createDeriveCallOptions(
-        factory,
-        sourceFile,
-        context,
-        registerHelper,
-      ),
+      deriveOptions,
     );
     return deriveCall ?? expression;
   }
@@ -371,12 +377,7 @@ export function transformExpressionWithOpaqueRef(
     const deriveCall = deriveWhenNecessary(
       expression,
       analyzeDataFlows,
-      createDeriveCallOptions(
-        factory,
-        sourceFile,
-        context,
-        registerHelper,
-      ),
+      deriveOptions,
     );
     return deriveCall ?? expression;
   }
@@ -388,16 +389,11 @@ export function transformExpressionWithOpaqueRef(
     if (analysis.rewriteHint?.kind === "call-if-else") {
       return expression;
     }
-    if (opaqueRefs.length === 0) return expression;
-    const deriveCall = createDeriveCall(
+    const deriveCall = deriveWhenNecessary(
       expression,
-      opaqueRefs,
-      createDeriveCallOptions(
-        factory,
-        sourceFile,
-        context,
-        registerHelper,
-      ),
+      analyzeDataFlows,
+      deriveOptions,
+      { analysis, dataFlows: opaqueRefs },
     );
     return deriveCall ?? expression;
   }
@@ -406,12 +402,7 @@ export function transformExpressionWithOpaqueRef(
     const deriveCall = deriveWhenNecessary(
       expression,
       analyzeDataFlows,
-      createDeriveCallOptions(
-        factory,
-        sourceFile,
-        context,
-        registerHelper,
-      ),
+      deriveOptions,
     );
     return deriveCall ?? expression;
   }
@@ -420,12 +411,7 @@ export function transformExpressionWithOpaqueRef(
     const deriveCall = deriveWhenNecessary(
       expression,
       analyzeDataFlows,
-      createDeriveCallOptions(
-        factory,
-        sourceFile,
-        context,
-        registerHelper,
-      ),
+      deriveOptions,
     );
     return deriveCall ?? expression;
   }
