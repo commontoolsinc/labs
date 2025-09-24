@@ -233,7 +233,7 @@ current offline harness.
       sentiment breakdown updates by tag and time.
 - [x] Medication adherence pattern — track medication schedule ensure derived
       adherence percentage reflects doses taken.
-- [ ] Patient vitals dashboard pattern — monitor vitals history ensure derived
+- [x] Patient vitals dashboard pattern — monitor vitals history ensure derived
       alerts trigger when readings hit critical ranges.
 - [ ] Clinical trial enrollment pattern — screen participants ensure derived
       eligible list responds to criteria toggles.
