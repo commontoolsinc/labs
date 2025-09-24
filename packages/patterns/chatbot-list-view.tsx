@@ -195,15 +195,45 @@ export default recipe<Input, Output>(
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-button
-              onClick={createChatRecipe({
+            <ct-toolbar dense sticky>
+              <div slot="start">
+                <ct-button
+                  id="new-chat-btn"
+                  onClick={createChatRecipe({
+                    selectedCharm,
+                    charmsList,
+                    allCharms: combined as unknown as any,
+                  })}
+                >
+                  Create New Chat
+                  <ct-kbd>⌘N</ct-kbd>
+                </ct-button>
+              </div>
+            </ct-toolbar>
+
+            {/* Keyboard shortcuts */}
+            <ct-keybind
+              name="new-chat-meta-n"
+              meta
+              key="n"
+              preventDefault
+              onct-keybind={createChatRecipe({
                 selectedCharm,
                 charmsList,
                 allCharms: combined as unknown as any,
               })}
-            >
-              Create New Chat
-            </ct-button>
+            />
+            <ct-keybind
+              name="new-chat-ctrl-n"
+              ctrl
+              key="n"
+              preventDefault
+              onct-keybind={createChatRecipe({
+                selectedCharm,
+                charmsList,
+                allCharms: combined as unknown as any,
+              })}
+            />
           </div>
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             {
