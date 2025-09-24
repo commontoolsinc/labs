@@ -281,6 +281,8 @@ export type { MemorySpace } from "@commontools/memory/interface";
 export type Cellify<T> =
   // Handle existing Cell<> types, allowing unwrapping
   T extends Cell<infer U> ? Cellify<U> | Cell<Cellify<U>>
+    // Handle Stream<> types, allowing unwrapping
+    : T extends Stream<infer U> ? Cellify<U> | Stream<Cellify<U>>
     // Handle arrays
     : T extends Array<infer U> ? Array<Cellify<U>> | Cell<Array<Cellify<U>>>
     // Handle objects (excluding null), adding optional ID fields
@@ -920,7 +922,7 @@ export function isCell(value: any): value is Cell<any> {
  * @param value - The value to check
  * @returns True if the value is a Stream
  */
-export function isStream(value: any): value is Stream<any> {
+export function isStream<T = any>(value: any): value is Stream<T> {
   return value instanceof StreamCell;
 }
 

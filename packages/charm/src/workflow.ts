@@ -10,9 +10,8 @@
  * 6. Spell search and casting
  */
 
-import { Cell, Runtime } from "@commontools/runner";
-import { Charm, charmId, CharmManager } from "./manager.ts";
-import { JSONSchema } from "@commontools/runner";
+import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
+import { charmId, CharmManager } from "./manager.ts";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -138,7 +137,7 @@ export interface ParsedMention {
   originalText: string;
   startIndex: number;
   endIndex: number;
-  charm: Cell<Charm>;
+  charm: Cell<unknown>;
 }
 
 /**
@@ -146,7 +145,7 @@ export interface ParsedMention {
  */
 export interface ProcessedPrompt {
   text: string; // Processed text with mentions replaced by readable names
-  mentions: Record<string, Cell<Charm>>; // Map of mention IDs to charm cells
+  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to charm cells
 }
 
 /**
@@ -213,7 +212,7 @@ export async function classifyIntent(
   };
 }
 
-function extractContext(charm: Cell<Charm>, runtime: Runtime) {
+function extractContext(charm: Cell<unknown>, runtime: Runtime) {
   let spec: string | undefined;
   let schema: JSONSchema | undefined;
   let code: string | undefined;
@@ -303,7 +302,7 @@ export interface WorkflowForm {
   input: {
     rawInput: string;
     processedInput: string;
-    existingCharm?: Cell<Charm>;
+    existingCharm?: Cell<unknown>;
     references: Record<string, Cell<unknown>>;
   };
 
@@ -322,7 +321,7 @@ export interface WorkflowForm {
   } | null;
 
   generation: {
-    charm: Cell<Charm>;
+    charm: Cell<unknown>;
   } | null;
 
   searchResults: {
@@ -364,7 +363,7 @@ export interface WorkflowForm {
 export function createWorkflowForm(
   options: {
     input: string;
-    charm?: Cell<Charm>;
+    charm?: Cell<unknown>;
     generationId?: string;
     charmManager: CharmManager;
     permittedWorkflows?: WorkflowType[];
@@ -513,7 +512,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
     throw new Error("CharmManager is required for code generation");
   }
 
-  let charm: Cell<Charm>;
+  let charm: Cell<unknown>;
   let llmRequestId: string | undefined;
 
   // Execute the appropriate workflow based on the classification
@@ -571,7 +570,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
 export type ProcessWorkflowOptions = {
   dryRun?: boolean;
-  existingCharm?: Cell<Charm>;
+  existingCharm?: Cell<unknown>;
   prefill?: Partial<WorkflowForm>;
   model?: string;
   onProgress?: (form: WorkflowForm) => void;
@@ -782,7 +781,7 @@ export async function processWorkflow(
           const schemaProperties = isObject(charm.schema)
             ? charm.schema.properties
             : undefined;
-          const id = charmId(charm as Cell<Charm>);
+          const id = charmId(charm as Cell<unknown>);
           if (!id) continue;
 
           castable[id] = [];
@@ -947,7 +946,7 @@ ${userPrompt}
 export function executeFixWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing FIX workflow");
 
   return iterate(
@@ -973,7 +972,7 @@ export function executeFixWorkflow(
 export function executeEditWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing EDIT workflow");
 
   return iterate(
@@ -1021,7 +1020,7 @@ function toCamelCase(input: string): string {
 export function executeImagineWorkflow(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources
@@ -1068,8 +1067,9 @@ export function executeImagineWorkflow(
   ) {
     try {
       const charmData = form.input.existingCharm.get();
-      const charmName = charmData && charmData["NAME"]
-        ? charmData["NAME"]
+      const charmName = isRecord(charmData) && NAME in charmData &&
+          typeof charmData[NAME] === "string"
+        ? charmData[NAME]
         : "currentCharm";
       const camelCaseId = toCamelCase(charmName);
 

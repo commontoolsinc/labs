@@ -1,8 +1,8 @@
 import {
-  Charm,
   charmId,
   CharmManager,
   DEFAULT_MODEL,
+  nameSchema,
 } from "@commontools/charm";
 import { NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
@@ -10,7 +10,7 @@ import { Cell } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 
 export type CharmSearchResult = {
-  charm: Cell<Charm>;
+  charm: Cell<unknown>;
   name: string;
   reason: string;
 };
@@ -28,7 +28,7 @@ export async function searchCharms(
     const results = await Promise.all(
       charms.get().map(async (charm) => {
         try {
-          const data = charm.get();
+          const data = charm.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";
 
           const recipe = await charmManager.syncRecipe(charm);
@@ -100,7 +100,7 @@ export async function searchCharms(
     );
 
     const selectedCharms: {
-      charm: Cell<Charm>;
+      charm: Cell<unknown>;
       name: string;
       reason: string;
     }[] = [];

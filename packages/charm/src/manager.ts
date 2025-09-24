@@ -13,11 +13,12 @@ import {
   parseLink,
   Recipe,
   Runtime,
-  Schema,
+  type Schema,
   TYPE,
   UI,
   URI,
 } from "@commontools/runner";
+import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
 import { isObject, isRecord } from "@commontools/utils/types";
 
@@ -26,33 +27,32 @@ import { isObject, isRecord } from "@commontools/utils/types";
  * @param charm - The charm to extract ID from
  * @returns The charm ID string, or undefined if no ID is found
  */
-export function charmId(charm: Cell<Charm>): string | undefined {
+export function charmId(charm: Cell<unknown>): string | undefined {
   const id = charm.entityId;
   if (!id) return undefined;
   const idValue = id["/"];
   return typeof idValue === "string" ? idValue : undefined;
 }
 
-export type Charm = {
-  [NAME]?: string;
-  [UI]?: unknown;
-  // FIXME: types
-  // Turning this into `unknown` causes cascading type failures.
-  [key: string]: any;
-};
-
-export const charmSchema = {
+export const nameSchema = {
   type: "object",
-  properties: {
-    [NAME]: { type: "string" },
-    [UI]: { type: "object" },
-  },
-  required: [UI, NAME],
+  properties: { [NAME]: { type: "string" } },
+  required: [NAME],
 } as const satisfies JSONSchema;
+
+export type NameSchema = Schema<typeof nameSchema>;
+
+export const uiSchema = {
+  type: "object",
+  properties: { [UI]: vdomSchema },
+  required: [UI],
+} as const satisfies JSONSchema;
+
+export type UISchema = Schema<typeof uiSchema>;
 
 export const charmListSchema = {
   type: "array",
-  items: { ...charmSchema, asCell: true },
+  items: { asCell: true },
 } as const satisfies JSONSchema;
 
 export const charmLineageSchema = {
@@ -94,8 +94,8 @@ export const processSchema = {
  * Helper to consistently compare entity IDs between cells
  */
 function isSameEntity(
-  a: Cell<Charm> | string | EntityId,
-  b: Cell<Charm> | string | EntityId,
+  a: Cell<unknown> | string | EntityId,
+  b: Cell<unknown> | string | EntityId,
 ): boolean {
   const idA = getEntityId(a);
   const idB = getEntityId(b);
@@ -106,11 +106,11 @@ function isSameEntity(
  * Filters an array of charms by removing any that match the target entity
  */
 function filterOutEntity(
-  list: Cell<Cell<Charm>[]>,
-  target: Cell<Charm> | string | EntityId,
-): Cell<Charm>[] {
+  list: Cell<Cell<unknown>[]>,
+  target: Cell<unknown> | string | EntityId,
+): Cell<unknown>[] {
   const targetId = getEntityId(target);
-  if (!targetId) return list.get() as Cell<Charm>[];
+  if (!targetId) return list.get() as Cell<unknown>[];
 
   return list.get().filter((charm) => !isSameEntity(charm, targetId));
 }
@@ -118,9 +118,9 @@ function filterOutEntity(
 export class CharmManager {
   private space: MemorySpace;
 
-  private charms: Cell<Cell<Charm>[]>;
-  private pinnedCharms: Cell<Cell<Charm>[]>;
-  private trashedCharms: Cell<Cell<Charm>[]>;
+  private charms: Cell<Cell<unknown>[]>;
+  private pinnedCharms: Cell<Cell<unknown>[]>;
+  private trashedCharms: Cell<Cell<unknown>[]>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -169,7 +169,7 @@ export class CharmManager {
     return await this.runtime.storageManager.synced();
   }
 
-  async pin(charm: Cell<Charm>) {
+  async pin(charm: Cell<unknown>) {
     await this.syncCharms(this.pinnedCharms);
     // Check if already pinned
     if (
@@ -198,24 +198,24 @@ export class CharmManager {
     })) && changed;
   }
 
-  async unpin(charm: Cell<Charm> | string | EntityId) {
+  async unpin(charm: Cell<unknown> | string | EntityId) {
     const id = getEntityId(charm);
     if (!id) return false;
 
     return await this.unpinById(id);
   }
 
-  getPinned(): Cell<Cell<Charm>[]> {
+  getPinned(): Cell<Cell<unknown>[]> {
     this.syncCharms(this.pinnedCharms);
     return this.pinnedCharms;
   }
 
-  getTrash(): Cell<Cell<Charm>[]> {
+  getTrash(): Cell<Cell<unknown>[]> {
     this.syncCharms(this.trashedCharms);
     return this.trashedCharms;
   }
 
-  async restoreFromTrash(idOrCharm: string | EntityId | Cell<Charm>) {
+  async restoreFromTrash(idOrCharm: string | EntityId | Cell<unknown>) {
     await this.syncCharms(this.trashedCharms);
     await this.syncCharms(this.charms);
 
@@ -256,14 +256,17 @@ export class CharmManager {
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
   // have to call .get() to get the actual charm (this is missing the schema)
   // how can we fix the type here?
-  getCharms(): Cell<Cell<Charm>[]> {
+  getCharms(): Cell<Cell<unknown>[]> {
     // Start syncing if not already syncing. Will trigger a change to the list
     // once loaded.
     this.syncCharms(this.charms);
     return this.charms;
   }
 
-  private addCharms(newCharms: Cell<Charm>[], tx: IExtendedStorageTransaction) {
+  private addCharms(
+    newCharms: Cell<unknown>[],
+    tx: IExtendedStorageTransaction,
+  ) {
     const charms = this.charms.withTx(tx);
 
     newCharms.forEach((charm) => {
@@ -273,7 +276,7 @@ export class CharmManager {
     });
   }
 
-  async add(newCharms: Cell<Charm>[], tx?: IExtendedStorageTransaction) {
+  async add(newCharms: Cell<unknown>[], tx?: IExtendedStorageTransaction) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 
@@ -286,7 +289,7 @@ export class CharmManager {
     }
   }
 
-  syncCharms(cell: Cell<Cell<Charm>[]>) {
+  syncCharms(cell: Cell<Cell<unknown>[]>) {
     // TODO(@ubik2) We use elevated permissions here temporarily.
     // Our request for the charm list will walk the schema tree, and that will
     // take us into classified data of charms. If that happens, we still want
@@ -298,23 +301,26 @@ export class CharmManager {
     return cell.asSchema(privilegedSchema).sync();
   }
 
-  // FIXME(ja): if we are already running the charm, can we just return it?
-  // if a charm has sideeffects we might multiple versions...
-  async get<T = Charm>(
-    id: string | Cell<Charm>,
+  async get<S extends JSONSchema = JSONSchema>(
+    id: string | Cell<unknown>,
+    runIt: boolean,
+    asSchema: S,
+  ): Promise<Cell<Schema<S>>>;
+  async get<T = unknown>(
+    id: string | Cell<unknown>,
+    runIt?: boolean,
+    asSchema?: JSONSchema,
+  ): Promise<Cell<T>>;
+  async get<T = unknown>(
+    id: string | Cell<unknown>,
     runIt: boolean = true,
     asSchema?: JSONSchema,
-  ): Promise<Cell<T> | undefined> {
+  ): Promise<Cell<T>> {
     // Load the charm from storage.
-    let charm: Cell<Charm> | undefined;
+    let charm: Cell<unknown>;
 
     if (isCell(id)) charm = id;
-    else {charm = this.runtime.getCellFromEntityId(
-        this.space,
-        { "/": id },
-        [],
-        charmSchema,
-      );}
+    else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
     await charm.sync();
 
@@ -382,12 +388,12 @@ export class CharmManager {
     return undefined;
   }
 
-  getLineage(charm: Cell<Charm>) {
+  getLineage(charm: Cell<unknown>) {
     return charm.getSourceCell(charmSourceCellSchema)?.key("lineage").get() ??
       [];
   }
 
-  getLLMTrace(charm: Cell<Charm>): string | undefined {
+  getLLMTrace(charm: Cell<unknown>): string | undefined {
     return charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
       .get() ?? undefined;
   }
@@ -398,10 +404,10 @@ export class CharmManager {
    * @param charm The charm to check
    * @returns Array of charms that are read from
    */
-  getReadingFrom(charm: Cell<Charm>): Cell<Charm>[] {
+  getReadingFrom(charm: Cell<unknown>): Cell<unknown>[] {
     // Get all charms that might be referenced
     const allCharms = this.getCharms().get();
-    const result: Cell<Charm>[] = [];
+    const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
@@ -589,10 +595,10 @@ export class CharmManager {
    * @param charm The charm to check
    * @returns Array of charms that read from this charm
    */
-  getReadByCharms(charm: Cell<Charm>): Cell<Charm>[] {
+  getReadByCharms(charm: Cell<unknown>): Cell<unknown>[] {
     // Get all charms to check
     const allCharms = this.getCharms().get();
-    const result: Cell<Charm>[] = [];
+    const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
@@ -603,7 +609,7 @@ export class CharmManager {
     if (!charmId) return result;
 
     // Helper function to add a matching charm to the result
-    const addReadingCharm = (otherCharm: Cell<Charm>) => {
+    const addReadingCharm = (otherCharm: Cell<unknown>) => {
       const otherCharmId = getEntityId(otherCharm);
       if (!otherCharmId || !otherCharmId["/"]) return;
 
@@ -792,7 +798,7 @@ export class CharmManager {
   // Return Cell with argument content of already loaded recipe according
   // to the schema of the charm.
   getArgument<T = unknown>(
-    charm: Cell<Charm | T>,
+    charm: Cell<unknown | T>,
   ): Cell<T> {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
@@ -803,7 +809,7 @@ export class CharmManager {
   }
 
   getResult<T = unknown>(
-    charm: Cell<Charm | T>,
+    charm: Cell<T>,
   ): Cell<T> {
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
@@ -811,13 +817,12 @@ export class CharmManager {
     const recipe = this.runtime.recipeManager.recipeById(recipeId);
     if (!recipe) throw new Error(`Recipe ${recipeId} not loaded`);
     const resultSchema = this.#getResultSchema(charm, recipe);
-    // FIXME(ja): return should be Cell<Schema<T>> I think?
     return charm.asSchema<T>(resultSchema);
   }
 
   // note: removing a charm doesn't clean up the charm's cells
   // Now moves the charm to trash instead of just removing it
-  async remove(idOrCharm: string | EntityId | Cell<Charm>) {
+  async remove(idOrCharm: string | EntityId | Cell<unknown>) {
     let success = false;
 
     await Promise.all([
@@ -857,7 +862,7 @@ export class CharmManager {
   }
 
   // Permanently delete a charm (from trash or directly)
-  async permanentlyDelete(idOrCharm: string | EntityId | Cell<Charm>) {
+  async permanentlyDelete(idOrCharm: string | EntityId | Cell<unknown>) {
     let success;
 
     await this.syncCharms(this.trashedCharms);
@@ -878,15 +883,15 @@ export class CharmManager {
     })) && success;
   }
 
-  async runPersistent(
+  async runPersistent<T = unknown>(
     recipe: Recipe | Module,
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
     options?: { start?: boolean },
-  ): Promise<Cell<Charm>> {
+  ): Promise<Cell<T>> {
     const start = options?.start ?? true;
-    const charm = await this.setupPersistent(
+    const charm = await this.setupPersistent<T>(
       recipe,
       inputs,
       cause,
@@ -907,15 +912,10 @@ export class CharmManager {
     charmId: string,
     inputs?: object,
     options?: { start?: boolean },
-  ): Promise<Cell<Charm>> {
-    const charm = this.runtime.getCellFromEntityId<Charm>(
-      this.space,
-      {
-        "/": charmId,
-      },
-      [],
-      charmSchema,
-    );
+  ): Promise<Cell<unknown>> {
+    const charm = this.runtime.getCellFromEntityId(this.space, {
+      "/": charmId,
+    });
     await charm.sync();
     const start = options?.start ?? true;
     if (start) {
@@ -934,14 +934,18 @@ export class CharmManager {
    * Prepare a new charm by setting up its process/result cells and recipe
    * metadata without scheduling the recipe's nodes.
    */
-  async setupPersistent(
+  async setupPersistent<T = unknown>(
     recipe: Recipe | Module,
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
-  ): Promise<Cell<Charm>> {
+  ): Promise<Cell<T>> {
     await this.runtime.idle();
-    const charm = this.runtime.getCell(this.space, cause, charmSchema);
+    const charm = this.runtime.getCell<T>(
+      this.space,
+      cause,
+      recipe.resultSchema,
+    );
     this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
     await this.syncRecipe(charm);
     await this.add([charm]);
@@ -958,9 +962,9 @@ export class CharmManager {
   }
 
   /** Start scheduling and running a prepared charm. */
-  async startCharm(charmOrId: string | Cell<Charm>): Promise<void> {
+  async startCharm<T = unknown>(charmOrId: string | Cell<T>): Promise<void> {
     const charm = typeof charmOrId === "string"
-      ? await this.get(charmOrId)
+      ? await this.get<T>(charmOrId)
       : charmOrId;
     if (!charm) throw new Error("Charm not found");
     this.runtime.start(charm);
@@ -969,9 +973,9 @@ export class CharmManager {
   }
 
   /** Stop a running charm (no-op if not running). */
-  async stopCharm(charmOrId: string | Cell<Charm>): Promise<void> {
+  async stopCharm<T = unknown>(charmOrId: string | Cell<T>): Promise<void> {
     const charm = typeof charmOrId === "string"
-      ? await this.get(charmOrId)
+      ? await this.get<T>(charmOrId)
       : charmOrId;
     if (!charm) throw new Error("Charm not found");
     this.runtime.runner.stop(charm);
@@ -979,7 +983,7 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>) {
+  async syncRecipe(charm: Cell<unknown>) {
     await charm.sync();
 
     // When we subscribe to a doc, our subscription includes the doc's source,
@@ -1009,7 +1013,7 @@ export class CharmManager {
 
   // Returns the charm from one of our active charm lists if it is present,
   // or undefined if it is not
-  getActiveCharm(charmId: Cell<Charm> | EntityId | string) {
+  getActiveCharm(charmId: Cell<unknown> | EntityId | string) {
     return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
       this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
   }
@@ -1078,7 +1082,7 @@ export class CharmManager {
   }
 }
 
-export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
+export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
   const sourceCell = charm.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE]!;

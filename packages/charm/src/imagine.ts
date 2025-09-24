@@ -1,5 +1,4 @@
 import { Cell } from "@commontools/runner";
-import { Charm } from "./manager.ts";
 
 // Re-export workflow types and functions from workflow module
 export type { WorkflowConfig, WorkflowType } from "./workflow.ts";
@@ -13,7 +12,7 @@ export interface ParsedMention {
   originalText: string;
   startIndex: number;
   endIndex: number;
-  charm: Cell<Charm>;
+  charm: Cell<unknown>;
 }
 
 /**
@@ -21,5 +20,5 @@ export interface ParsedMention {
  */
 export interface ProcessedPrompt {
   text: string; // Processed text with mentions replaced by readable names
-  mentions: Record<string, Cell<Charm>>; // Map of mention IDs to charm cells
+  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to charm cells
 }

@@ -1,5 +1,5 @@
 import { Module, NAME, Recipe } from "@commontools/runner";
-import { CharmManager, charmSchema } from "./index.ts";
+import { CharmManager, nameSchema } from "./manager.ts";
 import { Cell } from "@commontools/runner";
 
 /**
@@ -84,7 +84,7 @@ export function getCharmNameAsCamelCase(
   cell: Cell<unknown>,
   usedKeys: Record<string, unknown>,
 ): string {
-  const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
+  const charmName = toCamelCase(cell.asSchema(nameSchema).key(NAME).get());
 
   let name = charmName;
   let num = 0;

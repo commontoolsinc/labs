@@ -1,11 +1,13 @@
 export {
-  type Charm,
   charmId,
   charmListSchema,
   CharmManager,
-  charmSchema,
   getRecipeIdFromCharm,
+  type NameSchema,
+  nameSchema,
   processSchema,
+  type UISchema,
+  uiSchema,
 } from "./manager.ts";
 export { searchCharms } from "./search.ts";
 export {
