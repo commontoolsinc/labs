@@ -247,6 +247,7 @@ class MemoryProviderSession<
     return { ok: {} };
   }
   dispose() {
+    this.memory.unsubscribe(this);
     this.controller = undefined;
     this.sessions?.delete(this);
     this.sessions = null;
