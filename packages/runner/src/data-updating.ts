@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { isCell, RegularCell } from "./cell.ts";
+import { isCell, isStream, RegularCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -224,7 +224,7 @@ export function normalizeAndDiff(
   // preserve the link (do NOT collapse). For links created via query-result
   // dereferencing (non-Cell), we may collapse immediate-parent self-links.
   let linkOriginFromCell = false;
-  if (isCell(newValue)) {
+  if (isCell(newValue) || isStream(newValue)) {
     diffLogger.debug(() =>
       `[BRANCH_CELL] Converting cell to link at path=${pathStr}`
     );

@@ -1068,7 +1068,8 @@ export function executeImagineWorkflow(
     try {
       const charmData = form.input.existingCharm.get();
       const charmName =
-        charmData && NAME in charmData && typeof charmData[NAME] === "string"
+        isRecord(charmData) && NAME in charmData &&
+          typeof charmData[NAME] === "string"
           ? charmData[NAME]
           : "currentCharm";
       const camelCaseId = toCamelCase(charmName);

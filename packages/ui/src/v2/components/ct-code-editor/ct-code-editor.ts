@@ -831,14 +831,10 @@ export class CTCodeEditor extends BaseElement {
     // Compare by id set to avoid unnecessary writes
     const current = this.mentioned.asSchema(mentionableArraySchema).get() || [];
     const curIds = new Set(
-      current
-        .map((c: unknown) => getEntityId(c)?.["/"] || "")
-        .filter((id: string) => id),
+      current.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
     );
     const newIds = new Set(
-      newMentioned
-        .map((c: unknown) => getEntityId(c)?.["/"] || "")
-        .filter((id: string) => id),
+      newMentioned.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
     );
 
     if (curIds.size === newIds.size) {
