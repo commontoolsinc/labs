@@ -165,3 +165,6 @@
 - Normalizing role and permission identifiers with shared `lift` helpers keeps
   matrix summaries deterministic while handler toggles reuse the sanitized order
   for assertions.
+- Syncing option catalogs into a dedicated `cell` via a light `lift` watcher
+  lets handlers toggle selections safely while still respecting future argument
+  updates, avoiding the need for `compute`-style initialization.
