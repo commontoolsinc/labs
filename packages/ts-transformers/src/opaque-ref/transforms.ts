@@ -245,6 +245,19 @@ function createDeriveCall(
   );
 }
 
+function deriveWhenNecessary(
+  expression: ts.Expression,
+  analyzeDataFlows: (expr: ts.Expression) => {
+    analysis: DataFlowAnalysis;
+    dataFlows: ts.Expression[];
+  },
+  options: DeriveCallOptions,
+): ts.Expression | undefined {
+  const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
+  if (opaqueRefs.length === 0) return undefined;
+  return createDeriveCall(expression, opaqueRefs, options);
+}
+
 export function transformExpressionWithOpaqueRef(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -341,10 +354,9 @@ export function transformExpressionWithOpaqueRef(
     ts.isPrefixUnaryExpression(expression) &&
     expression.operator === ts.SyntaxKind.ExclamationToken
   ) {
-    const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
-    const deriveCall = createDeriveCall(
+    const deriveCall = deriveWhenNecessary(
       expression,
-      opaqueRefs,
+      analyzeDataFlows,
       createDeriveCallOptions(
         factory,
         sourceFile,
@@ -356,10 +368,9 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isPropertyAccessExpression(expression)) {
-    const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
-    const deriveCall = createDeriveCall(
+    const deriveCall = deriveWhenNecessary(
       expression,
-      opaqueRefs,
+      analyzeDataFlows,
       createDeriveCallOptions(
         factory,
         sourceFile,
@@ -377,6 +388,7 @@ export function transformExpressionWithOpaqueRef(
     if (analysis.rewriteHint?.kind === "call-if-else") {
       return expression;
     }
+    if (opaqueRefs.length === 0) return expression;
     const deriveCall = createDeriveCall(
       expression,
       opaqueRefs,
@@ -391,10 +403,9 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isTemplateExpression(expression)) {
-    const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
-    const deriveCall = createDeriveCall(
+    const deriveCall = deriveWhenNecessary(
       expression,
-      opaqueRefs,
+      analyzeDataFlows,
       createDeriveCallOptions(
         factory,
         sourceFile,
@@ -406,10 +417,9 @@ export function transformExpressionWithOpaqueRef(
   }
 
   if (ts.isBinaryExpression(expression)) {
-    const { dataFlows: opaqueRefs } = analyzeDataFlows(expression);
-    const deriveCall = createDeriveCall(
+    const deriveCall = deriveWhenNecessary(
       expression,
-      opaqueRefs,
+      analyzeDataFlows,
       createDeriveCallOptions(
         factory,
         sourceFile,
