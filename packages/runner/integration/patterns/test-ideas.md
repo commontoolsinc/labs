@@ -293,7 +293,7 @@ current offline harness.
       counts split orders by fulfillment status.
 - [ ] Support macro library pattern — manage canned replies ensure derived
       filters group macros by topic and usage.
-- [ ] Call center schedule pattern — schedule support shifts ensure derived
+- [x] Call center schedule pattern — schedule support shifts ensure derived
       coverage flags gaps across time blocks.
 - [x] Incident response playbook pattern — guide incident steps ensure derived
       escalation flags trigger when tasks stall.
