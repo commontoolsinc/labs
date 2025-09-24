@@ -207,7 +207,7 @@ current offline harness.
       totals enforce overall balance constraints.
 - [x] Expense reimbursement pattern — approve expense claims ensure handlers set
       statuses and derived totals reflect payouts.
-- [ ] Invoice generator pattern — assemble invoices from items ensure derived
+- [x] Invoice generator pattern — assemble invoices from items ensure derived
       totals include taxes and discounts accurately.
 - [ ] Subscription billing pattern — manage plan billing cycles ensure derived
       next invoice date updates after plan changes.
