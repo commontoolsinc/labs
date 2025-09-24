@@ -133,3 +133,6 @@
 - Normalizing currency rate maps with a shared `lift` kept derived conversion
   tables and summary strings stable while handlers only touched the raw rate and
   target cells.
+- Keeping an incident playbook responsive was easier after sanitizing step lists
+  with a shared `lift`; handlers could mutate the raw cell while a small derived
+  latest-log view read the active-step cell without breaking determinism.
