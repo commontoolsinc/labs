@@ -13,6 +13,11 @@ offline-friendly recipes that the harness can assert confidently.
   a known shape without runtime `.setDefault`.
 - Every output surfaced to the harness must be deterministic, regardless of
   payload ordering or missing fields.
+- The framework can turn cells into non-cells and vice-versa, and so call sites
+  have to only match the underlying schema, but not cell boundaries. E.g.
+  handlers request data as Cell<> to be able to write into them, but the recipe
+  creating the handler can pass in regular references, they don't have to be
+  cells.
 
 ## Cells and Lifts
 
@@ -20,12 +25,13 @@ offline-friendly recipes that the harness can assert confidently.
   sanitized cell across derives, handlers, and children.
 - Chain multiple `lift`s for multi-stage views; each stage should accept
   sanitized input and return a predictable shape.
-- When a derive depends on several cells, pass an object of dependencies into a
-  single `lift` call instead of sprinkling `.get()` calls.
+- When only reading from a cell, as is the case most of the times with `lift`,
+  it isn't necessary to request Cell<> and then have to call .get, just specifiy
+  the shape of the data needed.
 - Use `cell()` for state owned by the recipe. when the new cell remains part of
   the returned graph.
-- Memoize expensive derived objects when stability matters; reuse previous
-  references when sanitized inputs are unchanged.
+- Lift automatically memoized derived objects, they only get recomputed when the
+  data changes.
 
 ## Handler Design
 
