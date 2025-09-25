@@ -249,7 +249,7 @@ current offline harness.
       availability updates as handlers issue actions.
 - [x] Research citation manager pattern — organize citations ensure derived
       bibliographies regroup by topic and style.
-- [ ] Content publishing workflow pattern — shepherd draft review ensure derived
+- [x] Content publishing workflow pattern — shepherd draft review ensure derived
       queue orders drafts by priority and schedule.
 - [ ] Editorial calendar pattern — schedule publication dates ensure derived
       calendar view groups entries by channel.
