@@ -34,7 +34,8 @@ export const alertStyles = `
     padding: 1rem;
     gap: 0.75rem;
     font-family: inherit;
-    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
   }
 
   /* Alert icon */
@@ -91,7 +92,8 @@ export const alertStyles = `
     justify-content: center;
     cursor: pointer;
     opacity: 0.7;
-    transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     border-radius: 0.25rem;
     padding: 0.25rem;
     width: 1.5rem;

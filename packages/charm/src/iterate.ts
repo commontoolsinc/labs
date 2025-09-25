@@ -11,7 +11,7 @@ import {
   type Runtime,
   type RuntimeProgram,
 } from "@commontools/runner";
-import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
+import { CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
@@ -105,10 +105,10 @@ export const genSrc = async (
  */
 export async function iterate(
   charmManager: CharmManager,
-  charm: Cell<Charm>,
+  charm: Cell<unknown>,
   plan: WorkflowForm["plan"],
   options?: GenerationOptions,
-): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
   const { iframe } = getIframeRecipe(charm, charmManager.runtime);
@@ -151,7 +151,7 @@ export function extractTitle(src: string, defaultTitle: string): string {
 
 export const generateNewRecipeVersion = async (
   charmManager: CharmManager,
-  parent: Cell<Charm>,
+  parent: Cell<unknown>,
   newRecipe:
     & Pick<IFrameRecipe, "src" | "spec">
     & Partial<Omit<IFrameRecipe, "src" | "spec">>,
@@ -505,7 +505,7 @@ async function twoPhaseCodeGeneration(
 export async function castNewRecipe(
   charmManager: CharmManager,
   form: WorkflowForm,
-): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
+): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Processing form:", form);
 
   // Remove $UI, $NAME, and any streams from the cells
@@ -584,7 +584,7 @@ export async function compileAndRunRecipe(
   runOptions: unknown,
   parents?: string[],
   llmRequestId?: string,
-): Promise<Cell<Charm>> {
+): Promise<Cell<unknown>> {
   const recipe = await compileRecipe(
     recipeSrc,
     spec,

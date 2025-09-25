@@ -1,4 +1,4 @@
-import { type Charm, CharmManager } from "@commontools/charm";
+import { CharmManager } from "@commontools/charm";
 import {
   Cell,
   type ConsoleHandler,
@@ -7,6 +7,7 @@ import {
   type ErrorWithContext,
   isStream,
   Runtime,
+  Stream,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -29,7 +30,7 @@ let latestError: Error | null = null;
 let currentSession: Session | null = null;
 let manager: CharmManager | null = null;
 let runtime: Runtime | null = null;
-const loadedCharms = new Map<string, Cell<Charm>>();
+const loadedCharms = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 
 // Error handler that will be passed to Runtime
 const errorHandler: ErrorHandler = (e: ErrorWithContext) => {
@@ -163,7 +164,11 @@ async function runCharm(data: RunData): Promise<void> {
     if (!runningCharm) {
       // If not loaded yet, get it from the manager
       console.log(`Loading charm ${charmId} for the first time`);
-      runningCharm = await manager.get(charmsEntryCell, true);
+      runningCharm = await manager.get(charmsEntryCell, true, {
+        type: "object",
+        properties: { bgUpdater: { asStream: true } },
+        required: ["bgUpdater"],
+      });
 
       if (!runningCharm) {
         throw new Error(`Charm not found: ${charmId}`);
@@ -176,7 +181,7 @@ async function runCharm(data: RunData): Promise<void> {
     }
 
     // Find the updater stream
-    const updater = runningCharm.key("bgUpdater");
+    const updater = runningCharm.key("bgUpdater") as Stream<unknown>;
     if (!updater || !isStream(updater)) {
       throw new Error(`No updater stream found for charm: ${charmId}`);
     }

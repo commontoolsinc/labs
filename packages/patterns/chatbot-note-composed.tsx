@@ -77,6 +77,35 @@ type LLMTestResult = {
   chat: any;
 };
 
+const newNote = handler<
+  {
+    /** The text content of the note */
+    title: string;
+    content?: string;
+    /** A cell to store the result message indicating success or error */
+    result: Cell<string>;
+  },
+  { allCharms: Cell<MentionableCharm[]> }
+>(
+  (args, state) => {
+    try {
+      const n = Note({
+        title: args.title,
+        content: args.content || "",
+        allCharms: state.allCharms,
+      });
+
+      args.result.set(
+        `Created note ${args.title}!`,
+      );
+
+      return navigateTo(n);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 // put a note at the end of the outline (by appending to root.children)
 const editNote = handler<
   {
@@ -116,6 +145,23 @@ const readNote = handler<
   },
 );
 
+const listMentionable = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { allCharms: { [NAME]: string }[] }
+>(
+  (args, state) => {
+    try {
+      const namesList = state.allCharms.map((charm) => charm[NAME]);
+      args.result.set(JSON.stringify(namesList));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<LLMTestInput, LLMTestResult>(
   "Note",
   ({ title, expandChat, messages, content, allCharms }) => {
@@ -143,11 +189,40 @@ export default recipe<LLMTestInput, LLMTestResult>(
         } as JSONSchema,
         handler: readNote({ content }),
       },
+      listNotes: {
+        description: "List all mentionable notes.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        } as JSONSchema,
+        handler: listMentionable({
+          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+        }),
+      },
+      newNote: {
+        description: "Read the shared note.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "The title of the note.",
+            },
+            content: {
+              type: "string",
+              description: "The content of the note.",
+            },
+          },
+          required: ["title"],
+        } as JSONSchema,
+        handler: newNote({
+          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+        }),
+      },
     };
 
     const chat = Chat({ messages, tools });
-    const { addMessage, cancelGeneration, pending } = chat;
-
     const note = Note({ title, content, allCharms });
 
     return {

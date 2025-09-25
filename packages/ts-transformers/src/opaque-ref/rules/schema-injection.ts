@@ -134,6 +134,39 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           }
         }
 
+        if (callKind?.kind === "builder" && callKind.builderName === "lift") {
+          const factory = transformation.factory;
+
+          if (node.typeArguments && node.typeArguments.length >= 2) {
+            const argumentType = node.typeArguments[0];
+            const resultType = node.typeArguments[1];
+            if (!argumentType || !resultType) {
+              return ts.visitEachChild(node, visit, transformation);
+            }
+
+            const toSchemaArgument = factory.createCallExpression(
+              factory.createIdentifier("toSchema"),
+              [argumentType],
+              [],
+            );
+            const toSchemaResult = factory.createCallExpression(
+              factory.createIdentifier("toSchema"),
+              [resultType],
+              [],
+            );
+
+            ensureToSchemaImport();
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              [toSchemaArgument, toSchemaResult, ...node.arguments],
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+
         return ts.visitEachChild(node, visit, transformation);
       };
 

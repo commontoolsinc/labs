@@ -10,18 +10,24 @@ export const collapsibleStyles = `
 
   .trigger-wrapper {
     width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
   }
 
   /* Content wrapper for animation */
   .content-wrapper {
     overflow: hidden;
-    transition: height 0.2s ease-out;
+    transition: height var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     height: 0;
     will-change: height;
   }
 
   .collapsible.open .content-wrapper {
-    transition: height 0.2s ease-in;
+    transition: height var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
   }
 
   .content {
@@ -51,6 +57,31 @@ export const collapsibleStyles = `
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
     border-radius: calc(var(--radius) - 2px);
+  }
+
+  /* Chevron indicator */
+  .indicator {
+    margin-left: auto;
+    width: 1rem;
+    height: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .indicator::before {
+    content: '›';
+    display: block;
+    transform-origin: 50% 50%;
+    transform: rotate(0deg);
+    transition: transform var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
+    color: var(--ct-theme-color-text-muted, #64748b);
+    font-weight: var(--ct-font-weight-semibold, 600);
+  }
+
+  :host([open]) .indicator::before {
+    transform: rotate(90deg);
   }
 
   /* Custom properties for theming */

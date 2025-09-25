@@ -26,10 +26,20 @@ import {
   ViewUpdate,
   WidgetType,
 } from "@codemirror/view";
-import { type Cell, getEntityId, NAME } from "@commontools/runner";
+import {
+  type Cell,
+  getEntityId,
+  type JSONSchema,
+  NAME,
+  type Schema,
+} from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
-import { Charm } from "@commontools/charm";
+import {
+  Mentionable,
+  MentionableArray,
+  mentionableArraySchema,
+} from "../../core/mentionable.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -90,6 +100,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  *   (default: undefined)
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
+ * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -121,6 +132,7 @@ export class CTCodeEditor extends BaseElement {
     maxLineWidth: { type: Number },
     tabSize: { type: Number },
     tabIndent: { type: Boolean },
+    theme: { type: String, reflect: true },
   };
 
   declare value: Cell<string> | string;
@@ -130,13 +142,14 @@ export class CTCodeEditor extends BaseElement {
   declare placeholder: string;
   declare timingStrategy: InputTimingOptions["strategy"];
   declare timingDelay: number;
-  declare mentionable: Cell<Charm[]>;
-  declare mentioned?: Cell<Charm[]>;
+  declare mentionable: Cell<MentionableArray>;
+  declare mentioned?: Cell<MentionableArray>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
   declare tabSize: number;
   declare tabIndent: boolean;
+  declare theme: "light" | "dark";
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -147,6 +160,7 @@ export class CTCodeEditor extends BaseElement {
   private _tabIndentComp = new Compartment();
   private _maxLineWidthComp = new Compartment();
   private _indentUnitComp = new Compartment();
+  private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _cellController = createStringCellController(this, {
     timing: {
@@ -179,6 +193,7 @@ export class CTCodeEditor extends BaseElement {
     this.maxLineWidth = undefined;
     this.tabSize = 2;
     this.tabIndent = true;
+    this.theme = "light";
   }
 
   /**
@@ -252,28 +267,31 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query
    */
-  private getFilteredMentionable(query: string): Cell<Charm>[] {
+  private getFilteredMentionable(query: string): Cell<Mentionable>[] {
     if (!this.mentionable) {
       return [];
     }
 
-    const mentionableData = this.mentionable.getAsQueryResult();
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get();
 
     if (!mentionableData || mentionableData.length === 0) {
       return [];
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Cell<Charm>[] = [];
+    const matches: Cell<Mentionable>[] = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const mention = this.mentionable.key(i).get();
+      const mentionable = mentionableArray.key(i);
+      const mention = mentionable.get();
       if (
         mention &&
-        this.mentionable.key(i).key(NAME).getAsQueryResult()?.toLowerCase()
+        mentionable.key(NAME).get()
+          ?.toLowerCase()
           ?.includes(queryLower)
       ) {
-        matches.push(this.mentionable.key(i));
+        matches.push(mentionable);
       }
     }
 
@@ -360,14 +378,15 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Find a charm by ID in the mentionable list
    */
-  private findCharmById(id: string): Cell<Charm> | null {
+  private findCharmById(id: string): Cell<Mentionable> | null {
     if (!this.mentionable) return null;
 
-    const mentionableData = this.mentionable.getAsQueryResult();
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get();
     if (!mentionableData) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const charm = this.mentionable.key(i);
+      const charm = mentionableArray.key(i);
       if (charm) {
         const charmIdObj = getEntityId(charm);
         const charmId = charmIdObj?.["/"] || "";
@@ -503,9 +522,11 @@ export class CTCodeEditor extends BaseElement {
    */
   private _setupMentionableSyncHandler(): void {
     if (!this.mentionable) return;
-    const unsubscribe = this.mentionable.sink(() => {
-      this._updateMentionedFromContent();
-    });
+    const unsubscribe = this.mentionable.asSchema(mentionableArraySchema).sink(
+      () => {
+        this._updateMentionedFromContent();
+      },
+    );
     this._cleanupFns.push(unsubscribe);
   }
 
@@ -610,6 +631,15 @@ export class CTCodeEditor extends BaseElement {
       });
     }
 
+    // Update theme plugin
+    if (changedProperties.has("theme") && this._editorView) {
+      this._editorView.dispatch({
+        effects: this._themeComp.reconfigure(
+          this.theme === "dark" ? oneDark : [],
+        ),
+      });
+    }
+
     // Re-subscribe if mentionable cell reference changes
     if (changedProperties.has("mentionable")) {
       this._setupMentionableSyncHandler();
@@ -654,7 +684,6 @@ export class CTCodeEditor extends BaseElement {
       basicSetup,
       // Tab indentation keymap (toggleable)
       this._tabIndentComp.of(this.tabIndent ? keymap.of([indentWithTab]) : []),
-      oneDark,
       this._lang.of(getLangExtFromMimeType(this.language)),
       this._readonly.of(EditorState.readOnly.of(this.readonly)),
       // Word wrapping
@@ -681,6 +710,8 @@ export class CTCodeEditor extends BaseElement {
           })
           : [] as unknown as Extension,
       ),
+      // Theme (dark -> oneDark)
+      this._themeComp.of(this.theme === "dark" ? oneDark : []),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
@@ -803,16 +834,12 @@ export class CTCodeEditor extends BaseElement {
     const newMentioned = this._extractMentionedCharms(content);
 
     // Compare by id set to avoid unnecessary writes
-    const current = this.mentioned.getAsQueryResult?.() || [];
+    const current = this.mentioned.asSchema(mentionableArraySchema).get() || [];
     const curIds = new Set(
-      current
-        .map((c: Charm) => getEntityId(c)?.["/"] || "")
-        .filter((id: string) => id),
+      current.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
     );
     const newIds = new Set(
-      newMentioned
-        .map((c: Charm) => getEntityId(c)?.["/"] || "")
-        .filter((id: string) => id),
+      newMentioned.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
     );
 
     if (curIds.size === newIds.size) {
@@ -834,7 +861,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Parse content to a list of unique Charms referenced by [[...]] links.
    */
-  private _extractMentionedCharms(content: string): Charm[] {
+  private _extractMentionedCharms(content: string): Mentionable[] {
     if (!content || !this.mentionable) return [];
 
     const ids: string[] = [];
@@ -847,12 +874,12 @@ export class CTCodeEditor extends BaseElement {
 
     // Resolve unique ids to charms using mentionable list
     const seen = new Set<string>();
-    const result: Charm[] = [];
+    const result: Mentionable[] = [];
     for (const id of ids) {
       if (seen.has(id)) continue;
       const charm = this.findCharmById(id);
       if (charm) {
-        result.push(charm);
+        result.push(charm.get());
         seen.add(id);
       }
     }

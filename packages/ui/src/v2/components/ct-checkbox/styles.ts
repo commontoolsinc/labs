@@ -40,7 +40,8 @@ export const checkboxStyles = `
     border: 1px solid var(--primary, #0f172a);
     border-radius: 0.25rem; /* rounded */
     background-color: var(--background, #fff);
-    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     display: flex;
     align-items: center;
     justify-content: center;

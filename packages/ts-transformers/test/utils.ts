@@ -200,6 +200,20 @@ export async function transformSource(
   return output;
 }
 
+export async function checkWouldTransform(
+  source: string,
+  types: Record<string, string> = {},
+): Promise<boolean> {
+  try {
+    await transformSource(source, { mode: "error", types });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+transformSource.checkWouldTransform = checkWouldTransform;
+
 export async function loadFixture(path: string): Promise<string> {
   const fixturesDir = join(import.meta.dirname!, "fixtures");
   const fullPath = join(fixturesDir, path);

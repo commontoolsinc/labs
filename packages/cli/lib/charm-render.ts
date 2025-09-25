@@ -1,4 +1,4 @@
-import { render, VNode } from "@commontools/html";
+import { render, vdomSchema, VNode } from "@commontools/html";
 import { Cell, UI } from "@commontools/runner";
 import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
@@ -30,7 +30,13 @@ export async function renderCharm(
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
-  const cell = charm.getCell();
+  const cell = charm.getCell().asSchema({
+    type: "object",
+    properties: {
+      [UI]: vdomSchema,
+    },
+    required: [UI],
+  });
 
   // Check if charm has UI
   const staticValue = cell.get();

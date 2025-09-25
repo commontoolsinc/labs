@@ -34,6 +34,11 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   allCharms: Cell<any[]>;
+  theme?: {
+    accentColor: Default<string, "#3b82f6">;
+    fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
+    borderRadius: Default<string, "0.5rem">;
+  };
 };
 
 type Output = {
@@ -163,10 +168,24 @@ const combineLists = lift(
   },
 );
 
+const getSelectedCharm = lift<
+  { entry: { charm: any | undefined } },
+  {
+    chat: unknown;
+    note: unknown;
+    backlinks: MentionableCharm[];
+    mentioned: MentionableCharm[];
+  } | undefined
+>(
+  ({ entry }) => {
+    return entry?.charm;
+  },
+);
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
-  ({ selectedCharm, charmsList, allCharms }) => {
+  ({ selectedCharm, charmsList, allCharms, theme }) => {
     logCharmsList({ charmsList });
 
     const combined = combineLists({
@@ -174,92 +193,179 @@ export default recipe<Input, Output>(
       charmsList,
     });
 
+    const selected = getSelectedCharm({ entry: selectedCharm });
+
+    const localTheme = theme ?? {
+      accentColor: cell("#3b82f6"),
+      fontFace: cell("system-ui, -apple-system, sans-serif"),
+      borderRadius: cell("0.5rem"),
+    };
+
     return {
       [NAME]: "Launcher",
       [UI]: (
-        <ct-screen>
-          <div slot="header">
-            <ct-button
-              onClick={createChatRecipe({
-                selectedCharm,
-                charmsList,
-                allCharms: combined as unknown as any,
-              })}
-            >
-              Create New Chat
-            </ct-button>
-          </div>
-          <ct-autolayout tabNames={["Chat", "Tools"]}>
-            {
-              selectedCharm.charm.chat[UI] // workaround: CT-987
-            }
-            {
-              selectedCharm.charm.note[UI] // workaround: CT-987
-            }
+        <ct-theme theme={localTheme as any}>
+          <ct-screen>
+            <div slot="header">
+              <ct-toolbar dense sticky>
+                <div slot="start">
+                  <ct-button
+                    id="new-chat-btn"
+                    onClick={createChatRecipe({
+                      selectedCharm,
+                      charmsList,
+                      allCharms: combined as unknown as any,
+                    })}
+                  >
+                    Create New Chat
+                    <ct-kbd>alt+N</ct-kbd>
+                  </ct-button>
+                </div>
+              </ct-toolbar>
 
-            <aside slot="left">
-              <div>
-                <h3>Chat List</h3>
-              </div>
-              <div>
-                {charmsList.map((charmEntry, i) => (
-                  <div>
-                    index={i} chat ID: {charmEntry.local_id}
-                    <ct-button
-                      onClick={selectCharm({
-                        selectedCharm: selectedCharm,
+              {/* Keyboard shortcuts */}
+              <ct-keybind
+                code="KeyN"
+                alt
+                preventDefault
+                onct-keybind={createChatRecipe({
+                  selectedCharm,
+                  charmsList,
+                  allCharms: combined as unknown as any,
+                })}
+              />
+            </div>
+            <ct-autolayout
+              leftOpen
+              rightOpen={false}
+              tabNames={["Chat", "Note"]}
+            >
+              {selected.chat}
+              {selected.note}
+
+              <aside slot="left">
+                <div>
+                  <ct-heading level={3}>Chat List</ct-heading>
+                </div>
+                <div role="list">
+                  {charmsList.map((charmEntry) => (
+                    <ct-list-item
+                      onct-activate={selectCharm({
+                        selectedCharm,
                         charm: charmEntry.charm,
                       })}
                     >
-                      LOAD
-                    </ct-button>
-                  </div>
-                ))}
-              </div>
-            </aside>
+                      <span>{charmEntry.charm[NAME]}</span>
+                      <span slot="meta">{charmEntry.local_id}</span>
+                    </ct-list-item>
+                  ))}
+                </div>
+              </aside>
 
-            <aside slot="right">
-              {derive(selectedCharm.charm, (selected) => {
-                if (selected) {
-                  return (
-                    <>
-                      <div>
-                        <label>Backlinks</label>
-                        <ct-vstack>
-                          {selected?.backlinks?.map((
-                            charm: MentionableCharm,
-                          ) => (
-                            <ct-button
-                              onClick={handleCharmLinkClicked({ charm })}
-                            >
-                              {charm[NAME]}
-                            </ct-button>
-                          ))}
-                        </ct-vstack>
-                      </div>
-                      <details>
-                        <summary>Mentioned Charms</summary>
-                        <ct-vstack>
-                          {selected?.mentioned?.map((
-                            charm: MentionableCharm,
-                          ) => (
-                            <ct-button
-                              onClick={handleCharmLinkClicked({ charm })}
-                            >
-                              {charm[NAME]}
-                            </ct-button>
-                          ))}
-                        </ct-vstack>
-                      </details>
-                    </>
-                  );
-                } else {
-                  return null;
-                }
-              })}
-            </aside>
-          </ct-autolayout>
-        </ct-screen>
+              <aside slot="right">
+                {ifElse(
+                  selected,
+                  <>
+                    <div>
+                      <ct-heading level={4}>Backlinks</ct-heading>
+                      <ct-vstack>
+                        {selected?.backlinks?.map((
+                          charm: MentionableCharm,
+                        ) => (
+                          <ct-button
+                            onClick={handleCharmLinkClicked({ charm })}
+                          >
+                            {charm[NAME]}
+                          </ct-button>
+                        ))}
+                      </ct-vstack>
+                    </div>
+                    <ct-collapsible>
+                      <ct-heading slot="trigger" level={5} no-margin>
+                        Mentioned Charms
+                      </ct-heading>
+                      <ct-vstack>
+                        {selected?.mentioned?.map((
+                          charm: MentionableCharm,
+                        ) => (
+                          <ct-button
+                            onClick={handleCharmLinkClicked({ charm })}
+                          >
+                            {charm[NAME]}
+                          </ct-button>
+                        ))}
+                      </ct-vstack>
+                    </ct-collapsible>
+                  </>,
+                  null,
+                )}
+                <ct-collapsible>
+                  <ct-heading slot="trigger" level={5} no-margin>
+                    Theme
+                  </ct-heading>
+                  <ct-vstack style="padding: 0.5rem 0; gap: 0.5rem;">
+                    <ct-vstack>
+                      <ct-text>Font Family</ct-text>
+                      <ct-select
+                        items={[
+                          {
+                            label: "System",
+                            value: "system-ui, -apple-system, sans-serif",
+                          },
+                          {
+                            label: "Monospace",
+                            value: "ui-monospace, Consolas, monospace",
+                          },
+                          {
+                            label: "Serif",
+                            value: "Georgia, Times, serif",
+                          },
+                          {
+                            label: "Sans Serif",
+                            value: "Arial, Helvetica, sans-serif",
+                          },
+                        ]}
+                        $value={localTheme.fontFace}
+                      />
+                    </ct-vstack>
+
+                    <ct-vstack>
+                      <ct-text>Accent Color</ct-text>
+                      <ct-select
+                        items={[
+                          { label: "Blue", value: "#3b82f6" },
+                          { label: "Purple", value: "#8b5cf6" },
+                          { label: "Green", value: "#10b981" },
+                          { label: "Red", value: "#ef4444" },
+                          { label: "Orange", value: "#f97316" },
+                          { label: "Pink", value: "#ec4899" },
+                          { label: "Indigo", value: "#6366f1" },
+                          { label: "Teal", value: "#14b8a6" },
+                        ]}
+                        $value={localTheme.accentColor}
+                      />
+                    </ct-vstack>
+
+                    <ct-vstack>
+                      <ct-text>Border Radius</ct-text>
+                      <ct-select
+                        items={[
+                          { label: "None", value: "0px" },
+                          { label: "Small", value: "0.25rem" },
+                          { label: "Medium", value: "0.5rem" },
+                          { label: "Large", value: "0.75rem" },
+                          { label: "Extra Large", value: "1rem" },
+                          { label: "Rounded", value: "1.5rem" },
+                        ]}
+                        $value={localTheme.borderRadius}
+                      />
+                    </ct-vstack>
+                  </ct-vstack>
+                </ct-collapsible>
+              </aside>
+            </ct-autolayout>
+          </ct-screen>
+        </ct-theme>
       ),
       selectedCharm,
       charmsList,

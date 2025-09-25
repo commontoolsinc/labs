@@ -4,6 +4,11 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import {
+  Mentionable,
+  MentionableArray,
+  mentionableArraySchema,
+} from "../../core/mentionable.ts";
 
 /**
  * Executes a mutation on a Cell within a transaction
@@ -52,7 +57,6 @@ import {
   pathToString,
   stringToPath,
 } from "./node-path.ts";
-import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -144,7 +148,7 @@ export class CTOutliner extends BaseElement
 
   declare value: Cell<Tree> | null;
   declare readonly: boolean;
-  declare mentionable: Cell<Charm[]>;
+  declare mentionable: Cell<MentionableArray>;
 
   // Direct tree access from Cell
   get tree(): Tree {
@@ -671,8 +675,9 @@ export class CTOutliner extends BaseElement
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
       handleCharmLinkClick: (event: MouseEvent) =>
         this.handleCharmLinkClick(event),
-      encodeCharmForHref: (charm: Charm) => this.encodeCharmForHref(charm),
-      insertMention: (mention: Charm) => this.insertMention(mention),
+      encodeCharmForHref: (charm: Mentionable) =>
+        this.encodeCharmForHref(charm),
+      insertMention: (mention: Mentionable) => this.insertMention(mention),
     };
   }
 
@@ -1557,12 +1562,13 @@ export class CTOutliner extends BaseElement
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private getFilteredMentions(): Charm[] {
+  private getFilteredMentions(): MentionableArray {
     if (!this.mentionable) {
       return [];
     }
 
-    const mentionableData = this.mentionable.getAsQueryResult();
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get();
     if (!mentionableData || mentionableData.length === 0) {
       return [];
     }
@@ -1574,16 +1580,16 @@ export class CTOutliner extends BaseElement
     // we need to resolve each one individually
     for (let i = 0; i < mentionableData.length; i++) {
       // Use key(i).getAsQueryResult() to properly resolve LINK references
-      const mention = this.mentionable.key(i).getAsQueryResult();
+      const mention = mentionableArray.key(i).get();
       if (mention && mention[NAME]?.toLowerCase()?.includes(query)) {
         matches.push(i);
       }
     }
 
-    return matches.map((i) => this.mentionable.key(i).getAsQueryResult());
+    return matches.map((i) => mentionableArray.key(i).get());
   }
 
-  private insertMention(mention: Charm) {
+  private insertMention(mention: Mentionable) {
     if (!this.editingNodePath) return;
 
     const editingNode = getNodeByPath(this.tree, this.editingNodePath);
@@ -1623,7 +1629,7 @@ export class CTOutliner extends BaseElement
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: Charm): string {
+  private encodeCharmForHref(charm: Mentionable): string {
     // Simply use the entity ID as the href
     const entityId = getEntityId(charm);
     return encodeURIComponent(JSON.stringify(entityId)) || "";
@@ -1632,14 +1638,15 @@ export class CTOutliner extends BaseElement
   /**
    * Decode charm reference from href (entity ID)
    */
-  private decodeCharmFromHref(href: string | null): Charm | null {
+  private decodeCharmFromHref(href: string | null): Mentionable | null {
     if (!href || !this.mentionable) return null;
 
-    const mentionableData = this.mentionable.getAsQueryResult() || [];
+    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableData = mentionableArray.get() || [];
 
     for (let i = 0; i < mentionableData.length; i++) {
       // Properly resolve each LINK reference
-      const mention = this.mentionable.key(i).getAsQueryResult();
+      const mention = mentionableArray.key(i).get();
       if (mention) {
         const mentionEntityId = encodeURIComponent(
           JSON.stringify(getEntityId(mention)),
@@ -2123,7 +2130,7 @@ export class CTOutliner extends BaseElement
    * Render attachments for a node using ct-render
    */
   private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
-    const attachments = node.key("attachments").getAsQueryResult() as Charm[];
+    const attachments = node.key("attachments").getAsQueryResult() as unknown[];
 
     if (!attachments || attachments.length === 0) {
       return "";
@@ -2138,7 +2145,7 @@ export class CTOutliner extends BaseElement
     const space = tree.space;
 
     // Create proper charm cell references from attachment charm objects
-    const charmCells = attachments.map((attachment: Charm) => {
+    const charmCells = attachments.map((attachment: unknown) => {
       try {
         // Extract entity ID from the charm object
         const entityId = getEntityId(attachment);
@@ -2149,11 +2156,11 @@ export class CTOutliner extends BaseElement
         }
 
         // Create a proper charm cell reference using the runtime
-        const charmCell = runtime.getCellFromEntityId<Charm>(
+        const charmCell = runtime.getCellFromEntityId<unknown>(
           space,
           entityId,
           [],
-          charmSchema,
+          undefined,
         );
 
         return charmCell;
@@ -2165,11 +2172,11 @@ export class CTOutliner extends BaseElement
         );
         return null;
       }
-    }).filter((cell): cell is Cell<Charm> => cell !== null);
+    }).filter((cell): cell is Cell<unknown> => cell !== null);
 
     return html`
       <div class="attachments">
-        ${charmCells.map((charmCell: Cell<Charm>) => {
+        ${charmCells.map((charmCell: Cell<unknown>) => {
           return html`
             <div class="attachment">
               <ct-render .cell="${charmCell}"></ct-render>

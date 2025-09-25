@@ -6,7 +6,7 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
-import { Charm, CharmManager } from "./manager.ts";
+import { CharmManager, nameSchema } from "./manager.ts";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsCharm = async (
@@ -71,10 +71,10 @@ export const createDataCharm = (
 
 export async function fixItCharm(
   charmManager: CharmManager,
-  charm: Cell<Charm>,
+  charm: Cell<unknown>,
   error: Error,
   model = DEFAULT_MODEL_NAME,
-): Promise<Cell<Charm>> {
+): Promise<Cell<unknown>> {
   const iframeRecipe = getIframeRecipe(charm, charmManager.runtime);
   if (!iframeRecipe.iframe) {
     throw new Error("Fixit only works for iframe charms");
@@ -112,8 +112,7 @@ export async function renameCharm(
   charmId: string,
   newName: string,
 ): Promise<void> {
-  const charm = await charmManager.get(charmId);
-  if (!charm) return;
+  const charm = await charmManager.get(charmId, false, nameSchema);
   charm.key(NAME).set(newName);
 }
 
@@ -122,7 +121,7 @@ export async function addGithubRecipe(
   filename: string,
   spec: string,
   runOptions: unknown,
-): Promise<Cell<Charm>> {
+): Promise<Cell<unknown>> {
   const response = await fetch(
     `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
   );
@@ -151,10 +150,10 @@ export async function addGithubRecipe(
 export async function modifyCharm(
   charmManager: CharmManager,
   promptText: string,
-  currentCharm: Cell<Charm>,
+  currentCharm: Cell<unknown>,
   prefill?: Partial<WorkflowForm>,
   model?: string,
-): Promise<Cell<Charm>> {
+): Promise<Cell<unknown>> {
   // Include the current charm in the context
   const context: ProcessWorkflowOptions = {
     existingCharm: currentCharm,

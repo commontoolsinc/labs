@@ -29,7 +29,8 @@ export const badgeStyles = `
     font-size: 0.75rem;
     font-weight: 600;
     line-height: 1;
-    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     white-space: nowrap;
     font-family: inherit;
   }
@@ -70,7 +71,8 @@ export const badgeStyles = `
     margin-left: 0.125rem;
     margin-right: -0.25rem;
     opacity: 0.7;
-    transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     border-radius: 0.25rem;
     padding: 0;
     width: 14px;

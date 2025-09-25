@@ -19,6 +19,8 @@ export const styles = css`
   .cm-editor {
     height: 100%;
     width: 100%;
+    border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+    border-radius: var(--ct-theme-border-radius, 0.375rem);
   }
 
   .cm-scroller {
@@ -36,8 +38,8 @@ export const styles = css`
 
   /* Match v2 component theming */
   .cm-editor {
-    font-size: var(--ct-font-size-sm, 0.875rem);
-    font-family: var(--ct-font-mono, monospace);
+    font-size: 0.875rem;
+    font-family: var(--ct-theme-mono-font-family, monospace);
   }
 
   /* Focus state with v2 styling */
@@ -47,7 +49,7 @@ export const styles = css`
 
   /* Match v2 border radius */
   .cm-editor {
-    border-radius: var(--radius, 0.375rem);
+    border-radius: var(--ct-theme-border-radius, 0.375rem);
   }
 
   /* Backlink styling - make [[backlinks]] visually distinct */
@@ -61,10 +63,11 @@ export const styles = css`
     border-radius: 0.25rem;
     padding: 0.125rem 0.25rem;
     cursor: pointer;
-    transition: background-color 0.2s;
-  }
+    transition: background-color var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
+    }
 
-  .cm-backlink:hover {
-    background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
-  }
-`;
+    .cm-backlink:hover {
+      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+    }
+  `;

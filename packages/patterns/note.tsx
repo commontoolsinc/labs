@@ -92,15 +92,12 @@ const Note = recipe<Input, Output>(
   ({ title, content, allCharms }) => {
     const mentioned = cell<MentionableCharm[]>([]);
 
-    // why does MentionableCharm behave differently than any here?
-    // perhaps optional properties?
-    const computeBacklinks = lift(
-      toSchema<
-        { allCharms: Cell<any[]>; content: Cell<string> }
-      >(),
-      toSchema<any[]>(),
+    const computeBacklinks = lift<
+      { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
+      MentionableCharm[]
+    >(
       ({ allCharms, content }) => {
-        const cs: MentionableCharm[] = allCharms.get();
+        const cs = allCharms.get();
         if (!cs) return [];
 
         const self = cs.find((c) => c.content === content.get());
@@ -117,7 +114,7 @@ const Note = recipe<Input, Output>(
 
     const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
       allCharms,
-      content,
+      content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
     return {
@@ -140,6 +137,7 @@ const Note = recipe<Input, Output>(
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
             })}
             language="text/markdown"
+            theme="light"
             wordWrap
             tabIndent
             lineNumbers

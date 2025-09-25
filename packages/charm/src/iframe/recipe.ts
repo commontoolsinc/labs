@@ -1,5 +1,5 @@
 import { Cell, type JSONSchema, type Runtime } from "@commontools/runner";
-import { Charm, getRecipeIdFromCharm } from "../manager.ts";
+import { getRecipeIdFromCharm } from "../manager.ts";
 
 export type IFrameRecipe = {
   src: string;
@@ -62,7 +62,7 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 }
 
 export const getIframeRecipe = (
-  charm: Cell<Charm>,
+  charm: Cell<unknown>,
   runtime: Runtime,
 ): {
   recipeId: string;

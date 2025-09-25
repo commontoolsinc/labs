@@ -6,7 +6,8 @@ export const resizableHandleStyles = `
     position: relative;
     outline: none;
     background-color: hsl(var(--border, 240 5.9% 90%));
-    transition: background-color 0.2s;
+    transition: background-color var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
   }
 
   :host(:hover) {
@@ -31,7 +32,8 @@ export const resizableHandleStyles = `
     height: 16px;
     position: relative;
     opacity: 0.5;
-    transition: opacity 0.2s;
+    transition: opacity var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
   }
 
   :host(:hover) .grip-icon {
