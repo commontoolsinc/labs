@@ -1,4 +1,4 @@
-import { type JsScript } from "@commontools/js-runtime";
+import { type JsScript, Program } from "@commontools/js-runtime";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
@@ -35,15 +35,25 @@ export async function process(
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main),
   );
+  const getTransformedProgram = options.showTransformed
+    ? renderTransformed
+    : undefined;
   const { output, main } = await engine.process(program, {
     noCheck: !options.check,
     noRun: !options.run,
     filename,
-    showTransformed: options.showTransformed,
+    getTransformedProgram,
   });
 
   if (options.output) {
     await Deno.writeTextFile(options.output, output.js);
   }
   return { output, main };
+}
+
+function renderTransformed(program: Program) {
+  for (const { contents, name } of program.files) {
+    console.log(`// transformed: ${name}`);
+    console.log(contents);
+  }
 }

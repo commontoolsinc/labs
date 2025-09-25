@@ -20,8 +20,8 @@ export interface TypeScriptHarnessProcessOptions {
   // Filename to use in the compiled JS code, for engines
   // that apply source maps.
   filename?: string;
-  // Show only the transformed TypeScript source code without executing.
-  showTransformed?: boolean;
+  // Get the program post-AST-transformation for debugging.
+  getTransformedProgram?: (program: Program) => void;
 }
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.

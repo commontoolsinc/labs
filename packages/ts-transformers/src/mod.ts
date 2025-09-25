@@ -21,8 +21,6 @@ export {
 
 export { hasCtsEnableDirective } from "./cts-directive.ts";
 
-export { createAstInspectorTransformer } from "./ast-inspector-transformer.ts";
-
 export { collectOpaqueRefs } from "./opaque-ref/dataflow.ts";
 
 export {
@@ -47,3 +45,5 @@ export {
   createModularOpaqueRefTransformer,
   type ModularOpaqueRefTransformerOptions,
 } from "./opaque-ref/transformer.ts";
+
+export { commonTypeScriptTransformer } from "./transform.ts";
