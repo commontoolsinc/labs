@@ -201,6 +201,8 @@ export default recipe<Input, Output>(
       borderRadius: cell("0.5rem"),
     };
 
+    const selected = getSelectedCharm({ entry: selectedCharm });
+
     return {
       [NAME]: "Launcher",
       [UI]: (
@@ -241,12 +243,8 @@ export default recipe<Input, Output>(
               rightOpen={false}
               tabNames={["Chat", "Tools"]}
             >
-              {
-                selected.chat // workaround: CT-987
-              }
-              {
-                selected.note // workaround: CT-987
-              }
+              {selected.chat}
+              {selected.note}
 
               <aside slot="left">
                 <div>
