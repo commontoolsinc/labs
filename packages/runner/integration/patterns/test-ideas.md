@@ -283,7 +283,7 @@ current offline harness.
       stats compute per question and demographic.
 - [ ] Customer satisfaction tracker pattern — track csat trends ensure derived
       moving averages update with new survey entries.
-- [ ] Lead scoring pattern — score leads on signals ensure derived weights
+- [x] Lead scoring pattern — score leads on signals ensure derived weights
       adjust totals per signal mutation.
 - [x] CRM pipeline pattern — track deals by stage ensure derived forecasts sum
       weighted amounts across stages.
