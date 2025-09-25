@@ -93,6 +93,9 @@ offline-friendly recipes that the harness can assert confidently.
   need a simple hook; keep the raw log intact for derived summaries.
 - Keep scenarios offline and deterministic: no timers, randomness, or ambient IO
   beyond the CTS APIs.
+- When arguments supply initial collections that must later mutate, mirror them
+  into your own `cell` via a seeding `lift` so handlers avoid reading during
+  recipe creation while still honoring caller-provided defaults.
 
 ## Reuse & Abstractions
 
