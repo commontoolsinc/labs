@@ -49,7 +49,7 @@ current offline harness.
       and merge results into parent cell.
 - [x] Conditional UI branch using `ifElse` — build pattern that returns
       different trees based on argument flag and assert branch swap.
-- [ ] Counter aggregator pattern — accept list of counters and derive sum via
+- [x] Counter aggregator pattern — accept list of counters and derive sum via
       map + lift.
 - [ ] Mutable tuple state — pattern returns tuple-like object; handlers update
       both entries and scenario asserts tuple values.
