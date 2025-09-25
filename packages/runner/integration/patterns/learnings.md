@@ -45,6 +45,9 @@ offline-friendly recipes that the harness can assert confidently.
   handler and viewer always agree on defaults.
 - Only override metadata when events provide explicit values so sanitized
   defaults stay stable and deterministic.
+- When handler logic depends on argument cells and internal aggregates,
+  re-sanitize the argument cells inside the handler before writing so newly
+  created entries share the same canonical structure as derived views.
 
 ## Derived Views & Determinism
 
