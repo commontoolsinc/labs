@@ -163,6 +163,20 @@ const combineLists = lift(
   },
 );
 
+const getSelectedCharm = lift<
+  { entry: { charm: any | undefined } },
+  {
+    chat: unknown;
+    note: unknown;
+    backlinks: MentionableCharm[];
+    mentioned: MentionableCharm[];
+  } | undefined
+>(
+  ({ entry }) => {
+    return entry?.charm;
+  },
+);
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
@@ -173,6 +187,8 @@ export default recipe<Input, Output>(
       allCharms: allCharms as unknown as any[],
       charmsList,
     });
+
+    const selected = getSelectedCharm({ entry: selectedCharm });
 
     return {
       [NAME]: "Launcher",
@@ -191,10 +207,10 @@ export default recipe<Input, Output>(
           </div>
           <ct-autolayout tabNames={["Chat", "Tools"]}>
             {
-              selectedCharm.charm.chat[UI] // workaround: CT-987
+              selected.chat // workaround: CT-987
             }
             {
-              selectedCharm.charm.note[UI] // workaround: CT-987
+              selected.note // workaround: CT-987
             }
 
             <aside slot="left">
@@ -219,44 +235,40 @@ export default recipe<Input, Output>(
             </aside>
 
             <aside slot="right">
-              {derive(selectedCharm.charm, (selected) => {
-                if (selected) {
-                  return (
-                    <>
-                      <div>
-                        <label>Backlinks</label>
-                        <ct-vstack>
-                          {selected?.backlinks?.map((
-                            charm: MentionableCharm,
-                          ) => (
-                            <ct-button
-                              onClick={handleCharmLinkClicked({ charm })}
-                            >
-                              {charm[NAME]}
-                            </ct-button>
-                          ))}
-                        </ct-vstack>
-                      </div>
-                      <details>
-                        <summary>Mentioned Charms</summary>
-                        <ct-vstack>
-                          {selected?.mentioned?.map((
-                            charm: MentionableCharm,
-                          ) => (
-                            <ct-button
-                              onClick={handleCharmLinkClicked({ charm })}
-                            >
-                              {charm[NAME]}
-                            </ct-button>
-                          ))}
-                        </ct-vstack>
-                      </details>
-                    </>
-                  );
-                } else {
-                  return null;
-                }
-              })}
+              {ifElse(
+                selected,
+                <>
+                  <div>
+                    <label>Backlinks</label>
+                    <ct-vstack>
+                      {selected?.backlinks?.map((
+                        charm: MentionableCharm,
+                      ) => (
+                        <ct-button
+                          onClick={handleCharmLinkClicked({ charm })}
+                        >
+                          {charm[NAME]}
+                        </ct-button>
+                      ))}
+                    </ct-vstack>
+                  </div>
+                  <details>
+                    <summary>Mentioned Charms</summary>
+                    <ct-vstack>
+                      {selected?.mentioned?.map((
+                        charm: MentionableCharm,
+                      ) => (
+                        <ct-button
+                          onClick={handleCharmLinkClicked({ charm })}
+                        >
+                          {charm[NAME]}
+                        </ct-button>
+                      ))}
+                    </ct-vstack>
+                  </details>
+                </>,
+                null,
+              )}
             </aside>
           </ct-autolayout>
         </ct-screen>
