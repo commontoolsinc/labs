@@ -183,3 +183,6 @@
 - Reusing a generic facet toggle handler keeps category and brand filters in
   sync; sanitizing the payload within the handler prevents whitespace or case
   noise from destabilizing the derived filtered list.
+- Mapping nested counters through a `lift` produced a clean numeric slice so
+  another `lift` could sum values without touching the raw argument cell,
+  keeping handlers focused on mutating a single source cell.
