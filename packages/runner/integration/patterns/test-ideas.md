@@ -79,7 +79,7 @@ current offline harness.
       totals via derive.
 - [x] Counter with matrix state — maintain 2D array of numbers and update
       row/column cells.
-- [ ] Counter with pattern arguments referencing parent cells — pass parent cell
+- [x] Counter with pattern arguments referencing parent cells — pass parent cell
       references into child pattern and verify shared state.
 - [x] Counter with dynamic handler list — produce array of handlers for each
       item and send events per index.
