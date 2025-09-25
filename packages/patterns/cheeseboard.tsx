@@ -14,6 +14,12 @@ import {
   UI,
 } from "commontools";
 
+/**
+ * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
+ * display a list of pizza descriptions inside the charm.
+ *
+ * Uses: fetchData, lift, map built-in, toolshed web-read endpoint
+ */
 /** Extract pizza descriptions from a web-read content blob. */
 function extractPizzas(content: string): string[] {
   const marker = "### Pizza";
