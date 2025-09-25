@@ -1,4 +1,10 @@
-import { Compiler, JsScript, Program, ProgramResolver } from "../interface.ts";
+import {
+  Compiler,
+  JsScript,
+  Program,
+  ProgramResolver,
+  Source,
+} from "../interface.ts";
 import type {
   CompilerHost,
   CompilerOptions,
@@ -19,21 +25,10 @@ import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
-import {
-  createAstInspectorTransformer,
-  createModularOpaqueRefTransformer,
-  createSchemaTransformer,
-  hasCtsEnableDirective,
-} from "@commontools/ts-transformers";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
 
-// Create logger for the compiler
-const logger = getLogger("js-runtime-compiler", {
-  enabled: true,
-  level: "info",
-});
 // Create a separate debug logger for VirtualFs operations
 const vfsLogger = getLogger("virtualfs", {
   enabled: DEBUG_VIRTUAL_FS,
@@ -218,6 +213,12 @@ export interface TypeScriptCompilerOptions {
   // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
+  // Transformations to run before JS transforms.
+  beforeTransformers?: (
+    program: ts.Program,
+  ) => ts.TransformerFactory<ts.SourceFile>[];
+  // Return the transformed program.
+  getTransformedProgram?: (program: Program) => void;
   // Whether the bundling process results in the bundle, upon invocation,
   // evaluating to the main entry's exports (false|undefined),
   // or an object containing the main/default export and a map of all files'
@@ -227,10 +228,6 @@ export interface TypeScriptCompilerOptions {
   //   ({ runtimeDeps: Record<string, any> }) =>
   //     Record<string, any>;
   // ```
-  //
-  // Show only the transformed TypeScript source code.
-  showTransformed?: boolean;
-  debugLoggingTransformers?: boolean;
   // to
   //
   // ```ts
@@ -276,7 +273,6 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
   compile(
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
-    // maybe optional 'transform' function taking tsProgram, from where you can get source files etc, and returns optional ts.customTransformers (based on cts-enable presence)
   ): JsScript {
     const filename = inputOptions.filename ?? "out.js";
     const noCheck = inputOptions.noCheck ?? false;
@@ -312,65 +308,17 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
-    // beginning of transformation related code
-    // Check if the main source file has the /// <cts-enable /> directive
-    // Check if any source file has the CommonTools directive
-    const sourceFiles = tsProgram.getSourceFiles();
-    let hasCtsDirective = false;
-
-    for (const sourceFile of sourceFiles) {
-      if (hasCtsEnableDirective(sourceFile)) {
-        hasCtsDirective = true;
-        break;
-      }
-    }
-
-    // Build transformers list based on CTS directive and options
-    const beforeTransformers: ts.TransformerFactory<ts.SourceFile>[] = [];
-    const capturedSources: Array<
-      { file: ts.SourceFile; normalizedPath: string }
-    > = [];
-    const capturedFileMap = new Map<string, string>();
-
-    if (hasCtsDirective) {
-      // Add OpaqueRef and Schema transformers
-      beforeTransformers.push(
-        createModularOpaqueRefTransformer(tsProgram),
-        createSchemaTransformer(tsProgram),
-      );
-
-      // Only add AST inspector transformer if showTransformed is true
-      if (inputOptions.showTransformed) {
-        beforeTransformers.push(
-          createAstInspectorTransformer((sourceFile) => {
-            if (!hasCtsEnableDirective(sourceFile)) return;
-            if (capturedFileMap.has(sourceFile.fileName)) return;
-            capturedFileMap.set(sourceFile.fileName, sourceFile.fileName);
-            capturedSources.push({
-              file: sourceFile,
-              normalizedPath: path.normalize(sourceFile.fileName),
-            });
-          }),
-        );
-      }
-    } else if (inputOptions.showTransformed) {
-      // Warn if user requested transformed output but no CTS directive
-      logger.warn(() =>
-        "Warning: --show-transformed was specified but no /// <cts-enable /> directive found in the main source file"
-      );
-    }
-
-    const transformers = beforeTransformers.length > 0
-      ? { before: beforeTransformers }
-      : undefined;
-    // end of transformation related code
+    const { beforeTransformers, sourceCollector } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,
       undefined,
       undefined,
       undefined,
-      transformers,
+      { before: beforeTransformers },
     );
     checker.check(diagnostics);
 
@@ -378,15 +326,12 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Emit skipped. Check diagnostics.");
     }
 
-    if (inputOptions.showTransformed && capturedSources.length > 0) {
-      const printer = ts.createPrinter({
-        newLine: ts.NewLineKind.LineFeed,
-        removeComments: false,
-      });
-      for (const { file, normalizedPath } of capturedSources) {
-        console.log(`/* transformed: ${normalizedPath} */`);
-        console.log(printer.printFile(file));
-      }
+    if (sourceCollector && inputOptions.getTransformedProgram) {
+      const transformed = {
+        main: program.main,
+        files: sourceCollector.sources(),
+      };
+      inputOptions.getTransformedProgram(transformed);
     }
 
     // Get written files, should be a JS and source map.
@@ -431,8 +376,50 @@ function validateSource(artifact: Program) {
   }
 }
 
-function assert(expr: boolean, message: string) {
-  if (!expr) {
-    throw new Error(`${message}`);
+function createTransformers(
+  program: ts.Program,
+  options: TypeScriptCompilerOptions,
+): {
+  beforeTransformers: ts.TransformerFactory<ts.SourceFile>[];
+  sourceCollector?: SourceCollector;
+} {
+  const beforeTransformers = options.beforeTransformers
+    ? options.beforeTransformers(program)
+    : [];
+
+  const out: ReturnType<typeof createTransformers> = {
+    beforeTransformers,
+  };
+
+  if (beforeTransformers.length && options.getTransformedProgram) {
+    out.sourceCollector = new SourceCollector();
+    out.beforeTransformers.push(out.sourceCollector.transformer());
+  }
+
+  return out;
+}
+
+class SourceCollector {
+  #sources: Source[] = [];
+  #printer: ts.Printer;
+  constructor() {
+    this.#printer = ts.createPrinter({
+      newLine: ts.NewLineKind.LineFeed,
+      removeComments: false,
+    });
+  }
+
+  sources(): Source[] {
+    return this.#sources;
+  }
+
+  transformer(): ts.TransformerFactory<ts.SourceFile> {
+    return () => (sourceFile) => {
+      this.#sources.push({
+        contents: this.#printer.printFile(sourceFile),
+        name: path.normalize(sourceFile.fileName),
+      });
+      return sourceFile;
+    };
   }
 }
