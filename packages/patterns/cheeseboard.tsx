@@ -22,11 +22,13 @@ import {
  */
 const DATE_LINE_REGEX = /^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}$/;
 
+type CheeseboardEntry = [date: string, pizza: string];
+
 /** Extract pizza descriptions from a web-read content blob. */
-function extractPizzas(content: string): string[] {
+function extractPizzas(content: string): CheeseboardEntry[] {
   const normalized = content.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
-  const pizzas: string[] = [];
+  const pizzas: CheeseboardEntry[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const dateLine = lines[i].trim();
@@ -62,7 +64,10 @@ function extractPizzas(content: string): string[] {
     }
 
     if (descriptionLines.length > 0) {
-      pizzas.push(`${dateLine}: ${descriptionLines.join(" ")}`);
+      pizzas.push([
+        dateLine,
+        descriptionLines.join(" "),
+      ]);
     }
   }
 
@@ -84,7 +89,7 @@ type WebReadResult = {
   is updated. it also allows us to call our pure function
   `extractPizzas` and return the results
 */
-const createPizzaListCell = lift<{ result: WebReadResult }, string[]>(
+const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
   ({ result }) => {
     return extractPizzas(result?.content ?? "");
   },
@@ -127,9 +132,9 @@ export default recipe("Cheeseboard", () => {
         <div>
           <h3>Pizza list</h3>
           <ul>
-            {pizzaList.map((pizza, index) => (
+            {pizzaList.map(([date, pizza], index) => (
               <li key={`pizza-${index}`}>
-                {pizza}
+                {date}: {pizza}
               </li>
             ))}
           </ul>
