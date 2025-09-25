@@ -167,7 +167,7 @@ current offline harness.
       derived alerts react to threshold and stock adjustments.
 - [x] Catalog search facets pattern — filter catalog by selections ensure
       handlers sync facet toggles with filtered result lists.
-- [ ] Saved search subscription pattern — persist saved query payloads ensure
+- [x] Saved search subscription pattern — persist saved query payloads ensure
       appended subscriptions replay triggers in harness runs.
 - [x] Notification preference pattern — configure channel settings ensure
       derived schedules reflect per-channel frequency changes.
