@@ -1,6 +1,14 @@
 import { css, html } from "lit";
+import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { consume } from "@lit/context";
+import {
+  applyThemeToElement,
+  defaultTheme,
+  type CTTheme,
+  themeContext,
+} from "../theme-context.ts";
 
 /**
  * CTTextarea - Multi-line text input with support for auto-resize and various states
@@ -69,21 +77,21 @@ export class CTTextarea extends BaseElement {
       width: 100%;
 
       /* Default color values if not provided */
-      --background: #ffffff;
-      --foreground: #0f172a;
-      --border: #e2e8f0;
-      --ring: #94a3b8;
-      --destructive: #dc2626;
-      --muted: #f8fafc;
-      --muted-foreground: #64748b;
-      --placeholder: #94a3b8;
+      --background: var(--ct-theme-color-background, #ffffff);
+      --foreground: var(--ct-theme-color-text, #0f172a);
+      --border: var(--ct-theme-color-border, #e2e8f0);
+      --ring: var(--ct-theme-color-primary, #3b82f6);
+      --destructive: var(--ct-theme-color-error, #dc2626);
+      --muted: var(--ct-theme-color-surface, #f1f5f9);
+      --muted-foreground: var(--ct-theme-color-text-muted, #64748b);
+      --placeholder: var(--ct-theme-color-text-muted, #94a3b8);
 
       /* Textarea dimensions */
       --textarea-padding-x: 0.75rem;
       --textarea-padding-y: 0.5rem;
       --textarea-font-size: 0.875rem;
       --textarea-line-height: 1.25rem;
-      --textarea-border-radius: 0.375rem;
+      --textarea-border-radius: var(--ct-theme-border-radius, 0.375rem);
       --textarea-min-height: 5rem;
     }
 
@@ -95,12 +103,13 @@ export class CTTextarea extends BaseElement {
       padding: var(--textarea-padding-y) var(--textarea-padding-x);
       font-size: var(--textarea-font-size);
       line-height: var(--textarea-line-height);
-      font-family: inherit;
+      font-family: var(--ct-theme-font-family, inherit);
       color: var(--foreground);
       background-color: var(--background);
       border: 1px solid var(--border);
       border-radius: var(--textarea-border-radius);
-      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all var(--ct-theme-animation-duration, 150ms)
+        var(--ct-transition-timing-ease);
       display: block;
       overflow: auto;
       word-wrap: break-word;
@@ -150,14 +159,16 @@ export class CTTextarea extends BaseElement {
       outline: 2px solid transparent;
       outline-offset: 2px;
       border-color: var(--ring);
-      box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.1);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
     }
 
     textarea:focus-visible {
       outline: 2px solid transparent;
       outline-offset: 2px;
       border-color: var(--ring);
-      box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.1);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-primary, rgba(59, 130, 246, 0.15));
     }
 
     /* Disabled state */
@@ -182,7 +193,8 @@ export class CTTextarea extends BaseElement {
     textarea.error:focus,
     textarea.error:focus-visible {
       border-color: var(--destructive);
-      box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+      box-shadow: 0 0 0 3px
+        var(--ct-theme-color-error, rgba(220, 38, 38, 0.1));
     }
 
     /* Scrollbar styling */
@@ -199,7 +211,7 @@ export class CTTextarea extends BaseElement {
     textarea::-webkit-scrollbar-thumb {
       background-color: var(--border);
       border-radius: calc(var(--textarea-border-radius) * 0.5);
-      transition: background-color 150ms;
+      transition: background-color var(--ct-theme-animation-duration, 150ms);
     }
 
     textarea::-webkit-scrollbar-thumb:hover {
@@ -239,6 +251,13 @@ export class CTTextarea extends BaseElement {
       overflow-y: hidden;
     }
   `;
+
+  // Theme consumption
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
+  // Cache + initial setup
 
   private _textarea: HTMLTextAreaElement | null = null;
 
@@ -280,6 +299,9 @@ export class CTTextarea extends BaseElement {
       | HTMLTextAreaElement
       | null;
 
+    // Apply theme on mount
+    applyThemeToElement(this, this.theme ?? defaultTheme);
+
     if (this.autofocus) {
       this.textarea?.focus();
     }
@@ -293,6 +315,10 @@ export class CTTextarea extends BaseElement {
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
+
+    if (changedProperties.has("theme")) {
+      applyThemeToElement(this, this.theme ?? defaultTheme);
+    }
 
     if (changedProperties.has("value") && this.autoResize) {
       this.adjustHeight();
