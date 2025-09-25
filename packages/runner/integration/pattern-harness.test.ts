@@ -256,6 +256,9 @@ import {
   scenarios as designTokenSwitcherScenarios,
 } from "./patterns/design-token-switcher.ts";
 import {
+  scenarios as contentPublishingWorkflowScenarios,
+} from "./patterns/content-publishing-workflow.ts";
+import {
   scenarios as userJourneyMapScenarios,
 } from "./patterns/user-journey-map.ts";
 import {
@@ -313,6 +316,7 @@ const allScenarios = [
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
+  ...contentPublishingWorkflowScenarios,
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,
