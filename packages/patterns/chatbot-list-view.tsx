@@ -201,8 +201,6 @@ export default recipe<Input, Output>(
       borderRadius: cell("0.5rem"),
     };
 
-    const selected = getSelectedCharm({ entry: selectedCharm });
-
     return {
       [NAME]: "Launcher",
       [UI]: (
