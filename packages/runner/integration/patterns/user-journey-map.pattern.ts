@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -83,19 +82,6 @@ const defaultMilestones: JourneyMilestone[] = [
     durationDays: 3,
   },
 ];
-
-const journeyUpdateSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "id", "status", "startDay", "endDay"],
-  properties: {
-    sequence: { type: "number" },
-    id: { type: "string" },
-    status: { type: "string" },
-    startDay: { type: "number" },
-    endDay: { type: "number" },
-  },
-} as const;
 
 const sanitizeText = (value: unknown, fallback: string): string => {
   if (typeof value !== "string") return fallback;
@@ -423,17 +409,6 @@ export const userJourneyMap = recipe<JourneyMapArgs>(
 
         const sequenceValue = (context.sequence.get() ?? 0) + 1;
         context.sequence.set(sequenceValue);
-        createCell(
-          journeyUpdateSnapshotSchema,
-          `userJourneyMapUpdate_${sequenceValue}`,
-          {
-            sequence: sequenceValue,
-            id: entry.id,
-            status: entry.status,
-            startDay: entry.startDay,
-            endDay: entry.endDay,
-          },
-        );
       },
     );
 

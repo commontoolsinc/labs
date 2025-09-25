@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -31,17 +30,6 @@ interface HandlerDescriptor {
   label: string;
   calls: number;
 }
-
-const changeSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["action", "previous", "next"],
-  properties: {
-    action: { type: "string" },
-    previous: { type: "number" },
-    next: { type: "number" },
-  },
-} as const;
 
 const sanitizeNumber = (value: unknown, fallback: number): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -134,11 +122,6 @@ const recordInvocation = (
   const idSeed = sanitizeCount(context.snapshotId.get());
   const nextSeed = idSeed + 1;
   context.snapshotId.set(nextSeed);
-  createCell<CounterChange>(
-    changeSchema,
-    `typed-handler-record-change-${nextSeed}`,
-    entry,
-  );
 };
 
 const incrementCounter = handler(

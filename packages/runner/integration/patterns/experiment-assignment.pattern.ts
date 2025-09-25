@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -50,17 +49,6 @@ const defaultVariants: VariantConfig[] = [
   { name: "control", weight: 1 },
   { name: "experiment", weight: 1 },
 ];
-
-const assignmentSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["userId", "variant", "totalAssignments"],
-  properties: {
-    userId: { type: "string" },
-    variant: { type: "string" },
-    totalAssignments: { type: "number" },
-  },
-} as const;
 
 const roundShare = (value: number): number => Math.round(value * 1000) / 1000;
 
@@ -251,21 +239,6 @@ const assignParticipant = handler(
     const previousHistory = context.history.get();
     const history = Array.isArray(previousHistory) ? previousHistory : [];
     context.history.set([...history, `${userId}:${selection.name}`]);
-
-    const totalAssigned = Object.values(counts).reduce(
-      (sum, value) => sum + value,
-      0,
-    ) + 1;
-
-    createCell(
-      assignmentSnapshotSchema,
-      `experimentAssignment${totalAssigned}`,
-      {
-        userId,
-        variant: selection.name,
-        totalAssignments: totalAssigned,
-      },
-    );
   },
 );
 

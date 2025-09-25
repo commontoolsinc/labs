@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  createCell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
 
 type SortDirection = "asc" | "desc";
 
@@ -62,20 +53,6 @@ const toggleSortDirection = handler(
     const history = Array.isArray(previous) ? previous : [];
     const updates = [...history, next];
     context.history.set(updates);
-
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["direction", "historySize"],
-        properties: {
-          direction: { type: "string" },
-          historySize: { type: "number" },
-        },
-      },
-      "counterSortDirectionToggleSnapshot",
-      { direction: next, historySize: updates.length },
-    );
   },
 );
 

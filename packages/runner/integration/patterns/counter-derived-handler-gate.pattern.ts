@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  createCell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
 
 type GateMode = "enabled" | "disabled";
 
@@ -16,17 +7,6 @@ interface DerivedHandlerGateArgs {
   value: Default<number, 0>;
   gateMode: Default<GateMode, "enabled">;
 }
-
-const attemptAuditSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["allowed", "amount", "value"],
-  properties: {
-    allowed: { type: "boolean" },
-    amount: { type: "number" },
-    value: { type: "number" },
-  },
-} as const;
 
 const ensureNumber = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -59,11 +39,6 @@ const applyIncrement = handler(
     if (!allowed) {
       context.blockedCount.set(blocked + 1);
       context.log.set([...history, `blocked:${amount}`]);
-      createCell(
-        attemptAuditSchema,
-        "counterDerivedHandlerGateAttempt",
-        { allowed: false, amount, value: currentValue },
-      );
       return;
     }
 
@@ -71,11 +46,6 @@ const applyIncrement = handler(
     context.value.set(next);
     context.appliedCount.set(applied + 1);
     context.log.set([...history, `applied:${next}`]);
-    createCell(
-      attemptAuditSchema,
-      "counterDerivedHandlerGateAttempt",
-      { allowed: true, amount, value: next },
-    );
   },
 );
 

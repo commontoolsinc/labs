@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -68,39 +67,6 @@ const defaultThresholds = {
   temperature: { min: 36, max: 38 },
   oxygen: { min: 95 },
 } as const satisfies VitalThresholds;
-
-const vitalReadingSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "id",
-    "recordedAt",
-    "heartRate",
-    "systolic",
-    "diastolic",
-    "temperature",
-    "oxygenSaturation",
-  ],
-  properties: {
-    id: { type: "string" },
-    recordedAt: { type: "string" },
-    heartRate: { type: "number" },
-    systolic: { type: "number" },
-    diastolic: { type: "number" },
-    temperature: { type: "number" },
-    oxygenSaturation: { type: "number" },
-  },
-} as const;
-
-const alertSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["readingId", "alerts"],
-  properties: {
-    readingId: { type: "string" },
-    alerts: { type: "array", items: { type: "string" } },
-  },
-} as const;
 
 const isoMinutePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
 
@@ -355,14 +321,6 @@ const recordVitalReading = handler(
     const reading = toVitalReading(event, existing.length, used);
     const nextHistory = [...existing.slice(-11), reading];
     context.state.set(nextHistory);
-
-    createCell(vitalReadingSchema, reading.id, reading);
-    const thresholds = context.thresholds.get() ?? defaultThresholds;
-    const snapshot: AlertSnapshot = {
-      readingId: reading.id,
-      alerts: computeAlerts(reading, thresholds),
-    };
-    createCell(alertSnapshotSchema, `${reading.id}-alerts`, snapshot);
   },
 );
 

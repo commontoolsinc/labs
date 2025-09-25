@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -94,20 +93,6 @@ const defaultAssignments: AssignmentRecord[] = [
   { slot: "12:00-14:00", agent: "blair-chen" },
   { slot: "14:00-16:00", agent: "casey-james" },
 ];
-
-const updateSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "slot", "label", "action", "agent", "gaps"],
-  properties: {
-    sequence: { type: "number" },
-    slot: { type: "string" },
-    label: { type: "string" },
-    action: { type: "string" },
-    agent: { type: "string" },
-    gaps: { type: "number" },
-  },
-} as const;
 
 const slugify = (value: string): string => {
   return value
@@ -431,18 +416,6 @@ const updateSchedule = handler(
         gapCount,
         remaining,
       });
-      createCell(
-        updateSnapshotSchema,
-        `call-center-schedule-${nextSequence}`,
-        {
-          sequence: nextSequence,
-          slot: slotId,
-          label: slotLabel,
-          action,
-          agent: agentName,
-          gaps: gapCount,
-        },
-      );
     }
   },
 );

@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   type Cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -303,7 +302,6 @@ const addCitation = handler(
     );
     const nextCatalog = [...current, record];
     context.argument.set(toInputList(nextCatalog));
-    createCell(bibliographyEntrySchema, `citation-${record.id}`, record);
   },
 );
 

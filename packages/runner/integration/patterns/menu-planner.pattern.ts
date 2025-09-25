@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -81,18 +80,6 @@ interface ShoppingEntry {
   unit: string;
   quantity: number;
 }
-
-const assignmentSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "day", "meal", "recipe"],
-  properties: {
-    sequence: { type: "number" },
-    day: { type: "string" },
-    meal: { type: "string" },
-    recipe: { type: "string" },
-  },
-} as const;
 
 const mealSlots: MealSlot[] = ["breakfast", "lunch", "dinner"];
 
@@ -321,11 +308,6 @@ export const menuPlanner = recipe<MenuPlannerArgs>(
         context.sequence.set(sequenceValue);
         const action = `Assigned ${recipe} to ${day} ${meal}`;
         context.lastAction.set(action);
-        createCell(
-          assignmentSchema,
-          `menuPlannerAssignment_${sequenceValue}`,
-          { sequence: sequenceValue, day, meal, recipe },
-        );
       },
     );
 
@@ -359,11 +341,6 @@ export const menuPlanner = recipe<MenuPlannerArgs>(
         context.sequence.set(sequenceValue);
         const action = `Cleared ${day} ${meal}`;
         context.lastAction.set(action);
-        createCell(
-          assignmentSchema,
-          `menuPlannerAssignment_${sequenceValue}`,
-          { sequence: sequenceValue, day, meal, recipe: "" },
-        );
       },
     );
 

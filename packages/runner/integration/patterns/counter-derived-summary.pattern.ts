@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -48,18 +47,6 @@ interface SummarySnapshot {
   latestHistory: number;
   label: string;
 }
-
-const adjustmentSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "delta", "resulting", "label"],
-  properties: {
-    sequence: { type: "number" },
-    delta: { type: "number" },
-    resulting: { type: "number" },
-    label: { type: "string" },
-  },
-} as const;
 
 interface CounterAdjustmentEvent {
   amount?: number;
@@ -159,11 +146,6 @@ const applyAdjustment = handler(
     };
 
     context.adjustments.push(record);
-    createCell(
-      adjustmentSchema,
-      `derived-summary-adjustment-${currentSequence}`,
-      record,
-    );
   },
 );
 

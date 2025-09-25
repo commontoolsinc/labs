@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -85,27 +84,12 @@ const defaultStages: StageConfig[] = [
   { id: "closed-won", label: "Closed Won", probability: 1 },
 ];
 
-const pipelineSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "stageCount",
-    "dealCount",
-    "totalForecast",
-    "openPipeline",
-  ],
-  properties: {
-    stageCount: { type: "number" },
-    dealCount: { type: "number" },
-    totalForecast: { type: "number" },
-    openPipeline: { type: "number" },
-  },
-} as const;
-
 const formatLabel = (input: unknown, fallback: string): string => {
   if (typeof input === "string") {
     const trimmed = input.trim();
-    if (trimmed.length > 0) return trimmed;
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
   }
   return fallback;
 };
@@ -501,16 +485,6 @@ export const crmPipeline = recipe<PipelineArgs>(
       const stagesValue = ensureStages(stageList.get());
       const dealsValue = Array.isArray(list) ? list : [];
       const result = computeStageTotals(stagesValue, dealsValue);
-      createCell(
-        pipelineSnapshotSchema,
-        "crmPipelineForecastSnapshot",
-        {
-          stageCount: stagesValue.length,
-          dealCount: dealsValue.length,
-          totalForecast: result.weightedTotal,
-          openPipeline: result.openTotal,
-        },
-      );
       return result;
     })(dealView);
 
