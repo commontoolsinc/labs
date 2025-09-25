@@ -87,11 +87,25 @@ export default recipe("Cheeseboard", () => {
     [UI]: (
       <div>
         <h2>Cheeseboard</h2>
+        <p>
+          <a
+            href={cheeseBoardUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {cheeseBoardUrl}
+          </a>
+        </p>
         <div>
-          Pizza list:
-          {derive(pizzaList, (l) => l ? JSON.stringify(l) : "")}
+          <h3>Pizza list</h3>
+          <ul>
+            {pizzaList.map((pizza, index) => (
+              <li key={`pizza-${index}`}>
+                {pizza}
+              </li>
+            ))}
+          </ul>
         </div>
-        {/* <div>Full page: { result ? result : "No Result Yet"  }</div> */}
       </div>
     ),
   };
