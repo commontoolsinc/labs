@@ -1,5 +1,8 @@
 import { html } from "lit";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import { keyboardRouterContext } from "../keyboard-context.ts";
+import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
 
 /**
  * CTKeybind - Declarative keyboard shortcut listener
@@ -58,6 +61,11 @@ export class CTKeybind extends BaseElement {
   #metaDown = false;
   #shiftDown = false;
 
+  // Optional router provided by host app
+  @consume({ context: keyboardRouterContext, subscribe: false })
+  private _router?: KeyboardRouter;
+  #dispose?: () => void;
+
   constructor() {
     super();
     this.alt = false;
@@ -72,13 +80,24 @@ export class CTKeybind extends BaseElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    document.addEventListener("keydown", this.#onKeyDown, true);
-    document.addEventListener("keyup", this.#onKeyUp, true);
+    if (this._router) {
+      const spec = this.#toSpec();
+      this.#dispose = this._router.register(spec, (e) => this.#emitMatch(e));
+    } else {
+      // Fallback: internal listeners if no router provided
+      document.addEventListener("keydown", this.#onKeyDown, true);
+      document.addEventListener("keyup", this.#onKeyUp, true);
+    }
   }
 
   override disconnectedCallback(): void {
-    document.removeEventListener("keydown", this.#onKeyDown, true);
-    document.removeEventListener("keyup", this.#onKeyUp, true);
+    if (this.#dispose) {
+      this.#dispose();
+      this.#dispose = undefined;
+    } else {
+      document.removeEventListener("keydown", this.#onKeyDown, true);
+      document.removeEventListener("keyup", this.#onKeyUp, true);
+    }
     super.disconnectedCallback();
   }
 
@@ -103,20 +122,23 @@ export class CTKeybind extends BaseElement {
 
     if (!this.allowRepeat && e.repeat) return;
 
+    this.#emitMatch(e);
+  };
+
+  #emitMatch(e: KeyboardEvent) {
     if (this.preventDefault) e.preventDefault();
     if (this.stopPropagation) e.stopPropagation();
-
     this.emit("ct-keybind", {
       name: this.name,
       event: e,
       code: e.code,
       key: e.key,
-      alt: this.#altDown,
-      ctrl: this.#ctrlDown,
-      meta: this.#metaDown,
-      shift: this.#shiftDown,
+      alt: e.altKey,
+      ctrl: e.ctrlKey,
+      meta: e.metaKey,
+      shift: e.shiftKey,
     });
-  };
+  }
 
   #matchesContext(e: KeyboardEvent): boolean {
     if (!this.ignoreEditable) return true;
@@ -174,6 +196,22 @@ export class CTKeybind extends BaseElement {
         this.#shiftDown = e.shiftKey;
       }
     }
+  }
+
+  #toSpec(): ShortcutSpec {
+    return {
+      name: this.name,
+      code: this.code,
+      key: this.key,
+      alt: this.alt,
+      ctrl: this.ctrl,
+      meta: this.meta,
+      shift: this.shift,
+      ignoreEditable: this.ignoreEditable,
+      allowRepeat: this.allowRepeat,
+      preventDefault: this.preventDefault,
+      stopPropagation: this.stopPropagation,
+    };
   }
 }
 

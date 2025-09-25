@@ -35,6 +35,19 @@ export class CTAutoLayout extends BaseElement {
     tabNames: { type: Array, attribute: false },
     leftTabName: { type: String, attribute: false },
     rightTabName: { type: String, attribute: false },
+    /**
+     * Position of tabs on mobile: "top" | "bottom".
+     * Default is "bottom".
+     */
+    tabsPosition: { type: String, reflect: true },
+    /**
+     * Whether the left sidebar is open. Reflected to attribute.
+     */
+    leftOpen: { type: Boolean, reflect: true },
+    /**
+     * Whether the right sidebar is open. Reflected to attribute.
+     */
+    rightOpen: { type: Boolean, reflect: true },
   };
   static override styles = css`
     :host {
@@ -44,18 +57,11 @@ export class CTAutoLayout extends BaseElement {
       box-sizing: border-box;
     }
 
-    .controls {
-      display: none; /* desktop-only */
-      padding: 0.25rem 0.5rem;
-      gap: 0.5rem;
-      border-bottom: 1px solid #e0e0e0;
-    }
-
     .tabs {
-      display: none; /* Hidden by default (desktop) */
-      border-top: 1px solid #e0e0e0;
-      flex: none;
-      order: 2; /* Move tabs to bottom */
+      display: none; /* hidden on desktop */
+      gap: 0.25rem;
+      align-items: center;
+      justify-content: center;
     }
 
     .tab {
@@ -83,7 +89,15 @@ export class CTAutoLayout extends BaseElement {
       display: grid;
       grid-template-columns: 0px 1fr 0px; /* toggled by classes below */
       gap: 1rem;
+      position: relative;
     }
+
+    /* Hide toolbar by default (desktop); shown in mobile query */
+    .mobile-bar {
+      display: none;
+    }
+
+    /* Mobile bar styles are defined in the mobile media query */
 
     .sidebar-left,
     .sidebar-right,
@@ -92,76 +106,157 @@ export class CTAutoLayout extends BaseElement {
       min-width: 0;
     }
 
+    /* Scrim should not affect desktop layout */
+    .scrim {
+      display: none;
+    }
+
     .sidebar-left,
     .sidebar-right {
       overflow: hidden;
+      background: var(
+        --ct-theme-color-surface,
+        var(--ct-surface, #f1f5f9)
+      );
+      padding: var(--ct-theme-spacing-normal, 0.5rem);
+      /* Visual separation and rounding on content-adjacent corners */
+      border: none;
+    }
+    .sidebar-left {
+      border-right: 1px solid
+        var(
+          --ct-theme-color-border,
+          #e5e7eb
+        );
+      border-top-right-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
+      border-bottom-right-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
+    }
+    .sidebar-right {
+      border-left: 1px solid
+        var(
+          --ct-theme-color-border,
+          #e5e7eb
+        );
+      border-top-left-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
+      border-bottom-left-radius: var(
+        --ct-theme-border-radius,
+        var(--ct-border-radius-md, 0.375rem)
+      );
     }
 
-    /* Indicate presence of sidebars; width controlled by -open flags */
-    .has-left {
-      grid-template-columns: 0px 1fr 0px;
+    .content {
+      background: var(
+        --ct-theme-color-background,
+        #ffffff
+      );
     }
-    .has-right {
-      grid-template-columns: 0px 1fr 0px;
-    }
-    .left-open {
-      grid-template-columns: 280px 1fr 0px;
-    }
-    .right-open {
-      grid-template-columns: 0px 1fr 280px;
-    }
-    .left-open.right-open {
-      grid-template-columns: 280px 1fr 280px;
-    }
+
+    /* Track sizes are overridden in desktop media query */
 
     /* Desktop: Grid layout */
     @media (min-width: 769px) {
-      .controls {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
+      /* Define grid tracks for desktop */
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr; /* default: only content */
+        gap: var(--ct-theme-spacing-loose, 1rem);
       }
+      .left-open {
+        grid-template-columns: 280px 1fr;
+      }
+      .right-open {
+        grid-template-columns: 1fr 280px;
+      }
+      .left-open.right-open {
+        grid-template-columns: 280px 1fr 280px;
+      }
+
+      /* Lay out default panes side by side inside content area */
       .content {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 1rem;
+        gap: var(--ct-theme-spacing-loose, 1rem);
+      }
+      /* Visual separators for default content items */
+      .content > ::slotted(:not([slot])) {
+        background: transparent;
+        border: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e5e7eb
+          );
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        padding: var(--ct-theme-spacing-loose, 1rem);
       }
 
       .tabs {
         display: none;
       }
 
-      ::slotted(*) {
-        height: 100%;
+      /* Desktop: only show sidebars when open */
+      .sidebar-left,
+      .sidebar-right {
+        display: none;
+      }
+      .left-open .sidebar-left {
+        display: block;
+      }
+      .right-open .sidebar-right {
+        display: block;
+      }
+
+      /* Desktop floating toggle buttons */
+      .desktop-toggle {
+        position: absolute;
+        bottom: 0.5rem;
+        z-index: 35;
+      }
+      .desktop-toggle-left {
+        left: 0.5rem;
+      }
+      .desktop-toggle-right {
+        right: 0.5rem;
+      }
+      /* When a sidebar is open, move toggle just inside the panel */
+      .left-open .desktop-toggle-left {
+        left: calc(280px - 2.5rem - 0.5rem);
+      }
+      .right-open .desktop-toggle-right {
+        right: calc(280px - 2.5rem - 0.5rem);
       }
     }
 
-    /* Mobile: Tabbed layout */
+    /* Mobile: Tabbed layout + off-canvas sidebars */
     @media (max-width: 768px) {
-      .tabs {
-        display: flex;
-      }
-
       /* Collapse to single pane; hide wrappers by default */
       .layout {
         display: block;
+        position: relative; /* scope overlays within layout */
       }
-      .sidebar-left,
-      .sidebar-right,
+      /* Main content is visible for active content tab */
       .content {
         display: none;
         width: 100%;
         height: 100%;
       }
-
-      .layout.active-left .sidebar-left,
-      .layout.active-right .sidebar-right,
       .layout.active-content .content {
         display: block;
       }
 
-      /* Hide all slotted children by default */
-      ::slotted(*) {
+      /* Hide default-slotted children by default; keep named slots visible */
+      ::slotted(:not([slot])) {
         display: none;
         height: 100%;
       }
@@ -172,157 +267,412 @@ export class CTAutoLayout extends BaseElement {
         width: 100%;
         flex-direction: column;
       }
-    }
-  `;
 
-  private _activeTab = 0;
-  private _children: Element[] = [];
-  private _leftEl: Element | null = null;
-  private _rightEl: Element | null = null;
-  private _hasLeft = false;
-  private _hasRight = false;
-  private _leftOpen = true;
-  private _rightOpen = true;
+      /* Off-canvas panels for sidebars */
+      .sidebar-left,
+      .sidebar-right {
+        display: block;
+        position: absolute; /* within layout only */
+        top: 0;
+        bottom: 0;
+        width: min(80vw, 320px);
+        max-width: 90vw;
+        background: var(
+          --ct-theme-color-surface,
+          var(--ct-surface, #f1f5f9)
+        );
+        /*box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);*/
+        transition: transform 0.25s ease;
+        will-change: transform;
+        z-index: 30;
+        padding: var(--ct-theme-spacing-normal, 0.5rem);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .sidebar-left,
+        .sidebar-right {
+          transition: none;
+        }
+      }
+      .sidebar-left {
+        left: 0;
+        transform: translateX(-100%);
+      }
+      .sidebar-right {
+        right: 0;
+        transform: translateX(100%);
+      }
+      :host([leftopen]) .sidebar-left {
+        transform: translateX(0);
+      }
+      :host([rightopen]) .sidebar-right {
+        transform: translateX(0);
+      }
 
-  declare tabNames: string[];
-  declare leftTabName?: string;
-  declare rightTabName?: string;
+      /* Scrim overlay when any off-canvas is open */
+      .scrim {
+        display: block;
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.28);
+        z-index: 25;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      :host([leftopen]) .scrim,
+      :host([rightopen]) .scrim {
+        opacity: 1;
+        pointer-events: auto;
+      }
 
-  constructor() {
-    super();
-    this.tabNames = [];
-    this.leftTabName = "Left";
-    this.rightTabName = "Right";
-  }
+      /* Bottom/Top toolbar with centered tabs */
+      .mobile-bar {
+        --ct-mobile-bar-height: 3rem;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: var(--ct-mobile-bar-height);
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 0.25rem;
+        background: var(
+          --ct-theme-color-surface,
+          var(--ct-surface, #f1f5f9)
+        );
+        border-top: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e0e0e0
+          );
+        padding: 0 var(--ct-theme-spacing-normal, 0.5rem);
+        z-index: 40;
+      }
+      .mobile-bar.top {
+        top: 0;
+        bottom: auto;
+        border-top: none;
+        border-bottom: 1px solid
+          var(
+            --ct-theme-color-border,
+            #e0e0e0
+          );
+        }
+        .mobile-bar .tabs {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          overflow-x: auto;
+          scrollbar-width: thin;
+          border: 0;
+        }
+        .mobile-bar .tab {
+          padding: var(--ct-theme-spacing-tight, 0.25rem)
+            var(--ct-theme-spacing-normal, 0.5rem);
+          border: none;
+          background: none;
+          cursor: pointer;
+          border-bottom: 2px solid transparent;
+          font-size: 0.9rem;
+        }
+        .mobile-bar .tab.active {
+          border-bottom-color: #007acc;
+          font-weight: 500;
+        }
 
-  override connectedCallback() {
-    super.connectedCallback();
-    this._updateChildren();
-    this._updateActiveTab();
-  }
+        /* Reserve space for the mobile bar so content is full height */
+        .layout {
+          padding-bottom: var(--ct-mobile-bar-height, 3rem);
+        }
+        :host([tabsposition="top"]) .layout {
+          padding-bottom: 0;
+          padding-top: var(--ct-mobile-bar-height, 3rem);
+        }
+        /* Show the bar on mobile */
+        .mobile-bar {
+          display: grid;
+        }
 
-  private _updateChildren() {
-    this._children = Array.from(this.children);
-    this._leftEl = this._children.find((el) =>
-      el.getAttribute("slot") ===
-        "left"
-    ) ?? null;
-    this._rightEl = this._children.find((el) =>
-      el.getAttribute("slot") ===
-        "right"
-    ) ?? null;
-    this._hasLeft = !!this._leftEl;
-    this._hasRight = !!this._rightEl;
-  }
-
-  private _handleTabClick(index: number) {
-    this._activeTab = index;
-    this._updateActiveTab();
-    this.requestUpdate();
-  }
-
-  private _toggleLeft() {
-    if (!this._hasLeft) return;
-    this._leftOpen = !this._leftOpen;
-    this.requestUpdate();
-  }
-
-  private _toggleRight() {
-    if (!this._hasRight) return;
-    this._rightOpen = !this._rightOpen;
-    this.requestUpdate();
-  }
-
-  private _updateActiveTab() {
-    // Determine panes in order: left | defaults | right
-    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-    const panes: Element[] = [];
-    if (this._leftEl) panes.push(this._leftEl);
-    panes.push(...defaults);
-    if (this._rightEl) panes.push(this._rightEl);
-
-    // Remove active-tab class from all children
-    this._children.forEach((child) => child.classList.remove("active-tab"));
-
-    // Add active-tab class to current pane
-    const active = panes[this._activeTab];
-    if (active) active.classList.add("active-tab");
-  }
-
-  override render() {
-    this._updateChildren();
-
-    // Build tabs list: left | defaults | right
-    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-    const tabs: string[] = [];
-    if (this._hasLeft) tabs.push(this.leftTabName || "Left");
-    const defaultNames = this.tabNames.length === defaults.length
-      ? this.tabNames
-      : defaults.map((_, i) => `Pane ${i + 1}`);
-    tabs.push(...defaultNames);
-    if (this._hasRight) tabs.push(this.rightTabName || "Right");
-
-    const layoutClass = classMap({
-      layout: true,
-      "has-left": this._hasLeft,
-      "has-right": this._hasRight,
-      "left-open": this._hasLeft && this._leftOpen,
-      "right-open": this._hasRight && this._rightOpen,
-      "active-left": this._activeTab === 0 && this._hasLeft,
-      "active-right": this._activeTab === (tabs.length - 1) && this._hasRight,
-      "active-content": !((this._activeTab === 0 && this._hasLeft) ||
-        (this._activeTab === (tabs.length - 1) && this._hasRight)),
-    });
-
-    return html`
-      <!-- Sidebar toggle controls (desktop only) -->
-      <div class="controls" part="controls">
-        ${this._hasLeft
-          ? html`
-            <button @click="${() => this._toggleLeft()}" title="Toggle left">
-              ${this._leftOpen ? "Hide Left" : "Show Left"}
-            </button>
-          `
-          : null} ${this._hasRight
-          ? html`
-            <button @click="${() => this._toggleRight()}" title="Toggle right">
-              ${this._rightOpen ? "Hide Right" : "Show Right"}
-            </button>
-          `
-          : null}
-      </div>
-
-      <!-- Tabs (only visible on mobile) -->
-      <div class="tabs">
-        ${tabs.map((name, index) =>
-          html`
-            <button
-              class="${classMap({
-                tab: true,
-                active: index === this._activeTab,
-              })}"
-              @click="${() => this._handleTabClick(index)}"
-            >
-              ${name}
-            </button>
-          `
-        )}
-      </div>
-
-      <!-- Grid layout: left | content | right -->
-      <div class="${layoutClass}">
-        <div class="sidebar-left">
-          <slot name="left"></slot>
-        </div>
-        <div class="content">
-          <slot></slot>
-        </div>
-        <div class="sidebar-right">
-          <slot name="right"></slot>
-        </div>
-      </div>
+        /* Hide desktop floating toggles on mobile */
+        .desktop-toggle {
+          display: none;
+        }
+      }
     `;
-  }
-}
 
-globalThis.customElements.define("ct-autolayout", CTAutoLayout);
+    private _activeTab = 0;
+    private _children: Element[] = [];
+    private _leftEl: Element | null = null;
+    private _rightEl: Element | null = null;
+    private _hasLeft = false;
+    private _hasRight = false;
+    private _lastToggleEl: Element | null = null;
+
+    declare tabNames: string[];
+    declare leftTabName?: string;
+    declare rightTabName?: string;
+    declare tabsPosition: "top" | "bottom";
+    declare leftOpen: boolean;
+    declare rightOpen: boolean;
+
+    constructor() {
+      super();
+      this.tabNames = [];
+      this.leftTabName = "Left";
+      this.rightTabName = "Right";
+      this.tabsPosition = "bottom";
+      this.leftOpen = true;
+      this.rightOpen = true;
+    }
+
+    override connectedCallback() {
+      super.connectedCallback();
+      this._updateChildren();
+      this._updateActiveTab();
+      this._onKeydown = this._onKeydown.bind(this);
+      globalThis.addEventListener("keydown", this._onKeydown);
+    }
+
+    override disconnectedCallback(): void {
+      super.disconnectedCallback();
+      globalThis.removeEventListener("keydown", this._onKeydown);
+    }
+
+    // Keep attributes/props as the single source of truth and
+    // enforce mobile exclusivity even when set programmatically.
+    override updated(changed: Map<string, unknown>) {
+      if (changed.has("leftOpen") || changed.has("rightOpen")) {
+        // Enforce exclusivity on mobile when both become true.
+        if (this._isMobile() && this.leftOpen && this.rightOpen) {
+          const last = changed.has("leftOpen") ? "left" : "right";
+          if (last === "left") this.rightOpen = false;
+          else this.leftOpen = false;
+        }
+        // Emit change events so hosts can react even on attribute changes.
+        if (changed.has("leftOpen")) {
+          this.dispatchEvent(
+            new CustomEvent("ct-toggle-left", {
+              bubbles: true,
+              composed: true,
+              detail: { open: this.leftOpen },
+            }),
+          );
+        }
+        if (changed.has("rightOpen")) {
+          this.dispatchEvent(
+            new CustomEvent("ct-toggle-right", {
+              bubbles: true,
+              composed: true,
+              detail: { open: this.rightOpen },
+            }),
+          );
+        }
+      }
+      super.updated?.(changed as any);
+    }
+
+    private _updateChildren() {
+      this._children = Array.from(this.children);
+      this._leftEl = this._children.find((el) =>
+        el.getAttribute("slot") ===
+          "left"
+      ) ?? null;
+      this._rightEl = this._children.find((el) =>
+        el.getAttribute("slot") ===
+          "right"
+      ) ?? null;
+      this._hasLeft = !!this._leftEl;
+      this._hasRight = !!this._rightEl;
+    }
+
+    private _handleTabClick(index: number) {
+      this._activeTab = index;
+      this._updateActiveTab();
+      this.requestUpdate();
+    }
+
+    private _toggleLeft(trigger?: Element) {
+      if (!this._hasLeft) return;
+      this._lastToggleEl = trigger ?? null;
+      const opening = !this.leftOpen;
+      this.leftOpen = opening;
+      if (opening && this._isMobile()) {
+        this.rightOpen = false;
+      }
+      this.dispatchEvent(
+        new CustomEvent("ct-toggle-left", {
+          bubbles: true,
+          composed: true,
+          detail: { open: this.leftOpen },
+        }),
+      );
+      this.requestUpdate();
+    }
+
+    private _toggleRight(trigger?: Element) {
+      if (!this._hasRight) return;
+      this._lastToggleEl = trigger ?? null;
+      const opening = !this.rightOpen;
+      this.rightOpen = opening;
+      if (opening && this._isMobile()) {
+        this.leftOpen = false;
+      }
+      this.dispatchEvent(
+        new CustomEvent("ct-toggle-right", {
+          bubbles: true,
+          composed: true,
+          detail: { open: this.rightOpen },
+        }),
+      );
+      this.requestUpdate();
+    }
+
+    private _isMobile(): boolean {
+      try {
+        return globalThis.matchMedia?.("(max-width: 768px)")?.matches ?? false;
+      } catch {
+        return false;
+      }
+    }
+
+    private _closePanels() {
+      const wasOpen = this.leftOpen || this.rightOpen;
+      this.leftOpen = false;
+      this.rightOpen = false;
+      if (wasOpen && this._lastToggleEl instanceof HTMLElement) {
+        // Return focus to the last toggle trigger
+        this._lastToggleEl.focus();
+      }
+      this.requestUpdate();
+    }
+
+    private _onKeydown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (this.leftOpen || this.rightOpen) {
+          e.stopPropagation();
+          this._closePanels();
+        }
+      }
+    }
+
+    private _updateActiveTab() {
+      // Only default (content) panes participate in tab switching
+      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+      const panes: Element[] = [...defaults];
+
+      // Remove active-tab class from all children
+      this._children.forEach((child) => child.classList.remove("active-tab"));
+
+      // Add active-tab class to current pane
+      const active = panes[this._activeTab];
+      if (active) active.classList.add("active-tab");
+    }
+
+    override render() {
+      this._updateChildren();
+
+      // Build tab names for content panes only (exclude sidebars)
+      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+      const contentTabs: string[] = (this.tabNames.length === defaults.length)
+        ? this.tabNames
+        : defaults.map((_, i) => `Pane ${i + 1}`);
+
+      const layoutClass = classMap({
+        layout: true,
+        "has-left": this._hasLeft,
+        "has-right": this._hasRight,
+        "left-open": this._hasLeft && this.leftOpen,
+        "right-open": this._hasRight && this.rightOpen,
+        // On mobile, we always show the content container and only swap
+        // which default child is marked active.
+        "active-content": true,
+      });
+
+      return html`
+        <!-- Grid layout: left | content | right -->
+        <div class="${layoutClass}">
+          <div class="sidebar-left">
+            <slot name="left"></slot>
+          </div>
+          <div class="content">
+            <slot></slot>
+          </div>
+          <div class="sidebar-right">
+            <slot name="right"></slot>
+          </div>
+          <!-- Mobile-only overlays and toolbar (scoped within layout) -->
+          <div
+            class="scrim"
+            @click="${() => this._closePanels()}"
+            aria-hidden="true"
+          >
+          </div>
+
+          <div class="mobile-bar ${classMap({
+            top: this.tabsPosition === "top",
+          })}">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle left sidebar"
+              @click="${(e: Event) =>
+                this._toggleLeft(e.currentTarget as Element)}"
+            >
+              ←
+            </ct-button>
+            <div class="tabs">
+              ${contentTabs.map((name, index) =>
+                html`
+                  <button
+                    class="${classMap({
+                      tab: true,
+                      active: index === this._activeTab,
+                    })}"
+                    @click="${() => this._handleTabClick(index)}"
+                  >
+                    ${name}
+                  </button>
+                `
+              )}
+            </div>
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle right sidebar"
+              @click="${(e: Event) =>
+                this._toggleRight(e.currentTarget as Element)}"
+            >
+              →
+            </ct-button>
+          </div>
+
+          <!-- Desktop floating toggles -->
+          <div class="desktop-toggle desktop-toggle-left">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle left sidebar"
+              @click="${(e: Event) =>
+                this._toggleLeft(e.currentTarget as Element)}"
+            >
+              ←
+            </ct-button>
+          </div>
+          <div class="desktop-toggle desktop-toggle-right">
+            <ct-button
+              size="icon"
+              variant="secondary"
+              aria-label="Toggle right sidebar"
+              @click="${(e: Event) =>
+                this._toggleRight(e.currentTarget as Element)}"
+            >
+              →
+            </ct-button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  globalThis.customElements.define("ct-autolayout", CTAutoLayout);

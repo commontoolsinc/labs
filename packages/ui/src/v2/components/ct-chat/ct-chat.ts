@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { provide } from "@lit/context";
+import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell } from "@commontools/runner";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -155,8 +155,12 @@ export class CTChat extends BaseElement {
   @property({ type: Object })
   declare theme: any; // Accept any theme object (partial or full)
 
-  // Internal computed theme that gets provided to children
-  @provide({ context: themeContext })
+  // Consume theme from provider (preferred). If no direct theme prop, use this.
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare parentTheme?: CTTheme;
+
+  // Internal computed theme for applying CSS variables locally
   @property({ type: Object, attribute: false })
   declare _computedTheme: CTTheme;
 
@@ -176,7 +180,11 @@ export class CTChat extends BaseElement {
     super.firstUpdated(changedProperties);
     // Initialize cell controller binding
     this._cellController.bind(this.messages);
-    // Apply theme properties
+    // Compute and apply theme on first render
+    const source = this.theme && Object.keys(this.theme).length > 0
+      ? this.theme
+      : this.parentTheme;
+    this._computedTheme = mergeWithDefaultTheme(source ?? {});
     this._updateThemeProperties();
   }
 
@@ -212,9 +220,15 @@ export class CTChat extends BaseElement {
       this._cellController.bind(this.messages);
     }
 
-    // If the theme property changed, recompute the merged theme
-    if (changedProperties.has("theme")) {
-      this._computedTheme = mergeWithDefaultTheme(this.theme);
+    // If the theme property or provided theme changed, recompute
+    if (
+      changedProperties.has("theme") || changedProperties.has("parentTheme")
+    ) {
+      const source = this.theme && Object.keys(this.theme).length > 0
+        ? this.theme
+        : this.parentTheme;
+      this._computedTheme = mergeWithDefaultTheme(source ?? {});
+      this._updateThemeProperties();
     }
   }
 

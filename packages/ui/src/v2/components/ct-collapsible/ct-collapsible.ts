@@ -36,6 +36,7 @@ export class CTCollapsible extends BaseElement {
   private _contentWrapper: HTMLElement | null = null;
   private _content: HTMLElement | null = null;
   private _triggerSlot: HTMLSlotElement | null = null;
+  private _triggerWrapperEl: HTMLElement | null = null;
 
   constructor() {
     super();
@@ -70,6 +71,15 @@ export class CTCollapsible extends BaseElement {
     return this._triggerSlot;
   }
 
+  get triggerWrapperEl(): HTMLElement | null {
+    if (!this._triggerWrapperEl) {
+      this._triggerWrapperEl = this.shadowRoot?.querySelector(
+        ".trigger-wrapper",
+      ) as HTMLElement | null;
+    }
+    return this._triggerWrapperEl;
+  }
+
   override connectedCallback() {
     super.connectedCallback();
     // Set up event delegation for trigger clicks
@@ -92,6 +102,9 @@ export class CTCollapsible extends BaseElement {
     this._triggerSlot = this.shadowRoot?.querySelector(
       'slot[name="trigger"]',
     ) as HTMLSlotElement | null;
+    this._triggerWrapperEl = this.shadowRoot?.querySelector(
+      ".trigger-wrapper",
+    ) as HTMLElement | null;
 
     this.setupTriggerHandlers();
     this.updateContentHeight();
@@ -118,6 +131,7 @@ export class CTCollapsible extends BaseElement {
       <div class="${classMap(classes)}" part="base">
         <div class="trigger-wrapper" part="trigger-wrapper">
           <slot name="trigger" @slotchange="${this.handleSlotChange}"></slot>
+          <div class="indicator" part="indicator" aria-hidden="true"></div>
         </div>
         <div class="content-wrapper" part="content-wrapper">
           <div class="content" part="content">
@@ -170,16 +184,21 @@ export class CTCollapsible extends BaseElement {
   }
 
   private handleClick = (event: Event): void => {
-    // Check if click came from trigger slot
+    // Check if click came from trigger slot or wrapper/indicator
     const path = event.composedPath();
 
-    if (!this.triggerSlot || this.disabled) return;
+    if (this.disabled) return;
 
-    // Check if any element in the path is assigned to the trigger slot
-    const triggerElements = this.triggerSlot.assignedElements();
-    const clickedTrigger = path.some((el) =>
-      triggerElements.includes(el as Element)
-    );
+    let clickedTrigger = false;
+    if (this.triggerSlot) {
+      const triggerElements = this.triggerSlot.assignedElements();
+      clickedTrigger = path.some((el) =>
+        triggerElements.includes(el as Element)
+      );
+    }
+    if (!clickedTrigger && this.triggerWrapperEl) {
+      clickedTrigger = path.includes(this.triggerWrapperEl);
+    }
 
     if (clickedTrigger) {
       event.preventDefault();

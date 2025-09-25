@@ -137,6 +137,7 @@ const Note = recipe<Input, Output>(
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
             })}
             language="text/markdown"
+            theme="light"
             wordWrap
             tabIndent
             lineNumbers
