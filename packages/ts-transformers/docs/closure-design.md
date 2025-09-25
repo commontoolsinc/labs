@@ -50,21 +50,30 @@ state.items.map((item) => item.price * state.discount)
 
 ### Phase 1: Capture Detection Foundation
 
-Enhance `dataflow.ts` to detect captures:
+**Key Insight**: Instead of maintaining our own scope tree with bindings, we'll leverage TypeScript's symbol table which already knows where every variable is declared.
 
 ```typescript
-interface DataFlowScope {
-  // ... existing fields ...
-  captures?: Map<string, CaptureInfo>;
-}
+// Simple capture detection using TypeScript's built-in knowledge
+function isCaptured(
+  identifier: ts.Identifier,
+  containingFunction: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker
+): boolean {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (!symbol) return false;
 
-interface CaptureInfo {
-  symbol: ts.Symbol;
-  fromScopeId: number;
-  declaration: ts.Node;
-  isReactive: boolean;
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return false;
+
+  // Check if any declaration is outside the containing function
+  return declarations.some(decl => !isNodeWithin(decl, containingFunction));
 }
 ```
+
+**Important Design Decisions**:
+- We pass ALL captured variables as params, not just reactive ones (they all need to be accessible)
+- Closure transformation runs BEFORE jsx-expression transformation
+- No need to track bindings in dataflow - TypeScript already has this information
 
 ### Phase 2: Map Callback Support
 
