@@ -132,8 +132,8 @@ export default recipe("Cheeseboard", () => {
         <div>
           <h3>Pizza list</h3>
           <ul>
-            {pizzaList.map(([date, pizza], index) => (
-              <li key={`pizza-${index}`}>
+            {pizzaList.map(([date, pizza]) => (
+              <li>
                 {date}: {pizza}
               </li>
             ))}
