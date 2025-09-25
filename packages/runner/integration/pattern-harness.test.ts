@@ -193,6 +193,9 @@ import {
 import { scenarios as echoScenarios } from "./patterns/echo.ts";
 import { scenarios as listManagerScenarios } from "./patterns/list-manager.ts";
 import {
+  scenarios as libraryCheckoutSystemScenarios,
+} from "./patterns/library-checkout-system.ts";
+import {
   scenarios as nestedCounterScenarios,
 } from "./patterns/nested-counters.ts";
 import {
@@ -305,6 +308,7 @@ const allScenarios = [
   ...nestedCounterScenarios,
   ...composedCounterScenarios,
   ...listManagerScenarios,
+  ...libraryCheckoutSystemScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...sleepJournalScenarios,
   ...moodDiaryScenarios,
