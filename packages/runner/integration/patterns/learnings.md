@@ -51,6 +51,8 @@ offline-friendly recipes that the harness can assert confidently.
 - Tie sanitize fallbacks to the same `lift` inputs (e.g. plan defaults + cycle
   overrides) so derived strings stay aligned when handlers swap configurations
   mid-run.
+- Expose selected child metadata via a derive that inspects sanitized lists so
+  index changes always follow the updated ordering without extra handlers.
 
 ## Composition & Child Recipes
 

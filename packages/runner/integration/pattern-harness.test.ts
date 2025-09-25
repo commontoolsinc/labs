@@ -19,6 +19,9 @@ import {
   scenarios as counterDeduplicatedListScenarios,
 } from "./patterns/counter-deduplicated-list.ts";
 import {
+  scenarios as counterComputedChildSelectionScenarios,
+} from "./patterns/counter-computed-child-selection.ts";
+import {
   scenarios as counterComputedDefaultStringsScenarios,
 } from "./patterns/counter-computed-default-strings.ts";
 import {
@@ -327,6 +330,7 @@ const allScenarios = [
   ...counterAlternateInitialStatesScenarios,
   ...counterBatchedHandlerUpdatesScenarios,
   ...counterDeduplicatedListScenarios,
+  ...counterComputedChildSelectionScenarios,
   ...counterComputedDefaultStringsScenarios,
   ...counterComplexUnionStateScenarios,
   ...counterConditionalBranchScenarios,
