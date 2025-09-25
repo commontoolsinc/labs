@@ -1,5 +1,45 @@
 import type { OpaqueRef, Cell, Props, RenderNode, VNode } from "commontools";
 
+// Minimal theme typing for ct-theme
+type CTColorToken = string | {
+  light: string;
+  dark: string;
+};
+
+interface CTThemeColors {
+  primary: CTColorToken;
+  primaryForeground: CTColorToken;
+  secondary: CTColorToken;
+  secondaryForeground: CTColorToken;
+  background: CTColorToken;
+  surface: CTColorToken;
+  surfaceHover: CTColorToken;
+  text: CTColorToken;
+  textMuted: CTColorToken;
+  border: CTColorToken;
+  borderMuted: CTColorToken;
+  success: CTColorToken;
+  successForeground: CTColorToken;
+  error: CTColorToken;
+  errorForeground: CTColorToken;
+  warning: CTColorToken;
+  warningForeground: CTColorToken;
+  accent: CTColorToken;
+  accentForeground: CTColorToken;
+}
+
+interface CTThemeDef {
+  fontFamily: string;
+  monoFontFamily: string;
+  borderRadius: string;
+  density: "compact" | "comfortable" | "spacious";
+  colorScheme: "light" | "dark" | "auto";
+  animationSpeed: "none" | "slow" | "normal" | "fast";
+  colors: CTThemeColors;
+}
+
+type CTThemeInput = Partial<CTThemeDef> & Record<string, unknown>;
+
 type HTMLElementProps = {
   id?: string,
   style?: string;
@@ -124,6 +164,33 @@ declare global {
         "open"?: boolean,
         "disabled"?: boolean,
         "onct-toggle"?: any,
+      } & Children & HTMLElementProps;
+      "ct-theme": {
+        theme?: CTThemeInput,
+      } & Children & HTMLElementProps;
+      "ct-code-editor": {
+        "$value"?: OpaqueRef<string>,
+        "value"?: string,
+        "language"?: string,
+        "disabled"?: boolean,
+        "readonly"?: boolean,
+        "placeholder"?: string,
+        "timingStrategy"?: string,
+        "timingDelay"?: number,
+        "$mentionable"?: OpaqueRef<Cell<Charm[]>>,
+        "mentionable"?: Charm[],
+        "$mentioned"?: OpaqueRef<Cell<Charm[]>>,
+        "wordWrap"?: boolean,
+        "lineNumbers"?: boolean,
+        "maxLineWidth"?: number,
+        "tabSize"?: number,
+        "tabIndent"?: boolean,
+        "theme"?: "light" | "dark",
+        "onct-change"?: any,
+        "onct-focus"?: any,
+        "onct-blur"?: any,
+        "onbacklink-click"?: any,
+        "onbacklink-create"?: any,
       } & Children & HTMLElementProps;
     }
   }

@@ -100,6 +100,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  *   (default: undefined)
  * @attr {number} tabSize - Tab size (spaces shown for a tab, default: 2)
  * @attr {boolean} tabIndent - Indent on Tab key (default: true)
+ * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
  *
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
@@ -131,6 +132,7 @@ export class CTCodeEditor extends BaseElement {
     maxLineWidth: { type: Number },
     tabSize: { type: Number },
     tabIndent: { type: Boolean },
+    theme: { type: String, reflect: true },
   };
 
   declare value: Cell<string> | string;
@@ -147,6 +149,7 @@ export class CTCodeEditor extends BaseElement {
   declare maxLineWidth?: number;
   declare tabSize: number;
   declare tabIndent: boolean;
+  declare theme: "light" | "dark";
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -157,6 +160,7 @@ export class CTCodeEditor extends BaseElement {
   private _tabIndentComp = new Compartment();
   private _maxLineWidthComp = new Compartment();
   private _indentUnitComp = new Compartment();
+  private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _cellController = createStringCellController(this, {
     timing: {
@@ -189,6 +193,7 @@ export class CTCodeEditor extends BaseElement {
     this.maxLineWidth = undefined;
     this.tabSize = 2;
     this.tabIndent = true;
+    this.theme = "light";
   }
 
   /**
@@ -626,6 +631,15 @@ export class CTCodeEditor extends BaseElement {
       });
     }
 
+    // Update theme plugin
+    if (changedProperties.has("theme") && this._editorView) {
+      this._editorView.dispatch({
+        effects: this._themeComp.reconfigure(
+          this.theme === "dark" ? oneDark : [],
+        ),
+      });
+    }
+
     // Re-subscribe if mentionable cell reference changes
     if (changedProperties.has("mentionable")) {
       this._setupMentionableSyncHandler();
@@ -670,7 +684,6 @@ export class CTCodeEditor extends BaseElement {
       basicSetup,
       // Tab indentation keymap (toggleable)
       this._tabIndentComp.of(this.tabIndent ? keymap.of([indentWithTab]) : []),
-      oneDark,
       this._lang.of(getLangExtFromMimeType(this.language)),
       this._readonly.of(EditorState.readOnly.of(this.readonly)),
       // Word wrapping
@@ -697,6 +710,8 @@ export class CTCodeEditor extends BaseElement {
           })
           : [] as unknown as Extension,
       ),
+      // Theme (dark -> oneDark)
+      this._themeComp.of(this.theme === "dark" ? oneDark : []),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !this.readonly) {
           const value = update.state.doc.toString();
