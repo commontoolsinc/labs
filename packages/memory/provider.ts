@@ -35,7 +35,7 @@ import {
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import { refer } from "./reference.ts";
-import { redactCommit } from "./space.ts";
+import { redactCommitData } from "./space.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
@@ -366,43 +366,50 @@ class MemoryProviderSession<
   }
 
   async commit(commit: Commit<Space>) {
-    // First, check to see if any of our schema queries need to be notified
-    // Any queries that lack access are skipped (with a console log)
-    const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
-      commit,
-    );
+    // We should really only have one item, but it's technically legal to have
+    // multiple transactions in the same commit, so iterate
+    for (
+      const item of SelectionBuilder.iterate<{ is: Memory.CommitData }>(commit)
+    ) {
+      // We need to remove any classified results from our commit.
+      // The schema subscription has a classification claim, but these don't.
+      const redactedData = redactCommitData(item.value.is);
+      if (Subscription.isTransactionReadOnly(redactedData.transaction)) {
+        continue;
+      }
+      // First, check to see if any of our schema queries need to be notified
+      // Any queries that lack access are skipped (with a console log)
+      const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
+        redactedData.transaction,
+      );
 
-    // We need to remove any classified results from our commit.
-    // The schema subscription has a classification claim, but these don't.
-    const redactedCommit = redactCommit(commit);
-    const [[space, _ignored]] = Object.entries(commit);
+      const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
+      for (const [id, channels] of this.channels) {
+        if (Subscription.match(redactedData.transaction, channels)) {
+          jobIds.push(id);
+        }
+      }
 
-    const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
-    for (const [id, channels] of this.channels) {
-      if (Subscription.match(redactedCommit, channels)) {
-        jobIds.push(id);
+      if (jobIds.length > 0) {
+        // The client has a subscription to the space's commit log, but our
+        // subscriptions may trigger inclusion of other objects. Add these here.
+        const enhancedCommit: EnhancedCommit<Space> = {
+          commit: {
+            [item.of]: { [item.the]: { [item.cause]: { is: redactedData } } },
+          } as Commit<Space>,
+          revisions: this.filterKnownFacts(facts),
+        };
+
+        for (const id of jobIds) {
+          // this is sent to a standard subscription (application/commit+json)
+          this.perform({
+            the: "task/effect",
+            of: id,
+            is: enhancedCommit,
+          });
+        }
       }
     }
-
-    if (jobIds.length > 0) {
-      // The client has a subscription to the space's commit log, but our
-      // subscriptions may trigger inclusion of other objects. Add these here.
-      const factsList = [...FactModule.iterate(facts[space as Space])];
-      const enhancedCommit: EnhancedCommit<Space> = {
-        commit: redactedCommit,
-        revisions: this.filterKnownFacts(factsList),
-      };
-
-      for (const id of jobIds) {
-        // this is sent to a standard subscription (application/commit+json)
-        this.perform({
-          the: "task/effect",
-          of: id,
-          is: enhancedCommit,
-        });
-      }
-    }
-
     return { ok: {} };
   }
 
@@ -470,17 +477,18 @@ class MemoryProviderSession<
   }
 
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
-    commit: Commit<Space>,
-  ): Promise<[JobId | undefined, number, Selection<Space>]> {
+    transaction: Transaction<Space>,
+  ): Promise<[JobId | undefined, number, Revision<Fact>[]]> {
     const schemaMatches = new Map<string, Revision<Fact>>();
+    const space = transaction.sub;
     let maxSince = -1;
     let lastId;
-    const [[spaceStr, _attributes]] = Object.entries(commit);
-    const space = spaceStr as Space;
     // Eventually, we should support multiple spaces, but currently the since handling is per-space
     // Our websockets are also per-space, so there's larger issues involved.
     for (const [id, subscription] of this.schemaChannels) {
-      if (Subscription.match(commit, subscription.watchedObjects)) {
+      if (
+        Subscription.match(transaction, subscription.watchedObjects)
+      ) {
         // Re-run our original query, but not as a subscription
         const newArgs = { ...subscription.invocation.args, subscribe: false };
         const newInvocation = { ...subscription.invocation, args: newArgs };
@@ -519,11 +527,7 @@ class MemoryProviderSession<
         maxSince = since > maxSince ? since : maxSince;
       }
     }
-    const selection = SelectionBuilder.from(
-      schemaMatches.values().map((item) => [item, item.since]),
-    );
-    const selectionSpace = { [space]: selection } as Selection<Space>;
-    return [lastId, maxSince, selectionSpace];
+    return [lastId, maxSince, [...schemaMatches.values()]];
   }
 }
 

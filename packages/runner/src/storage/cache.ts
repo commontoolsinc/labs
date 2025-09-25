@@ -971,73 +971,6 @@ export class Replica {
     this.syncTimer = setTimeout(this.pull, this.syncTimeout);
   }
 
-  /**
-   * Attempts to commit and push changes to the remote. It optimistically
-   * updates local state so that subsequent commits can be made without having
-   * awaiting for each commit to succeed. However if commit fails all the local
-   * changes made will be reverted back to the last merged state.
-   *
-   * ⚠️ Please note that if commits stack up e.g by incrementing value of the
-   * same entity, rejected commit will ripple through stack as the changes there
-   * would assume state that is rejected.
-   */
-  async push(
-    changes: (Assert | Retract | Claim)[],
-  ): Promise<
-    Result<
-      Commit,
-      PushError
-    >
-  > {
-    // Generate the selectors for the various change objects
-    const loadArgs: [BaseMemoryAddress, SchemaPathSelector?][] = changes.map((
-      change,
-    ) => {
-      const schema = generateSchemaFromLabels(change);
-      const selector = schema === undefined
-        ? undefined
-        : { path: [], schemaContext: { schema: schema, rootSchema: schema } };
-      return [{ id: change.of, type: change.the }, selector];
-    });
-    // First we pull all the affected entries into heap so we can build a
-    // transaction that is aware of latest state.
-    const { error } = await this.load(loadArgs);
-    if (error) {
-      return { error };
-    } else {
-      // Collect facts so that we can derive desired state and a corresponding
-      // transaction
-      const facts: Fact[] = [];
-      const claims: Invariant[] = [];
-      for (const { the, of, is, claim } of changes) {
-        const fact = this.get({ id: of, type: the });
-
-        if (claim) {
-          claims.push(claimState(fact!));
-        } else if (is === undefined) {
-          // If `is` is `undefined` we want to retract the fact.
-          // If local `is` in the local state is also `undefined` desired state
-          // matches current state in which case we omit this change from the
-          // transaction, otherwise we retract fact.
-          if (fact?.is !== undefined) {
-            facts.push(retract(fact));
-          }
-        } else {
-          facts.push(assert({
-            the,
-            of,
-            is,
-            // If fact has no `cause` it is unclaimed fact.
-            cause: fact?.cause ? fact : null,
-          }));
-        }
-      }
-
-      // These push transaction that will commit desired state to a remote.
-      return this.commit({ facts, claims });
-    }
-  }
-
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
     const { facts, claims } = transaction;
     const changes = Differential.create().update(this, facts);
@@ -1616,6 +1549,7 @@ class ProviderConnection implements IStorageProvider {
   get<T = any>(uri: URI): StorageValue<T> | undefined {
     return this.provider.get(uri);
   }
+
   send<T = any>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ) {
@@ -1760,6 +1694,8 @@ export class Provider implements IStorageProvider {
     return entity?.is as StorageValue<T> | undefined;
   }
 
+  // This is mostly just used by tests and tools, since the transactions will
+  // directly commit their results.
   async send<T = any>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
@@ -1768,7 +1704,9 @@ export class Provider implements IStorageProvider {
     const { the, workspace } = this;
     const LABEL_TYPE = "application/label+json" as const;
 
-    const changes = [];
+    // Collect facts so that we can derive desired state and a corresponding
+    // transaction
+    const facts: Fact[] = [];
     for (const { uri, value } of batch) {
       const content = value.value !== undefined
         ? JSON.stringify({ value: value.value, source: value.source })
@@ -1779,29 +1717,37 @@ export class Provider implements IStorageProvider {
         if (content !== undefined) {
           // ⚠️ We do JSON roundtrips to strip off the undefined values that
           // cause problems with serialization.
-          changes.push({ of: uri, the, is: JSON.parse(content) as JSONValue });
+          facts.push(assert({
+            the,
+            of: uri,
+            is: JSON.parse(content) as JSONValue,
+            // If fact has no `cause` it is unclaimed fact.
+            cause: current?.cause ? current : null,
+          }));
         } else {
-          changes.push({ of: uri, the });
+          facts.push(retract(current as Consumer.Assertion));
         }
       }
       if (value.labels !== undefined) {
         const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
         if (!deepEqual(currentLabel?.is, value.labels)) {
           if (value.labels !== undefined) {
-            changes.push({
-              of: uri,
+            facts.push(assert({
               the: LABEL_TYPE,
+              of: uri,
               is: value.labels as JSONValue,
-            });
+              // If fact has no `cause` it is unclaimed fact.
+              cause: currentLabel?.cause ? currentLabel : null,
+            }));
           } else {
-            changes.push({ of: uri, the: LABEL_TYPE });
+            facts.push(retract(currentLabel as Consumer.Assertion));
           }
         }
       }
     }
-
-    if (changes.length > 0) {
-      const result = await this.workspace.push(changes);
+    // If we don't have any writes, don't bother sending it.
+    if (facts.length > 0) {
+      const result = await this.workspace.commit({ facts, claims: [] });
       return result.error ? result : { ok: {} };
     } else {
       return { ok: {} };
