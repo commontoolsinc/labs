@@ -11,7 +11,6 @@ import {
   lift,
   NAME,
   recipe,
-  toSchema,
   UI,
 } from "commontools";
 
@@ -39,7 +38,6 @@ function extractPizzas(content: string): string[] {
       sections.push(slice);
     }
   }
-
   return sections;
 }
 
@@ -54,21 +52,13 @@ type WebReadResult = {
   };
 };
 
-/** Minimal schema the lift callback expects from fetchData. */
-interface FetchDataResult {
-  result: Cell<WebReadResult>;
-}
-
 /** Reactive system will call this lift when the fetched data
   is updated. it also allows us to call our pure function
   `extractPizzas` and return the results
 */
-const createPizzaListCell = lift(
-  toSchema<FetchDataResult>(),
-  undefined,
+const createPizzaListCell = lift<{ result: WebReadResult }, string[]>(
   ({ result }) => {
-    const data = result.get();
-    return data?.content ? extractPizzas(data.content) : [];
+    return extractPizzas(result?.content ?? "");
   },
 );
 
