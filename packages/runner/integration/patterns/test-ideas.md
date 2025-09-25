@@ -199,7 +199,7 @@ current offline harness.
       relocate staff and derived chains stay valid.
 - [x] Calendar availability pattern — merge shared availability ensure derived
       free slots recompute after block edits.
-- [ ] Meeting scheduler pattern — propose meeting slots ensure vote handlers
+- [x] Meeting scheduler pattern — propose meeting slots ensure vote handlers
       update consensus pick with tie breakers.
 - [ ] Goal progress tracker pattern — track milestones toward goal ensure
       derived percent updates when milestone weights shift.

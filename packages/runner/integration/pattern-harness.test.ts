@@ -292,6 +292,9 @@ import {
 import {
   scenarios as callCenterScheduleScenarios,
 } from "./patterns/call-center-schedule.ts";
+import {
+  scenarios as meetingSchedulerScenarios,
+} from "./patterns/meeting-scheduler.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -329,6 +332,7 @@ const allScenarios = [
   ...calendarAvailabilityScenarios,
   ...catalogSearchFacetsScenarios,
   ...callCenterScheduleScenarios,
+  ...meetingSchedulerScenarios,
   ...warehouseBinMapScenarios,
   ...logisticsRoutingScenarios,
   ...researchCitationManagerScenarios,
