@@ -20,31 +20,53 @@ import {
  *
  * Uses: fetchData, lift, map built-in, toolshed web-read endpoint
  */
+const DATE_LINE_REGEX = /^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}$/;
+
 /** Extract pizza descriptions from a web-read content blob. */
 function extractPizzas(content: string): string[] {
-  const marker = "### Pizza";
-  if (!content.includes(marker)) {
-    return [];
-  }
+  const normalized = content.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const pizzas: string[] = [];
 
-  const sections: string[] = [];
-  const parts = content.split(marker).slice(1);
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) {
+  for (let i = 0; i < lines.length; i++) {
+    const dateLine = lines[i].trim();
+    if (!DATE_LINE_REGEX.test(dateLine)) {
       continue;
     }
 
-    const headingIndex = trimmed.indexOf("### ");
-    const slice = headingIndex === -1
-      ? trimmed
-      : trimmed.slice(0, headingIndex).trim();
+    let cursor = i + 1;
+    while (cursor < lines.length && lines[cursor].trim() === "") {
+      cursor++;
+    }
 
-    if (slice) {
-      sections.push(slice);
+    if (lines[cursor]?.trim() !== "### Pizza") {
+      continue;
+    }
+
+    cursor++;
+    while (cursor < lines.length && lines[cursor].trim() === "") {
+      cursor++;
+    }
+
+    const descriptionLines: string[] = [];
+    for (; cursor < lines.length; cursor++) {
+      const current = lines[cursor].trim();
+      if (
+        current === "" ||
+        current.startsWith("### ") ||
+        DATE_LINE_REGEX.test(current)
+      ) {
+        break;
+      }
+      descriptionLines.push(current);
+    }
+
+    if (descriptionLines.length > 0) {
+      pizzas.push(`${dateLine}: ${descriptionLines.join(" ")}`);
     }
   }
-  return sections;
+
+  return pizzas;
 }
 
 /** Shape of the Toolshed web-read response we care about. */
