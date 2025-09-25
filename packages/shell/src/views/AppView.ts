@@ -13,6 +13,9 @@ import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { NAME } from "@commontools/runner";
 import { type NameSchema, nameSchema } from "@commontools/charm";
 import { navigate, updatePageTitle } from "../lib/navigate.ts";
+import { provide } from "@lit/context";
+import { KeyboardRouter } from "../lib/keyboard-router.ts";
+import { keyboardRouterContext } from "../lib/keyboard-context.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -57,78 +60,43 @@ export class XAppView extends BaseView {
   private titleSubscription?: CellEventTarget<string | undefined>;
 
   private debuggerController = new DebuggerController(this);
-  private _onGlobalKeyDown = (e: KeyboardEvent) => {
-    // Ignore when focusing editable elements
-    const target = e.target as HTMLElement | null;
-    const tag = (target?.tagName || "").toLowerCase();
-    const isEditable = !!(
-      target &&
-      (target.isContentEditable ||
-        tag === "input" ||
-        tag === "textarea" ||
-        tag === "select")
-    );
-    if (isEditable) return;
+  @provide({ context: keyboardRouterContext })
+  private keyboard = new KeyboardRouter();
 
-    // Track modifier state explicitly; some layouts emit separate events
-    this._updateModifierState(e, true);
-
-    const isMac = navigator.platform.toLowerCase().includes("mac");
-    const hasMod = isMac ? this._metaDown : this._ctrlDown;
-    const onlyMod = hasMod && !this._shiftDown && !this._altDown;
-    const altOnly = this._altDown && !this._shiftDown && !this._metaDown &&
-      !this._ctrlDown;
-    if (onlyMod && e.code === "KeyO") {
-      e.preventDefault();
-      this.command({ type: "set-show-quick-jump-view", show: true });
-      return;
-    }
-
-    if (altOnly && e.code === "KeyW") {
-      e.preventDefault();
-      const spaceName = this.app?.spaceName ?? "common-knowledge";
-      navigate({ type: "space", spaceName });
-    }
-  };
-
-  private _onGlobalKeyUp = (e: KeyboardEvent) => {
-    this._updateModifierState(e, false);
-  };
-
-  private _altDown = false;
-  private _metaDown = false;
-  private _ctrlDown = false;
-  private _shiftDown = false;
-
-  private _updateModifierState(e: KeyboardEvent, down: boolean) {
-    switch (e.key) {
-      case "Alt":
-        this._altDown = down;
-        break;
-      case "Meta":
-        this._metaDown = down;
-        break;
-      case "Control":
-        this._ctrlDown = down;
-        break;
-      case "Shift":
-        this._shiftDown = down;
-        break;
-    }
-  }
+  private _unsubShortcuts: Array<() => void> = [];
 
   override connectedCallback() {
     super.connectedCallback();
     // Listen for clear telemetry events
     this.addEventListener("clear-telemetry", this.handleClearTelemetry);
-    document.addEventListener("keydown", this._onGlobalKeyDown);
-    document.addEventListener("keyup", this._onGlobalKeyUp);
+
+    // Register global shortcuts via keyboard router
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const mod = isMac ? { meta: true } : { ctrl: true };
+    this._unsubShortcuts.push(
+      this.keyboard.register(
+        { code: "KeyO", ...mod, preventDefault: true },
+        () => {
+          this.command({ type: "set-show-quick-jump-view", show: true });
+        },
+      ),
+    );
+    this._unsubShortcuts.push(
+      this.keyboard.register(
+        { code: "KeyW", alt: true, preventDefault: true },
+        () => {
+          const spaceName = this.app?.spaceName ?? "common-knowledge";
+          navigate({ type: "space", spaceName });
+        },
+      ),
+    );
   }
 
   override disconnectedCallback() {
     this.removeEventListener("clear-telemetry", this.handleClearTelemetry);
-    document.removeEventListener("keydown", this._onGlobalKeyDown);
-    document.removeEventListener("keyup", this._onGlobalKeyUp);
+    for (const off of this._unsubShortcuts) off();
+    this._unsubShortcuts = [];
+    this.keyboard.dispose();
     super.disconnectedCallback();
   }
 
