@@ -19,13 +19,15 @@ export const collapsibleStyles = `
   /* Content wrapper for animation */
   .content-wrapper {
     overflow: hidden;
-    transition: height 0.2s ease-out;
+    transition: height var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     height: 0;
     will-change: height;
   }
 
   .collapsible.open .content-wrapper {
-    transition: height 0.2s ease-in;
+    transition: height var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
   }
 
   .content {

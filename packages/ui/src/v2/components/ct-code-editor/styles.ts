@@ -63,10 +63,11 @@ export const styles = css`
     border-radius: 0.25rem;
     padding: 0.125rem 0.25rem;
     cursor: pointer;
-    transition: background-color 0.2s;
-  }
+    transition: background-color var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
+    }
 
-  .cm-backlink:hover {
-    background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
-  }
-`;
+    .cm-backlink:hover {
+      background-color: var(--ring-alpha, hsla(212, 100%, 47%, 0.2));
+    }
+  `;

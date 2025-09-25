@@ -23,7 +23,8 @@ export const tabStyles = `
     font-weight: var(--ct-font-weight-medium);
     line-height: var(--ct-line-height-normal);
     color: var(--ct-colors-gray-700);
-    transition: all var(--ct-transition-duration-fast) var(--ct-transition-timing-ease);
+    transition: all var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     outline: none;
     position: relative;
   }

@@ -40,7 +40,8 @@ export const buttonStyles = `
     white-space: nowrap;
     border-radius: var(--ct-border-radius-md);
     font-weight: var(--ct-font-weight-medium);
-    transition: all var(--ct-transition-duration-fast) var(--ct-transition-timing-ease);
+    transition: all var(--ct-theme-animation-duration, 150ms)
+      var(--ct-transition-timing-ease);
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;

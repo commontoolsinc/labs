@@ -66,7 +66,7 @@ export class CTListItem extends BaseElement {
           --ct-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        transition: background-color var(--ct-transition-duration-fast)
+        transition: background-color var(--ct-theme-animation-duration, 150ms)
           var(--ct-transition-timing-ease);
         cursor: pointer;
         user-select: none;
@@ -182,8 +182,7 @@ export class CTListItem extends BaseElement {
           }
 
           #applyTheme() {
-            if (!this.theme) return;
-            applyThemeToElement(this, this.theme);
+            applyThemeToElement(this, this.theme ?? defaultTheme);
           }
 
           override connectedCallback(): void {

@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
 import {
@@ -143,7 +144,8 @@ export class CTInput extends BaseElement {
         --ct-theme-border-radius,
         var(--ct-border-radius-md, 0.375rem)
       );
-      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all var(--ct-theme-animation-duration, 150ms)
+        var(--ct-transition-timing-ease);
       font-family: var(--ct-theme-font-family, inherit);
     }
 
@@ -396,6 +398,7 @@ export class CTInput extends BaseElement {
 
       // Theme consumption
       @consume({ context: themeContext, subscribe: true })
+      @property({ attribute: false })
       // deno-lint-ignore no-explicit-any
       declare theme?: CTTheme;
 
