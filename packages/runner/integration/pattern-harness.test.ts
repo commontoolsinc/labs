@@ -220,6 +220,7 @@ import {
 import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
+import { scenarios as leadScoringScenarios } from "./patterns/lead-scoring.ts";
 import {
   scenarios as heatmapAggregationScenarios,
 } from "./patterns/heatmap-aggregation.ts";
@@ -305,6 +306,7 @@ const allScenarios = [
   ...patientVitalsDashboardScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...leadScoringScenarios,
   ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
   ...budgetPlannerScenarios,
