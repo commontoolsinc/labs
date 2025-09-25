@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -99,19 +98,6 @@ const recordValue = handler(
 
     context.lastEvent.set(snapshot);
     context.audit.set(auditState);
-    createCell<ChecksumAudit>(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["updates", "checksum"],
-        properties: {
-          updates: { type: "number" },
-          checksum: { type: "number" },
-        },
-      },
-      "derivedChecksumAudit",
-      auditState,
-    );
   },
 );
 

@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  cell,
-  createCell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { cell, Default, handler, lift, recipe, str } from "commontools";
 import type { Cell } from "commontools";
 
 type PipelineMode = "double" | "mirror";
@@ -135,20 +127,6 @@ export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
 
         historyState = [...historyState, next];
         pipelineHistory.set(historyState);
-
-        createCell(
-          {
-            type: "object",
-            additionalProperties: false,
-            required: ["mode", "historySize"],
-            properties: {
-              mode: { type: "string" },
-              historySize: { type: "number" },
-            },
-          },
-          "counterToggledDerivePipelineSnapshot",
-          { mode: next, historySize: historyState.length },
-        );
       },
     );
 

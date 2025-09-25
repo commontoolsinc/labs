@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -70,22 +69,6 @@ const recordTransition = (
   const currentId = toNumber(sequence.get(), 0);
   const nextId = currentId + 1;
   sequence.set(nextId);
-
-  createCell<TransitionRecord>(
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["from", "to", "kind", "note"],
-      properties: {
-        from: { type: "string" },
-        to: { type: "string" },
-        kind: { type: "string" },
-        note: { type: "string" },
-      },
-    },
-    `counterEnumerationTransition-${nextId}`,
-    record,
-  );
 };
 
 const advanceState = handler(

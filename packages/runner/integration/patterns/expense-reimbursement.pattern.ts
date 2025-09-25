@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -84,19 +83,6 @@ const defaultClaims: ExpenseClaimInput[] = [
     status: "paid",
   },
 ];
-
-const auditEntrySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "claimId", "status", "employee", "amount"],
-  properties: {
-    sequence: { type: "number" },
-    claimId: { type: "string" },
-    status: { type: "string" },
-    employee: { type: "string" },
-    amount: { type: "number" },
-  },
-} as const;
 
 const roundCurrency = (value: number): number => {
   return Math.round(value * 100) / 100;
@@ -299,18 +285,6 @@ const buildStatusChangeHandler = (
 
       const sequence = (context.sequence.get() ?? 0) + 1;
       context.sequence.set(sequence);
-
-      createCell(
-        auditEntrySchema,
-        `expenseAudit_${sequence}`,
-        {
-          sequence,
-          claimId: updatedClaim.id,
-          status: updatedClaim.status,
-          employee: updatedClaim.employee,
-          amount: updatedClaim.amount,
-        },
-      );
     },
   );
 

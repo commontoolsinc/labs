@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -79,31 +78,6 @@ const defaultShipments: ShipmentRecord[] = [
   { id: "PKG-300", route: "SOUTH", weight: 5 },
   { id: "PKG-301", route: "SOUTH", weight: 6 },
 ];
-
-const snapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "sequence",
-    "shipment",
-    "from",
-    "to",
-    "load",
-    "capacity",
-    "remaining",
-    "status",
-  ],
-  properties: {
-    sequence: { type: "number" },
-    shipment: { type: "string" },
-    from: { type: "string" },
-    to: { type: "string" },
-    load: { type: "number" },
-    capacity: { type: "number" },
-    remaining: { type: "number" },
-    status: { type: "string" },
-  },
-} as const;
 
 const sanitizeLabel = (value: unknown, fallback: string): string => {
   if (typeof value === "string") {
@@ -344,20 +318,6 @@ const reassignShipment = handler(
       context.lastAction.set(message);
       const sequence = (context.sequence.get() ?? 0) + 1;
       context.sequence.set(sequence);
-      createCell(
-        snapshotSchema,
-        `logistics-routing-${sequence}`,
-        {
-          sequence,
-          shipment: shipmentId,
-          from: record.route,
-          to: targetRoute,
-          load: roundRatio(currentLoad),
-          capacity: targetCapacity,
-          remaining: roundRatio(targetCapacity - currentLoad),
-          status: "blocked",
-        },
-      );
       return;
     }
 
@@ -377,20 +337,6 @@ const reassignShipment = handler(
     context.lastAction.set(message);
     const sequence = (context.sequence.get() ?? 0) + 1;
     context.sequence.set(sequence);
-    createCell(
-      snapshotSchema,
-      `logistics-routing-${sequence}`,
-      {
-        sequence,
-        shipment: shipmentId,
-        from: record.route,
-        to: targetRoute,
-        load: targetMetric?.used ?? 0,
-        capacity: targetMetric?.capacity ?? 0,
-        remaining: targetMetric?.remaining ?? 0,
-        status: "moved",
-      },
-    );
   },
 );
 

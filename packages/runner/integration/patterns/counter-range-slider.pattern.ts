@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -24,17 +23,6 @@ interface SliderSnapshot {
   value: number;
   percentage: number;
 }
-
-const snapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["interaction", "value", "percentage"],
-  properties: {
-    interaction: { type: "number" },
-    value: { type: "number" },
-    percentage: { type: "number" },
-  },
-} as const;
 
 const toFiniteNumber = (input: unknown, fallback: number): number => {
   if (typeof input !== "number" || !Number.isFinite(input)) {
@@ -112,12 +100,6 @@ const applySliderUpdate = (
   const list = Array.isArray(existing) ? existing.slice() : [];
   list.push(snapshot);
   context.history.set(list);
-
-  createCell<SliderSnapshot>(
-    snapshotSchema,
-    `rangeSliderSnapshot-${counter}`,
-    snapshot,
-  );
 };
 
 const setSliderValue = handler(

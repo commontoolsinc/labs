@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -61,39 +60,6 @@ interface UsageMetricsSnapshot {
   topCohort: string;
   topCohortCount: number;
 }
-
-const metricsSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "total",
-    "features",
-    "cohorts",
-    "featureCount",
-    "cohortCount",
-    "topFeature",
-    "topFeatureCount",
-    "topCohort",
-    "topCohortCount",
-  ],
-  properties: {
-    total: { type: "number" },
-    features: {
-      type: "object",
-      additionalProperties: { type: "number" },
-    },
-    cohorts: {
-      type: "object",
-      additionalProperties: { type: "number" },
-    },
-    featureCount: { type: "number" },
-    cohortCount: { type: "number" },
-    topFeature: { type: "string" },
-    topFeatureCount: { type: "number" },
-    topCohort: { type: "string" },
-    topCohortCount: { type: "number" },
-  },
-} as const;
 
 const sanitizeLabel = (input: unknown, fallback: string): string => {
   if (typeof input === "string") {
@@ -312,11 +278,6 @@ export const featureUsageAnalytics = recipe<FeatureUsageArgs>(
         topCohort: topCohort.name,
         topCohortCount: topCohort.count,
       };
-      createCell(
-        metricsSnapshotSchema,
-        "featureUsageAnalyticsSnapshot",
-        snapshot,
-      );
       return {
         featureTotals,
         cohortTotals,

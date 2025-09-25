@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -34,25 +33,6 @@ interface DifferenceAudit {
   secondary: number;
   difference: number;
 }
-
-const differenceAuditSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "sequence",
-    "via",
-    "primary",
-    "secondary",
-    "difference",
-  ],
-  properties: {
-    sequence: { type: "number" },
-    via: { enum: ["primary", "secondary"] },
-    primary: { type: "number" },
-    secondary: { type: "number" },
-    difference: { type: "number" },
-  },
-} as const;
 
 const sanitizeInteger = (value: unknown, fallback = 0): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -113,11 +93,6 @@ const recordDifference = (
   };
   state.log.push(entry);
   state.history.push(difference);
-  createCell(
-    differenceAuditSchema,
-    `derived-difference-${sequence}`,
-    entry,
-  );
 };
 
 const makeAdjustHandler = (via: DifferenceSource) =>

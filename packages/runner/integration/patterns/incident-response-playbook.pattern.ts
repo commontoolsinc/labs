@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -308,19 +307,6 @@ const beginIncidentStep = handler(
     const entry = `Started ${requested}`;
     const updates = [...history, entry];
     context.history.set(updates);
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["action", "stepId"],
-        properties: {
-          action: { type: "string" },
-          stepId: { type: "string" },
-        },
-      },
-      `incidentPlaybookLog-start-${requested}-${updates.length}`,
-      { action: "start", stepId: requested },
-    );
   },
 );
 
@@ -365,20 +351,6 @@ const noteElapsedTime = handler(
     const entry = `Logged ${minutes}m on ${targetId}`;
     const updates = [...history, entry];
     context.history.set(updates);
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["action", "stepId", "minutes"],
-        properties: {
-          action: { type: "string" },
-          stepId: { type: "string" },
-          minutes: { type: "number" },
-        },
-      },
-      `incidentPlaybookLog-elapsed-${targetId}-${updates.length}`,
-      { action: "elapsed", stepId: targetId, minutes },
-    );
   },
 );
 
@@ -425,20 +397,6 @@ const updateStepStatus = handler(
     const entry = `Marked ${targetId} as ${status}`;
     const updates = [...history, entry];
     context.history.set(updates);
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["action", "stepId", "status"],
-        properties: {
-          action: { type: "string" },
-          stepId: { type: "string" },
-          status: { type: "string" },
-        },
-      },
-      `incidentPlaybookLog-status-${targetId}-${updates.length}`,
-      { action: "status", stepId: targetId, status },
-    );
   },
 );
 
@@ -465,18 +423,6 @@ const resetPlaybook = handler(
     context.history.set([]);
     context.active.set(null);
     context.clock.set(0);
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["action"],
-        properties: {
-          action: { type: "string" },
-        },
-      },
-      "incidentPlaybookLog-reset",
-      { action: "reset" },
-    );
   },
 );
 

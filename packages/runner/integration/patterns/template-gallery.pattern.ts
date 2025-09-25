@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -86,17 +85,6 @@ interface TemplateGalleryArgs {
 interface SelectCategoryEvent {
   category?: string;
 }
-
-const selectionRecordSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "category", "label"],
-  properties: {
-    sequence: { type: "number" },
-    category: { type: "string" },
-    label: { type: "string" },
-  },
-} as const;
 
 function sanitizeText(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -309,12 +297,6 @@ const selectCategory = handler(
     const updated = [...previous, label];
     const limited = updated.length > 5 ? updated.slice(-5) : updated;
     context.history.set(limited);
-
-    createCell(
-      selectionRecordSchema,
-      `template-gallery-selection-${next}`,
-      { sequence: next, category: resolved, label },
-    );
   },
 );
 

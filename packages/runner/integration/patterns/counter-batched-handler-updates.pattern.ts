@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -62,19 +61,6 @@ const applyBatchedIncrement = handler(
           ? event.note
           : "no-op batch";
       context.lastNote.set(fallbackNote);
-      createCell(
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["note", "applied"],
-          properties: {
-            note: { type: "string" },
-            applied: { type: "number" },
-          },
-        },
-        "counterBatchedHandlerAudit",
-        { note: fallbackNote, applied: 0 },
-      );
       return;
     }
 
@@ -98,21 +84,6 @@ const applyBatchedIncrement = handler(
       ? event.note
       : `batch ${amounts.length}`;
     context.lastNote.set(note);
-
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["note", "applied", "increments"],
-        properties: {
-          note: { type: "string" },
-          applied: { type: "number" },
-          increments: { type: "number" },
-        },
-      },
-      "counterBatchedHandlerAudit",
-      { note, applied: nextValue, increments: amounts.length },
-    );
   },
 );
 

@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -66,20 +65,6 @@ const updateStage = (
   context.preparedCount.set(preparedSoFar + 1);
 
   context.lastPrepared.set({ delta, tag });
-
-  createCell<PreparedSnapshot>(
-    {
-      type: "object",
-      required: ["delta", "tag"],
-      additionalProperties: false,
-      properties: {
-        delta: { type: "number" },
-        tag: { type: "string" },
-      },
-    },
-    "nestedHandlerDebug",
-    { delta, tag },
-  );
 };
 
 const applyStagedAdjustment = handler(

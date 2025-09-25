@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -147,27 +146,6 @@ const completeSequence = handler(
     const summary =
       `${phaseValue} (${note}) steps: ${steps.length} total: ${total}`;
     context.phaseHistory.set([...history, summary]);
-
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["phase", "note", "steps", "total"],
-        properties: {
-          phase: { type: "string" },
-          note: { type: "string" },
-          steps: { type: "number" },
-          total: { type: "number" },
-        },
-      },
-      "counterScenarioMultiStepAudit",
-      {
-        phase: phaseValue,
-        note,
-        steps: steps.length,
-        total,
-      },
-    );
   },
 );
 

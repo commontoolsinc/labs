@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -59,16 +58,6 @@ const slotOrder = new Map<string, number>(
 
 const slotSet = new Set<string>(slotCatalog);
 const emptySlotFallback: readonly SlotId[] = [] as const;
-
-const availabilityChangeSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["slot", "status"],
-  properties: {
-    slot: { type: "string" },
-    status: { type: "string" },
-  },
-} as const;
 
 const defaultParticipants: ParticipantAvailability[] = [
   {
@@ -265,7 +254,6 @@ const modifySharedAvailability = handler(
     recordHistoryEntry(context.history, `${status} ${slot}`);
     const change: AvailabilityChange = { slot, status };
     context.latestChange.set(change);
-    createCell(availabilityChangeSchema, "calendarAvailabilityChange", change);
   },
 );
 
