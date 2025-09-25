@@ -48,6 +48,9 @@ offline-friendly recipes that the harness can assert confidently.
   downstream derives remain ergonomic and predictable.
 - Snapshot raw values with `lift` before cloning or duplicating nodes; this
   keeps replicas in sync without leaking unsanitized data.
+- Tie sanitize fallbacks to the same `lift` inputs (e.g. plan defaults + cycle
+  overrides) so derived strings stay aligned when handlers swap configurations
+  mid-run.
 
 ## Composition & Child Recipes
 

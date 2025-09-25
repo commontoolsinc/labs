@@ -209,7 +209,7 @@ current offline harness.
       statuses and derived totals reflect payouts.
 - [x] Invoice generator pattern — assemble invoices from items ensure derived
       totals include taxes and discounts accurately.
-- [ ] Subscription billing pattern — manage plan billing cycles ensure derived
+- [x] Subscription billing pattern — manage plan billing cycles ensure derived
       next invoice date updates after plan changes.
 - [x] Currency conversion pattern — convert between currencies ensure derived
       amounts follow handler updates to rate table.
