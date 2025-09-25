@@ -24,4 +24,3 @@ export interface KeyboardRouter {
   register(spec: ShortcutSpec, handler: ShortcutHandler): () => void;
   dispose(): void;
 }
-

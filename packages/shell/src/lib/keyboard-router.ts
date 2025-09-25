@@ -17,7 +17,21 @@ export type ShortcutSpec = {
 export type ShortcutHandler = (e: KeyboardEvent) => void;
 
 type RegisteredShortcut = {
-  spec: Required<ShortcutSpec> & { code?: string; key?: string };
+  spec: {
+    name?: string;
+    code?: string;
+    key?: string;
+    alt: boolean;
+    ctrl: boolean;
+    meta: boolean;
+    shift: boolean;
+    ignoreEditable: boolean;
+    allowRepeat: boolean;
+    preventDefault: boolean;
+    stopPropagation: boolean;
+    when: () => boolean;
+    priority: number;
+  };
   handler: ShortcutHandler;
 };
 
@@ -112,7 +126,7 @@ export class KeyboardRouter {
     };
   }
 
-  #modsMatch(s: Required<ShortcutSpec>) {
+  #modsMatch(s: RegisteredShortcut["spec"]) {
     return (
       s.alt === this.#alt &&
       s.ctrl === this.#ctrl &&
@@ -121,7 +135,7 @@ export class KeyboardRouter {
     );
   }
 
-  #keyMatch(s: ShortcutSpec, e: KeyboardEvent) {
+  #keyMatch(s: RegisteredShortcut["spec"], e: KeyboardEvent) {
     if (s.code) return e.code === s.code;
     if (s.key) return this.#normKey(e.key) === this.#normKey(s.key);
     return false;

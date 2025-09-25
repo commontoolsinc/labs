@@ -4,4 +4,3 @@ import type { KeyboardRouter } from "./keyboard-router.ts";
 export const keyboardRouterContext = createContext<KeyboardRouter>(
   Symbol("ct.keyboard-router"),
 );
-

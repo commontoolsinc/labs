@@ -3,6 +3,7 @@ import type { OpaqueRef, Cell, Props, RenderNode, VNode } from "commontools";
 type HTMLElementProps = {
   id?: string,
   style?: string;
+  slot?: string;
 }
 
 type Children = {
@@ -114,6 +115,15 @@ declare global {
         "items": { label: string, value: any }[],
         "multiple"?: boolean,
         "onct-change"?: OpaqueRef<HandlerEvent<{ items: { label: string, value: any }[], value: any | any[] }>>,
+      } & Children & HTMLElementProps;
+      "ct-heading": {
+        "level"?: number,
+        "no-margin"?: boolean,
+      } & Children & HTMLElementProps;
+      "ct-collapsible": {
+        "open"?: boolean,
+        "disabled"?: boolean,
+        "onct-toggle"?: any,
       } & Children & HTMLElementProps;
     }
   }
