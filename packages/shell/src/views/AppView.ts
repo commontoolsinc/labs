@@ -15,7 +15,7 @@ import { type NameSchema, nameSchema } from "@commontools/charm";
 import { navigate, updatePageTitle } from "../lib/navigate.ts";
 import { provide } from "@lit/context";
 import { KeyboardRouter } from "../lib/keyboard-router.ts";
-import { keyboardRouterContext } from "../lib/keyboard-context.ts";
+import { keyboardRouterContext } from "@commontools/ui/v2";
 
 export class XAppView extends BaseView {
   static override styles = css`

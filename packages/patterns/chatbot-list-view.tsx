@@ -227,9 +227,8 @@ export default recipe<Input, Output>(
 
               {/* Keyboard shortcuts */}
               <ct-keybind
-                name="new-chat-meta-n"
+                code="KeyN"
                 alt
-                key="n"
                 preventDefault
                 onct-keybind={createChatRecipe({
                   selectedCharm,
