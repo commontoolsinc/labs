@@ -22,8 +22,8 @@ offline-friendly recipes that the harness can assert confidently.
   sanitized input and return a predictable shape.
 - When a derive depends on several cells, pass an object of dependencies into a
   single `lift` call instead of sprinkling `.get()` calls.
-- Use `cell()` for ephemeral logging or counters; reach for `createCell` only
-  when the new cell remains part of the returned graph.
+- Use `cell()` for state owned by the recipe. when the new cell remains part of
+  the returned graph.
 - Memoize expensive derived objects when stability matters; reuse previous
   references when sanitized inputs are unchanged.
 
