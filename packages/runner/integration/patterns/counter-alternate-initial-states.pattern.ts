@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -53,19 +52,6 @@ const defaultInitialStateSeeds = [
   { id: "baseline", label: "Baseline", value: 0, step: 1 },
   { id: "boost", label: "Momentum Boost", value: 8, step: 3 },
 ] satisfies AlternateInitialStateSeed[];
-
-const selectionSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "value", "step", "reason", "index"],
-  properties: {
-    id: { type: "string" },
-    value: { type: "number" },
-    step: { type: "number" },
-    reason: { type: "string" },
-    index: { type: "number" },
-  },
-} as const;
 
 const fallbackState = (): AlternateInitialState => ({
   id: "baseline",
@@ -188,12 +174,6 @@ const selectInitialState = handler(
     };
     history.push(entry);
     context.log.set(history);
-
-    createCell(
-      selectionSnapshotSchema,
-      `alternateInitialState-${index}`,
-      entry,
-    );
   },
 );
 

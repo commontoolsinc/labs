@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -46,18 +45,6 @@ interface CanonicalForm {
   totalValue: number;
   signature: string[];
 }
-
-const canonicalEntrySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["group", "id", "label", "value"],
-  properties: {
-    group: { type: "string" },
-    id: { type: "string" },
-    label: { type: "string" },
-    value: { type: "number" },
-  },
-} as const;
 
 const toInteger = (value: unknown, fallback = 0): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -237,17 +224,6 @@ const applyAdjustment = handler(
     context.operations.set(operations);
 
     context.lastMutation.set(mutationSummary);
-
-    createCell(
-      canonicalEntrySchema,
-      safeKey(targetGroup.name, entry.id),
-      {
-        group: targetGroup.name,
-        id: entry.id,
-        label: entry.label,
-        value: entry.value,
-      },
-    );
   },
 );
 

@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -224,20 +223,6 @@ const markDoseTaken = handler(
       `Took ${dose.medication} scheduled for ${dose.scheduledTime} at ${takenAt}`;
     const historyEntries = Array.isArray(log) ? log : [];
     context.history.set([...historyEntries, message]);
-
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["doseId", "takenAt"],
-        properties: {
-          doseId: { type: "string" },
-          takenAt: { type: "string" },
-        },
-      },
-      `medicationAdherenceDose-${dose.id}-${nextRecords.length}`,
-      { doseId: dose.id, takenAt },
-    );
   },
 );
 

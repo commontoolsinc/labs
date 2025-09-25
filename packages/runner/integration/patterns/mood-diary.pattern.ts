@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -73,93 +72,6 @@ interface MoodMetrics {
 interface MoodDiaryArgs {
   entries: Default<MoodEntrySeed[], []>;
 }
-
-const moodEntrySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "id",
-    "timestamp",
-    "date",
-    "timeBucket",
-    "mood",
-    "score",
-    "note",
-    "tags",
-  ],
-  properties: {
-    id: { type: "string" },
-    timestamp: { type: "string" },
-    date: { type: "string" },
-    timeBucket: { type: "string" },
-    mood: { type: "string" },
-    score: { type: "number" },
-    note: { type: "string" },
-    tags: {
-      type: "array",
-      items: { type: "string" },
-    },
-  },
-} as const;
-
-const metricsSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "entryCount",
-    "averageScore",
-    "positiveCount",
-    "negativeCount",
-    "positiveShare",
-  ],
-  properties: {
-    entryCount: { type: "number" },
-    averageScore: { type: "number" },
-    positiveCount: { type: "number" },
-    negativeCount: { type: "number" },
-    positiveShare: { type: "number" },
-  },
-} as const;
-
-const tagBreakdownSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "tag",
-      "averageScore",
-      "entryCount",
-      "positiveShare",
-    ],
-    properties: {
-      tag: { type: "string" },
-      averageScore: { type: "number" },
-      entryCount: { type: "number" },
-      positiveShare: { type: "number" },
-    },
-  },
-} as const;
-
-const timeBreakdownSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "bucket",
-      "averageScore",
-      "entryCount",
-      "positiveShare",
-    ],
-    properties: {
-      bucket: { type: "string" },
-      averageScore: { type: "number" },
-      entryCount: { type: "number" },
-      positiveShare: { type: "number" },
-    },
-  },
-} as const;
 
 const roundScore = (value: number): number => {
   return Math.round(value * 100) / 100;
@@ -400,19 +312,6 @@ const logMoodEntry = handler(
     const nextEntries = normalizeEntries([...existing, entry]);
     context.entries.set(nextEntries);
     context.runtimeSeed.set(priorSeed + 1);
-
-    const metrics = computeMetrics(nextEntries);
-    const tagBreakdown = computeTagBreakdown(nextEntries);
-    const timeBreakdown = computeTimeBreakdown(nextEntries);
-
-    createCell(
-      moodEntrySchema,
-      `mood-diary-entry-${entry.id}`,
-      entry,
-    );
-    createCell(metricsSchema, "mood-diary-metrics", metrics);
-    createCell(tagBreakdownSchema, "mood-diary-tags", tagBreakdown);
-    createCell(timeBreakdownSchema, "mood-diary-time", timeBreakdown);
   },
 );
 

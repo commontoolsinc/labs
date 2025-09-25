@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -43,15 +42,6 @@ interface RebalanceEvent {
   mode?: "targets" | "even";
 }
 
-interface BudgetSnapshot {
-  sequence: number;
-  action: "allocate" | "rebalance" | "reset";
-  category?: string;
-  details: string;
-  totalAllocated: number;
-  remaining: number;
-}
-
 interface BudgetSummary {
   allocations: AllocationRecord;
   categories: CategoryProjection[];
@@ -74,26 +64,6 @@ const defaultCategories: BudgetCategoryInput[] = [
   { name: "Savings", target: 800 },
   { name: "Leisure", target: 400 },
 ];
-
-const budgetSnapshotSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "sequence",
-    "action",
-    "details",
-    "totalAllocated",
-    "remaining",
-  ],
-  properties: {
-    sequence: { type: "number" },
-    action: { type: "string" },
-    category: { type: "string" },
-    details: { type: "string" },
-    totalAllocated: { type: "number" },
-    remaining: { type: "number" },
-  },
-} as const;
 
 const roundCurrency = (value: number): number => {
   return Math.round(value * 100) / 100;
@@ -391,18 +361,6 @@ const updateAllocation = handler(
 
     const sequence = (context.sequence.get() ?? 0) + 1;
     context.sequence.set(sequence);
-    createCell(
-      budgetSnapshotSchema,
-      `budgetSnapshot-${sequence}`,
-      {
-        sequence,
-        action: "allocate",
-        category: targetCategory.id,
-        details: message,
-        totalAllocated: enforced.totalAllocated,
-        remaining: enforced.remaining,
-      } satisfies BudgetSnapshot,
-    );
   },
 );
 
@@ -440,17 +398,6 @@ const rebalanceAllocations = handler(
 
     const sequence = (context.sequence.get() ?? 0) + 1;
     context.sequence.set(sequence);
-    createCell(
-      budgetSnapshotSchema,
-      `budgetSnapshot-${sequence}`,
-      {
-        sequence,
-        action: "rebalance",
-        details: message,
-        totalAllocated: applied.totalAllocated,
-        remaining: applied.remaining,
-      } satisfies BudgetSnapshot,
-    );
   },
 );
 
@@ -480,17 +427,6 @@ const resetAllocations = handler(
     appendHistory(context.history, message);
     const sequence = (context.sequence.get() ?? 0) + 1;
     context.sequence.set(sequence);
-    createCell(
-      budgetSnapshotSchema,
-      `budgetSnapshot-${sequence}`,
-      {
-        sequence,
-        action: "reset",
-        details: message,
-        totalAllocated: applied.totalAllocated,
-        remaining: applied.remaining,
-      } satisfies BudgetSnapshot,
-    );
   },
 );
 
