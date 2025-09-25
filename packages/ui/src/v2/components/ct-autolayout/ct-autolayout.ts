@@ -281,7 +281,7 @@ export class CTAutoLayout extends BaseElement {
           --ct-theme-color-surface,
           var(--ct-surface, #f1f5f9)
         );
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        /*box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);*/
         transition: transform 0.25s ease;
         will-change: transform;
         z-index: 30;

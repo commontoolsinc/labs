@@ -247,7 +247,7 @@ export default recipe<Input, Output>(
 
               <aside slot="left">
                 <div>
-                  <h3>Chat List</h3>
+                  <ct-heading level={3}>Chat List</ct-heading>
                 </div>
                 <div role="list">
                   {charmsList.map((charmEntry) => (
@@ -269,7 +269,7 @@ export default recipe<Input, Output>(
                   selected,
                   <>
                     <div>
-                      <label>Backlinks</label>
+                      <ct-heading level={4}>Backlinks</ct-heading>
                       <ct-vstack>
                         {selected?.backlinks?.map((
                           charm: MentionableCharm,
@@ -282,8 +282,10 @@ export default recipe<Input, Output>(
                         ))}
                       </ct-vstack>
                     </div>
-                    <details>
-                      <summary>Mentioned Charms</summary>
+                    <ct-collapsible>
+                      <ct-heading slot="trigger" level={5} no-margin>
+                        Mentioned Charms
+                      </ct-heading>
                       <ct-vstack>
                         {selected?.mentioned?.map((
                           charm: MentionableCharm,
@@ -295,71 +297,73 @@ export default recipe<Input, Output>(
                           </ct-button>
                         ))}
                       </ct-vstack>
-                    </details>
-                    <details>
-                      <summary>Theme</summary>
-                      <ct-vstack style="padding: 0.5rem 0; gap: 0.5rem;">
-                        <ct-vstack>
-                          <ct-text>Font Family</ct-text>
-                          <ct-select
-                            items={[
-                              {
-                                label: "System",
-                                value: "system-ui, -apple-system, sans-serif",
-                              },
-                              {
-                                label: "Monospace",
-                                value: "ui-monospace, Consolas, monospace",
-                              },
-                              {
-                                label: "Serif",
-                                value: "Georgia, Times, serif",
-                              },
-                              {
-                                label: "Sans Serif",
-                                value: "Arial, Helvetica, sans-serif",
-                              },
-                            ]}
-                            $value={localTheme.fontFace}
-                          />
-                        </ct-vstack>
-
-                        <ct-vstack>
-                          <ct-text>Accent Color</ct-text>
-                          <ct-select
-                            items={[
-                              { label: "Blue", value: "#3b82f6" },
-                              { label: "Purple", value: "#8b5cf6" },
-                              { label: "Green", value: "#10b981" },
-                              { label: "Red", value: "#ef4444" },
-                              { label: "Orange", value: "#f97316" },
-                              { label: "Pink", value: "#ec4899" },
-                              { label: "Indigo", value: "#6366f1" },
-                              { label: "Teal", value: "#14b8a6" },
-                            ]}
-                            $value={localTheme.accentColor}
-                          />
-                        </ct-vstack>
-
-                        <ct-vstack>
-                          <ct-text>Border Radius</ct-text>
-                          <ct-select
-                            items={[
-                              { label: "None", value: "0px" },
-                              { label: "Small", value: "0.25rem" },
-                              { label: "Medium", value: "0.5rem" },
-                              { label: "Large", value: "0.75rem" },
-                              { label: "Extra Large", value: "1rem" },
-                              { label: "Rounded", value: "1.5rem" },
-                            ]}
-                            $value={localTheme.borderRadius}
-                          />
-                        </ct-vstack>
-                      </ct-vstack>
-                    </details>
+                    </ct-collapsible>
                   </>,
                   null,
                 )}
+                <ct-collapsible>
+                  <ct-heading slot="trigger" level={5} no-margin>
+                    Theme
+                  </ct-heading>
+                  <ct-vstack style="padding: 0.5rem 0; gap: 0.5rem;">
+                    <ct-vstack>
+                      <ct-text>Font Family</ct-text>
+                      <ct-select
+                        items={[
+                          {
+                            label: "System",
+                            value: "system-ui, -apple-system, sans-serif",
+                          },
+                          {
+                            label: "Monospace",
+                            value: "ui-monospace, Consolas, monospace",
+                          },
+                          {
+                            label: "Serif",
+                            value: "Georgia, Times, serif",
+                          },
+                          {
+                            label: "Sans Serif",
+                            value: "Arial, Helvetica, sans-serif",
+                          },
+                        ]}
+                        $value={localTheme.fontFace}
+                      />
+                    </ct-vstack>
+
+                    <ct-vstack>
+                      <ct-text>Accent Color</ct-text>
+                      <ct-select
+                        items={[
+                          { label: "Blue", value: "#3b82f6" },
+                          { label: "Purple", value: "#8b5cf6" },
+                          { label: "Green", value: "#10b981" },
+                          { label: "Red", value: "#ef4444" },
+                          { label: "Orange", value: "#f97316" },
+                          { label: "Pink", value: "#ec4899" },
+                          { label: "Indigo", value: "#6366f1" },
+                          { label: "Teal", value: "#14b8a6" },
+                        ]}
+                        $value={localTheme.accentColor}
+                      />
+                    </ct-vstack>
+
+                    <ct-vstack>
+                      <ct-text>Border Radius</ct-text>
+                      <ct-select
+                        items={[
+                          { label: "None", value: "0px" },
+                          { label: "Small", value: "0.25rem" },
+                          { label: "Medium", value: "0.5rem" },
+                          { label: "Large", value: "0.75rem" },
+                          { label: "Extra Large", value: "1rem" },
+                          { label: "Rounded", value: "1.5rem" },
+                        ]}
+                        $value={localTheme.borderRadius}
+                      />
+                    </ct-vstack>
+                  </ct-vstack>
+                </ct-collapsible>
               </aside>
             </ct-autolayout>
           </ct-screen>

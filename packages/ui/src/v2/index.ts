@@ -16,6 +16,7 @@ export * from "./styles/index.ts";
 // Component exports
 export * from "./components/ct-accordion/index.ts";
 export * from "./components/ct-accordion-item/index.ts";
+export * from "./components/ct-heading/index.ts";
 export * from "./components/ct-alert/index.ts";
 export * from "./components/ct-autolayout/index.ts";
 export * from "./components/ct-aspect-ratio/index.ts";

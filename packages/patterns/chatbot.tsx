@@ -131,21 +131,7 @@ export default recipe<ChatInput, ChatOutput>(
       [UI]: (
         <ct-screen>
           <ct-hstack justify="between" slot="header">
-            <div>
-              <h2>{title}</h2>
-            </div>
-
-            <div>
-              <ct-button
-                id="clear-chat-button"
-                onClick={clearChat({
-                  messages,
-                  pending,
-                })}
-              >
-                Clear Chat
-              </ct-button>
-            </div>
+            <ct-heading level={4}>{title}</ct-heading>
           </ct-hstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
