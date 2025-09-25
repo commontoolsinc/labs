@@ -980,9 +980,13 @@ export class Replica {
    * ⚠️ Please note that if commits stack up e.g by incrementing value of the
    * same entity, rejected commit will ripple through stack as the changes there
    * would assume state that is rejected.
+   *
+   * Normally, if all the changes are Claims, we don't actually commit,
+   * but if the `commitReadOnlyTransaction` flag is set, then we will.
    */
   async push(
     changes: (Assert | Retract | Claim)[],
+    commitReadOnlyTransaction: boolean = false,
   ): Promise<
     Result<
       Commit,
@@ -1033,6 +1037,10 @@ export class Replica {
         }
       }
 
+      // If we don't have any writes, don't bother sending it.
+      if (facts.length === 0 && !commitReadOnlyTransaction) {
+        return { ok: {} };
+      }
       // These push transaction that will commit desired state to a remote.
       return this.commit({ facts, claims });
     }
