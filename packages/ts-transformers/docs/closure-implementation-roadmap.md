@@ -9,36 +9,60 @@ This roadmap provides a concrete, step-by-step plan for implementing closure sup
 
 ## Implementation Phases
 
-### Phase 1: Foundation - Capture Detection (Week 1)
+### Phase 1: Foundation - Capture Detection (Simplified!)
 
-#### Step 1.1: Extend DataFlowScope
-**File**: `src/opaque-ref/dataflow.ts`
+#### Step 1.1: Create Closure Transform Rule
+**File**: `src/opaque-ref/rules/closure-transform.ts` (new)
 
 ```typescript
-// Add to DataFlowScope interface
-interface DataFlowScope {
-  readonly id: number;
-  readonly parentId: number | null;
-  readonly parameters: readonly DataFlowScopeParameter[];
-  readonly captures?: Map<string, CaptureInfo>; // NEW
-}
-
-interface CaptureInfo {
-  symbol: ts.Symbol;
-  fromScopeId: number;
-  expression: ts.Expression;
-  isReactive: boolean;
+export function createClosureTransformRule(): OpaqueRefRule {
+  return {
+    name: "closure-transform",
+    transform(sourceFile, context, transformation): ts.SourceFile {
+      // This runs BEFORE jsx-expression transformation
+    }
+  };
 }
 ```
 
 #### Step 1.2: Implement Capture Detection
-**File**: `src/opaque-ref/dataflow.ts`
+**File**: `src/opaque-ref/rules/closure-transform.ts`
 
-In the `analyzeExpression` function, when processing identifiers:
-1. Check if symbol is defined in current scope
-2. If not, traverse parent scopes to find definition
-3. If found in parent scope and is reactive, record as capture
-4. Add captures to DataFlowAnalysis result
+Use TypeScript's symbol table directly:
+
+```typescript
+function collectCaptures(
+  func: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker
+): Set<ts.Identifier> {
+  const captures = new Set<ts.Identifier>();
+
+  function visit(node: ts.Node) {
+    if (ts.isIdentifier(node)) {
+      const symbol = checker.getSymbolAtLocation(node);
+      if (!symbol) return;
+
+      const declarations = symbol.getDeclarations();
+      if (!declarations) return;
+
+      // Check if declared outside the function
+      const isDeclaredOutside = declarations.some(decl =>
+        !isNodeWithin(decl, func)
+      );
+
+      if (isDeclaredOutside) {
+        captures.add(node);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  if (func.body) visit(func.body);
+  return captures;
+}
+```
+
+**Key Insight**: No need to maintain our own scope tree - TypeScript already knows where everything is declared!
 
 #### Step 1.3: Test Capture Detection
 **File**: `test/opaque-ref/capture-detection.test.ts` (new)
@@ -98,9 +122,9 @@ Implementation steps:
 ```typescript
 function createRules(): OpaqueRefRule[] {
   return [
-    createJsxExpressionRule(),
-    createClosureTransformRule(), // NEW - after JSX, before schema
-    createSchemaInjectionRule(),
+    createClosureTransformRule(), // NEW - runs FIRST to handle captures
+    createJsxExpressionRule(),    // Then JSX expressions
+    createSchemaInjectionRule(),  // Finally schema injection
   ];
 }
 ```
