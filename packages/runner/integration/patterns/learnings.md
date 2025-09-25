@@ -43,6 +43,8 @@ offline-friendly recipes that the harness can assert confidently.
   Prefer updating a single source cell and deriving summaries from it.
 - For batched updates, write through sanitized cells shared with derives so the
   handler and viewer always agree on defaults.
+- Only override metadata when events provide explicit values so sanitized
+  defaults stay stable and deterministic.
 
 ## Derived Views & Determinism
 
