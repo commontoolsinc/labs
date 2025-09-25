@@ -67,7 +67,7 @@ current offline harness.
       defaults; ensure defaults applied when arguments missing.
 - [x] Counter with computed child selection — derive index to display from list
       of counters and assert selected output.
-- [ ] Counter with cross-field validation — derive boolean error flag based on
+- [x] Counter with cross-field validation — derive boolean error flag based on
       two numeric cells.
 - [x] Counter with enumeration state — use string union for state transitions
       and handlers for next/previous steps.
