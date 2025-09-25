@@ -48,6 +48,9 @@ offline-friendly recipes that the harness can assert confidently.
 - When handler logic depends on argument cells and internal aggregates,
   re-sanitize the argument cells inside the handler before writing so newly
   created entries share the same canonical structure as derived views.
+- When argument cells double as mutable state, write the canonicalized entries
+  back into that argument cell and keep consumers on a sanitized `lift` view so
+  initialization never needs to read values during recipe creation.
 
 ## Derived Views & Determinism
 
