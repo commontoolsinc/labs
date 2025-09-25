@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -59,33 +58,6 @@ interface SleepMetrics {
 interface SleepJournalArgs {
   sessions: Default<SleepSessionSeed[], []>;
 }
-
-const sleepSessionSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "date", "hours", "tags", "weekday"],
-  properties: {
-    id: { type: "string" },
-    date: { type: "string" },
-    hours: { type: "number" },
-    tags: {
-      type: "array",
-      items: { type: "string" },
-    },
-    weekday: { type: "string" },
-  },
-} as const;
-
-const sleepMetricsSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sessionCount", "totalHours", "averageHours"],
-  properties: {
-    sessionCount: { type: "number" },
-    totalHours: { type: "number" },
-    averageHours: { type: "number" },
-  },
-} as const;
 
 const roundHours = (value: number): number => {
   return Math.round(value * 100) / 100;
@@ -262,19 +234,6 @@ const logSleepSession = handler(
     const nextSeeds = [...existing, entry];
     context.sessions.set(nextSeeds);
     context.idSeed.set(nextIndex);
-
-    const metrics = computeMetrics(nextSeeds);
-
-    createCell<SleepSessionEntry>(
-      sleepSessionSchema,
-      `sleepJournalEntry-${entry.id}`,
-      entry,
-    );
-    createCell<SleepMetrics>(
-      sleepMetricsSchema,
-      "sleepJournalMetrics",
-      metrics,
-    );
   },
 );
 

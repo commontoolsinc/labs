@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -92,20 +91,6 @@ const incrementAndRecordUnique = handler(
     const skipped = toInteger(context.duplicates.get());
     const auditRecord: DedupAudit = { added, skipped };
     context.audit.set(auditRecord);
-
-    createCell<DedupAudit>(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["added", "skipped"],
-        properties: {
-          added: { type: "number" },
-          skipped: { type: "number" },
-        },
-      },
-      "deduplicatedListAudit",
-      auditRecord,
-    );
   },
 );
 

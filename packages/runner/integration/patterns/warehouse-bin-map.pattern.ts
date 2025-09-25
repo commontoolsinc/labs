@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -189,27 +188,7 @@ const relocateInventory = handler(
       `Moved ${itemId} from ${currentPlacement.bin} to ${targetBin}`;
     context.history.set([...log, message]);
 
-    const occupancy = buildOccupancy(bins, updated);
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["itemId", "from", "to", "targetUsed"],
-        properties: {
-          itemId: { type: "string" },
-          from: { type: "string" },
-          to: { type: "string" },
-          targetUsed: { type: "number" },
-        },
-      },
-      `warehouseBinMapSnapshot-${itemId}`,
-      {
-        itemId,
-        from: currentPlacement.bin,
-        to: targetBin,
-        targetUsed: occupancy[targetBin]?.used ?? 0,
-      },
-    );
+    buildOccupancy(bins, updated);
   },
 );
 

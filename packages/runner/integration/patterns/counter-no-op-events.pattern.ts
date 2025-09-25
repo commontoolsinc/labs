@@ -2,7 +2,6 @@
 import {
   Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -47,20 +46,6 @@ const applyIncrement = handler(
       : 1;
     context.updates.set(applied);
     context.lastEvent.set(`applied ${amount}`);
-
-    createCell(
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["value", "amount"],
-        properties: {
-          value: { type: "number" },
-          amount: { type: "number" },
-        },
-      },
-      "counterNoOpLastApplication",
-      { value: next, amount },
-    );
   },
 );
 

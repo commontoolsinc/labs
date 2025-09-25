@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   handler,
   lift,
@@ -74,19 +73,6 @@ interface ConfigureChannelEvent {
   enabled?: boolean;
   frequency?: string;
 }
-
-const preferenceLogSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["sequence", "channel", "enabled", "frequency", "summary"],
-  properties: {
-    sequence: { type: "number" },
-    channel: { type: "string" },
-    enabled: { type: "boolean" },
-    frequency: { type: "string" },
-    summary: { type: "string" },
-  },
-} as const;
 
 const resolveChannelId = (value: unknown): ChannelId | null => {
   if (typeof value !== "string") return null;
@@ -210,17 +196,6 @@ const configureChannel = handler(
 
     const sequence = (context.sequence.get() ?? 0) + 1;
     context.sequence.set(sequence);
-    createCell(
-      preferenceLogSchema,
-      `notificationPreferenceChange_${sequence}`,
-      {
-        sequence,
-        channel,
-        enabled,
-        frequency,
-        summary,
-      },
-    );
   },
 );
 

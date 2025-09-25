@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -184,13 +183,6 @@ export const counterNestedParameterized = recipe<NestedParameterizedArgs>(
 
     const manifest = lift((entries: ChildConfig[]) => {
       const records = entries.map(toRecord);
-      for (const record of records) {
-        createCell<ChildSpecializationRecord>(
-          specializationSchema,
-          "nestedParameterizedChildRecord",
-          record,
-        );
-      }
       return records;
     })(sanitizedConfigs);
 

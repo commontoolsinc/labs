@@ -2,7 +2,6 @@
 import {
   type Cell,
   cell,
-  createCell,
   Default,
   derive,
   handler,
@@ -150,14 +149,6 @@ export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
     const updateCount = cell(0);
     const lastPath = cell(DEFAULT_PATH_STRING);
     const pathLog = cell<string[]>([]);
-    const defaultPathSeed = cell(true);
-    const defaultPathCell = lift(() =>
-      createCell(
-        { type: "string" },
-        "hierarchicalDefaultPath",
-        DEFAULT_PATH_STRING,
-      )
-    )(defaultPathSeed);
 
     const totals = derive(hierarchy, computeClusterTotals);
     const overall = lift(sumTotals)(totals);
@@ -178,7 +169,7 @@ export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
       lastUpdatedPath,
       pathLog: pathLogView,
       label,
-      defaultPath: defaultPathCell,
+      defaultPath: DEFAULT_PATH_STRING,
       adjust: updateHierarchicalCounter({
         hierarchy,
         updateCount,
