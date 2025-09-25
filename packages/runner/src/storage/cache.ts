@@ -983,6 +983,9 @@ export class Replica {
    *
    * Normally, if all the changes are Claims, we don't actually commit,
    * but if the `commitReadOnlyTransaction` flag is set, then we will.
+   *
+   * This function is not generally used, since the transaction.ts will bypass
+   * this and just call commit.
    */
   async push(
     changes: (Assert | Retract | Claim)[],

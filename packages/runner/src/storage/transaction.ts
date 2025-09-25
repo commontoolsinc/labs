@@ -322,7 +322,7 @@ export const commit = async (
       const { writer, storage } = ready;
       const replica = writer ? storage.open(writer.did()).replica : null;
       const changes = replica ? archive.get(replica.did()) : null;
-      const promise = changes
+      const promise = (changes && changes.facts.length > 0)
         ? replica!.commit(changes, transaction)
         : Promise.resolve({ ok: {} });
 
