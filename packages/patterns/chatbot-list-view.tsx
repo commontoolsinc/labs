@@ -240,7 +240,7 @@ export default recipe<Input, Output>(
             <ct-autolayout
               leftOpen
               rightOpen={false}
-              tabNames={["Chat", "Tools"]}
+              tabNames={["Chat", "Note"]}
             >
               {selected.chat}
               {selected.note}
