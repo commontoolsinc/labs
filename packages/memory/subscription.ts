@@ -1,39 +1,37 @@
 import {
   Cause,
-  Commit,
   Entity,
   MemorySpace,
   SchemaSelector,
   Selector,
   The,
+  Transaction,
 } from "./interface.ts";
+import { iterate } from "./selection.ts";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
 
-export const match = (commit: Commit, watched: Set<string>) => {
-  for (const at of Object.keys(commit) as MemorySpace[]) {
-    const commitObj = commit[at][COMMIT_LOG_TYPE] ?? {};
-    for (const { is: { transaction } } of Object.values(commitObj)) {
-      // If commit on this space are watched we have a match
-      if (matchAddress(watched, { the: COMMIT_LOG_TYPE, of: at, at })) {
-        return true;
-      }
+export const match = (
+  transaction: Transaction<MemorySpace>,
+  watched: Set<string>,
+) => {
+  const space = transaction.sub;
+  // If commit on this space are watched we have a match
+  if (
+    matchAddress(watched, { at: space, of: space, the: COMMIT_LOG_TYPE })
+  ) {
+    return true;
+  }
 
-      // Otherwise we consider individual in the commit transaction to figure
-      // out if we have a match.
-      for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-        for (const [the, changes] of Object.entries(attributes)) {
-          for (const change of Object.values(changes)) {
-            // If `change == true` we simply confirm that state has not changed
-            // so we don't need to notify those subscribers.
-            if (
-              change !== true &&
-              matchAddress(watched, { at: transaction.sub, the, of })
-            ) {
-              return true;
-            }
-          }
-        }
-      }
+  // Otherwise we consider individual in the commit transaction to figure
+  // out if we have a match.
+  for (const fact of iterate(transaction.args.changes)) {
+    // If `fact.value == true` we simply confirm that state has not changed
+    // so we don't need to notify those subscribers.
+    if (
+      fact.value !== true &&
+      matchAddress(watched, { at: space, of: fact.of, the: fact.the })
+    ) {
+      return true;
     }
   }
 
@@ -42,9 +40,9 @@ export const match = (commit: Commit, watched: Set<string>) => {
 
 const matchAddress = (
   watched: Set<string>,
-  { at, the, of }: { the: string; of: string; at: MemorySpace },
+  { at, of, the }: { at: MemorySpace; of: string; the: string },
 ) =>
-  watched.has(formatAddress({ at, the, of })) ||
+  watched.has(formatAddress({ at, of, the })) ||
   watched.has(formatAddress({ at, the })) ||
   watched.has(formatAddress({ at, of })) ||
   watched.has(formatAddress({ at }));
@@ -97,6 +95,17 @@ export const fromSelector = function* (selector: Selector | SchemaSelector) {
     }
   }
 };
+
+export function isTransactionReadOnly(
+  transaction: Transaction<MemorySpace>,
+): boolean {
+  for (const fact of iterate(transaction.args.changes)) {
+    if (fact.value !== true) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export const formatAddress = (
   { at = "_", of = "_", the = "_" }: {

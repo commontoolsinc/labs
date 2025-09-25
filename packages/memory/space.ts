@@ -992,20 +992,9 @@ export function getClassifications(
   return classifications;
 }
 
-export function redactCommit(commit: Commit): Commit {
-  const newCommit = {};
-  for (const item of iterate(commit)) {
-    const redactedData = redactCommitData(item.value.is);
-    set(newCommit, item.of, item.the, item.cause, { is: redactedData });
-  }
-  return newCommit;
-}
-
 // Return the item with any classified results and the labels removed.
-export function redactCommitData(
-  commitData?: CommitData,
-): CommitData | undefined {
-  if (commitData === undefined || commitData.labels === undefined) {
+export function redactCommitData(commitData: CommitData): CommitData {
+  if (commitData.labels === undefined) {
     return commitData;
   }
   // Make a copy of the transaction with no changes
