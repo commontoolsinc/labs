@@ -28,6 +28,9 @@ import {
   scenarios as counterComplexUnionStateScenarios,
 } from "./patterns/counter-complex-union-state.ts";
 import {
+  scenarios as counterCrossFieldValidationScenarios,
+} from "./patterns/counter-cross-field-validation.ts";
+import {
   scenarios as counterConditionalBranchScenarios,
 } from "./patterns/counter-conditional-branch.ts";
 import {
@@ -337,6 +340,7 @@ const allScenarios = [
   ...counterComputedChildSelectionScenarios,
   ...counterComputedDefaultStringsScenarios,
   ...counterComplexUnionStateScenarios,
+  ...counterCrossFieldValidationScenarios,
   ...counterConditionalBranchScenarios,
   ...counterConditionalChildInstantiationScenarios,
   ...counterConditionalIfElseScenarios,

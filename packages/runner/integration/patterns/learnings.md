@@ -48,6 +48,8 @@ offline-friendly recipes that the harness can assert confidently.
 
 - Sort, clamp, or normalize inside derives so lists, buckets, and summaries keep
   a stable ordering independent of mutation order.
+- Build cross-field validation snapshots with a single `lift` so boolean flags
+  and delta views stay aligned across every exposed field.
 - Keep history or audit logs append-only and sanitized; store formatted strings
   or structured entries that can be asserted deterministically.
 - When exposing conditional branches, make all branches share the same shape so
