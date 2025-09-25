@@ -124,6 +124,9 @@ import {
   scenarios as counterParentChildBubbleScenarios,
 } from "./patterns/counter-parent-child-bubble.ts";
 import {
+  scenarios as counterParentCellArgumentsScenarios,
+} from "./patterns/counter-parent-cell-arguments.ts";
+import {
   scenarios as counterPersistenceDefaultsScenarios,
 } from "./patterns/counter-persistence-defaults.ts";
 import {
@@ -353,6 +356,7 @@ const allScenarios = [
   ...counterOptionalFallbackScenarios,
   ...counterOpaqueRefMapScenarios,
   ...counterParentChildBubbleScenarios,
+  ...counterParentCellArgumentsScenarios,
   ...counterPersistenceDefaultsScenarios,
   ...counterRichLabelScenarios,
   ...counterRenderTreeScenarios,
