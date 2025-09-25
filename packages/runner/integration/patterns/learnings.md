@@ -2,6 +2,9 @@
 
 - Avoid sending `undefined` payloads in scenarios; the harness expects an object
   and may attempt DOM style handling when it receives `undefined`.
+- Passing parent argument cells directly into child recipes keeps shared
+  handlers synchronous; sanitize inside the child so derived previews update
+  without extra bridging cells.
 - Sanitizing mood tags to lowercase and normalizing timestamps keeps tag and
   time bucket summaries stable for sentiment breakdown derives even as handlers
   append new entries.
