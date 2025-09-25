@@ -228,6 +228,9 @@ import {
   scenarios as searchRelevanceTuningScenarios,
 } from "./patterns/search-relevance-tuning.ts";
 import {
+  scenarios as savedSearchSubscriptionScenarios,
+} from "./patterns/saved-search-subscription.ts";
+import {
   scenarios as budgetPlannerScenarios,
 } from "./patterns/budget-planner.ts";
 import {
@@ -312,6 +315,7 @@ const allScenarios = [
   ...leadScoringScenarios,
   ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
+  ...savedSearchSubscriptionScenarios,
   ...budgetPlannerScenarios,
   ...expenseReimbursementScenarios,
   ...invoiceGeneratorScenarios,
