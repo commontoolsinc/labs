@@ -452,12 +452,12 @@ export type DeriveFunction = {
     input: Opaque<SchemaWithoutCell<InputSchema>>,
     f: (
       input: Schema<InputSchema>,
-    ) => Schema<ResultSchema> | Promise<Schema<ResultSchema>>,
+    ) => Schema<ResultSchema>,
   ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 
   <In, Out>(
     input: Opaque<In>,
-    f: (input: In) => Out | Promise<Out>,
+    f: (input: In) => Out,
   ): OpaqueRef<Out>;
 };
 

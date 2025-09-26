@@ -260,8 +260,8 @@ export type HandlerFunction = {
     <E, T>(handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<StripCell<T>, E>;
 };
 export type DeriveFunction = {
-    <InputSchema extends JSONSchema = JSONSchema, ResultSchema extends JSONSchema = JSONSchema>(argumentSchema: InputSchema, resultSchema: ResultSchema, input: Opaque<SchemaWithoutCell<InputSchema>>, f: (input: Schema<InputSchema>) => Schema<ResultSchema> | Promise<Schema<ResultSchema>>): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-    <In, Out>(input: Opaque<In>, f: (input: In) => Out | Promise<Out>): OpaqueRef<Out>;
+    <InputSchema extends JSONSchema = JSONSchema, ResultSchema extends JSONSchema = JSONSchema>(argumentSchema: InputSchema, resultSchema: ResultSchema, input: Opaque<SchemaWithoutCell<InputSchema>>, f: (input: Schema<InputSchema>) => Schema<ResultSchema>): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+    <In, Out>(input: Opaque<In>, f: (input: In) => Out): OpaqueRef<Out>;
 };
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
 export type RenderFunction = <T>(fn: () => T) => OpaqueRef<T>;
