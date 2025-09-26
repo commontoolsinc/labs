@@ -442,10 +442,24 @@ export type HandlerFunction = {
   ): ModuleFactory<StripCell<T>, E>;
 };
 
-export type DeriveFunction = <In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out | Promise<Out>,
-) => OpaqueRef<Out>;
+export type DeriveFunction = {
+  <
+    InputSchema extends JSONSchema = JSONSchema,
+    ResultSchema extends JSONSchema = JSONSchema,
+  >(
+    argumentSchema: InputSchema,
+    resultSchema: ResultSchema,
+    input: Opaque<SchemaWithoutCell<InputSchema>>,
+    f: (
+      input: Schema<InputSchema>,
+    ) => Schema<ResultSchema> | Promise<Schema<ResultSchema>>,
+  ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+
+  <In, Out>(
+    input: Opaque<In>,
+    f: (input: In) => Out | Promise<Out>,
+  ): OpaqueRef<Out>;
+};
 
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
 

@@ -177,10 +177,42 @@ export function handler<E, T>(
   return factory;
 }
 
-export const derive = <In, Out>(
+export function derive<
+  InputSchema extends JSONSchema = JSONSchema,
+  ResultSchema extends JSONSchema = JSONSchema,
+>(
+  argumentSchema: InputSchema,
+  resultSchema: ResultSchema,
+  input: Opaque<SchemaWithoutCell<InputSchema>>,
+  f: (
+    input: Schema<InputSchema>,
+  ) => Schema<ResultSchema> | Promise<Schema<ResultSchema>>,
+): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
+export function derive<In, Out>(
   input: Opaque<In>,
   f: (input: In) => Out | Promise<Out>,
-): OpaqueRef<Out> => lift(f)(input) as OpaqueRef<Out>;
+): OpaqueRef<Out>;
+export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
+  if (args.length === 4) {
+    const [argumentSchema, resultSchema, input, f] = args as [
+      JSONSchema,
+      JSONSchema,
+      Opaque<SchemaWithoutCell<any>>,
+      (input: Schema<any>) => Schema<any> | Promise<Schema<any>>,
+    ];
+    return lift(
+      argumentSchema,
+      resultSchema,
+      f as (input: Schema<any>) => Schema<any> | Promise<Schema<any>>,
+    )(input);
+  }
+
+  const [input, f] = args as [
+    Opaque<In>,
+    (input: In) => Out | Promise<Out>,
+  ];
+  return lift(f)(input);
+}
 
 // unsafe closures: like derive, but doesn't need any arguments
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
