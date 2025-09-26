@@ -134,22 +134,22 @@ export function fetchData(
     })
       .then(processResponse)
       .then(async (data) => {
-        if (thisRun !== currentRun) return;
-
         await runtime.idle();
 
         await runtime.editWithRetry((tx) => {
+          if (thisRun !== currentRun) return;
+
           pending.withTx(tx).set(false);
           result.withTx(tx).set(data);
           requestHash.withTx(tx).set(hash);
         });
       })
       .catch(async (err) => {
-        if (thisRun !== currentRun) return;
-
         await runtime.idle();
 
         await runtime.editWithRetry((tx) => {
+          if (thisRun !== currentRun) return;
+
           pending.withTx(tx).set(false);
           result.withTx(tx).set(undefined);
           error.withTx(tx).set(err);
