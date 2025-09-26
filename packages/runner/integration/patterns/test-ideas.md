@@ -177,7 +177,7 @@ current offline harness.
       derived SLA countdowns track escalations per queue.
 - [ ] Workflow state machine pattern — enforce allowed transitions ensure
       history derive records every move and rejected jump.
-- [ ] Kanban board grouping pattern — group tasks into columns ensure handlers
+- [x] Kanban board grouping pattern — group tasks into columns ensure handlers
       move tasks and derived WIP limits flag overloads.
 - [ ] Sprint burndown pattern — project remaining work daily ensure lifted
       history produces burndown curve after updates.
