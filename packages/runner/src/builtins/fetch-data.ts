@@ -78,6 +78,12 @@ export function fetchData(
       error.setSourceCell(parentCell);
       requestHash.setSourceCell(parentCell);
 
+      // Kick off sync in the background
+      pending.sync();
+      result.sync();
+      error.sync();
+      requestHash.sync();
+
       sendResult(tx, {
         pending,
         result,
