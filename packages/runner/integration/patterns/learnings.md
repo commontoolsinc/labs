@@ -83,6 +83,9 @@ offline-friendly recipes that the harness can assert confidently.
   percentages stay consistent after handler-driven weight updates.
 - Clamp sequential ratio derives before formatting so percent labels remain
   stable when stages grow or shrink between events.
+- When deriving topological orderings, keep the ready queue sorted after each
+  push so deterministic traversal stays stable when multiple roots share zero
+  indegree.
 
 ## Composition & Child Recipes
 
