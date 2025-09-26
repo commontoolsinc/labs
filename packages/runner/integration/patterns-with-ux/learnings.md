@@ -12,6 +12,9 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Don't write `onClick={() => ...}` etc., instead create a handler with
   `handler` and call it with the state bindings in needs, i.e.
   `onClick={myHandler({ foo, bar })}`.
+- Reach for `cell()` when the UI needs its own form state; ct components wired
+  with `$value={cell}` stay reactive, and you can sanitize user input with
+  `lift` before feeding it back into shared derives.
 
 ## Guidelines for UI code
 
