@@ -75,7 +75,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] crm-pipeline
 - [ ] currency-conversion
 - [ ] design-token-switcher
-- [ ] double-counter-shared-increment
+- [x] double-counter-shared-increment
 - [ ] echo
 - [ ] email-inbox-threading
 - [ ] expense-reimbursement
