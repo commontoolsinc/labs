@@ -255,6 +255,9 @@ import {
   scenarios as subscriptionBillingScenarios,
 } from "./patterns/subscription-billing.ts";
 import {
+  scenarios as supportTicketTriageScenarios,
+} from "./patterns/support-ticket-triage.ts";
+import {
   scenarios as experimentAssignmentScenarios,
 } from "./patterns/experiment-assignment.ts";
 import {
@@ -353,6 +356,7 @@ const allScenarios = [
   ...expenseReimbursementScenarios,
   ...invoiceGeneratorScenarios,
   ...subscriptionBillingScenarios,
+  ...supportTicketTriageScenarios,
   ...experimentAssignmentScenarios,
   ...currencyConversionScenarios,
   ...menuPlannerScenarios,
