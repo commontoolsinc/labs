@@ -9,6 +9,9 @@ Add short notes after each run so the next agent can build on proven approaches.
   conversion for you.
 - Don't use `toSchema<>` when defining lifts, instead use
   `lift<ArgumentType, ResultType>((arg) => { ...})`.
+- Don't write `onClick={() => ...}` etc., instead create a handler with
+  `handler` and call it with the state bindings in needs, i.e.
+  `onClick={myHandler({ foo, bar })}`.
 
 ## Guidelines for UI code
 
