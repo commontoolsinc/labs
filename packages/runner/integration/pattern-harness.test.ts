@@ -307,6 +307,9 @@ import {
 import {
   scenarios as meetingSchedulerScenarios,
 } from "./patterns/meeting-scheduler.ts";
+import {
+  scenarios as sprintBurndownScenarios,
+} from "./patterns/sprint-burndown.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -349,6 +352,7 @@ const allScenarios = [
   ...catalogSearchFacetsScenarios,
   ...callCenterScheduleScenarios,
   ...meetingSchedulerScenarios,
+  ...sprintBurndownScenarios,
   ...warehouseBinMapScenarios,
   ...logisticsRoutingScenarios,
   ...researchCitationManagerScenarios,
