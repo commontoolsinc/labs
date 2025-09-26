@@ -96,6 +96,9 @@ offline-friendly recipes that the harness can assert confidently.
 - When arguments supply initial collections that must later mutate, mirror them
   into your own `cell` via a seeding `lift` so handlers avoid reading during
   recipe creation while still honoring caller-provided defaults.
+- When a pattern needs hyphenated identifiers (e.g. `in-progress`), expose an
+  ordered array summary so harness assertions can use numeric indices instead of
+  awkward bracket notation.
 
 ## Reuse & Abstractions
 
