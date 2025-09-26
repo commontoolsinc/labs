@@ -17,6 +17,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -200,6 +201,7 @@ const getSelectedCharm = lift<
   {
     chat: unknown;
     note: unknown;
+    list: ListItem[];
     backlinks: MentionableCharm[];
     mentioned: MentionableCharm[];
   } | undefined
@@ -313,6 +315,12 @@ export default recipe<Input, Output>(
                         ))}
                       </ct-vstack>
                     </div>
+                    <ct-ct-collapsible>
+                      <ct-heading slot="trigger" level={5} no-margin>
+                        List
+                      </ct-heading>
+                      <ct-list $value={selected.list} />
+                    </ct-ct-collapsible>
                     <ct-collapsible>
                       <ct-heading slot="trigger" level={5} no-margin>
                         Mentioned Charms

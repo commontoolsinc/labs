@@ -78,6 +78,7 @@ type ChatbotNoteResult = {
   content: Default<string, "">;
   note: any;
   chat: any;
+  list: Default<ListItem[], []>;
 };
 
 const newNote = handler<
@@ -169,7 +170,6 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages, content, allCharms }) => {
     const list = cell<ListItem[]>([]);
-    const { tools: commonTools } = Tools({ list });
 
     const tools = {
       searchWeb: {
@@ -254,6 +254,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       messages,
       mentioned: note.mentioned,
       backlinks: note.backlinks,
+      list,
     };
   },
 );
