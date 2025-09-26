@@ -8,6 +8,11 @@ UI. Enhance the recipe so it exposes `[NAME]` and `[UI]`, exercise it through
 Playwright, capture a screenshot, and land a passing integration test inspired
 by `packages/patterns/integration`.
 
+Context to study before starting: Look at the patterns in `packages/patterns` as
+examples. Look at the docs in `docs/common` for some documentation on the
+framework. Look at `learnings.md` in
+`packages/runner/integration/patterns-with-ux/`.
+
 Steps:
 
 1. Open `packages/runner/integration/patterns-with-ux/worklist.md` and pick ONE
