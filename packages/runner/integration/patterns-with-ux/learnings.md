@@ -2,7 +2,15 @@
 
 Add short notes after each run so the next agent can build on proven approaches.
 
-## UI guidelines
+- Don't use `{ proxy: true }` when defining handles. Instead define `Cell<...>`
+  in context schema for values you want to change and call `.set()`, `.push()`
+  and `.get()` on those cells. It's ok that the call site has a type of
+  `OpaqueRef` and the handler expects `Cell`, the framework will handle that
+  conversion for you.
+- Don't use `toSchema<>` when defining lifts, instead use
+  `lift<ArgumentType, ResultType>((arg) => { ...})`.
+
+## Guidelines for UI code
 
 - Drive the UI from sanitized derives; never tap raw event payloads in JSX.
 - Prefer ct primitives (`ct-button`, `ct-input`, `ct-card`, etc.) for consistent
