@@ -181,7 +181,7 @@ current offline harness.
       move tasks and derived WIP limits flag overloads.
 - [x] Sprint burndown pattern — project remaining work daily ensure lifted
       history produces burndown curve after updates.
-- [ ] Issue dependency graph pattern — manage dependency edges ensure derived
+- [x] Issue dependency graph pattern — manage dependency edges ensure derived
       order validates acyclic structure post updates.
 - [ ] Release checklist pattern — gate releases on task completion ensure
       readiness flips only when all checklist items pass.
