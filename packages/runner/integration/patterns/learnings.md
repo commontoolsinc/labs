@@ -71,6 +71,8 @@ offline-friendly recipes that the harness can assert confidently.
   without mutating the underlying source list inside handlers.
 - Expose selected child metadata via a derive that inspects sanitized lists so
   index changes always follow the updated ordering without extra handlers.
+- Pre-build categorical buckets before populating them inside `lift` so empty
+  groups remain visible and ordering stays deterministic when counts reach zero.
 
 ## Composition & Child Recipes
 

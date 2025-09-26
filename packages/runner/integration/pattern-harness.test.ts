@@ -278,6 +278,9 @@ import {
   scenarios as inventoryReorderThresholdScenarios,
 } from "./patterns/inventory-reorder-threshold.ts";
 import {
+  scenarios as assetLifecycleTrackerScenarios,
+} from "./patterns/asset-lifecycle-tracker.ts";
+import {
   scenarios as incidentResponsePlaybookScenarios,
 } from "./patterns/incident-response-playbook.ts";
 import {
@@ -339,6 +342,7 @@ const allScenarios = [
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,
+  ...assetLifecycleTrackerScenarios,
   ...incidentResponsePlaybookScenarios,
   ...kanbanBoardGroupingScenarios,
   ...calendarAvailabilityScenarios,
