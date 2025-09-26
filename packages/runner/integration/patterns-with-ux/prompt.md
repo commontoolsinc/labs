@@ -56,8 +56,7 @@ Steps:
    anything too specific to this pattern's use-case.
 10. Format your changes with `deno fmt`. Run `deno task check` plus the targeted
     integration test (e.g.
-    `deno test --allow-env --allow-read --allow-write --allow-ffi \
-packages/patterns/integration/<pattern>.test.ts`).
+    `deno test -A packages/patterns/integration/<pattern>.test.ts`).
 11. If something fails persistently, revert that pattern, add a note about the
     issue to `issues.md`, leave the checklist unchecked, and exit.
 12. Otherwise stage the changes, commit with a concise summary, and exit.
