@@ -42,24 +42,17 @@ Steps:
    - Save at least one screenshot (store it alongside other artifacts if a path
      is requested) and inspect the DOM to confirm the UI is behaving and looking
      as intended. If you find problems, fix the pattern are go back to step 5.
-8. Author a dedicated integration test in
-   `packages/runner/integration/patterns-with-ux/<pattern>.test.ts`. Follow the
-   existing tests for structure: bootstrap a charm, drive it with Astro, assert
-   DOM state, and inspect any derived summaries. Prefer descriptive
-   `describe`/`it` names. See examples in
-   `packages/patterns/integration/*.test.ts`.
-9. Update `packages/runner/integration/patterns-with-ux/worklist.md` to mark the
-   pattern as completed. Append any new insights or caveats to
+8. Append any new insights or caveats to
    `packages/runner/integration/patterns-with-ux/learnings.md`. Learnings can be
    about how to write patterns, but also a summary of conext you had to build up
    that could apply to other patterns as well, including tool use. Don't
    anything too specific to this pattern's use-case.
-10. Format your changes with `deno fmt`. Run `deno task check` plus the targeted
-    integration test (e.g.
-    `deno test -A packages/patterns/integration/<pattern>.test.ts`).
-11. If something fails persistently, revert that pattern, add a note about the
-    issue to `issues.md`, leave the checklist unchecked, and exit.
-12. Otherwise stage the changes, commit with a concise summary, and exit.
+9. If something fails persistently, revert that pattern, add a note about the
+   issue to `issues.md`, leave the checklist unchecked, and exit.
+10. Update `packages/runner/integration/patterns-with-ux/worklist.md` to mark
+   the pattern as completed.
+11. Format your changes with `deno fmt`.
+12. Stage the changes, commit with a concise summary, and exit.
 
 IMPORTANT: Only tackle one pattern per run. Quality beats quantity - ship a
 charm the shell team would demo proudly.
