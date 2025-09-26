@@ -49,8 +49,12 @@ Steps:
     `deno test --allow-env --allow-read --allow-write --allow-ffi \
 packages/patterns/integration/<pattern>.test.ts`).
 11. If something fails persistently, revert that pattern, add a note about the
-    issue to `learnins.md`, leave the checklist unchecked, and exit.
-12. Otherwise stage the changes, commit with a concise summary, and exit.
+    issue to `issues.md`, leave the checklist unchecked, and exit.
+12. If you succeed, note any learnings in `learnings.md`. Learnings can be about
+    how to write patterns, but also a summary of conext you had to build up that
+    could apply to other patterns as well, including tool use. Don't anything
+    too specific to this pattern's use-case.
+13. Otherwise stage the changes, commit with a concise summary, and exit.
 
 IMPORTANT: Only tackle one pattern per run. Quality beats quantity - ship a
 charm the shell team would demo proudly.
