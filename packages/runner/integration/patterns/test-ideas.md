@@ -279,7 +279,7 @@ current offline harness.
       snapshot refreshes on rule edits.
 - [x] User journey map pattern — map journey milestones ensure derived timeline
       strings milestones with annotations.
-- [ ] Survey response analyzer pattern — analyze survey data ensure derived
+- [x] Survey response analyzer pattern — analyze survey data ensure derived
       stats compute per question and demographic.
 - [ ] Customer satisfaction tracker pattern — track csat trends ensure derived
       moving averages update with new survey entries.
