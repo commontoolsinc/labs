@@ -223,6 +223,9 @@ import {
 import {
   scenarios as featureUsageAnalyticsScenarios,
 } from "./patterns/feature-usage-analytics.ts";
+import {
+  scenarios as funnelAnalyticsScenarios,
+} from "./patterns/funnel-analytics.ts";
 import { scenarios as leadScoringScenarios } from "./patterns/lead-scoring.ts";
 import {
   scenarios as heatmapAggregationScenarios,
@@ -331,6 +334,7 @@ const allScenarios = [
   ...patientVitalsDashboardScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
+  ...funnelAnalyticsScenarios,
   ...leadScoringScenarios,
   ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
