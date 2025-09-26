@@ -171,7 +171,7 @@ current offline harness.
       appended subscriptions replay triggers in harness runs.
 - [x] Notification preference pattern — configure channel settings ensure
       derived schedules reflect per-channel frequency changes.
-- [ ] Chat reaction tracker pattern — track reactions per message ensure nested
+- [x] Chat reaction tracker pattern — track reactions per message ensure nested
       reaction counts roll up totals on every handler.
 - [x] Support ticket triage pattern — assign tickets with priority ensure
       derived SLA countdowns track escalations per queue.
