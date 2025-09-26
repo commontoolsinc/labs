@@ -79,6 +79,8 @@ offline-friendly recipes that the harness can assert confidently.
   groups remain visible and ordering stays deterministic when counts reach zero.
 - Round weighted totals and shares before formatting derived strings so progress
   percentages stay consistent after handler-driven weight updates.
+- Clamp sequential ratio derives before formatting so percent labels remain
+  stable when stages grow or shrink between events.
 
 ## Composition & Child Recipes
 
