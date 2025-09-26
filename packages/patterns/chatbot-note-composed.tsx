@@ -27,6 +27,14 @@ import {
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
+import Tools, {
+  addListItem,
+  calculator,
+  ListItem,
+  readListItems,
+  readWebpage,
+  searchWeb,
+} from "./common-tools.tsx";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -34,14 +42,10 @@ export type MentionableCharm = {
   mentioned?: MentionableCharm[];
 };
 
-type NoteResult = {
-  content: Default<string, "">;
-};
-
-export type NoteInput = {
-  content: Default<string, "">;
-  allCharms: Cell<MentionableCharm[]>;
-};
+// export type ChatbotNoteInput = {
+//   content: Default<string, "">;
+//   allCharms?: Cell<MentionableCharm[]>;
+// };
 
 const handleCharmLinkClick = handler<
   {
@@ -60,15 +64,14 @@ const handleCharmLinkClicked = handler(
   },
 );
 
-type LLMTestInput = {
+type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  expandChat: Default<boolean, false>;
   content: Default<string, "">;
   allCharms: Cell<MentionableCharm[]>;
 };
 
-type LLMTestResult = {
+type ChatbotNoteResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: Default<Array<MentionableCharm>, []>;
@@ -162,10 +165,28 @@ const listMentionable = handler<
   },
 );
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "Note",
-  ({ title, expandChat, messages, content, allCharms }) => {
+export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
+  "Chatbot + Note",
+  ({ title, messages, content, allCharms }) => {
+    const list = cell<ListItem[]>([]);
+    const { tools: commonTools } = Tools({ list });
+
     const tools = {
+      searchWeb: {
+        pattern: searchWeb,
+      },
+      readWebpage: {
+        pattern: readWebpage,
+      },
+      calculator: {
+        pattern: calculator,
+      },
+      addListItem: {
+        handler: addListItem({ list }),
+      },
+      readListItems: {
+        handler: readListItems({ list }),
+      },
       editNote: {
         description: "Modify the shared note.",
         inputSchema: {

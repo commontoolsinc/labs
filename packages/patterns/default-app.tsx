@@ -16,12 +16,8 @@ import {
 
 // Import recipes we want to be launchable from the default app.
 import Chatbot from "./chatbot.tsx";
-import ChatbotTools from "./chatbot-tools.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
-import {
-  default as ChatbotNote,
-  type MentionableCharm,
-} from "./chatbot-note.tsx";
+import { type MentionableCharm } from "./chatbot-note-composed.tsx";
 import { default as Note } from "./note.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 
@@ -74,7 +70,7 @@ const spawnChatList = handler<
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
     charmsList: [],
-    allCharms: state.allCharms,
+    allCharms: state.allCharms, // we should handle empty here
   }));
 });
 
@@ -85,17 +81,6 @@ const spawnChatbot = handler<
   return navigateTo(Chatbot({
     messages: [],
     tools: undefined,
-  }));
-});
-
-const spawnChatbotTools = handler<
-  Record<string, never>,
-  Record<string, never>
->((_, state) => {
-  return navigateTo(ChatbotTools({
-    title: "Chatbot Tools",
-    messages: [],
-    list: [],
   }));
 });
 
@@ -110,19 +95,6 @@ const spawnChatbotOutliner = handler<
     outline: {
       root: { body: "", children: [], attachments: [] },
     },
-    allCharms: state.allCharms,
-  }));
-});
-
-const spawnChatbotNote = handler<
-  Record<string, never>,
-  { allCharms: Cell<MentionableCharm[]> }
->((_, state) => {
-  return navigateTo(ChatbotNote({
-    title: "New Note",
-    content: "",
-    expandChat: false,
-    messages: [],
     allCharms: state.allCharms,
   }));
 });
@@ -149,7 +121,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             code="KeyN"
             alt
             preventDefault
-            onct-keybind={spawnChatbotNote({
+            onct-keybind={spawnChatList({
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
             })}
           />
@@ -173,24 +145,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 💬 Chatbot
               </ct-button>
               <ct-button
-                onClick={spawnChatbotTools({})}
-              >
-                🔧 Chatbot Tools
-              </ct-button>
-              <ct-button
                 onClick={spawnChatbotOutliner({ allCharms })}
               >
                 📝 Chatbot Outliner
-              </ct-button>
-              <ct-button
-                onClick={spawnChatbotNote({
-                  // slight disagreement between Charm types but they are compatible
-                  allCharms: allCharms as unknown as OpaqueRef<
-                    MentionableCharm[]
-                  >,
-                })}
-              >
-                🤖 Chatbot Note
               </ct-button>
               <ct-button
                 onClick={spawnNote({ // slight disagreement between Charm types but they are compatible

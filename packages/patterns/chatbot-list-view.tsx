@@ -96,6 +96,33 @@ const storeCharm = lift(
   },
 );
 
+const populateChatList = lift(
+  (
+    { charmsList, allCharms, selectedCharm }: {
+      charmsList: CharmEntry[];
+      allCharms: Cell<any[]>;
+      selectedCharm: { charm: any };
+    },
+  ) => {
+    if (charmsList.length === 0) {
+      const isInitialized = cell(false);
+      return storeCharm({
+        charm: Chat({
+          title: "New Chat",
+          messages: [],
+          content: "",
+          allCharms,
+        }),
+        selectedCharm,
+        charmsList,
+        isInitialized,
+      });
+    }
+
+    return charmsList;
+  },
+);
+
 const createChatRecipe = handler<
   unknown,
   {
@@ -110,7 +137,6 @@ const createChatRecipe = handler<
     const charm = Chat({
       title: "New Chat",
       messages: [],
-      expandChat: false,
       content: "",
       allCharms,
     });
@@ -130,6 +156,7 @@ const selectCharm = handler<
   },
 );
 
+// TODO: remove manual JSON schema -> lift<>
 const logCharmsList = lift(
   {
     type: "object",
@@ -187,6 +214,12 @@ export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, allCharms, theme }) => {
     logCharmsList({ charmsList });
+
+    populateChatList({
+      selectedCharm,
+      charmsList,
+      allCharms,
+    });
 
     const combined = combineLists({
       allCharms: allCharms as unknown as any[],

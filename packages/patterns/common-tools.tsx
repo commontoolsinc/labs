@@ -17,23 +17,7 @@ import {
   UI,
 } from "commontools";
 
-import Chat from "./chatbot.tsx";
-
-type ListItem = {
-  title: string;
-};
-
-type LLMTestInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-  list: Default<Array<ListItem>, []>;
-};
-
-type LLMTestResult = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-};
-
-///// TOOLS ////
+///// COMMON TOOLS (get it?) ////
 
 /**
  * Calculate the result of a mathematical expression.
@@ -44,7 +28,7 @@ type CalculatorRequest = {
   expression: string;
 };
 
-const calculator = recipe<
+export const calculator = recipe<
   CalculatorRequest,
   string | { error: string }
 >("Calculator", ({ expression }) => {
@@ -67,7 +51,16 @@ type AddListItemRequest = {
   result: Cell<string>;
 };
 
-const addListItem = handler<
+/** Read all items from the list. */
+type ReadListItemsRequest = {
+  result: Cell<string>;
+};
+
+export type ListItem = {
+  title: string;
+};
+
+export const addListItem = handler<
   AddListItemRequest,
   { list: Cell<ListItem[]> }
 >(
@@ -75,6 +68,27 @@ const addListItem = handler<
     try {
       state.list.push({ title: args.item });
       args.result.set(`${state.list.get().length} items`);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
+export const readListItems = handler<
+  ReadListItemsRequest,
+  { list: ListItem[] }
+>(
+  (args, state) => {
+    try {
+      const items = state.list;
+      if (items.length === 0) {
+        args.result.set("The list is empty");
+      } else {
+        const itemList = items.map((item, index) =>
+          `${index + 1}. ${item.title}`
+        ).join("\n");
+        args.result.set(`List items (${items.length} total):\n${itemList}`);
+      }
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
@@ -95,7 +109,7 @@ type SearchWebResult = {
   }[];
 };
 
-const searchWeb = recipe<
+export const searchWeb = recipe<
   SearchQuery,
   SearchWebResult | { error: string }
 >("Search Web", ({ query }) => {
@@ -136,7 +150,7 @@ type ReadWebResult = {
   };
 };
 
-const readWebpage = recipe<
+export const readWebpage = recipe<
   ReadWebRequest,
   ReadWebResult | { error: string }
 >("Read Webpage", ({ url }) => {
@@ -159,54 +173,25 @@ const readWebpage = recipe<
   return ifElse(error, { error }, result);
 });
 
-export default recipe<LLMTestInput, LLMTestResult>(
-  "LLM Test",
-  ({ title, messages, list }) => {
-    const model = cell<string>("anthropic:claude-sonnet-4-0");
-    const tools: Record<string, BuiltInLLMTool> = {
-      search_web: {
-        pattern: searchWeb,
-      },
-      read_webpage: {
-        pattern: readWebpage,
-      },
-      calculator: {
-        pattern: calculator,
-      },
-      addListItem: {
-        handler: addListItem({ list }),
-      },
-    };
+type ToolsInput = {
+  list: ListItem[];
+};
 
-    const chat = Chat({ messages, tools });
-    const { addMessage, cancelGeneration, pending } = chat;
+export default recipe<ToolsInput>("Tools", ({ list }) => {
+  const tools: Record<string, BuiltInLLMTool> = {
+    search_web: {
+      pattern: searchWeb,
+    },
+    read_webpage: {
+      pattern: readWebpage,
+    },
+    calculator: {
+      pattern: calculator,
+    },
+    addListItem: {
+      handler: addListItem({ list }),
+    },
+  };
 
-    return {
-      [NAME]: title,
-      [UI]: (
-        <ct-screen>
-          <ct-hstack justify="between" slot="header">
-            <ct-input
-              $value={title}
-              placeholder="Enter title..."
-            />
-          </ct-hstack>
-
-          <ct-autolayout tabNames={["Chat", "Tools"]}>
-            {chat}
-
-            <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-              <ct-vstack data-label="Tools">
-                <div>
-                  <h3>Items</h3>
-                  <ct-list $value={list} />
-                </div>
-              </ct-vstack>
-            </ct-vscroll>
-          </ct-autolayout>
-        </ct-screen>
-      ),
-      messages,
-    };
-  },
-);
+  return { tools, list };
+});
