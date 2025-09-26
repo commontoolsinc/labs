@@ -161,7 +161,7 @@ current offline harness.
       lifted schemas rebuild inputs without stale defaults.
 - [ ] Address form normalization pattern — standardize address inputs ensure
       casing and components recombine into formatted output.
-- [ ] Shopping cart aggregation pattern — total line items with rules ensure
+- [x] Shopping cart aggregation pattern — total line items with rules ensure
       discounts apply via derived pricing cells consistently.
 - [x] Inventory reorder threshold pattern — flag low stock entries ensure
       derived alerts react to threshold and stock adjustments.
