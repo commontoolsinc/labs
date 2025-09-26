@@ -221,7 +221,7 @@ current offline harness.
       relocate inventory and derived occupancy stays.
 - [x] Menu planner pattern — plan meals across schedule ensure derived shopping
       list aggregates ingredients by day.
-- [ ] Recipe ingredient scaler pattern — scale servings easily ensure derived
+- [x] Recipe ingredient scaler pattern — scale servings easily ensure derived
       ingredient list multiplies accurately per size.
 - [ ] Nutritional tracker pattern — record nutrient intake ensure derived totals
       compare against daily goals per nutrient.

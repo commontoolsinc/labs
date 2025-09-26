@@ -25,6 +25,8 @@ offline-friendly recipes that the harness can assert confidently.
   sanitized cell across derives, handlers, and children.
 - Chain multiple `lift`s for multi-stage views; each stage should accept
   sanitized input and return a predictable shape.
+- Combine sanitized inputs by calling `lift(fn)({ ...cells })` so ratios or
+  paired transforms stay in sync without manual recompute steps.
 - When only reading from a cell, as is the case most of the times with `lift`,
   it isn't necessary to request Cell<> and then have to call .get, just specifiy
   the shape of the data needed.
