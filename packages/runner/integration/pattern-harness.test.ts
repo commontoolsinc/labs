@@ -290,6 +290,9 @@ import {
   scenarios as researchCitationManagerScenarios,
 } from "./patterns/research-citation-manager.ts";
 import {
+  scenarios as recipeIngredientScalerScenarios,
+} from "./patterns/recipe-ingredient-scaler.ts";
+import {
   scenarios as warehouseBinMapScenarios,
 } from "./patterns/warehouse-bin-map.ts";
 import {
@@ -356,6 +359,7 @@ const allScenarios = [
   ...warehouseBinMapScenarios,
   ...logisticsRoutingScenarios,
   ...researchCitationManagerScenarios,
+  ...recipeIngredientScalerScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
