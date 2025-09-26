@@ -173,7 +173,7 @@ current offline harness.
       derived schedules reflect per-channel frequency changes.
 - [ ] Chat reaction tracker pattern — track reactions per message ensure nested
       reaction counts roll up totals on every handler.
-- [ ] Support ticket triage pattern — assign tickets with priority ensure
+- [x] Support ticket triage pattern — assign tickets with priority ensure
       derived SLA countdowns track escalations per queue.
 - [ ] Workflow state machine pattern — enforce allowed transitions ensure
       history derive records every move and rejected jump.

@@ -53,6 +53,8 @@ offline-friendly recipes that the harness can assert confidently.
 - When argument cells double as mutable state, write the canonicalized entries
   back into that argument cell and keep consumers on a sanitized `lift` view so
   initialization never needs to read values during recipe creation.
+- Allow handlers to accept optional target priorities so escalations can jump
+  directly to stricter SLAs while countdowns stay clamped to shared defaults.
 
 ## Derived Views & Determinism
 
