@@ -77,6 +77,8 @@ offline-friendly recipes that the harness can assert confidently.
   index changes always follow the updated ordering without extra handlers.
 - Pre-build categorical buckets before populating them inside `lift` so empty
   groups remain visible and ordering stays deterministic when counts reach zero.
+- Round weighted totals and shares before formatting derived strings so progress
+  percentages stay consistent after handler-driven weight updates.
 
 ## Composition & Child Recipes
 

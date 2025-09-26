@@ -313,6 +313,9 @@ import {
 import {
   scenarios as sprintBurndownScenarios,
 } from "./patterns/sprint-burndown.ts";
+import {
+  scenarios as goalProgressTrackerScenarios,
+} from "./patterns/goal-progress-tracker.ts";
 
 const allScenarios = [
   ...echoScenarios,
@@ -356,6 +359,7 @@ const allScenarios = [
   ...callCenterScheduleScenarios,
   ...meetingSchedulerScenarios,
   ...sprintBurndownScenarios,
+  ...goalProgressTrackerScenarios,
   ...warehouseBinMapScenarios,
   ...logisticsRoutingScenarios,
   ...researchCitationManagerScenarios,
