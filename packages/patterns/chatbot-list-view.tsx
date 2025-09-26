@@ -47,6 +47,40 @@ type Output = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
 };
 
+const removeChat = handler<
+  unknown,
+  {
+    charmsList: Cell<CharmEntry[]>;
+    id: string;
+    selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
+  }
+>(
+  (
+    _,
+    { charmsList, id, selectedCharm },
+  ) => {
+    const list = charmsList.get();
+    const index = list.findIndex((entry) => entry.local_id === id);
+    if (index === -1) return;
+
+    const removed = list[index];
+    const next = [...list];
+    next.splice(index, 1);
+    charmsList.set(next);
+
+    // If we removed the currently selected charm, choose a new selection.
+    const current = selectedCharm.get();
+    if (current?.charm === removed.charm) {
+      const replacement = next[index] ?? next[index - 1];
+      if (replacement) {
+        selectedCharm.set({ charm: replacement.charm });
+      } else {
+        selectedCharm.set({ charm: undefined as unknown as any });
+      }
+    }
+  },
+);
+
 // this will be called whenever charm or selectedCharm changes
 // pass isInitialized to make sure we dont call this each time
 // we change selectedCharm, otherwise creates a loop
@@ -286,6 +320,23 @@ export default recipe<Input, Output>(
                     >
                       <span>{charmEntry.charm[NAME]}</span>
                       <span slot="meta">{charmEntry.local_id}</span>
+                      <ct-button
+                        slot="actions"
+                        size="sm"
+                        title="Delete Chat"
+                        variant="destructive"
+                        onClick={removeChat({
+                          charmsList: charmsList as unknown as OpaqueRef<
+                            CharmEntry[]
+                          >,
+                          id: charmEntry.local_id,
+                          selectedCharm: selectedCharm as unknown as OpaqueRef<
+                            Default<{ charm: any }, { charm: undefined }>
+                          >,
+                        })}
+                      >
+                        🗑️
+                      </ct-button>
                     </ct-list-item>
                   ))}
                 </div>
