@@ -237,6 +237,9 @@ import {
   scenarios as savedSearchSubscriptionScenarios,
 } from "./patterns/saved-search-subscription.ts";
 import {
+  scenarios as shoppingCartAggregationScenarios,
+} from "./patterns/shopping-cart-aggregation.ts";
+import {
   scenarios as budgetPlannerScenarios,
 } from "./patterns/budget-planner.ts";
 import {
@@ -339,6 +342,7 @@ const allScenarios = [
   ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
   ...savedSearchSubscriptionScenarios,
+  ...shoppingCartAggregationScenarios,
   ...budgetPlannerScenarios,
   ...expenseReimbursementScenarios,
   ...invoiceGeneratorScenarios,
