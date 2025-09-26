@@ -320,6 +320,9 @@ import {
   scenarios as catalogSearchFacetsScenarios,
 } from "./patterns/catalog-search-facets.ts";
 import {
+  scenarios as chatReactionTrackerScenarios,
+} from "./patterns/chat-reaction-tracker.ts";
+import {
   scenarios as callCenterScheduleScenarios,
 } from "./patterns/call-center-schedule.ts";
 import {
@@ -375,6 +378,7 @@ const allScenarios = [
   ...kanbanBoardGroupingScenarios,
   ...calendarAvailabilityScenarios,
   ...catalogSearchFacetsScenarios,
+  ...chatReactionTrackerScenarios,
   ...callCenterScheduleScenarios,
   ...meetingSchedulerScenarios,
   ...sprintBurndownScenarios,

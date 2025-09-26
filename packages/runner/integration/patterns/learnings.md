@@ -55,6 +55,8 @@ offline-friendly recipes that the harness can assert confidently.
   initialization never needs to read values during recipe creation.
 - Allow handlers to accept optional target priorities so escalations can jump
   directly to stricter SLAs while countdowns stay clamped to shared defaults.
+- When promoting new keys (like reaction types), extend the canonical catalog
+  before sanitizing state so every derive sees zeroed placeholders immediately.
 
 ## Derived Views & Determinism
 
