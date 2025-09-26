@@ -309,5 +309,5 @@ current offline harness.
       spending summary updates per approval result.
 - [ ] Vendor risk assessment pattern — score vendor responses ensure derived
       risk tiers update when answers change.
-- [ ] Asset lifecycle tracker pattern — manage asset stages ensure derived
+- [x] Asset lifecycle tracker pattern — manage asset stages ensure derived
       depreciation recalculates as lifecycle moves.
