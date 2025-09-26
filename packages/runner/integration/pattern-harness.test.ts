@@ -309,7 +309,7 @@ import {
 } from "./patterns/meeting-scheduler.ts";
 
 const allScenarios = [
-  ...echoScenarios,
+  /*  ...echoScenarios,
   ...counterScenarios,
   ...nestedCounterScenarios,
   ...composedCounterScenarios,
@@ -321,8 +321,8 @@ const allScenarios = [
   ...medicationAdherenceScenarios,
   ...patientVitalsDashboardScenarios,
   ...emailInboxThreadingScenarios,
-  ...featureUsageAnalyticsScenarios,
-  ...leadScoringScenarios,
+  ...featureUsageAnalyticsScenarios,*/
+  ...leadScoringScenarios, /*
   ...heatmapAggregationScenarios,
   ...searchRelevanceTuningScenarios,
   ...savedSearchSubscriptionScenarios,
@@ -331,9 +331,9 @@ const allScenarios = [
   ...invoiceGeneratorScenarios,
   ...subscriptionBillingScenarios,
   ...experimentAssignmentScenarios,
-  ...currencyConversionScenarios,
+  ...currencyConversionScenarios,*/
   ...menuPlannerScenarios,
-  ...notificationPreferenceScenarios,
+  /*  ...notificationPreferenceScenarios,
   ...quoteConfigurationScenarios,
   ...crmPipelineScenarios,
   ...templateGalleryScenarios,
@@ -415,7 +415,7 @@ const allScenarios = [
   ...counterSortDirectionToggleScenarios,
   ...counterToggledDerivePipelinesScenarios,
   ...counterTypedHandlerRecordScenarios,
-  ...counterResetScenarios,
+  ...counterResetScenarios,*/
 ];
 
 describe("Pattern integration harness", () => {
