@@ -179,7 +179,7 @@ current offline harness.
       history derive records every move and rejected jump.
 - [x] Kanban board grouping pattern — group tasks into columns ensure handlers
       move tasks and derived WIP limits flag overloads.
-- [ ] Sprint burndown pattern — project remaining work daily ensure lifted
+- [x] Sprint burndown pattern — project remaining work daily ensure lifted
       history produces burndown curve after updates.
 - [ ] Issue dependency graph pattern — manage dependency edges ensure derived
       order validates acyclic structure post updates.
