@@ -281,6 +281,9 @@ import {
   scenarios as incidentResponsePlaybookScenarios,
 } from "./patterns/incident-response-playbook.ts";
 import {
+  scenarios as kanbanBoardGroupingScenarios,
+} from "./patterns/kanban-board-grouping.ts";
+import {
   scenarios as researchCitationManagerScenarios,
 } from "./patterns/research-citation-manager.ts";
 import {
@@ -337,6 +340,7 @@ const allScenarios = [
   ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,
   ...incidentResponsePlaybookScenarios,
+  ...kanbanBoardGroupingScenarios,
   ...calendarAvailabilityScenarios,
   ...catalogSearchFacetsScenarios,
   ...callCenterScheduleScenarios,
