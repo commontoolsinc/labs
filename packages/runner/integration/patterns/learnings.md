@@ -97,6 +97,8 @@ offline-friendly recipes that the harness can assert confidently.
   parent helpers; typed helpers prevent casting churn.
 - Store manifests or configuration lists in sanitized cells so parent summaries
   and child resets remain aligned.
+- Build child arrays via a `lift` that iterates index cells so parent summaries
+  stay aligned with each child's sanitized subtotal output.
 
 ## Scenario & Harness Hygiene
 

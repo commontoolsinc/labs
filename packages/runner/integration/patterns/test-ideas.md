@@ -87,7 +87,7 @@ current offline harness.
       metadata, and navigate between stages via handlers.
 - [x] Counter with derived summary object — consolidate multiple cells into
       derived object and assert deep properties.
-- [ ] Counter with nested computed totals — nested patterns each compute
+- [x] Counter with nested computed totals — nested patterns each compute
       subtotal and parent derives grand total.
 - [x] Counter with ring buffer history — maintain fixed-length history array
       trimming oldest entries.
