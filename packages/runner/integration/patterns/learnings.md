@@ -90,6 +90,8 @@ offline-friendly recipes that the harness can assert confidently.
 - When deriving topological orderings, keep the ready queue sorted after each
   push so deterministic traversal stays stable when multiple roots share zero
   indegree.
+- Build canonical catalogs (questions, demographics, etc.) via lifts before
+  deriving cross-stat tables so new records reuse the same stable ordering.
 
 ## Composition & Child Recipes
 
