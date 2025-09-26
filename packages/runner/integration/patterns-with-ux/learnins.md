@@ -5,7 +5,7 @@ Add short notes after each run so the next agent can build on proven approaches.
 ## UI guidelines
 
 - Drive the UI from sanitized derives; never tap raw event payloads in JSX.
-- Prefer ct primitives (`ct-button`, `ct-field`, `ct-card`, etc.) for consistent
+- Prefer ct primitives (`ct-button`, `ct-input`, `ct-card`, etc.) for consistent
   styling and accessibility.
 - Keep layouts responsive with flex or stack containers; avoid hard coded pixel
   widths unless a component demands it.
