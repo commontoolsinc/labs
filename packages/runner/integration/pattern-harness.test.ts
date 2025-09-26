@@ -290,6 +290,9 @@ import {
   scenarios as incidentResponsePlaybookScenarios,
 } from "./patterns/incident-response-playbook.ts";
 import {
+  scenarios as issueDependencyGraphScenarios,
+} from "./patterns/issue-dependency-graph.ts";
+import {
   scenarios as kanbanBoardGroupingScenarios,
 } from "./patterns/kanban-board-grouping.ts";
 import {
@@ -361,6 +364,7 @@ const allScenarios = [
   ...inventoryReorderThresholdScenarios,
   ...assetLifecycleTrackerScenarios,
   ...incidentResponsePlaybookScenarios,
+  ...issueDependencyGraphScenarios,
   ...kanbanBoardGroupingScenarios,
   ...calendarAvailabilityScenarios,
   ...catalogSearchFacetsScenarios,
