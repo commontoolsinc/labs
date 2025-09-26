@@ -201,7 +201,7 @@ current offline harness.
       free slots recompute after block edits.
 - [x] Meeting scheduler pattern — propose meeting slots ensure vote handlers
       update consensus pick with tie breakers.
-- [ ] Goal progress tracker pattern — track milestones toward goal ensure
+- [x] Goal progress tracker pattern — track milestones toward goal ensure
       derived percent updates when milestone weights shift.
 - [x] Budget planner pattern — allocate funds across categories ensure derived
       totals enforce overall balance constraints.
