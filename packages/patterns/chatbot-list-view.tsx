@@ -13,10 +13,12 @@ import {
   navigateTo,
   OpaqueRef,
   recipe,
+  toSchema,
   UI,
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -49,33 +51,20 @@ type Output = {
 // pass isInitialized to make sure we dont call this each time
 // we change selectedCharm, otherwise creates a loop
 const storeCharm = lift(
-  {
-    type: "object",
-    properties: {
-      charm: { type: "object" },
-      selectedCharm: {
-        type: "object",
-        properties: {
-          charm: { type: "object" },
-        },
-        asCell: true,
-      },
-      charmsList: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            local_id: { type: "string" }, // display ID for the charm
-            charm: { type: "object" },
-          },
-        },
-        asCell: true,
-      },
-      isInitialized: { type: "boolean", asCell: true },
-    },
-  },
+  toSchema<{
+    charm: any;
+    selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
+    charmsList: Cell<CharmEntry[]>;
+    allCharms: Cell<any[]>;
+    theme?: {
+      accentColor: Default<string, "#3b82f6">;
+      fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
+      borderRadius: Default<string, "0.5rem">;
+    };
+    isInitialized: Cell<boolean>;
+  }>(),
   undefined,
-  ({ charm, selectedCharm, charmsList, isInitialized }) => {
+  ({ charm, selectedCharm, charmsList, isInitialized, allCharms }) => { // Not including `allCharms` is a compile error...
     if (!isInitialized.get()) {
       console.log(
         "storeCharm storing charm:",
@@ -96,6 +85,36 @@ const storeCharm = lift(
   },
 );
 
+const populateChatList = lift(
+  toSchema<{
+    charmsList: CharmEntry[];
+    allCharms: Cell<any[]>;
+    selectedCharm: Cell<{ charm: any }>;
+  }>(),
+  undefined,
+  (
+    { charmsList, allCharms, selectedCharm },
+  ) => {
+    if (charmsList.length === 0) {
+      const isInitialized = cell(false);
+      return storeCharm({
+        charm: Chat({
+          title: "New Chat",
+          messages: [],
+          content: "",
+          allCharms,
+        }),
+        selectedCharm,
+        charmsList,
+        allCharms,
+        isInitialized: isInitialized as unknown as Cell<boolean>,
+      });
+    }
+
+    return charmsList;
+  },
+);
+
 const createChatRecipe = handler<
   unknown,
   {
@@ -110,12 +129,17 @@ const createChatRecipe = handler<
     const charm = Chat({
       title: "New Chat",
       messages: [],
-      expandChat: false,
       content: "",
       allCharms,
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
-    return storeCharm({ charm, selectedCharm, charmsList, isInitialized });
+    return storeCharm({
+      charm,
+      selectedCharm,
+      charmsList: charmsList as unknown as OpaqueRef<CharmEntry[]>,
+      allCharms,
+      isInitialized: isInitialized as unknown as Cell<boolean>,
+    });
   },
 );
 
@@ -130,25 +154,21 @@ const selectCharm = handler<
   },
 );
 
+// const logCharmsList = lift<
+//   { charmsList: Cell<CharmEntry[]> }
+// >(
+//   ({ charmsList }) => {
+//     // charmsList is a ProxyArray
+//     console.log("logCharmsList: ", charmsList.get());
+//     return charmsList;
+//   },
+// );
+
 const logCharmsList = lift(
-  {
-    type: "object",
-    properties: {
-      charmsList: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            local_id: { type: "string" }, // display ID for the charm
-            charm: { type: "object" },
-          },
-        },
-        asCell: true,
-      },
-    },
-  },
+  toSchema<{ charmsList: Cell<CharmEntry[]> }>(),
   undefined,
   ({ charmsList }) => {
+    // charmsList is a Cell
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
   },
@@ -173,6 +193,7 @@ const getSelectedCharm = lift<
   {
     chat: unknown;
     note: unknown;
+    list: ListItem[];
     backlinks: MentionableCharm[];
     mentioned: MentionableCharm[];
   } | undefined
@@ -186,7 +207,15 @@ const getSelectedCharm = lift<
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, allCharms, theme }) => {
-    logCharmsList({ charmsList });
+    logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+
+    populateChatList({
+      selectedCharm: selectedCharm as unknown as Cell<
+        Pick<CharmEntry, "charm">
+      >,
+      charmsList,
+      allCharms,
+    });
 
     const combined = combineLists({
       allCharms: allCharms as unknown as any[],
@@ -280,6 +309,12 @@ export default recipe<Input, Output>(
                         ))}
                       </ct-vstack>
                     </div>
+                    <ct-ct-collapsible>
+                      <ct-heading slot="trigger" level={5} no-margin>
+                        List
+                      </ct-heading>
+                      <ct-list $value={selected.list} />
+                    </ct-ct-collapsible>
                     <ct-collapsible>
                       <ct-heading slot="trigger" level={5} no-margin>
                         Mentioned Charms
