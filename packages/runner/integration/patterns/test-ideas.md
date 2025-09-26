@@ -267,7 +267,7 @@ current offline harness.
       metrics bucket counts by feature and cohort.
 - [x] Experiment assignment pattern — assign users to tests ensure derived
       balances hold allocation ratios across groups.
-- [ ] Funnel analytics pattern — model funnel stages ensure derived drop-off
+- [x] Funnel analytics pattern — model funnel stages ensure derived drop-off
       metrics update when events stream in.
 - [x] Heatmap aggregation pattern — aggregate interaction points ensure derived
       grid normalizes intensity per coordinate bucket.
