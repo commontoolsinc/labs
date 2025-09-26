@@ -38,9 +38,11 @@ Steps:
      is requested) and inspect the DOM to confirm the UI is behaving and looking
      as intended. If you find problems, fix the pattern are go back to step 5.
 8. Author a dedicated integration test in
-   `packages/patterns/integration/<pattern>.test.ts`. Follow the existing tests
-   for structure: bootstrap a charm, drive it with Playwright, assert DOM state,
-   and inspect any derived summaries. Prefer descriptive `describe`/`it` names.
+   `packages/runner/integration/patterns-with-ux/<pattern>.test.ts`. Follow the
+   existing tests for structure: bootstrap a charm, drive it with Astro, assert
+   DOM state, and inspect any derived summaries. Prefer descriptive
+   `describe`/`it` names. See examples in
+   `packages/patterns/integration/*.test.ts`.
 9. Update `packages/runner/integration/patterns-with-ux/worklist.md` to mark the
    pattern as completed. Append any new insights or caveats to
    `packages/runner/integration/patterns-with-ux/learnins.md`.
