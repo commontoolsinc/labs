@@ -50,7 +50,7 @@ Steps:
 9. If something fails persistently, revert that pattern, add a note about the
    issue to `issues.md`, leave the checklist unchecked, and exit.
 10. Update `packages/runner/integration/patterns-with-ux/worklist.md` to mark
-   the pattern as completed.
+    the pattern as completed.
 11. Format your changes with `deno fmt`.
 12. Stage the changes, commit with a concise summary, and exit.
 

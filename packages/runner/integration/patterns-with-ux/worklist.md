@@ -23,7 +23,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-conditional-ifelse
 - [ ] counter-cross-field-validation
 - [ ] counter-deduplicated-list
-- [ ] counter-delayed-compute
+- [x] counter-delayed-compute
 - [ ] counter-derived-canonical-form
 - [ ] counter-derived-checksum
 - [ ] counter-derived-color
