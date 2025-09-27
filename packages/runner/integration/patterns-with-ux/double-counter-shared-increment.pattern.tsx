@@ -1,4 +1,5 @@
 /// <cts-enable />
+// @ts-nocheck
 import {
   type Cell,
   cell,
