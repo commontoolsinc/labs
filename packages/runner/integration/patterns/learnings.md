@@ -90,6 +90,8 @@ offline-friendly recipes that the harness can assert confidently.
   mutate the raw collections feeding the pricing pipeline.
 - Round weighted totals and shares before formatting derived strings so progress
   percentages stay consistent after handler-driven weight updates.
+- Mirror tiered summaries from the same sanitized list so count labels and
+  grouped arrays stay aligned when handlers promote entries between buckets.
 - When layering nested percentages, reuse a shared lift for sanitized totals so
   both group- and item-level ratios stay aligned without duplicate math.
 - Clamp sequential ratio derives before formatting so percent labels remain
