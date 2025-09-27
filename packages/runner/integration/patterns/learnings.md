@@ -90,6 +90,8 @@ offline-friendly recipes that the harness can assert confidently.
   mutate the raw collections feeding the pricing pipeline.
 - Round weighted totals and shares before formatting derived strings so progress
   percentages stay consistent after handler-driven weight updates.
+- When layering nested percentages, reuse a shared lift for sanitized totals so
+  both group- and item-level ratios stay aligned without duplicate math.
 - Clamp sequential ratio derives before formatting so percent labels remain
   stable when stages grow or shrink between events.
 - When deriving topological orderings, keep the ready queue sorted after each
