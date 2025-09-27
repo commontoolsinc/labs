@@ -221,6 +221,9 @@ import {
   scenarios as composedCounterScenarios,
 } from "./patterns/composed-counter.ts";
 import {
+  scenarios as educationCoursePlannerScenarios,
+} from "./patterns/education-course-planner.ts";
+import {
   scenarios as emailInboxThreadingScenarios,
 } from "./patterns/email-inbox-threading.ts";
 import {
@@ -372,6 +375,7 @@ const allScenarios = [
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,
+  ...educationCoursePlannerScenarios,
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,

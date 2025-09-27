@@ -122,6 +122,9 @@ offline-friendly recipes that the harness can assert confidently.
 - When a pattern needs hyphenated identifiers (e.g. `in-progress`), expose an
   ordered array summary so harness assertions can use numeric indices instead of
   awkward bracket notation.
+- Accumulate sequential timelines with a single `lift` that sums durations so
+  reorder handlers only update the source array while derives recompute offsets
+  deterministically.
 
 ## Reuse & Abstractions
 
