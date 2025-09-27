@@ -301,7 +301,7 @@ current offline harness.
       derived risk scores roll up by severity and system.
 - [ ] Compliance checklist pattern — track compliance tasks ensure derived gap
       report highlights overdue obligations.
-- [ ] Document signature workflow pattern — collect signatures ensure derived
+- [x] Document signature workflow pattern — collect signatures ensure derived
       status shows next signer and outstanding steps.
 - [ ] Legal clause library pattern — curate clause templates ensure derived
       filters surface clauses by topic and region.
