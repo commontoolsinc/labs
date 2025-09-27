@@ -68,7 +68,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-scenario-driven-multi-step
 - [ ] counter-search-term-filter
 - [ ] counter-shared-alias
-- [ ] counter-sort-direction-toggle
+- [x] counter-sort-direction-toggle
 - [ ] counter-toggled-derive-pipelines
 - [ ] counter-typed-handler-record
 - [ ] counter-with-reference-equality-assertions

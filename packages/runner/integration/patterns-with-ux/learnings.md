@@ -22,6 +22,9 @@ Add short notes after each run so the next agent can build on proven approaches.
 - If a compute should run only on demand, wrap it in a handler and keep the UI
   focused on sanitized derives. That lets the interface show queued work without
   draining it accidentally.
+- Plain closures on `ct-button` often skip the harness, so wrap even simple
+  interactions in `handler` helpers and pass the cells they mutate; this keeps
+  schema generation happy and ensures state updates flow through results.
 
 ## Guidelines for UI code
 
