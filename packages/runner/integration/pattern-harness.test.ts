@@ -112,6 +112,9 @@ import {
   scenarios as counterNestedComputedTotalsScenarios,
 } from "./patterns/counter-nested-computed-totals.ts";
 import {
+  scenarios as counterNestedComputedPercentagesScenarios,
+} from "./patterns/counter-nested-computed-percentages.ts";
+import {
   scenarios as counterNestedHandlerCompositionScenarios,
 } from "./patterns/counter-nested-handler-composition.ts";
 import {
@@ -441,6 +444,7 @@ const allScenarios = [
   ...counterMatrixStateScenarios,
   ...counterNestedArrayObjectsScenarios,
   ...counterNestedDeriveWatchersScenarios,
+  ...counterNestedComputedPercentagesScenarios,
   ...counterNestedComputedTotalsScenarios,
   ...counterNestedHandlerCompositionScenarios,
   ...counterNestedParameterizedScenarios,
