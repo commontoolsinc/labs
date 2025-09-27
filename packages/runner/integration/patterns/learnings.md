@@ -59,6 +59,8 @@ offline-friendly recipes that the harness can assert confidently.
   before sanitizing state so every derive sees zeroed placeholders immediately.
 - When relocating hierarchical nodes, pre-build a child adjacency map so cycle
   guards can short-circuit before mutating shared state.
+- To re-open staged workflows, re-sanitize the full list before writing so
+  downstream derives recompute from the canonical stage definitions.
 
 ## Derived Views & Determinism
 
