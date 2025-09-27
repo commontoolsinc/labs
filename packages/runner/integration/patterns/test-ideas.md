@@ -237,7 +237,7 @@ current offline harness.
       alerts trigger when readings hit critical ranges.
 - [ ] Clinical trial enrollment pattern — screen participants ensure derived
       eligible list responds to criteria toggles.
-- [ ] Education course planner pattern — arrange course modules ensure derived
+- [x] Education course planner pattern — arrange course modules ensure derived
       timeline updates when modules reorder.
 - [ ] Assignment grading matrix pattern — record student grades ensure derived
       averages compute per student and assignment.
