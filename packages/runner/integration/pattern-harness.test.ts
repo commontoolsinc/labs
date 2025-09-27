@@ -64,6 +64,9 @@ import {
   scenarios as counterDerivedSummaryScenarios,
 } from "./patterns/counter-derived-summary.ts";
 import {
+  scenarios as counterFallbackDefaultsScenarios,
+} from "./patterns/counter-fallback-defaults.ts";
+import {
   scenarios as counterDynamicHandlerListScenarios,
 } from "./patterns/counter-dynamic-handler-list.ts";
 import {
@@ -468,6 +471,7 @@ const allScenarios = [
   ...counterNestedStreamScenarios,
   ...counterNoOpEventsScenarios,
   ...counterOptionalFallbackScenarios,
+  ...counterFallbackDefaultsScenarios,
   ...counterOpaqueRefMapScenarios,
   ...counterParentChildBubbleScenarios,
   ...counterParentCellArgumentsScenarios,
