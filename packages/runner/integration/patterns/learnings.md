@@ -66,6 +66,9 @@ offline-friendly recipes that the harness can assert confidently.
   and delta views stay aligned across every exposed field.
 - Keep history or audit logs append-only and sanitized; store formatted strings
   or structured entries that can be asserted deterministically.
+- Seed mutable log cells separately from their initial derived entry so handlers
+  write into the history while a lift combines sanitized arguments with the
+  recorded events.
 - Derive forward-looking projections from the sanitized baseline rather than
   mutating extra cells so charts stay deterministic even if events skip days.
 - When exposing conditional branches, make all branches share the same shape so
