@@ -284,6 +284,9 @@ import {
   scenarios as contentPublishingWorkflowScenarios,
 } from "./patterns/content-publishing-workflow.ts";
 import {
+  scenarios as documentSignatureWorkflowScenarios,
+} from "./patterns/document-signature-workflow.ts";
+import {
   scenarios as userJourneyMapScenarios,
 } from "./patterns/user-journey-map.ts";
 import {
@@ -375,6 +378,7 @@ const allScenarios = [
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,
+  ...documentSignatureWorkflowScenarios,
   ...educationCoursePlannerScenarios,
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,
