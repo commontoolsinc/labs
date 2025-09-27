@@ -39,11 +39,3 @@ Add short notes after each run so the next agent can build on proven approaches.
   styling hooks.
 - Wait on explicit UI signals (text, aria attributes) instead of arbitrary
   sleeps whenever possible.
-
-## Testing workflow
-
-- Keep integration tests focused on user journeys: load the charm, perform two
-  or three critical actions, and assert visible outcomes.
-- Reuse helpers from existing tests for login, charm creation, and teardown so
-  runs stay fast and reliable.
-- Document flaky behavior or missing harness features here before exiting.

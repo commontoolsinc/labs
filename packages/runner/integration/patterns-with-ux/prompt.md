@@ -57,4 +57,7 @@ Steps:
 IMPORTANT: Only tackle one pattern per run. Quality beats quantity - ship a
 charm the shell team would demo proudly.
 
+IMPORTANT: No need to add integration tests just yet, we'll do that in a future
+round. Just thoroughly exercise it with playwright.
+
 Please begin.
