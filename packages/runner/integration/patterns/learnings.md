@@ -27,6 +27,8 @@ offline-friendly recipes that the harness can assert confidently.
   sanitized input and return a predictable shape.
 - Combine sanitized inputs by calling `lift(fn)({ ...cells })` so ratios or
   paired transforms stay in sync without manual recompute steps.
+- When arrays may contain sparse slots, create a sanitized copy before filling
+  fallbacks so derives and handlers share the same dense ordering.
 - When only reading from a cell, as is the case most of the times with `lift`,
   it isn't necessary to request Cell<> and then have to call .get, just specifiy
   the shape of the data needed.
