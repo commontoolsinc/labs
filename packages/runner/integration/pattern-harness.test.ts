@@ -290,6 +290,9 @@ import {
   scenarios as contentPublishingWorkflowScenarios,
 } from "./patterns/content-publishing-workflow.ts";
 import {
+  scenarios as editorialCalendarScenarios,
+} from "./patterns/editorial-calendar.ts";
+import {
   scenarios as documentSignatureWorkflowScenarios,
 } from "./patterns/document-signature-workflow.ts";
 import {
@@ -388,6 +391,7 @@ const allScenarios = [
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,
+  ...editorialCalendarScenarios,
   ...documentSignatureWorkflowScenarios,
   ...educationCoursePlannerScenarios,
   ...userJourneyMapScenarios,

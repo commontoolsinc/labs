@@ -101,6 +101,8 @@ offline-friendly recipes that the harness can assert confidently.
   indegree.
 - Build canonical catalogs (questions, demographics, etc.) via lifts before
   deriving cross-stat tables so new records reuse the same stable ordering.
+- Prime grouping derives from the sanitized catalog (channels, buckets, etc.) so
+  every group returns a stable bucket even before entries arrive.
 
 ## Composition & Child Recipes
 
