@@ -40,7 +40,10 @@ Steps:
    noting the issue and exit.
 
 6. Add any learnings about the API or otherwise to
-   `packages/runner/integration/patterns/learnings.md`.
+   `packages/runner/integration/patterns/learnings.md`. Keep learnings general,
+   not specific to the use-case you tackled. This is for future instances of you
+   that are working on different use-cases, but in the same framework and with
+   the same tools.
 
 7. Stage and commit with a message like
    `Add pattern scenarios for toggle through rolling average`.

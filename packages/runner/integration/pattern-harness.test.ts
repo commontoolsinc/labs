@@ -208,6 +208,9 @@ import {
   scenarios as securityVulnerabilityTrackerScenarios,
 } from "./patterns/security-vulnerability-tracker.ts";
 import {
+  scenarios as vendorRiskAssessmentScenarios,
+} from "./patterns/vendor-risk-assessment.ts";
+import {
   scenarios as sleepJournalScenarios,
 } from "./patterns/sleep-journal.ts";
 import { scenarios as moodDiaryScenarios } from "./patterns/mood-diary.ts";
@@ -358,6 +361,7 @@ const allScenarios = [
   ...listManagerScenarios,
   ...libraryCheckoutSystemScenarios,
   ...securityVulnerabilityTrackerScenarios,
+  ...vendorRiskAssessmentScenarios,
   ...sleepJournalScenarios,
   ...moodDiaryScenarios,
   ...medicationAdherenceScenarios,

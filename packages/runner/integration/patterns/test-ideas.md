@@ -307,7 +307,7 @@ current offline harness.
       filters surface clauses by topic and region.
 - [ ] Procurement request pattern — route procurement approvals ensure derived
       spending summary updates per approval result.
-- [ ] Vendor risk assessment pattern — score vendor responses ensure derived
+- [x] Vendor risk assessment pattern — score vendor responses ensure derived
       risk tiers update when answers change.
 - [x] Asset lifecycle tracker pattern — manage asset stages ensure derived
       depreciation recalculates as lifecycle moves.
