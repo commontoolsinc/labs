@@ -195,7 +195,7 @@ current offline harness.
       threads reorder by latest timestamp updates.
 - [x] User permission matrix pattern — toggle role permissions ensure derived
       per-role summaries stay accurate after changes.
-- [ ] Org chart hierarchy pattern — maintain reporting tree ensure handlers
+- [x] Org chart hierarchy pattern — maintain reporting tree ensure handlers
       relocate staff and derived chains stay valid.
 - [x] Calendar availability pattern — merge shared availability ensure derived
       free slots recompute after block edits.

@@ -57,6 +57,8 @@ offline-friendly recipes that the harness can assert confidently.
   directly to stricter SLAs while countdowns stay clamped to shared defaults.
 - When promoting new keys (like reaction types), extend the canonical catalog
   before sanitizing state so every derive sees zeroed placeholders immediately.
+- When relocating hierarchical nodes, pre-build a child adjacency map so cycle
+  guards can short-circuit before mutating shared state.
 
 ## Derived Views & Determinism
 

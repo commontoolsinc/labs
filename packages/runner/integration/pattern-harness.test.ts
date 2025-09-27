@@ -338,6 +338,9 @@ import {
   scenarios as meetingSchedulerScenarios,
 } from "./patterns/meeting-scheduler.ts";
 import {
+  scenarios as orgChartHierarchyScenarios,
+} from "./patterns/org-chart-hierarchy.ts";
+import {
   scenarios as sprintBurndownScenarios,
 } from "./patterns/sprint-burndown.ts";
 import {
@@ -392,6 +395,7 @@ const allScenarios = [
   ...chatReactionTrackerScenarios,
   ...callCenterScheduleScenarios,
   ...meetingSchedulerScenarios,
+  ...orgChartHierarchyScenarios,
   ...sprintBurndownScenarios,
   ...goalProgressTrackerScenarios,
   ...warehouseBinMapScenarios,
