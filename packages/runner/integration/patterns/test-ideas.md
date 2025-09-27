@@ -251,7 +251,7 @@ current offline harness.
       bibliographies regroup by topic and style.
 - [x] Content publishing workflow pattern — shepherd draft review ensure derived
       queue orders drafts by priority and schedule.
-- [ ] Editorial calendar pattern — schedule publication dates ensure derived
+- [x] Editorial calendar pattern — schedule publication dates ensure derived
       calendar view groups entries by channel.
 - [ ] Media playlist curator pattern — curate playlists ensure handlers reorder
       tracks and derived runtime recalcs.
