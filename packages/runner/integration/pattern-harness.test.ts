@@ -224,6 +224,9 @@ import {
   scenarios as patientVitalsDashboardScenarios,
 } from "./patterns/patient-vitals-dashboard.ts";
 import {
+  scenarios as procurementRequestScenarios,
+} from "./patterns/procurement-request.ts";
+import {
   scenarios as toggleScenarios,
 } from "./patterns/toggle-derive-label.ts";
 import {
@@ -373,6 +376,7 @@ const allScenarios = [
   ...moodDiaryScenarios,
   ...medicationAdherenceScenarios,
   ...patientVitalsDashboardScenarios,
+  ...procurementRequestScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
   ...funnelAnalyticsScenarios,

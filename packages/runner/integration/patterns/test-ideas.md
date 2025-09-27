@@ -305,7 +305,7 @@ current offline harness.
       status shows next signer and outstanding steps.
 - [ ] Legal clause library pattern — curate clause templates ensure derived
       filters surface clauses by topic and region.
-- [ ] Procurement request pattern — route procurement approvals ensure derived
+- [x] Procurement request pattern — route procurement approvals ensure derived
       spending summary updates per approval result.
 - [x] Vendor risk assessment pattern — score vendor responses ensure derived
       risk tiers update when answers change.
