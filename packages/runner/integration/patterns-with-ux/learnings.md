@@ -19,6 +19,9 @@ Add short notes after each run so the next agent can build on proven approaches.
   a `compute` effect instead of calling `.get()` during recipe creation; this
   keeps the harness happy while still updating the field after sanitizer
   handlers run.
+- If a compute should run only on demand, wrap it in a handler and keep the UI
+  focused on sanitized derives. That lets the interface show queued work without
+  draining it accidentally.
 
 ## Guidelines for UI code
 
