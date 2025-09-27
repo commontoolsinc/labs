@@ -225,7 +225,7 @@ current offline harness.
       ingredient list multiplies accurately per size.
 - [ ] Nutritional tracker pattern — record nutrient intake ensure derived totals
       compare against daily goals per nutrient.
-- [ ] Workout routine planner pattern — schedule workouts ensure derived volume
+- [x] Workout routine planner pattern — schedule workouts ensure derived volume
       per muscle group updates with edits.
 - [x] Sleep journal pattern — log sleep sessions with tags ensure derived
       averages compute per tag and weekday grouping.
