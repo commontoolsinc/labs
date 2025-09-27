@@ -15,6 +15,10 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Reach for `cell()` when the UI needs its own form state; ct components wired
   with `$value={cell}` stay reactive, and you can sanitize user input with
   `lift` before feeding it back into shared derives.
+- When you need to mirror numeric state into text inputs, sync the UI cell with
+  a `compute` effect instead of calling `.get()` during recipe creation; this
+  keeps the harness happy while still updating the field after sanitizer
+  handlers run.
 
 ## Guidelines for UI code
 
