@@ -261,7 +261,7 @@ current offline harness.
       selection mirrors active device mode cells.
 - [x] Design token switcher pattern — toggle design tokens ensure derived token
       bundle reflects theme swaps instantly.
-- [ ] Component library catalog pattern — catalog UI components ensure derived
+- [x] Component library catalog pattern — catalog UI components ensure derived
       prop coverage updates when recipes register.
 - [x] Feature usage analytics pattern — track feature events ensure derived
       metrics bucket counts by feature and cohort.
