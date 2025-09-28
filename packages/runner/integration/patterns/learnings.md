@@ -73,6 +73,9 @@ offline-friendly recipes that the harness can assert confidently.
   ordering.
 - Build cross-field validation snapshots with a single `lift` so boolean flags
   and delta views stay aligned across every exposed field.
+- When deriving keyed collections, sanitize the key list first and iterate that
+  order everywhere so handlers and derives reuse a deterministic sequence even
+  after fallback entries populate missing items.
 - Keep history or audit logs append-only and sanitized; store formatted strings
   or structured entries that can be asserted deterministically.
 - Seed mutable log cells separately from their initial derived entry so handlers
