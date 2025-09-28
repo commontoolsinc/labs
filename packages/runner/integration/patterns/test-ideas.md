@@ -257,7 +257,7 @@ current offline harness.
       tracks and derived runtime recalcs.
 - [ ] Podcast episode planner pattern — plan episode segments ensure derived
       outline strings segment order and timing.
-- [ ] Image gallery variant pattern — manage per-device variants ensure derived
+- [x] Image gallery variant pattern — manage per-device variants ensure derived
       selection mirrors active device mode cells.
 - [x] Design token switcher pattern — toggle design tokens ensure derived token
       bundle reflects theme swaps instantly.

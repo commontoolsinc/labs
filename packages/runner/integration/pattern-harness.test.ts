@@ -320,6 +320,9 @@ import {
   scenarios as inventoryReorderThresholdScenarios,
 } from "./patterns/inventory-reorder-threshold.ts";
 import {
+  scenarios as imageGalleryVariantScenarios,
+} from "./patterns/image-gallery-variant.ts";
+import {
   scenarios as assetLifecycleTrackerScenarios,
 } from "./patterns/asset-lifecycle-tracker.ts";
 import {
@@ -419,6 +422,7 @@ const allScenarios = [
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,
   ...inventoryReorderThresholdScenarios,
+  ...imageGalleryVariantScenarios,
   ...assetLifecycleTrackerScenarios,
   ...incidentResponsePlaybookScenarios,
   ...issueDependencyGraphScenarios,
