@@ -115,6 +115,8 @@ offline-friendly recipes that the harness can assert confidently.
   affects deterministic expectations.
 - Prime grouping derives from the sanitized catalog (channels, buckets, etc.) so
   every group returns a stable bucket even before entries arrive.
+- For matrix-style summaries, build row and column order maps from sanitized
+  inputs so handler writes can re-sort the combined entries deterministically.
 
 ## Composition & Child Recipes
 
