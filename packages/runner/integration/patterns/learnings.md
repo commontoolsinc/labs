@@ -108,6 +108,9 @@ offline-friendly recipes that the harness can assert confidently.
   indegree.
 - Build canonical catalogs (questions, demographics, etc.) via lifts before
   deriving cross-stat tables so new records reuse the same stable ordering.
+- When summarizing coverage across a catalog, populate a map keyed by sanitized
+  identifiers first, then derive sorted arrays so registration order never
+  affects deterministic expectations.
 - Prime grouping derives from the sanitized catalog (channels, buckets, etc.) so
   every group returns a stable bucket even before entries arrive.
 

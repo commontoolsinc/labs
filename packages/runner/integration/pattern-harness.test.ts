@@ -299,6 +299,9 @@ import {
   scenarios as contentPublishingWorkflowScenarios,
 } from "./patterns/content-publishing-workflow.ts";
 import {
+  scenarios as componentLibraryCatalogScenarios,
+} from "./patterns/component-library-catalog.ts";
+import {
   scenarios as editorialCalendarScenarios,
 } from "./patterns/editorial-calendar.ts";
 import {
@@ -402,6 +405,7 @@ const allScenarios = [
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,
+  ...componentLibraryCatalogScenarios,
   ...editorialCalendarScenarios,
   ...documentSignatureWorkflowScenarios,
   ...educationCoursePlannerScenarios,
