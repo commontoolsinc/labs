@@ -153,7 +153,7 @@ current offline harness.
       ensure state unchanged.
 - [x] Counter with fallback defaults for sparse arrays — ensure gaps filled with
       default cells.
-- [ ] Markdown preview toggle pattern — switch raw text and preview ensure
+- [x] Markdown preview toggle pattern — switch raw text and preview ensure
       formatting derive updates when handlers change content.
 - [ ] Form wizard stepper pattern — advance gated multi-step flows ensure
       invalid steps halt progress until fixes arrive.

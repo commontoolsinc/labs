@@ -344,6 +344,9 @@ import {
   scenarios as logisticsRoutingScenarios,
 } from "./patterns/logistics-routing.ts";
 import {
+  scenarios as markdownPreviewToggleScenarios,
+} from "./patterns/markdown-preview-toggle.ts";
+import {
   scenarios as calendarAvailabilityScenarios,
 } from "./patterns/calendar-availability.ts";
 import {
@@ -426,6 +429,7 @@ const allScenarios = [
   ...goalProgressTrackerScenarios,
   ...warehouseBinMapScenarios,
   ...logisticsRoutingScenarios,
+  ...markdownPreviewToggleScenarios,
   ...researchCitationManagerScenarios,
   ...surveyResponseAnalyzerScenarios,
   ...recipeIngredientScalerScenarios,
