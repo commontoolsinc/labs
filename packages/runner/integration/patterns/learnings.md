@@ -99,6 +99,8 @@ offline-friendly recipes that the harness can assert confidently.
   percentages stay consistent after handler-driven weight updates.
 - Mirror tiered summaries from the same sanitized list so count labels and
   grouped arrays stay aligned when handlers promote entries between buckets.
+- Drive display toggles from the same sanitized source cells so mode switches
+  never diverge between raw text and formatted derives.
 - When layering nested percentages, reuse a shared lift for sanitized totals so
   both group- and item-level ratios stay aligned without duplicate math.
 - Clamp sequential ratio derives before formatting so percent labels remain
