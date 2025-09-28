@@ -78,6 +78,9 @@ offline-friendly recipes that the harness can assert confidently.
   after fallback entries populate missing items.
 - Keep history or audit logs append-only and sanitized; store formatted strings
   or structured entries that can be asserted deterministically.
+- Preserve weighted totals alongside counts when deriving moving averages so
+  sliding windows can reuse sanitized sums instead of recalculating from raw
+  entries.
 - Seed mutable log cells separately from their initial derived entry so handlers
   write into the history while a lift combines sanitized arguments with the
   recorded events.
