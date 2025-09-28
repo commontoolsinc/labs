@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "./pattern-harness.ts";
 import {
+  scenarios as assignmentGradingMatrixScenarios,
+} from "./patterns/assignment-grading-matrix.ts";
+import {
   scenarios as boundedCounterScenarios,
 } from "./patterns/bounded-counter.ts";
 import {
@@ -377,6 +380,7 @@ const allScenarios = [
   ...nestedCounterScenarios,
   ...composedCounterScenarios,
   ...listManagerScenarios,
+  ...assignmentGradingMatrixScenarios,
   ...libraryCheckoutSystemScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...vendorRiskAssessmentScenarios,

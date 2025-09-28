@@ -239,7 +239,7 @@ current offline harness.
       eligible list responds to criteria toggles.
 - [x] Education course planner pattern — arrange course modules ensure derived
       timeline updates when modules reorder.
-- [ ] Assignment grading matrix pattern — record student grades ensure derived
+- [x] Assignment grading matrix pattern — record student grades ensure derived
       averages compute per student and assignment.
 - [ ] Student attendance tracker pattern — track attendance logs ensure derived
       summaries highlight absences per session.
