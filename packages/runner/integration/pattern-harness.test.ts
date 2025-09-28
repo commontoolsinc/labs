@@ -293,6 +293,9 @@ import {
 } from "./patterns/quote-configuration.ts";
 import { scenarios as crmPipelineScenarios } from "./patterns/crm-pipeline.ts";
 import {
+  scenarios as customerSatisfactionTrackerScenarios,
+} from "./patterns/customer-satisfaction-tracker.ts";
+import {
   scenarios as templateGalleryScenarios,
 } from "./patterns/template-gallery.ts";
 import {
@@ -412,6 +415,7 @@ const allScenarios = [
   ...notificationPreferenceScenarios,
   ...quoteConfigurationScenarios,
   ...crmPipelineScenarios,
+  ...customerSatisfactionTrackerScenarios,
   ...templateGalleryScenarios,
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,

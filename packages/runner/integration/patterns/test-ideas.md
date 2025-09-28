@@ -281,7 +281,7 @@ current offline harness.
       strings milestones with annotations.
 - [x] Survey response analyzer pattern — analyze survey data ensure derived
       stats compute per question and demographic.
-- [ ] Customer satisfaction tracker pattern — track csat trends ensure derived
+- [x] Customer satisfaction tracker pattern — track csat trends ensure derived
       moving averages update with new survey entries.
 - [x] Lead scoring pattern — score leads on signals ensure derived weights
       adjust totals per signal mutation.
