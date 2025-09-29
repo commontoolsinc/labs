@@ -51,7 +51,6 @@ const configs: FixtureConfig[] = [
   {
     directory: "closures",
     describe: "Closure Transformation",
-    transformerOptions: { applySchemaTransformer: true },
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
     groups: [
       { pattern: /^map-/, name: "Map callbacks" },
