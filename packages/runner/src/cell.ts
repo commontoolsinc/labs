@@ -670,7 +670,9 @@ export class RegularCell<T> implements Cell<T> {
 
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options) as
+
+    const tx = this.runtime.readTx(this.tx);
+    return tx.readValueOrThrow(resolveLink(tx, this.link, "top"), options) as
       | Immutable<T>
       | undefined;
   }
