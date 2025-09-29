@@ -144,3 +144,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   complete style string including the visibility toggle in a single `lift` that
   takes all dependencies as an object parameter - this ensures proper reactive
   updates when any dependency changes.
+- When rendering lists with `lift`, use `.map()` to create JSX elements for each
+  item. Remember to include a `key` attribute on each mapped element for proper
+  rendering. For empty states, return a placeholder message element from the
+  lift function.
+- Progress bars and percentage displays work well with `lift` functions that
+  compute ratios from multiple cells passed as an object parameter. Bind the
+  resulting style string to the progress bar's inner element for smooth animated
+  transitions.
+- For patterns tracking audit data or statistics with multiple fields, define an
+  interface for the audit record structure and use `lift` to safely access and
+  format those fields for display. This keeps the UI robust against undefined
+  values.
