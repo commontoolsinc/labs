@@ -198,3 +198,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   different states rather than just changing individual properties. Each branch
   can have its own complete set of properties (header, variant, description,
   etc.).
+- When rendering complex nested structures (like groups containing arrays of
+  entries) inside a `lift`, compute all dynamic values as plain variables BEFORE
+  the JSX return statement. This prevents "Can't read value during recipe
+  creation" errors. Use string concatenation with `+` instead of template
+  literals, and call `String()` on numeric values before interpolation.
+- For patterns with deeply nested data structures rendered via `lift`, extract
+  inner collections into separate mapping operations with their own variable
+  assignments. Build the JSX from the inside out, storing intermediate results
+  (like `entryElements`) before composing the outer structure.
+- When a `lift` renders an empty state vs. actual data, check both null/
+  undefined and array length before attempting to map. Use
+  `if (!form ||
+  !Array.isArray(form.groups) || form.groups.length === 0)` for
+  robust empty state detection.
