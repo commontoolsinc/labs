@@ -44,6 +44,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   the shared state mutation into a plain helper (e.g. `applyIncrementToState`)
   and call that from both places; invoking the original handler factory from
   another handler still surfaces `TypeError: ... is not a function` at runtime.
+- Avoid using boolean expressions like `{childCount > 0 && <Button />}` directly
+  in JSX when `childCount` is a `Cell` - this will render "false" when the
+  condition fails. Instead, use `lift` with a derived boolean, then
+  conditionally hide elements with
+  `style={lift((show) => show ? "display: block;" : "display:
+  none;")(derivedBool)}`
+  or return `null` from the lift function.
+- When dynamically creating child recipes in a `lift`, remember that each
+  invocation recreates all children from scratch with their initial values - any
+  runtime state changes (like incremented counters) will be lost when the parent
+  configuration changes. This is expected behavior for parameterized patterns.
 
 ## Guidelines for UI code
 
