@@ -236,3 +236,17 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Side-by-side layouts for dual counter patterns work well with CSS Grid's
   two-column layout. Use colored borders (e.g., blue for primary, pink for
   secondary) to visually distinguish the controls while maintaining symmetry.
+- When you need multiple buttons that call the same handler with different
+  parameters, create separate handler functions for each button rather than
+  trying to use inline functions or event attributes. Each handler should be
+  defined at the recipe level with `handler()` and then invoked with the
+  necessary cells in context.
+- For patterns with preset configuration options (like step sizes 1, 5, 10, 25,
+  100), individual handlers for each preset provide the clearest, most
+  maintainable approach. While this creates more handler definitions, it avoids
+  runtime complexity and keeps the JSX simple with straightforward `onClick`
+  bindings.
+- When handlers update both a primary cell and a UI input field (like syncing
+  step size to the custom input), both updates should happen in the same handler
+  to maintain consistency. This prevents drift between the actual state and
+  what's shown in input fields.
