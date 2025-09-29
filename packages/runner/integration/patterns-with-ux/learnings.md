@@ -302,3 +302,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   when the included filter is empty, and "All values meet the threshold" when
   the excluded filter is empty. This helps users understand why sections are
   empty.
+- For grouped summary patterns displaying aggregations, a three-column stats
+  layout (Total, Count, Average) within each group card provides a complete
+  picture of the data. Computing the average as `total / count` and formatting
+  it consistently with the total helps users compare groups.
+- Grid layouts with
+  `grid-template-columns: repeat(auto-fill, minmax(280px,
+  1fr))` work well for
+  group summary cards, allowing them to reflow responsively while maintaining
+  readable card widths for the stat displays.
+- When rendering entry lists with group associations, displaying both the group
+  name and value side-by-side helps users quickly scan which entries belong to
+  which group. A simple flex layout with space-between keeps the value visually
+  prominent on the right.
+- For patterns with "dominant" or "winning" group calculations, showing both the
+  group name and its total value in the display (e.g., "alpha (15)") provides
+  context for why it's dominant, especially in tie scenarios.
