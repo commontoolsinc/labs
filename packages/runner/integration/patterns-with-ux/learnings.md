@@ -250,3 +250,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   step size to the custom input), both updates should happen in the same handler
   to maintain consistency. This prevents drift between the actual state and
   what's shown in input fields.
+- When passing multiple derived cells to a `lift` function, wrap them in an
+  object parameter (e.g.,
+  `{ blocked: blockedAttempts, applied: appliedAttempts
+  }`) rather than
+  passing them as separate positional arguments. This avoids "undefined" values
+  appearing in the UI and ensures all dependencies are properly tracked.
+- For patterns that track attempt history (successful vs. blocked operations),
+  use color-coded visual feedback: green backgrounds for successful operations,
+  red backgrounds for blocked ones. This makes the pattern's behavior
+  immediately clear to users.
