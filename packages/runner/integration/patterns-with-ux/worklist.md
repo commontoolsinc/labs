@@ -3,7 +3,7 @@
 Track progress converting existing integration patterns to include UI harnesses.
 Check off each pattern after the agent delivers UI, screenshots, and tests.
 
-- [ ] asset-lifecycle-tracker
+- [x] asset-lifecycle-tracker
 - [x] bounded-counter
 - [ ] budget-planner
 - [ ] calendar-availability
