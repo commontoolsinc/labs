@@ -156,3 +156,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   interface for the audit record structure and use `lift` to safely access and
   format those fields for display. This keeps the UI robust against undefined
   values.
+- Avoid using template literals with `${}` syntax directly in JSX style
+  attributes inside `lift` functions. Instead, compute the dynamic values as
+  variables first, then concatenate them with strings using `+`. This prevents
+  `ReferenceError: style is not defined` errors during recipe compilation.
+- When rendering collections with `.map()` inside a `lift`, compute all dynamic
+  style values (colors, widths, etc.) as plain variables before the JSX return
+  statement. This keeps the JSX clean and avoids scope issues with template
+  literals.
+- For budget/allocation patterns with multiple categories, using a grid layout
+  with `grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))` creates a
+  responsive card layout that adapts to different screen sizes.
+- Visual indicators for variance (positive/negative deltas from targets) work
+  well with conditional color logic computed before the JSX. Use distinct colors
+  for negative (red), positive (green), and neutral (gray) variances.
+- History/action logs displayed in reverse chronological order
+  (`.slice().reverse()`) provide better UX, showing the most recent action
+  first. Limit history length in the handler (e.g., keep last 6 entries) to
+  prevent unbounded growth.
