@@ -1,17 +1,17 @@
 import ts from "typescript";
-import type { OpaqueRefRule } from "../../opaque-ref/rules/jsx-expression.ts";
+import type { ClosureRule } from "../types.ts";
 import type { TransformationContext } from "../../core/context.ts";
 import { containsOpaqueRef } from "../../opaque-ref/types.ts";
 
 /**
  * Detects captured variables in a function using TypeScript's symbol table.
- * Returns all captured identifiers (both reactive and non-reactive).
+ * Returns all captured expressions (both reactive and non-reactive).
  */
 function collectCaptures(
   func: ts.FunctionLikeDeclaration,
   checker: ts.TypeChecker,
-): Set<ts.Identifier> {
-  const captures = new Set<ts.Identifier>();
+): Set<ts.Expression> {
+  const captures = new Set<ts.Expression>();
 
   function isNodeWithin(node: ts.Node, container: ts.Node): boolean {
     let current = node;
@@ -23,7 +23,42 @@ function collectCaptures(
   }
 
   function visit(node: ts.Node) {
+    // For property access like state.discount, capture the whole expression
+    if (ts.isPropertyAccessExpression(node)) {
+      // Get the root object (e.g., 'state' in 'state.discount')
+      let root = node.expression;
+      while (ts.isPropertyAccessExpression(root)) {
+        root = root.expression;
+      }
+
+      if (ts.isIdentifier(root)) {
+        const symbol = checker.getSymbolAtLocation(root);
+        if (!symbol) return;
+
+        const declarations = symbol.getDeclarations();
+        if (!declarations || declarations.length === 0) return;
+
+        // Check if declared outside the function
+        const isDeclaredOutside = declarations.some(
+          (decl) => !isNodeWithin(decl, func),
+        );
+
+        if (isDeclaredOutside) {
+          // Capture the whole property access expression
+          captures.add(node);
+          // Don't visit children of this property access
+          return;
+        }
+      }
+    }
+
+    // For plain identifiers
     if (ts.isIdentifier(node)) {
+      // Skip if this is part of a property access (handled above)
+      if (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+        return;
+      }
+
       const symbol = checker.getSymbolAtLocation(node);
       if (!symbol) return;
 
@@ -39,6 +74,7 @@ function collectCaptures(
         captures.add(node);
       }
     }
+
     ts.forEachChild(node, visit);
   }
 
@@ -106,8 +142,8 @@ function transformMapCallback(
 
   // Import recipe
   imports.request({
-    module: "@commontools/runtime",
     name: "recipe",
+    // module defaults to "commontools"
   });
 
   // Transform the callback parameters
@@ -261,7 +297,7 @@ function isNodeWithin(node: ts.Node, container: ts.Node): boolean {
   return false;
 }
 
-export function createClosureTransformRule(): OpaqueRefRule {
+export function createClosureTransformRule(): ClosureRule {
   return {
     name: "closure-transform",
     transform(

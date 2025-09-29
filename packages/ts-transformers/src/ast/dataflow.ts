@@ -170,6 +170,39 @@ export function createDataFlowAnalyzer(
     scope: DataFlowScopeInternal,
     context: AnalyzerContext,
   ): InternalAnalysis => {
+    // Handle synthetic nodes (created by previous transformers)
+    // We can't analyze them directly, but we need to visit children
+    if (!expression.getSourceFile()) {
+      // Collect analyses from all children
+      const childAnalyses: InternalAnalysis[] = [];
+
+      ts.forEachChild(expression, (child) => {
+        if (ts.isExpression(child)) {
+          childAnalyses.push(analyzeExpression(child, scope, context));
+        }
+      });
+
+      // Inherit properties from children
+      if (childAnalyses.length > 0) {
+        const merged = mergeAnalyses(...childAnalyses);
+        return {
+          ...merged,
+          // Synthetic nodes themselves never require rewrite
+          // (they're already transformed)
+          requiresRewrite: false,
+        };
+      }
+
+      // No children with analysis
+      return {
+        containsOpaqueRef: false,
+        requiresRewrite: false,
+        dataFlows: [],
+        localNodes: [],
+        rewriteHint: undefined,
+      };
+    }
+
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
       if (scope.aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
