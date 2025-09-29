@@ -323,6 +323,9 @@ import {
   scenarios as documentSignatureWorkflowScenarios,
 } from "./patterns/document-signature-workflow.ts";
 import {
+  scenarios as formWizardStepperScenarios,
+} from "./patterns/form-wizard-stepper.ts";
+import {
   scenarios as userJourneyMapScenarios,
 } from "./patterns/user-journey-map.ts";
 import {
@@ -433,6 +436,7 @@ const allScenarios = [
   ...componentLibraryCatalogScenarios,
   ...editorialCalendarScenarios,
   ...documentSignatureWorkflowScenarios,
+  ...formWizardStepperScenarios,
   ...educationCoursePlannerScenarios,
   ...userJourneyMapScenarios,
   ...userPermissionMatrixScenarios,

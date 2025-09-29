@@ -52,6 +52,9 @@ offline-friendly recipes that the harness can assert confidently.
 - When handler logic depends on argument cells and internal aggregates,
   re-sanitize the argument cells inside the handler before writing so newly
   created entries share the same canonical structure as derived views.
+- Gate multi-step navigation inside handlers so validation failures can still
+  store canonical state while surfacing deterministic block reasons the harness
+  can assert.
 - When argument cells double as mutable state, write the canonicalized entries
   back into that argument cell and keep consumers on a sanitized `lift` view so
   initialization never needs to read values during recipe creation.
