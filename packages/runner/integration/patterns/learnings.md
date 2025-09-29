@@ -95,6 +95,8 @@ offline-friendly recipes that the harness can assert confidently.
   mid-run.
 - Build live queues with derives so priority/schedule ordering stays consistent
   without mutating the underlying source list inside handlers.
+- When surfacing per-entity summaries, reuse the sanitized source ordering so
+  deterministic arrays stay stable regardless of event insertion order.
 - Expose selected child metadata via a derive that inspects sanitized lists so
   index changes always follow the updated ordering without extra handlers.
 - Pre-build categorical buckets before populating them inside `lift` so empty
