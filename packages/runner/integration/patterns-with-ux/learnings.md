@@ -174,3 +174,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   (`.slice().reverse()`) provide better UX, showing the most recent action
   first. Limit history length in the handler (e.g., keep last 6 entries) to
   prevent unbounded growth.
+- When working with conditional child instantiation patterns, avoid calling
+  `.set()` on cells inside `lift` functions - lifts are for deriving values, not
+  side effects. If you need to track metadata about child creation (like seed
+  values), handle it in handlers or compute effects rather than trying to mutate
+  state within lifts.
+- For patterns that dynamically create/destroy child recipes, focus the UI on
+  showing the lifecycle state (present/absent) rather than trying to reactively
+  read derived values from child recipe instances. Child recipe outputs are best
+  accessed through their exposed schema rather than by trying to peek into their
+  internal derived state from the parent's lift functions.
