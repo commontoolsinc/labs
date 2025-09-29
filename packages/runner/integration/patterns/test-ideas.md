@@ -35,7 +35,7 @@ current offline harness.
       numeric ranges.
 - [x] Counter reset control — add reset handler that re-applies defaults and
       verify state resets.
-- [ ] Counter persistence via initial argument defaults — simulate persisted
+- [x] Counter persistence via initial argument defaults — simulate persisted
       state by passing populated argument map and confirming default skip.
 - [ ] Rolling average counter — maintain array of recent values and derive
       average cell.
