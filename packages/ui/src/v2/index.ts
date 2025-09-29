@@ -75,6 +75,7 @@ export * from "./components/ct-message-input/ct-message-input.ts";
 export * from "./components/ct-prompt-input/index.ts";
 export * from "./components/ct-outliner/index.ts";
 export * from "./components/ct-keybind/index.ts";
+export * from "./components/ct-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";
 export * from "./components/keyboard-router.ts";
 

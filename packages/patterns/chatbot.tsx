@@ -132,6 +132,7 @@ export default recipe<ChatInput, ChatOutput>(
         <ct-screen>
           <ct-hstack justify="between" slot="header">
             <ct-heading level={4}>{title}</ct-heading>
+            <ct-tools-chip tools={tools} />
           </ct-hstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>

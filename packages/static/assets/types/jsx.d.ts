@@ -156,6 +156,21 @@ declare global {
         "multiple"?: boolean,
         "onct-change"?: OpaqueRef<HandlerEvent<{ items: { label: string, value: any }[], value: any | any[] }>>,
       } & Children & HTMLElementProps;
+      "ct-tools-chip": {
+        "label"?: string,
+        "show-count"?: boolean,
+        "open-on-hover"?: boolean,
+        "toggle-on-click"?: boolean,
+        "close-delay"?: number,
+        /**
+         * Accepts either:
+         * - Array: { name, description?, schema? }[]
+         * - Native map: { [toolName]: { handler?: any, pattern?: any } | any }
+         */
+        "tools"?:
+          | { name: string, description?: string, schema?: unknown }[]
+          | Record<string, { handler?: unknown; pattern?: unknown } | any>,
+      } & Children & HTMLElementProps;
       "ct-heading": {
         "level"?: number,
         "no-margin"?: boolean,
