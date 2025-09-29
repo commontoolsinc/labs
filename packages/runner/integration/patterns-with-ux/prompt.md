@@ -17,6 +17,8 @@ Steps:
 
 1. Open `packages/runner/integration/patterns-with-ux/worklist.md` and pick ONE
    unchecked entry at random. Only work on that pattern during this run.
+   - You can use
+     `grep '^- \[ \]' packages/runner/integration/patterns-with-ux/worklist.md | sort -R | head -n 1`
 2. Inspect the existing business-logic recipe in
    `packages/runner/integration/patterns/<pattern>.pattern.ts` (plus its
    scenario file, if helpful) to understand inputs, derives, and handlers.
