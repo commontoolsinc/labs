@@ -136,3 +136,11 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns that track transitions or history, make sure to update both the
   primary state cell and the history cell within the same handler to keep
   derived boundaries in sync.
+- When combining multiple derived cells into a single style string, pass them as
+  an object to a single `lift` function rather than calling `.get()` inside the
+  lift - this keeps everything reactive and avoids runtime errors about
+  undefined values.
+- For conditional UI elements (like showing/hiding based on state), compute the
+  complete style string including the visibility toggle in a single `lift` that
+  takes all dependencies as an object parameter - this ensures proper reactive
+  updates when any dependency changes.
