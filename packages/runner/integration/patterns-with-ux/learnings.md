@@ -376,3 +376,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   hierarchical relationships. Use distinct colors for different clusters/groups
   (e.g., blue for one cluster, red for another) with colored borders and
   indicator dots to create clear visual groupings.
+- For history tracking patterns with bar chart visualizations, compute all
+  dynamic styling (colors, heights, backgrounds) as plain variables before JSX
+  to avoid template literal scope issues. Use `Math.max(...array.map())` to
+  calculate relative scaling for consistent bar height visualization.
+- When rendering history arrays in reverse chronological order with bar charts,
+  use color-coding to distinguish positive (green) vs negative (red) values.
+  Computing percentage-based heights relative to the maximum absolute value
+  creates a clear visual comparison across all entries.
+- History visualization patterns work well with horizontal scrollable containers
+  (`overflow-x: auto`) that display bars side-by-side, allowing users to scan
+  through the timeline naturally from newest (left) to oldest (right) after
+  reversing the array.
