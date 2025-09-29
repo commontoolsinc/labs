@@ -211,7 +211,23 @@ export function getNativeTypeSchema(
  */
 export function getNamedTypeKey(
   type: ts.Type,
+  typeNode?: ts.TypeNode,
 ): string | undefined {
+  // Check if the TypeNode indicates this is a wrapper type (Default/Cell/Stream)
+  // Even if the type symbol says it's the inner type, if it's wrapped we shouldn't hoist it
+  if (typeNode && ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    const nodeTypeName = typeNode.typeName.text;
+    if (nodeTypeName === "Default" || nodeTypeName === "Cell" || nodeTypeName === "Stream") {
+      return undefined;
+    }
+  }
+
+  // Check if this is a Default/Cell/Stream wrapper type via alias
+  const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+  if (aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream") {
+    return undefined;
+  }
+
   // Prefer direct symbol name; fall back to target symbol for TypeReference
   const symbol = type.symbol;
   let name = symbol?.name;
@@ -220,12 +236,13 @@ export function getNamedTypeKey(
     const ref = type as unknown as ts.TypeReference;
     name = ref.target?.symbol?.name ?? name;
   }
-  // Fall back to alias symbol when present (type aliases)
-  if (!name) {
-    const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
-    if (aliasName) name = aliasName;
+  // Fall back to alias symbol when present (type aliases) if we haven't used it yet
+  if (!name && aliasName) {
+    name = aliasName;
   }
-  if (!name || name === "__type") return undefined;
+  if (!name || name === "__type") {
+    return undefined;
+  }
   // Exclude property/method-like symbols (member names), which are not real named types
   const symFlags = symbol?.flags ?? 0;
   if (

@@ -156,7 +156,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
     // into definitions and return $ref for non-root uses. Cycle detection
     // still applies via definitionStack.
-    let namedKey = getNamedTypeKey(type);
+    let namedKey = getNamedTypeKey(type, context.typeNode);
     if (!namedKey) {
       const synthetic = context.anonymousNames.get(type);
       if (synthetic) namedKey = synthetic;

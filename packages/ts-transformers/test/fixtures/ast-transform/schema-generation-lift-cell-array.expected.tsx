@@ -34,26 +34,20 @@ const logCharmsList = lift({
         }
     }
 } as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
     type: "array",
     items: {
-        $ref: "#/definitions/CharmEntry"
-    },
-    asCell: true,
-    definitions: {
-        CharmEntry: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "string"
-                },
-                name: {
-                    type: "string"
-                }
+        type: "object",
+        properties: {
+            id: {
+                type: "string"
             },
-            required: ["id", "name"]
-        }
-    }
+            name: {
+                type: "string"
+            }
+        },
+        required: ["id", "name"]
+    },
+    asCell: true
 } as const satisfies JSONSchema, ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
