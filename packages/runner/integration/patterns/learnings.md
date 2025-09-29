@@ -160,6 +160,9 @@ offline-friendly recipes that the harness can assert confidently.
 - Accumulate sequential timelines with a single `lift` that sums durations so
   reorder handlers only update the source array while derives recompute offsets
   deterministically.
+- When scenarios stage new arguments mid-run, keep runtime state in dedicated
+  cells and route the adoption through a handler so harness writes can queue
+  inputs without mutating the live projection prematurely.
 
 ## Reuse & Abstractions
 
