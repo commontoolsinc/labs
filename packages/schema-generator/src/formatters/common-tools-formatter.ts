@@ -250,7 +250,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (defaultValue !== undefined) {
       // If the schema is a $ref, we can't add properties directly to it.
       // Use allOf to combine the $ref with the default value.
-      if (typeof valueSchema === "object" && valueSchema !== null && "$ref" in valueSchema) {
+      if (
+        typeof valueSchema === "object" && valueSchema !== null &&
+        "$ref" in valueSchema
+      ) {
         const result = {
           allOf: [valueSchema],
           default: defaultValue,

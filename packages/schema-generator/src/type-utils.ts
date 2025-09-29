@@ -215,16 +215,24 @@ export function getNamedTypeKey(
 ): string | undefined {
   // Check if the TypeNode indicates this is a wrapper type (Default/Cell/Stream)
   // Even if the type symbol says it's the inner type, if it's wrapped we shouldn't hoist it
-  if (typeNode && ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+  if (
+    typeNode && ts.isTypeReferenceNode(typeNode) &&
+    ts.isIdentifier(typeNode.typeName)
+  ) {
     const nodeTypeName = typeNode.typeName.text;
-    if (nodeTypeName === "Default" || nodeTypeName === "Cell" || nodeTypeName === "Stream") {
+    if (
+      nodeTypeName === "Default" || nodeTypeName === "Cell" ||
+      nodeTypeName === "Stream"
+    ) {
       return undefined;
     }
   }
 
   // Check if this is a Default/Cell/Stream wrapper type via alias
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
-  if (aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream") {
+  if (
+    aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream"
+  ) {
     return undefined;
   }
 
