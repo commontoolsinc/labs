@@ -45,7 +45,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-matrix-state
 - [ ] counter-mutable-tuple
 - [ ] counter-nested-array-objects
-- [ ] counter-nested-derive-watchers
+- [x] counter-nested-derive-watchers
 - [ ] counter-nested-handler-composition
 - [x] counter-nested-optional-cells
 - [x] counter-nested-parameterized
