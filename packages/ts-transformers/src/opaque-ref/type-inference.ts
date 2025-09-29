@@ -60,7 +60,7 @@ export function inferParameterType(
 }
 
 /**
- * Infer return type from function signature, with body fallback
+ * Infer return type from function signature
  * Returns undefined if the type cannot be inferred or is 'any'/'unknown'
  */
 export function inferReturnType(
@@ -70,36 +70,12 @@ export function inferReturnType(
 ): ts.Type | undefined {
   const returnType = checker.getReturnTypeOfSignature(signature);
 
-  // If return type is 'any', try inferring from body
+  // Don't use any/unknown types
   if (isAnyOrUnknownType(returnType)) {
-    return inferReturnTypeFromBody(fn, checker);
+    return undefined;
   }
 
   return returnType;
-}
-
-/**
- * Infer return type by looking at function body
- */
-export function inferReturnTypeFromBody(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
-  checker: ts.TypeChecker,
-): ts.Type | undefined {
-  const body = fn.body;
-  if (!body) return undefined;
-
-  if (ts.isBlock(body)) {
-    // Look for return statements in block body
-    for (const statement of body.statements) {
-      if (ts.isReturnStatement(statement) && statement.expression) {
-        return checker.getTypeAtLocation(statement.expression);
-      }
-    }
-    return undefined; // No return statement found
-  }
-
-  // Arrow function with expression body
-  return checker.getTypeAtLocation(body);
 }
 
 /**
