@@ -47,7 +47,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-nested-array-objects
 - [ ] counter-nested-derive-watchers
 - [ ] counter-nested-handler-composition
-- [ ] counter-nested-optional-cells
+- [x] counter-nested-optional-cells
 - [ ] counter-nested-parameterized
 - [ ] counter-nested-stream
 - [ ] counter-no-op-events

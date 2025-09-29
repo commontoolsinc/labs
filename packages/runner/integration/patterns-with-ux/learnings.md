@@ -29,6 +29,10 @@ Add short notes after each run so the next agent can build on proven approaches.
   `handler` that takes the same cells instead of closing over the original
   callable; otherwise runtime errors like `TypeError: resize is not a function`
   can pop up once Playwright exercises the controls.
+- If you need to reuse a business handler's logic inside new UI actions, factor
+  the shared state mutation into a plain helper (e.g. `applyIncrementToState`)
+  and call that from both places; invoking the original handler factory from
+  another handler still surfaces `TypeError: ... is not a function` at runtime.
 
 ## Guidelines for UI code
 
