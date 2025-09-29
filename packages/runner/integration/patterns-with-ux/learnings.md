@@ -328,3 +328,18 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns with "dominant" or "winning" group calculations, showing both the
   group name and its total value in the display (e.g., "alpha (15)") provides
   context for why it's dominant, especially in tie scenarios.
+- When creating dynamic handler lists where handlers are generated per-item in a
+  collection, pass the cells directly (not derived values) to the handler
+  factory within the `lift` function. The framework handles Cell/OpaqueRef
+  conversion automatically, so `adjustValue({ values, slotIndex: index, ... })`
+  works correctly even when called from within a lift that receives the derived
+  array.
+- For patterns displaying adjustment history with positive/negative changes, use
+  conditional color coding computed before JSX: green for positive amounts, red
+  for negative, gray for zero. String concatenation for the sign display ("+",
+  "-", or "±") provides clear visual feedback in compact space.
+- When rendering dynamic collections of slots/items that each have their own
+  handlers, the `lift` function should focus on transforming the data and
+  creating the handler references - it doesn't need to receive all the context
+  cells separately. Pass the cells once to the adjustment handler factory, and
+  reference them by index within the lift's mapping operation.
