@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isOpaqueRefType } from "./types.ts";
 
 /**
  * Type inference utilities for function signatures
@@ -92,4 +93,91 @@ export function typeToTypeNode(
   } catch (_error) {
     return undefined;
   }
+}
+
+/**
+ * Extract the first type argument from a TypeReference or type alias
+ * Used to unwrap generic types like OpaqueRef<T> to get T
+ */
+export function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
+  if ("aliasTypeArguments" in type && type.aliasTypeArguments) {
+    const [arg] = type.aliasTypeArguments;
+    if (arg) return arg;
+  }
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const ref = objectType as ts.TypeReference;
+      if (ref.typeArguments && ref.typeArguments.length > 0) {
+        return ref.typeArguments[0];
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Unwrap OpaqueRef-like types to get the underlying type
+ * Handles unions, intersections, and nested OpaqueRef types
+ * @param seen - Set to track visited types and prevent infinite recursion
+ */
+export function unwrapOpaqueLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Type>(),
+): ts.Type | undefined {
+  if (!type) return undefined;
+  if (seen.has(type)) return type;
+  seen.add(type);
+
+  if (type.isUnion()) {
+    const unwrapped = type.types.map((candidate) =>
+      unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
+    );
+    const merged = (checker as ts.TypeChecker & {
+      getUnionType?: (types: readonly ts.Type[], node?: ts.Node) => ts.Type;
+    }).getUnionType?.(unwrapped) ?? type;
+    return merged;
+  }
+
+  if (type.isIntersection()) {
+    const intersection = (checker as ts.TypeChecker & {
+      getIntersectionType?: (types: readonly ts.Type[]) => ts.Type;
+    }).getIntersectionType;
+    if (intersection) {
+      const parts = type.types.map((candidate) =>
+        unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
+      );
+      return intersection(parts);
+    }
+    return type;
+  }
+
+  if (isOpaqueRefType(type, checker)) {
+    const inner = unwrapOpaqueLikeType(
+      getTypeReferenceArgument(type),
+      checker,
+      seen,
+    );
+    if (inner) return inner;
+  }
+
+  return type;
+}
+
+/**
+ * Convert a TypeScript type to a TypeNode, unwrapping OpaqueRef types first
+ * This is the main entry point for converting inferred types to schema TypeNodes
+ */
+export function typeToSchemaTypeNode(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+): ts.TypeNode | undefined {
+  const normalized = unwrapOpaqueLikeType(type, checker);
+  if (!normalized) {
+    return undefined;
+  }
+  const result = typeToTypeNode(normalized, checker, location);
+  return result;
 }

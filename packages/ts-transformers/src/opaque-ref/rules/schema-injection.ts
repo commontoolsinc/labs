@@ -9,11 +9,9 @@ import {
   inferReturnType,
   isAnyOrUnknownType,
   typeToTypeNode,
+  typeToSchemaTypeNode,
 } from "../type-inference.ts";
 import type { TypeRegistry } from "../../core/type-registry.ts";
-
-const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
-  ts.NodeBuilderFlags.UseStructuralFallback;
 
 function isFunctionLikeExpression(
   expression: ts.Expression,
@@ -38,80 +36,6 @@ function isInsideJsx(node: ts.Node): boolean {
     current = current.parent;
   }
   return false;
-}
-
-function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
-  if ("aliasTypeArguments" in type && type.aliasTypeArguments) {
-    const [arg] = type.aliasTypeArguments;
-    if (arg) return arg;
-  }
-  if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const ref = objectType as ts.TypeReference;
-      if (ref.typeArguments && ref.typeArguments.length > 0) {
-        return ref.typeArguments[0];
-      }
-    }
-  }
-  return undefined;
-}
-
-function unwrapOpaqueLikeType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-  seen = new Set<ts.Type>(),
-): ts.Type | undefined {
-  if (!type) return undefined;
-  if (seen.has(type)) return type;
-  seen.add(type);
-
-  if (type.isUnion()) {
-    const unwrapped = type.types.map((candidate) =>
-      unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
-    );
-    const merged = (checker as ts.TypeChecker & {
-      getUnionType?: (types: readonly ts.Type[], node?: ts.Node) => ts.Type;
-    }).getUnionType?.(unwrapped) ?? type;
-    return merged;
-  }
-
-  if (type.isIntersection()) {
-    const intersection = (checker as ts.TypeChecker & {
-      getIntersectionType?: (types: readonly ts.Type[]) => ts.Type;
-    }).getIntersectionType;
-    if (intersection) {
-      const parts = type.types.map((candidate) =>
-        unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
-      );
-      return intersection(parts);
-    }
-    return type;
-  }
-
-  if (isOpaqueRefType(type, checker)) {
-    const inner = unwrapOpaqueLikeType(
-      getTypeReferenceArgument(type),
-      checker,
-      seen,
-    );
-    if (inner) return inner;
-  }
-
-  return type;
-}
-
-function typeToSchemaTypeNode(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-  location: ts.Node,
-): ts.TypeNode | undefined {
-  const normalized = unwrapOpaqueLikeType(type, checker);
-  if (!normalized) {
-    return undefined;
-  }
-  const result = typeToTypeNode(normalized, checker, location);
-  return result;
 }
 
 function collectFunctionSchemaTypeNodes(
