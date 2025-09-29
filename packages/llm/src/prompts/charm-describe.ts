@@ -43,7 +43,7 @@ Provide your one-sentence description inside <description> tags.
  * @param spec - The specification/description of the web application.
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
- * @param model - The model to use to generate the description. (default: "anthropic:claude-sonnet-4-0")
+ * @param model - The model to use to generate the description. (default: "anthropic:claude-sonnet-4-5")
  * @returns The generated description.
  */
 export async function describeCharm(

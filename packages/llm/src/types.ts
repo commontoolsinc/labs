@@ -6,7 +6,7 @@ import type {
   JSONSchema,
 } from "@commontools/api";
 
-export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-0";
+export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-5";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.

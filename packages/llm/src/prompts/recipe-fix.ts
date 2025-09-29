@@ -77,7 +77,7 @@ Remember to consider the context of the code running inside an iframe and ensure
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
  * @param error - The error stacktrace that resulted from running the code.
- * @param model - The model to use to generate the description. (default: "anthropic:claude-sonnet-4-0")
+ * @param model - The model to use to generate the description. (default: "anthropic:claude-sonnet-4-5")
  * @returns The recipe.
  */
 export async function fixRecipePrompt(

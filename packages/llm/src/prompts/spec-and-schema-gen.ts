@@ -242,13 +242,13 @@ ${
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
  * @param existingSchema Optional existing schema to use as a basis
- * @param model Optional model identifier to use (defaults to claude-sonnet-4-0)
+ * @param model Optional model identifier to use (defaults to claude-sonnet-4-5)
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchema(
   form: WorkflowForm,
   existingSchema?: JSONSchema,
-  model: string = "anthropic:claude-sonnet-4-0",
+  model: string = "anthropic:claude-sonnet-4-5",
 ): Promise<{
   spec: string;
   plan: string;
@@ -384,7 +384,7 @@ Based on this goal and the existing schema, please provide a title, description,
  * Generates a complete specification, schema, and plan from a goal.
  * @param goal The user's goal or request
  * @param existingSchema Optional existing schema to use as a basis
- * @param model Optional model identifier to use (defaults to claude-sonnet-4-0)
+ * @param model Optional model identifier to use (defaults to claude-sonnet-4-5)
  * @returns Object containing title, description, specification, schema
  */
 export async function generateSpecAndSchemaAndCode(
