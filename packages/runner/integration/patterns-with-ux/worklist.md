@@ -38,7 +38,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-grouped-summary
 - [x] counter-handler-spawn
 - [x] counter-hierarchical-defaults
-- [ ] counter-hierarchical-key-path
+- [x] counter-hierarchical-key-path
 - [ ] counter-history-tracker
 - [ ] counter-keyed-map
 - [ ] counter-lift-formatting
