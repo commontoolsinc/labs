@@ -250,6 +250,16 @@ Add short notes after each run so the next agent can build on proven approaches.
   step size to the custom input), both updates should happen in the same handler
   to maintain consistency. This prevents drift between the actual state and
   what's shown in input fields.
+- For hierarchical defaults patterns, keep the UI display-only to show how
+  settings resolve through multiple levels. Avoid trying to create editable
+  configuration UIs that mutate `Default<T>` typed cells, as the framework's
+  default resolution happens via `lift` and isn't designed for runtime mutation
+  of partial settings objects.
+- When interpolating cells inside JSX within `lift` functions, you cannot
+  reference cells directly in the JSX - they render as JSON strings. Instead,
+  pass cells as parameters to the lift and extract their values as function
+  arguments. Simple direct cell interpolation like `{myCell}` works fine in
+  top-level JSX outside of lifts.
 - When passing multiple derived cells to a `lift` function, wrap them in an
   object parameter (e.g.,
   `{ blocked: blockedAttempts, applied: appliedAttempts
