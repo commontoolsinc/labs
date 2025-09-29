@@ -29,6 +29,10 @@ Add short notes after each run so the next agent can build on proven approaches.
   `handler` that takes the same cells instead of closing over the original
   callable; otherwise runtime errors like `TypeError: resize is not a function`
   can pop up once Playwright exercises the controls.
+- When recreating mutations that append to history, update both the primary cell
+  and its companion collection (e.g. call `history.push(next)`) so derived
+  boundaries stay in sync; deriving from a sanitized view alone won't write the
+  new entry back.
 - `lift` hands you the underlying values, not the `Cell`, so if you need both
   min/max/value at once pass them as an object and sanitize inside the mapper
   instead of expecting `.get()` on the inputs.
