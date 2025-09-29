@@ -1,4 +1,8 @@
 /// <cts-enable />
-import { derive } from "commontools";
+import { derive, JSONSchema } from "commontools";
 declare const total: number;
-export const doubled = derive(total, (value) => value * 2);
+export const doubled = derive({
+    type: "number"
+} as const satisfies JSONSchema, {
+    type: "number"
+} as const satisfies JSONSchema, total, (value) => value * 2);

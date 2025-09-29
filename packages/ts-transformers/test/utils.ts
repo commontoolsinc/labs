@@ -5,6 +5,7 @@ import {
   createModularOpaqueRefTransformer,
   createSchemaTransformer,
 } from "../src/mod.ts";
+import { TypeRegistry } from "../src/core/type-registry.ts";
 import { assertDefined } from "../src/core/assert.ts";
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
@@ -166,14 +167,19 @@ export async function transformSource(
   const beforeTransformers = before.map((factory) => factory(program));
   const afterTransformers = after.map((factory) => factory(program));
 
+  // Create a TypeRegistry shared between OpaqueRef and Schema transformers
+  const typeRegistry = new TypeRegistry();
+
   const transformers: ts.TransformerFactory<ts.SourceFile>[] = [
     ...beforeTransformers,
   ];
   if (applyOpaqueRefTransformer) {
-    transformers.push(createModularOpaqueRefTransformer(program, { mode }));
+    transformers.push(
+      createModularOpaqueRefTransformer(program, { mode, typeRegistry }),
+    );
   }
   if (applySchemaTransformer) {
-    transformers.push(createSchemaTransformer(program));
+    transformers.push(createSchemaTransformer(program, { typeRegistry }));
   }
   transformers.push(...afterTransformers);
 

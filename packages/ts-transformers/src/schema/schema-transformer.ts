@@ -5,9 +5,11 @@ import {
   removeCommonToolsImport,
 } from "../core/common-tools-imports.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
+import type { TypeRegistry } from "../core/type-registry.ts";
 
 export interface SchemaTransformerOptions {
   logger?: (message: string) => void;
+  typeRegistry?: TypeRegistry;
 }
 
 export function createSchemaTransformer(
@@ -16,6 +18,7 @@ export function createSchemaTransformer(
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
   const logger = options.logger;
+  const typeRegistry = options.typeRegistry;
   const generateSchema = createSchemaTransformerV2();
 
   return (context: ts.TransformationContext) => (sourceFile: ts.SourceFile) => {
@@ -33,7 +36,16 @@ export function createSchemaTransformer(
         if (!typeArg) {
           return ts.visitEachChild(node, visit, context);
         }
-        const type = checker.getTypeFromTypeNode(typeArg);
+
+        // First check if we have a registered Type for this node
+        // (from schema-injection when synthetic TypeNodes were created)
+        let type: ts.Type;
+        if (typeRegistry && typeRegistry.has(node)) {
+          type = typeRegistry.get(node)!;
+        } else {
+          // Fall back to getting Type from TypeNode
+          type = checker.getTypeFromTypeNode(typeArg);
+        }
 
         if (logger) {
           let typeText = "unknown";

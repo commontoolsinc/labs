@@ -1,32 +1,22 @@
 /// <cts-enable />
 import { Cell, derive, h, handler, NAME, recipe, str, UI, JSONSchema } from "commontools";
-
-const adder = handler({
+const adder = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
         values: {
             type: "array",
             items: {
                 type: "string"
-            }
+            },
+            asCell: true
         }
     },
     required: ["values"]
-} as const satisfies JSONSchema, {
-    type: "object",
-    properties: {
-        values: {
-            type: "array",
-            items: {
-                asCell: true
-            }
-        }
-    },
-    required: ["values"]
-} as const satisfies JSONSchema, (_, state) => {
+} as const satisfies JSONSchema, (_, state: {
+    values: Cell<string[]>;
+}) => {
     state.values.push(Math.random().toString(36).substring(2, 15));
 });
-
 export default recipe({
     type: "object",
     properties: {

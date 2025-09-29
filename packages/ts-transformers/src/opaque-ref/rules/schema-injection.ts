@@ -4,6 +4,13 @@ import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
 import { detectCallKind } from "../call-kind.ts";
 import { isOpaqueRefType } from "../types.ts";
+import {
+  inferParameterType,
+  inferReturnType,
+  isAnyOrUnknownType,
+  typeToTypeNode,
+} from "../type-inference.ts";
+import type { TypeRegistry } from "../../core/type-registry.ts";
 
 const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
@@ -14,58 +21,7 @@ function isFunctionLikeExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function isPromiseLikeType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): boolean {
-  const extended = checker as ts.TypeChecker & {
-    getPromisedTypeOfPromise?: (type: ts.Type) => ts.Type | undefined;
-  };
-  if (extended.getPromisedTypeOfPromise) {
-    const promised = extended.getPromisedTypeOfPromise(type);
-    if (promised) return true;
-  }
-  if (type.isUnion()) {
-    return type.types.some((candidate) =>
-      isPromiseLikeType(candidate, checker)
-    );
-  }
-  const symbol = type.getSymbol();
-  if (!symbol) return false;
-  const name = symbol.getName();
-  if (name === "Promise" || name === "PromiseLike") return true;
-  if (symbol.flags & ts.SymbolFlags.Alias) {
-    const aliased = checker.getAliasedSymbol(symbol);
-    if (!aliased) return false;
-    const aliasName = aliased.getName();
-    return aliasName === "Promise" || aliasName === "PromiseLike";
-  }
-  return false;
-}
-
-function isAnyType(type: ts.Type | undefined): boolean {
-  return !!type && (type.flags & ts.TypeFlags.Any) !== 0;
-}
-
-function inferReturnTypeFromBody(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
-  checker: ts.TypeChecker,
-): ts.Type | undefined {
-  const body = fn.body;
-  if (!body) return undefined;
-  if (ts.isBlock(body)) {
-    for (const statement of body.statements) {
-      if (ts.isReturnStatement(statement) && statement.expression) {
-        return checker.getTypeAtLocation(statement.expression);
-      }
-    }
-    const extended = checker as ts.TypeChecker & {
-      getVoidType?: () => ts.Type;
-    };
-    return extended.getVoidType ? extended.getVoidType() : undefined;
-  }
-  return checker.getTypeAtLocation(body);
-}
+// Promise-related code removed - no longer supporting async derives/lifts
 
 function isInsideJsx(node: ts.Node): boolean {
   let current: ts.Node | undefined = node.parent;
@@ -151,12 +107,11 @@ function typeToSchemaTypeNode(
   location: ts.Node,
 ): ts.TypeNode | undefined {
   const normalized = unwrapOpaqueLikeType(type, checker);
-  if (!normalized) return undefined;
-  try {
-    return checker.typeToTypeNode(normalized, location, TYPE_NODE_FLAGS);
-  } catch {
+  if (!normalized) {
     return undefined;
   }
+  const result = typeToTypeNode(normalized, checker, location);
+  return result;
 }
 
 function collectFunctionSchemaTypeNodes(
@@ -165,66 +120,80 @@ function collectFunctionSchemaTypeNodes(
   fallbackArgType?: ts.Type,
 ): {
   argument?: ts.TypeNode;
+  argumentType?: ts.Type; // Store the Type for registry
   result?: ts.TypeNode;
+  resultType?: ts.Type; // Store the Type for registry
 } {
   const signature = checker.getSignatureFromDeclaration(fn);
   if (!signature) return {};
 
+  // 1. Get parameter TypeNode (prefer original if it exists)
   const parameter = fn.parameters.length > 0 ? fn.parameters[0] : undefined;
   let argumentNode: ts.TypeNode | undefined;
-  const resolveArgumentNode = (
-    type: ts.Type | undefined,
-    location: ts.Node,
-  ): ts.TypeNode | undefined => {
-    if (!type) return undefined;
-    if (isAnyType(type) && fallbackArgType) {
-      type = fallbackArgType;
-    }
-    return typeToSchemaTypeNode(type, checker, location);
-  };
+  let argumentType: ts.Type | undefined;
 
   if (parameter?.type) {
+    // Use original TypeNode from source - preserves all type information!
     argumentNode = parameter.type;
-  } else if (parameter) {
-    argumentNode = resolveArgumentNode(
-      checker.getTypeAtLocation(parameter),
+    // Also get the Type for registry (in case it's needed)
+    argumentType = checker.getTypeFromTypeNode(parameter.type);
+  } else {
+    // Need to infer - get type and convert to TypeNode
+    const paramType = inferParameterType(
       parameter,
+      signature,
+      checker,
+      fallbackArgType,
     );
-  } else if (signature.parameters.length > 0) {
-    const parameterSymbol = signature.parameters[0];
-    if (parameterSymbol) {
-      argumentNode = resolveArgumentNode(
-        checker.getTypeOfSymbolAtLocation(
-          parameterSymbol,
-          parameterSymbol.valueDeclaration ?? fn,
-        ),
-        fn,
-      );
+    if (paramType && !isAnyOrUnknownType(paramType)) {
+      argumentType = paramType; // Store for registry
+      argumentNode = typeToSchemaTypeNode(paramType, checker, parameter ?? fn);
     }
+    // If inference failed, leave argumentNode undefined - we'll use unknown below
   }
 
-  if (!argumentNode && fallbackArgType) {
-    argumentNode = typeToSchemaTypeNode(fallbackArgType, checker, fn);
-  }
+  // 2. Get return type TypeNode
+  let resultNode: ts.TypeNode | undefined;
+  let resultType: ts.Type | undefined;
 
-  const rawReturnType = checker.getReturnTypeOfSignature(signature);
-  if (isPromiseLikeType(rawReturnType, checker)) {
-    const result: { argument?: ts.TypeNode; result?: ts.TypeNode } = {};
-    if (argumentNode) result.argument = argumentNode;
-    return result;
-  }
-  let returnTypeForSchema = rawReturnType;
-  if (isAnyType(returnTypeForSchema)) {
-    const inferredReturn = inferReturnTypeFromBody(fn, checker);
-    if (inferredReturn && !isAnyType(inferredReturn)) {
-      returnTypeForSchema = inferredReturn;
+  if (fn.type) {
+    // Explicit return type annotation - use it directly!
+    resultNode = fn.type;
+    // Also get the Type for registry (in case it's needed)
+    resultType = checker.getTypeFromTypeNode(fn.type);
+  } else {
+    // Need to infer return type
+    const returnType = inferReturnType(fn, signature, checker);
+    if (returnType && !isAnyOrUnknownType(returnType)) {
+      resultType = returnType; // Store for registry
+      resultNode = typeToSchemaTypeNode(returnType, checker, fn);
     }
+    // If inference failed, leave resultNode undefined - we'll use unknown below
   }
-  const resultNode = typeToSchemaTypeNode(returnTypeForSchema, checker, fn);
 
-  const result: { argument?: ts.TypeNode; result?: ts.TypeNode } = {};
-  if (argumentNode) result.argument = argumentNode;
-  if (resultNode) result.result = resultNode;
+  // 3. If we couldn't infer a type, we can't transform at all
+  // Both types are required for derive/lift to work
+  if (!argumentNode && !resultNode) {
+    return {}; // No types could be determined
+  }
+
+  // Build result object with only defined properties
+  const result: {
+    argument?: ts.TypeNode;
+    argumentType?: ts.Type;
+    result?: ts.TypeNode;
+    resultType?: ts.Type;
+  } = {};
+
+  if (argumentNode) {
+    result.argument = argumentNode;
+    if (argumentType) result.argumentType = argumentType;
+  }
+  if (resultNode) {
+    result.result = resultNode;
+    if (resultType) result.resultType = resultType;
+  }
+
   return result;
 }
 
@@ -242,21 +211,36 @@ function createToSchemaCall(
 function prependSchemaArguments(
   factory: ts.NodeFactory,
   node: ts.CallExpression,
-  argumentType: ts.TypeNode,
-  resultType: ts.TypeNode,
+  argumentTypeNode: ts.TypeNode,
+  argumentType: ts.Type | undefined,
+  resultTypeNode: ts.TypeNode,
+  resultType: ts.Type | undefined,
+  typeRegistry?: TypeRegistry,
+  checker?: ts.TypeChecker,
 ): ts.CallExpression {
+  const argSchemaCall = createToSchemaCall(factory, argumentTypeNode);
+  const resSchemaCall = createToSchemaCall(factory, resultTypeNode);
+
+  // Register Types if they were inferred (not from original source)
+  if (typeRegistry && checker) {
+    if (argumentType) {
+      typeRegistry.set(argSchemaCall, argumentType);
+    }
+    if (resultType) {
+      typeRegistry.set(resSchemaCall, resultType);
+    }
+  }
+
   return factory.createCallExpression(
     node.expression,
     undefined,
-    [
-      createToSchemaCall(factory, argumentType),
-      createToSchemaCall(factory, resultType),
-      ...node.arguments,
-    ],
+    [argSchemaCall, resSchemaCall, ...node.arguments],
   );
 }
 
-export function createSchemaInjectionRule(): OpaqueRefRule {
+export function createSchemaInjectionRule(
+  typeRegistry?: TypeRegistry,
+): OpaqueRefRule {
   return {
     name: "schema-injection",
     transform(sourceFile, context, transformation) {
@@ -391,16 +375,23 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           const insideJsx = isInsideJsx(node);
           const updateWithSchemas = (
             argumentType: ts.TypeNode,
+            argumentTypeValue: ts.Type | undefined,
             resultType: ts.TypeNode,
+            resultTypeValue: ts.Type | undefined,
           ): ts.Node => {
             ensureToSchemaImport();
             const updated = prependSchemaArguments(
               factory,
               node,
               argumentType,
+              argumentTypeValue,
               resultType,
+              resultTypeValue,
+              typeRegistry,
+              context.checker,
             );
-            return ts.visitEachChild(updated, visit, transformation);
+            // Don't visit children - we've already transformed this node
+            return updated;
           };
 
           if (node.typeArguments && node.typeArguments.length >= 2) {
@@ -409,7 +400,12 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               return ts.visitEachChild(node, visit, transformation);
             }
 
-            return updateWithSchemas(argumentType, resultType);
+            return updateWithSchemas(
+              argumentType,
+              undefined,
+              resultType,
+              undefined,
+            );
           }
 
           if (
@@ -429,8 +425,18 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               argumentType,
             );
 
-            if (inferred.argument && inferred.result) {
-              return updateWithSchemas(inferred.argument, inferred.result);
+            // Transform if we got at least one type, filling in unknown for the other
+            if (inferred.argument || inferred.result) {
+              const argNode = inferred.argument ??
+                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+              const resNode = inferred.result ??
+                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+              return updateWithSchemas(
+                argNode,
+                inferred.argumentType,
+                resNode,
+                inferred.resultType,
+              );
             }
           }
         }
@@ -439,16 +445,23 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
           const factory = transformation.factory;
           const updateWithSchemas = (
             argumentType: ts.TypeNode,
+            argumentTypeValue: ts.Type | undefined,
             resultType: ts.TypeNode,
+            resultTypeValue: ts.Type | undefined,
           ): ts.Node => {
             ensureToSchemaImport();
             const updated = prependSchemaArguments(
               factory,
               node,
               argumentType,
+              argumentTypeValue,
               resultType,
+              resultTypeValue,
+              typeRegistry,
+              context.checker,
             );
-            return ts.visitEachChild(updated, visit, transformation);
+            // Don't visit children - we've already transformed this node
+            return updated;
           };
 
           if (node.typeArguments && node.typeArguments.length >= 2) {
@@ -457,7 +470,12 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               return ts.visitEachChild(node, visit, transformation);
             }
 
-            return updateWithSchemas(argumentType, resultType);
+            return updateWithSchemas(
+              argumentType,
+              undefined,
+              resultType,
+              undefined,
+            );
           }
 
           if (
@@ -472,8 +490,18 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               context.checker,
             );
 
-            if (inferred.argument && inferred.result) {
-              return updateWithSchemas(inferred.argument, inferred.result);
+            // Transform if we got at least one type, filling in unknown for the other
+            if (inferred.argument || inferred.result) {
+              const argNode = inferred.argument ??
+                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+              const resNode = inferred.result ??
+                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+              return updateWithSchemas(
+                argNode,
+                inferred.argumentType,
+                resNode,
+                inferred.resultType,
+              );
             }
           }
         }
