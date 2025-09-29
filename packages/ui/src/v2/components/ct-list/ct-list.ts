@@ -5,6 +5,13 @@ import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, ID, isCell } from "@commontools/runner";
 // Removed cell-controller import - working directly with Cell
 import "../ct-input/ct-input.ts";
+import { consume } from "@lit/context";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  defaultTheme,
+  themeContext,
+} from "../theme-context.ts";
 
 type ListItem = {
   title: string;
@@ -97,225 +104,265 @@ export class CTList extends BaseElement {
   // Subscription cleanup function
   private _unsubscribe: (() => void) | null = null;
 
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
   constructor() {
     super();
   }
 
-  static override styles = css`
-    :host {
-      display: block;
-      width: 100%;
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      :host {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+      }
 
-      --background: #ffffff;
-      --foreground: #0f172a;
-      --border: #e2e8f0;
-      --ring: #94a3b8;
-      --muted: #f8fafc;
-      --muted-foreground: #64748b;
-      --destructive: #ef4444;
-      --destructive-foreground: #ffffff;
+      .list-container {
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-colors-gray-50, #fafafa)
+        );
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-lg, 0.5rem)
+        );
+        padding: var(--ct-theme-spacing-block, 1rem);
+      }
 
-      --list-padding: 1rem;
-      --list-border-radius: 0.5rem;
-      --list-border: 1px solid var(--border);
-      --item-gap: 0.5rem;
-    }
+      .list-title {
+        font-weight: 600;
+        font-size: 1.125rem;
+        margin-bottom: 1rem;
+        color: var(--ct-theme-color-text, #0f172a);
+      }
 
-    .list-container {
-      background-color: var(--background);
-      border: var(--list-border);
-      border-radius: var(--list-border-radius);
-      padding: var(--list-padding);
-    }
+      .list-items {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-theme-spacing-normal, 0.5rem);
+        margin-bottom: var(--ct-theme-spacing-normal, 0.5rem);
+      }
 
-    .list-title {
-      font-weight: bold;
-      font-size: 1.125rem;
-      margin-bottom: 1rem;
-      color: var(--foreground);
-    }
+      .list-item {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-theme-spacing-normal, 0.5rem);
+        padding: 0.25rem;
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        transition: background-color var(--ct-theme-animation-duration, 200ms) ease;
+      }
 
-    .list-items {
-      display: flex;
-      flex-direction: column;
-      gap: var(--item-gap);
-      margin-bottom: 1rem;
-    }
+      .list-item:hover {
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-colors-gray-100, #f5f5f5)
+        );
+      }
 
-    .list-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.25rem;
-      border-radius: 0.25rem;
-      transition: background-color 0.1s;
-    }
+      .item-bullet {
+        width: 0.375rem;
+        height: 0.375rem;
+        background-color: var(--ct-theme-color-text, #0f172a);
+        border-radius: 50%;
+        flex-shrink: 0;
+        margin-left: 1rem;
+      }
 
-    .list-item:hover {
-      background-color: var(--muted);
-    }
+      .item-content {
+        flex: 1;
+        color: var(--ct-theme-color-text, #0f172a);
+      }
 
-    .item-bullet {
-      width: 0.375rem;
-      height: 0.375rem;
-      background-color: var(--foreground);
-      border-radius: 50%;
-      flex-shrink: 0;
-      margin-left: 1rem;
-    }
+      .item-action {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        cursor: pointer;
+        font-size: 0.75rem;
+        font-weight: 600;
+        transition: opacity var(--ct-theme-animation-duration, 200ms) ease;
+        opacity: 0;
+        border: none;
+      }
 
-    .item-content {
-      flex: 1;
-      color: var(--foreground);
-    }
+      .list-item:hover .item-action {
+        opacity: 1;
+      }
 
-    .item-action {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 1.5rem;
-      height: 1.5rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font-size: 0.75rem;
-      font-weight: bold;
-      transition: opacity 0.2s;
-      opacity: 0;
-      border: none;
-    }
+      .item-action.remove {
+        background-color: var(
+          --ct-theme-color-error,
+          var(--ct-colors-error, #f44336)
+        );
+        color: var(
+          --ct-theme-color-error-foreground,
+          var(--ct-colors-white, #ffffff)
+        );
+      }
 
-    .list-item:hover .item-action {
-      opacity: 1;
-    }
+      .item-action.accept {
+        background-color: var(
+          --ct-theme-color-success,
+          var(--ct-colors-success, #22c55e)
+        );
+        color: var(--ct-theme-color-success-foreground, #ffffff);
+      }
 
-    .item-action.remove {
-      background-color: var(--destructive);
-      color: var(--destructive-foreground);
-    }
+      .add-item-container {
+        display: flex;
+        gap: var(--ct-theme-spacing-normal, 0.5rem);
+        align-items: center;
+      }
 
-    .item-action.remove:hover {
-      background-color: #dc2626;
-    }
+      .add-item-input {
+        flex: 1;
+        padding: 0.5rem;
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        font-size: 0.875rem;
+        color: var(--ct-theme-color-text, #0f172a);
+        background-color: var(
+          --ct-theme-color-background,
+          var(--ct-colors-white, #ffffff)
+        );
+      }
 
-    .item-action.accept {
-      background-color: #22c55e;
-      color: #ffffff;
-    }
+      .add-item-input:focus {
+        outline: 2px solid
+          var(--ct-theme-color-primary, var(--ct-colors-primary-500, #2196f3));
+        outline-offset: -2px;
+        border-color: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-primary-500, #2196f3)
+        );
+      }
 
-    .item-action.accept:hover {
-      background-color: #16a34a;
-    }
+      .add-item-input::placeholder {
+        color: var(--ct-theme-color-text-muted, #64748b);
+      }
 
-    .add-item-container {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
+      .add-item-button {
+        padding: 0.5rem 1rem;
+        background-color: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-primary-500, #2196f3)
+        );
+        color: var(--ct-theme-color-primary-foreground, #ffffff);
+        border: none;
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: opacity var(--ct-theme-animation-duration, 200ms) ease;
+      }
 
-    .add-item-input {
-      flex: 1;
-      padding: 0.5rem;
-      border: 1px solid var(--border);
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      color: var(--foreground);
-      background-color: var(--background);
-    }
+      .add-item-button:hover {
+        opacity: 0.9;
+      }
 
-    .add-item-input:focus {
-      outline: 2px solid var(--ring);
-      outline-offset: -2px;
-      border-color: var(--ring);
-    }
+      .add-item-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-    .add-item-input::placeholder {
-      color: var(--muted-foreground);
-    }
+      .empty-state {
+        color: var(--ct-theme-color-text-muted, #64748b);
+        font-style: italic;
+        text-align: center;
+        padding: 1rem;
+      }
 
-    .add-item-button {
-      padding: 0.5rem 1rem;
-      background-color: var(--ring);
-      color: var(--background);
-      border: none;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      cursor: pointer;
-      transition: background-color 0.1s;
-    }
+      /* Editing-specific styles */
+      .item-content.editable {
+        cursor: pointer;
+        user-select: none;
+      }
 
-    .add-item-button:hover {
-      background-color: #64748b;
-    }
+      .item-content.editable:hover {
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-colors-gray-100, #f5f5f5)
+        );
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        padding: 0.125rem 0.25rem;
+        margin: -0.125rem -0.25rem;
+      }
 
-    .add-item-button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
+      .list-item.editing {
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-colors-gray-100, #f5f5f5)
+        );
+      }
 
-    .empty-state {
-      color: var(--muted-foreground);
-      font-style: italic;
-      text-align: center;
-      padding: 1rem;
-    }
+      .list-item.editing .item-content {
+        flex: 1;
+        margin: -0.25rem 0;
+      }
 
-    /* Editing-specific styles */
-    .item-content.editable {
-      cursor: pointer;
-      user-select: none;
-    }
+      .edit-input {
+        width: 100%;
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-colors-gray-300, #e0e0e0));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        padding: 0.25rem;
+        font-size: inherit;
+        font-family: inherit;
+        background: var(--ct-theme-color-background, #ffffff);
+        color: var(--ct-theme-color-text, #0f172a);
+      }
 
-    .item-content.editable:hover {
-      background-color: var(--muted);
-      border-radius: 0.25rem;
-      padding: 0.125rem 0.25rem;
-      margin: -0.125rem -0.25rem;
-    }
+      .edit-input:focus {
+        outline: 2px solid
+          var(--ct-theme-color-primary, var(--ct-colors-primary-500, #2196f3));
+        outline-offset: -1px;
+      }
 
-    .list-item.editing {
-      background-color: var(--muted);
-    }
+      .item-action.edit {
+        background-color: var(
+          --ct-theme-color-accent,
+          var(--ct-colors-primary-600, #1e88e5)
+        );
+        color: var(--ct-theme-color-accent-foreground, #ffffff);
+        font-size: 0.6rem;
+      }
 
-    .list-item.editing .item-content {
-      flex: 1;
-      margin: -0.25rem 0;
-    }
-
-    .edit-input {
-      width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 0.25rem;
-      padding: 0.25rem;
-      font-size: inherit;
-      font-family: inherit;
-      background: var(--background);
-      color: var(--text);
-    }
-
-    .edit-input:focus {
-      outline: 2px solid var(--primary);
-      outline-offset: -1px;
-    }
-
-    .item-action.edit {
-      background-color: #3b82f6;
-      color: white;
-      font-size: 0.6rem;
-    }
-
-    .item-action.edit:hover {
-      background-color: #2563eb;
-    }
-
-    .item-action.cancel {
-      background-color: #6b7280;
-      color: white;
-    }
-
-    .item-action.cancel:hover {
-      background-color: #4b5563;
-    }
-  `;
+      .item-action.cancel {
+        background-color: var(
+          --ct-theme-color-secondary,
+          var(--ct-colors-gray-200, #eeeeee)
+        );
+        color: var(--ct-theme-color-text, #0f172a);
+      }
+    `,
+  ];
 
   // Lifecycle methods for Cell binding management
   override updated(changedProperties: Map<string, any>) {
@@ -336,6 +383,19 @@ export class CTList extends BaseElement {
         });
       }
     }
+  }
+
+  override firstUpdated(changed: Map<string | number | symbol, unknown>) {
+    super.firstUpdated(changed as any);
+    this.#applyTheme();
+  }
+
+  override willUpdate(changed: Map<string | number | symbol, unknown>) {
+    if (changed.has("theme")) this.#applyTheme();
+  }
+
+  #applyTheme() {
+    applyThemeToElement(this, this.theme ?? defaultTheme);
   }
 
   override disconnectedCallback() {
