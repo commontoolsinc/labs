@@ -184,3 +184,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   read derived values from child recipe instances. Child recipe outputs are best
   accessed through their exposed schema rather than by trying to peek into their
   internal derived state from the parent's lift functions.
+- When implementing `ifElse` patterns in the UI, you can simplify the derive
+  chain by using `lift` to extract individual properties from the branched
+  object rather than passing through the entire `ifElse` result. This makes it
+  easier to bind specific values (header, description, variant) to different UI
+  elements while maintaining reactivity.
+- Conditional visibility in `ifElse` patterns works cleanly with `lift`
+  functions that return complete style strings including `display: flex;` or
+  `display: none;` based on the boolean state. This provides smooth UI
+  transitions between different branch states.
+- The `ifElse` primitive creates distinct object trees for each branch, making
+  it ideal for patterns where the UI should completely switch between two
+  different states rather than just changing individual properties. Each branch
+  can have its own complete set of properties (header, variant, description,
+  etc.).

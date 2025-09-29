@@ -20,7 +20,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-computed-default-strings
 - [x] counter-conditional-branch
 - [x] counter-conditional-child-instantiation
-- [ ] counter-conditional-ifelse
+- [x] counter-conditional-ifelse
 - [x] counter-cross-field-validation
 - [x] counter-deduplicated-list
 - [x] counter-delayed-compute
