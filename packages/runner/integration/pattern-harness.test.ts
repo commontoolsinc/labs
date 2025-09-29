@@ -151,6 +151,9 @@ import {
   scenarios as counterPersistenceDefaultsScenarios,
 } from "./patterns/counter-persistence-defaults.ts";
 import {
+  scenarios as counterPersistenceInitialArgumentsScenarios,
+} from "./patterns/counter-persistence-initial-arguments.ts";
+import {
   scenarios as counterRenderTreeScenarios,
 } from "./patterns/counter-render-tree.ts";
 import {
@@ -531,6 +534,7 @@ const allScenarios = [
   ...counterParentChildBubbleScenarios,
   ...counterParentCellArgumentsScenarios,
   ...counterPersistenceDefaultsScenarios,
+  ...counterPersistenceInitialArgumentsScenarios,
   ...counterRichLabelScenarios,
   ...counterRenderTreeScenarios,
   ...counterRollingAverageScenarios,
