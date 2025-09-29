@@ -234,6 +234,9 @@ import {
 import {
   scenarios as workoutRoutinePlannerScenarios,
 } from "./patterns/workout-routine-planner.ts";
+import {
+  scenarios as workflowStateMachineScenarios,
+} from "./patterns/workflow-state-machine.ts";
 import { scenarios as moodDiaryScenarios } from "./patterns/mood-diary.ts";
 import {
   scenarios as medicationAdherenceScenarios,
@@ -424,6 +427,7 @@ const allScenarios = [
   ...sleepJournalScenarios,
   ...studentAttendanceTrackerScenarios,
   ...workoutRoutinePlannerScenarios,
+  ...workflowStateMachineScenarios,
   ...moodDiaryScenarios,
   ...medicationAdherenceScenarios,
   ...patientVitalsDashboardScenarios,
