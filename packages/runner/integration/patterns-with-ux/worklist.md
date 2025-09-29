@@ -21,7 +21,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-conditional-branch
 - [ ] counter-conditional-child-instantiation
 - [ ] counter-conditional-ifelse
-- [ ] counter-cross-field-validation
+- [x] counter-cross-field-validation
 - [ ] counter-deduplicated-list
 - [x] counter-delayed-compute
 - [ ] counter-derived-canonical-form

@@ -76,6 +76,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   computation into separate `lift` calls that return style strings, then bind
   those derived style cells directly to JSX `style` attributes. This keeps the
   JSX clean and ensures proper reactive updates.
+- When rendering collections like audit trails, use `lift` to map over the array
+  and return JSX elements. Use `.slice().reverse()` if you need to show newest
+  entries first. Remember to include a `key` prop for each mapped item to help
+  with rendering performance.
+- For validation UIs that show error/success states, use separate `lift` calls
+  to compute dynamic styles (borders, backgrounds, text colors) based on
+  validation state, then interpolate those lifted style strings into inline
+  styles. This creates clear visual feedback that updates reactively.
 
 ## Guidelines for UI code
 
