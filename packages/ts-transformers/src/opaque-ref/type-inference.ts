@@ -27,7 +27,6 @@ export function inferParameterType(
   checker: ts.TypeChecker,
   fallbackType?: ts.Type,
 ): ts.Type | undefined {
-
   // If no parameter but signature has parameters, try to get from signature
   if (!parameter) {
     if (signature.parameters.length > 0) {
