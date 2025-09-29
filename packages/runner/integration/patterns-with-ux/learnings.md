@@ -25,6 +25,10 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Plain closures on `ct-button` often skip the harness, so wrap even simple
   interactions in `handler` helpers and pass the cells they mutate; this keeps
   schema generation happy and ensures state updates flow through results.
+- When wrapping business handlers for the UI, re-express the effect inside a new
+  `handler` that takes the same cells instead of closing over the original
+  callable; otherwise runtime errors like `TypeError: resize is not a function`
+  can pop up once Playwright exercises the controls.
 
 ## Guidelines for UI code
 
