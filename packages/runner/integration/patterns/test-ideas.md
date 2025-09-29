@@ -303,7 +303,7 @@ current offline harness.
       report highlights overdue obligations.
 - [x] Document signature workflow pattern — collect signatures ensure derived
       status shows next signer and outstanding steps.
-- [ ] Legal clause library pattern — curate clause templates ensure derived
+- [x] Legal clause library pattern — curate clause templates ensure derived
       filters surface clauses by topic and region.
 - [x] Procurement request pattern — route procurement approvals ensure derived
       spending summary updates per approval result.

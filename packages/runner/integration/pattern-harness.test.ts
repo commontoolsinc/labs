@@ -208,6 +208,9 @@ import {
   scenarios as libraryCheckoutSystemScenarios,
 } from "./patterns/library-checkout-system.ts";
 import {
+  scenarios as legalClauseLibraryScenarios,
+} from "./patterns/legal-clause-library.ts";
+import {
   scenarios as nestedCounterScenarios,
 } from "./patterns/nested-counters.ts";
 import {
@@ -388,6 +391,7 @@ const allScenarios = [
   ...listManagerScenarios,
   ...assignmentGradingMatrixScenarios,
   ...libraryCheckoutSystemScenarios,
+  ...legalClauseLibraryScenarios,
   ...securityVulnerabilityTrackerScenarios,
   ...vendorRiskAssessmentScenarios,
   ...sleepJournalScenarios,

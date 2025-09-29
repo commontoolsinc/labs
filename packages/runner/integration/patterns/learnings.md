@@ -99,6 +99,8 @@ offline-friendly recipes that the harness can assert confidently.
   index changes always follow the updated ordering without extra handlers.
 - Pre-build categorical buckets before populating them inside `lift` so empty
   groups remain visible and ordering stays deterministic when counts reach zero.
+- Compose filter summary strings from sanitized counts plus label derives so
+  harness expectations stay readable while filter cells remain internal.
 - Derive category totals once and reuse them when mapping rules so handlers only
   mutate the raw collections feeding the pricing pipeline.
 - Round weighted totals and shares before formatting derived strings so progress
