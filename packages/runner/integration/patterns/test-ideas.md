@@ -175,7 +175,7 @@ current offline harness.
       reaction counts roll up totals on every handler.
 - [x] Support ticket triage pattern — assign tickets with priority ensure
       derived SLA countdowns track escalations per queue.
-- [ ] Workflow state machine pattern — enforce allowed transitions ensure
+- [x] Workflow state machine pattern — enforce allowed transitions ensure
       history derive records every move and rejected jump.
 - [x] Kanban board grouping pattern — group tasks into columns ensure handlers
       move tasks and derived WIP limits flag overloads.
