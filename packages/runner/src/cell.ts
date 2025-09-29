@@ -672,6 +672,7 @@ export class RegularCell<T> implements Cell<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
     const tx = this.runtime.readTx(this.tx);
+    // Resolve all links ON THE WAY to the target, but don't resolve the final link
     return tx.readValueOrThrow(resolveLink(tx, this.link, "top"), options) as
       | Immutable<T>
       | undefined;
