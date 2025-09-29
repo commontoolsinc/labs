@@ -8,13 +8,24 @@ This roadmap provides a concrete, step-by-step plan for implementing closure
 support in the CommonTools TypeScript transformer. We'll start with the simplest
 case (map callbacks) and progressively build toward full closure support.
 
+## Implementation Status
+
+✅ **COMPLETED**: Basic closure transformer structure created in `src/closures/` directory
+- Separate from opaque-ref for clean architecture
+- Runs FIRST in the pipeline (before OpaqueRef and Schema transformers)
+- Has its own types and rules system
+
+⚠️ **IN PROGRESS**: Fixing capture detection bug
+- Currently capturing wrong variables (individual identifiers instead of full expressions)
+- Need to properly handle property access like `state.discount`
+
 ## Implementation Phases
 
-### Phase 1: Foundation - Capture Detection (Simplified!)
+### Phase 1: Foundation - Capture Detection ✅ COMPLETED (with bug to fix)
 
 #### Step 1.1: Create Closure Transform Rule
 
-**File**: `src/opaque-ref/rules/closure-transform.ts` (new)
+**File**: `src/closures/rules/closure-transform.ts` ✅ CREATED
 
 ```typescript
 export function createClosureTransformRule(): OpaqueRefRule {
@@ -79,11 +90,11 @@ Create unit tests for:
 - Mixed reactive/non-reactive captures
 - Captures in different closure types
 
-### Phase 2: Map Callback Transformation (Week 1-2)
+### Phase 2: Map Callback Transformation ⚠️ IN PROGRESS
 
-#### Step 2.1: Create Closure Transform Rule
+#### Step 2.1: Create Closure Transform Rule ✅ COMPLETED
 
-**File**: `src/opaque-ref/rules/closure-transform.ts` (new)
+**File**: `src/closures/rules/closure-transform.ts`
 
 ```typescript
 export function createClosureTransformRule(): OpaqueRefRule {
@@ -128,31 +139,32 @@ Implementation steps:
 5. Wrap callback in recipe()
 6. Transform map call to object form
 
-#### Step 2.4: Add Rule to Pipeline
+#### Step 2.4: Add Rule to Pipeline ✅ COMPLETED
 
-**File**: `src/opaque-ref/transformer.ts`
+**File**: `src/transform.ts`
 
 ```typescript
-function createRules(): OpaqueRefRule[] {
+export function commonTypeScriptTransformer(
+  program: ts.Program,
+): ts.TransformerFactory<ts.SourceFile>[] {
   return [
-    createClosureTransformRule(), // NEW - runs FIRST to handle captures
-    createJsxExpressionRule(), // Then JSX expressions
-    createSchemaInjectionRule(), // Finally schema injection
+    createClosureTransformer(program),  // ✅ Runs FIRST to handle closures
+    createModularOpaqueRefTransformer(program),  // Then OpaqueRef transformations
+    createSchemaTransformer(program),  // Finally schema injection
   ];
 }
 ```
 
-#### Step 2.5: Create Fixture Tests
+#### Step 2.5: Create Fixture Tests ✅ COMPLETED
 
 **Directory**: `test/fixtures/closures/`
 
-Create test fixtures:
+Created test fixtures:
 
-- `map-single-capture.input.tsx` / `.expected.tsx`
-- `map-multiple-captures.input.tsx` / `.expected.tsx`
-- `map-nested-property.input.tsx` / `.expected.tsx`
+- `map-single-capture.input.tsx` / `.expected.tsx` ✅
+- Additional fixtures to be added
 
-Update `test/fixture-based.test.ts` to include closures directory.
+Updated `test/fixture-based.test.ts` to include closures directory ✅
 
 ### Phase 3: Event Handler Support (Week 2)
 
@@ -268,22 +280,20 @@ graph TD
     I --> J[4.1 Generic Closures]
 ```
 
-## Key Files to Modify
+## Key Files Modified/Created
 
-### Core Changes
+### Core Changes ✅
 
-1. `src/opaque-ref/dataflow.ts` - Add capture detection
-2. `src/opaque-ref/types.ts` - Add capture-related types
-3. `src/opaque-ref/transformer.ts` - Add closure rule to pipeline
+1. `src/opaque-ref/dataflow.ts` - Added synthetic node handling for nodes created by closure transformer
+2. `src/transform.ts` - Added closure transformer to pipeline (runs first)
+3. `test/utils.ts` - Updated to use commonTypeScriptTransformer instead of individual transformers
 
-### New Files
+### New Files ✅
 
-1. `src/opaque-ref/rules/closure-transform.ts` - Main closure transformation
-   logic
-2. `src/opaque-ref/rewrite/closure-helpers.ts` - Helper functions for closure
-   transforms
-3. `test/opaque-ref/capture-detection.test.ts` - Unit tests
-4. `test/fixtures/closures/` - Fixture tests directory
+1. `src/closures/closure-transformer.ts` - Transformer factory
+2. `src/closures/types.ts` - Type definitions for closure transformation
+3. `src/closures/rules/closure-transform.ts` - Main closure transformation logic
+4. `test/fixtures/closures/` - Fixture tests directory with initial test case
 
 ### Updates Needed
 
@@ -355,14 +365,20 @@ When starting implementation:
   initially
 - Keep the existing map parameter detection working alongside closure support
 
-## Open Implementation Questions
+## Resolved Implementation Questions
 
-1. **Curry implementation**: Does runtime support curry? If not, what's our
-   alternative?
-2. **Import management**: How do we ensure recipe/handler/lift are imported when
-   needed?
-3. **Type preservation**: How do we maintain TypeScript types through
-   transformation?
-4. **Debugging experience**: How can we preserve meaningful stack traces?
+1. **Import management**: ✅ Using context.imports.request() to add necessary imports
+2. **Synthetic nodes**: ✅ Added handling in dataflow.ts for nodes without source files
+3. **Transformer ordering**: ✅ Closure transformer runs FIRST in the pipeline
 
-These questions should be answered during Phase 1 implementation and documented.
+## Current Implementation Issues
+
+1. **Capture Detection Bug**: Currently capturing individual identifiers instead of full property access expressions
+   - Should capture: `state.discount` as a single unit
+   - Currently capturing: `state` and `discount` separately (incorrectly)
+   - Also mysteriously capturing non-existent variables like "span" and "price"
+
+2. **Outstanding Questions**:
+   - **Curry implementation**: Still need to verify runtime support for lift+curry pattern
+   - **Type preservation**: Need to ensure transformed code maintains TypeScript types
+   - **Debugging experience**: Source maps through transformation not yet addressed
