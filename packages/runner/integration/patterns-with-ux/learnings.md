@@ -93,6 +93,20 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Keep layouts responsive with flex or stack containers; avoid hard coded pixel
   widths unless a component demands it.
 
+- For conditional branch patterns, use `lift` to compute the branch state string
+  (e.g., "Enabled" vs "Disabled") directly from the boolean cell rather than
+  using `ifElse` to return objects that need additional lifting. This simplifies
+  the derive chain.
+- Dynamic styling based on boolean state works well with `lift` functions that
+  return complete style strings, including gradients and transitions. Binding
+  these directly to JSX `style` attributes provides smooth visual feedback.
+- The `disabled` attribute on buttons can be bound to inverted boolean derives
+  (e.g., `lift((isActive: boolean) => !isActive)(active)`) to prevent actions
+  when conditions aren't met.
+- Status indicators with dynamic icons (like colored dots) can be implemented
+  with inline `span` elements whose styles are controlled by lifted functions,
+  creating clear visual state without external assets.
+
 ## Playwright + MCP tips
 
 - Capture screenshots at meaningful checkpoints and note any visual quirks in
@@ -101,3 +115,5 @@ Add short notes after each run so the next agent can build on proven approaches.
   styling hooks.
 - Wait on explicit UI signals (text, aria attributes) instead of arbitrary
   sleeps whenever possible.
+- After navigating to a charm URL, wait 2 seconds before taking snapshots to
+  allow the UI to fully render and become interactive.
