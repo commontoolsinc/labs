@@ -1,6 +1,6 @@
 # Closure Transformation Design
 
-_Created: 2025-09-24_ _Status: In Design_
+_Created: 2025-09-24_ _Updated: 2025-09-29_ _Status: In Implementation_
 
 ## Overview
 
@@ -31,28 +31,27 @@ state.items.map((item) => item.price * state.discount)
 4. **Clear Separation of Concerns**: Detection vs. transformation
 5. **Runtime Compatibility**: Work with existing CommonTools runtime
 
-## Architecture
+## Architecture (IMPLEMENTED)
 
 ### Component Responsibilities
 
-1. **Dataflow Analysis** (Enhanced)
-   - Detect when functions capture outer scope variables
-   - Record capture information in analysis result
-   - Mark closure contexts that need transformation
+1. **Separate Closure Module** (`src/closures/`)
+   - Standalone transformer independent of opaque-ref
+   - Runs FIRST in the pipeline
+   - Has its own types and rule system
 
-2. **Closure Transform Rule** (New)
-   - Transform different closure patterns based on context
-   - Generate appropriate CommonTools patterns (params, handler, lift)
-   - Coordinate with import management
+2. **Closure Transform Rule** (`src/closures/rules/closure-transform.ts`)
+   - Detects map callbacks with captures
+   - Transforms to recipe pattern with params
+   - Manages import requests through context
 
-3. **Rewrite Helpers** (Extended)
-   - Support new transformation patterns
-   - Handle params object creation
-   - Manage curry transformations
+3. **Dataflow Analysis** (Enhanced)
+   - Added synthetic node handling for transformer-created nodes
+   - Supports nodes without source files (inheritance approach)
 
 ## Implementation Phases
 
-### Phase 1: Capture Detection Foundation
+### Phase 1: Capture Detection Foundation ✅ IMPLEMENTED
 
 **Key Insight**: Instead of maintaining our own scope tree with bindings, we'll
 leverage TypeScript's symbol table which already knows where every variable is
@@ -84,7 +83,7 @@ function isCaptured(
 - No need to track bindings in dataflow - TypeScript already has this
   information
 
-### Phase 2: Map Callback Support
+### Phase 2: Map Callback Support ⚠️ IN PROGRESS
 
 Transform map callbacks with captured variables:
 
@@ -207,9 +206,9 @@ state.items.map((item) => item.price * state.discount + constant);
 
 ## Testing Strategy
 
-### Fixture-Based Tests (Primary)
+### Fixture-Based Tests (Primary) ✅ IMPLEMENTED
 
-Following the existing pattern in `test/fixture-based.test.ts`, we'll create
+Following the existing pattern in `test/fixture-based.test.ts`, we have created
 fixture pairs for closure transformations:
 
 **Directory Structure**:
@@ -227,7 +226,7 @@ test/fixtures/closures/
 └── ...
 ```
 
-**Configuration Addition** to `fixture-based.test.ts`:
+**Configuration Addition** to `fixture-based.test.ts` ✅ COMPLETED:
 
 ```typescript
 {
@@ -303,14 +302,27 @@ const compute = (state) => () => state.a + state.b;
 const compute = () => state.a + state.b;
 ```
 
+## Implementation Decisions Made
+
+1. **Architecture**: Created separate `src/closures/` module instead of embedding in opaque-ref
+2. **Ordering**: Closure transformer runs FIRST in the pipeline
+3. **Synthetic Nodes**: Implemented inheritance approach in dataflow.ts
+4. **Testing**: Using commonTypeScriptTransformer for all tests
+5. **Import Management**: Using context.imports for managing CommonTools imports
+
+## Known Issues
+
+1. **Capture Detection Bug**:
+   - Currently captures individual identifiers instead of full property expressions
+   - Example: `state.discount` is incorrectly captured as "state" and "discount" separately
+   - Root cause identified: `collectCaptures` function needs to handle property access expressions as units
+
 ## Open Questions
 
 1. **Performance**: Should we cache capture analysis results?
-2. **Optimization**: Can we detect and eliminate unnecessary transforms?
-3. **Debugging**: How do we preserve source maps through transformation?
-4. **Type Safety**: How do we ensure transformed code maintains type safety?
-5. **Runtime Detection**: Should runtime detect and warn about untransformed
-   closures?
+2. **Debugging**: How do we preserve source maps through transformation?
+3. **Type Safety**: How do we ensure transformed code maintains type safety?
+4. **Runtime Support**: Does the runtime support lift+curry pattern for generic closures?
 
 ## Success Metrics
 
