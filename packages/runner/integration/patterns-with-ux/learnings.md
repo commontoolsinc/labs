@@ -55,6 +55,16 @@ Add short notes after each run so the next agent can build on proven approaches.
   invocation recreates all children from scratch with their initial values - any
   runtime state changes (like incremented counters) will be lost when the parent
   configuration changes. This is expected behavior for parameterized patterns.
+- The `disabled` attribute on `ct-button` works well with derived boolean cells
+  to prevent invalid operations (e.g., incrementing past max, decrementing below
+  min). Use `lift` to compute boundary conditions and bind them directly to the
+  `disabled` prop.
+- Visual progress indicators (like progress bars) can be driven entirely by
+  `lift` functions that compute percentages from the current value relative to
+  min/max boundaries. Use inline styles with lift for dynamic width/positioning.
+- When handlers need to enforce boundaries, perform the clamping logic directly
+  in the handler using `Math.min`/`Math.max` with values from `.get()` on the
+  boundary cells to ensure the value never escapes the valid range.
 
 ## Guidelines for UI code
 
