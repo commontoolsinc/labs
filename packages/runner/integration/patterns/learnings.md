@@ -102,6 +102,9 @@ offline-friendly recipes that the harness can assert confidently.
   deterministic arrays stay stable regardless of event insertion order.
 - Expose selected child metadata via a derive that inspects sanitized lists so
   index changes always follow the updated ordering without extra handlers.
+- Derive eligibility or status summaries from the sanitized screening report so
+  toggling guardrails only re-evaluates derived views while preserving the
+  canonical ordering.
 - Pre-build categorical buckets before populating them inside `lift` so empty
   groups remain visible and ordering stays deterministic when counts reach zero.
 - Compose filter summary strings from sanitized counts plus label derives so

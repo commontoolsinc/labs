@@ -377,6 +377,9 @@ import {
   scenarios as chatReactionTrackerScenarios,
 } from "./patterns/chat-reaction-tracker.ts";
 import {
+  scenarios as clinicalTrialEnrollmentScenarios,
+} from "./patterns/clinical-trial-enrollment.ts";
+import {
   scenarios as callCenterScheduleScenarios,
 } from "./patterns/call-center-schedule.ts";
 import {
@@ -449,6 +452,7 @@ const allScenarios = [
   ...calendarAvailabilityScenarios,
   ...catalogSearchFacetsScenarios,
   ...chatReactionTrackerScenarios,
+  ...clinicalTrialEnrollmentScenarios,
   ...callCenterScheduleScenarios,
   ...meetingSchedulerScenarios,
   ...orgChartHierarchyScenarios,
