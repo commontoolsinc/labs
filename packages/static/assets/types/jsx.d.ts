@@ -195,6 +195,8 @@ declare global {
         "$mentionable"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
         "mentionable"?: Charm[],
         "$mentioned"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
+        "$pattern"?: OpaqueRef<any> | OpaqueRef<Cell<any>>,
+        "pattern"?: any,
         "wordWrap"?: boolean,
         "lineNumbers"?: boolean,
         "maxLineWidth"?: number,

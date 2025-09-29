@@ -3,6 +3,7 @@ import {
   Cell,
   cell,
   Default,
+  derive,
   h,
   handler,
   lift,
@@ -112,6 +113,10 @@ const reactToJustCreated = lift(
   },
 );
 
+const stringify = lift(({ pattern }) => {
+  return JSON.stringify(pattern);
+});
+
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content, allCharms }) => {
@@ -145,6 +150,8 @@ const Note = recipe<Input, Output>(
       content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
+    const pattern = stringify({ pattern: Note });
+
     return {
       [NAME]: title,
       [UI]: (
@@ -160,6 +167,7 @@ const Note = recipe<Input, Output>(
             $value={content}
             $mentionable={allCharms}
             $mentioned={mentioned}
+            $pattern={Note}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,

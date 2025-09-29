@@ -12,6 +12,11 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { Runtime } from "@commontools/runner";
+// Import contexts directly to avoid barrel self-import cycles.
+import { runtimeContext } from "../runtime-context.ts";
+import { sessionContext, type SessionInfo } from "../session-context.ts";
+
 import {
   acceptCompletion,
   autocompletion,
@@ -40,6 +45,8 @@ import {
   MentionableArray,
   mentionableArraySchema,
 } from "../../core/mentionable.ts";
+import { consume } from "@lit/context";
+import { MemorySpace } from "@commontools/runner";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -126,6 +133,7 @@ export class CTCodeEditor extends BaseElement {
     timingDelay: { type: Number },
     mentionable: { type: Array },
     mentioned: { type: Array },
+    pattern: { type: Object },
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
@@ -144,6 +152,7 @@ export class CTCodeEditor extends BaseElement {
   declare timingDelay: number;
   declare mentionable: Cell<MentionableArray>;
   declare mentioned?: Cell<MentionableArray>;
+  declare pattern: any;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -177,6 +186,12 @@ export class CTCodeEditor extends BaseElement {
       this._updateMentionedFromContent();
     },
   });
+
+  @consume({ context: runtimeContext })
+  private _rt: Runtime | undefined = undefined;
+
+  @consume({ context: sessionContext })
+  private _session?: SessionInfo;
 
   constructor() {
     super();
@@ -355,6 +370,20 @@ export class CTCodeEditor extends BaseElement {
 
         // No ID or no matching item: request creation
         this.emit("backlink-create", { text: backlinkText });
+
+        if (this._rt && this._session && this.pattern) {
+          const tx = this._rt.edit();
+          const result = this._rt.getCell<any>(
+            this._session.spaceName as MemorySpace,
+            backlinkText,
+          );
+          this._rt.run(tx, this.pattern, {
+            title: backlinkText,
+            content: "",
+            allCharms: [], // TODO: what do
+          }, result);
+        }
+
         return true;
       }
     }
