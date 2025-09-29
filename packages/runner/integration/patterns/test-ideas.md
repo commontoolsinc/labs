@@ -289,7 +289,7 @@ current offline harness.
       weighted amounts across stages.
 - [x] Quote configuration pattern — configure quote options ensure derived price
       recalculates when option cells toggle.
-- [ ] Order fulfillment tracker pattern — monitor order flow ensure derived
+- [x] Order fulfillment tracker pattern — monitor order flow ensure derived
       counts split orders by fulfillment status.
 - [ ] Support macro library pattern — manage canned replies ensure derived
       filters group macros by topic and usage.
