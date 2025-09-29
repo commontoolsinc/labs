@@ -27,6 +27,7 @@ export function inferParameterType(
   checker: ts.TypeChecker,
   fallbackType?: ts.Type,
 ): ts.Type | undefined {
+
   // If no parameter but signature has parameters, try to get from signature
   if (!parameter) {
     if (signature.parameters.length > 0) {
@@ -46,7 +47,8 @@ export function inferParameterType(
 
   // If explicit type annotation exists, use it
   if (parameter.type) {
-    return checker.getTypeFromTypeNode(parameter.type);
+    const explicitType = checker.getTypeFromTypeNode(parameter.type);
+    return explicitType;
   }
 
   // Try to infer from parameter location
@@ -166,18 +168,18 @@ export function unwrapOpaqueLikeType(
 }
 
 /**
- * Convert a TypeScript type to a TypeNode, unwrapping OpaqueRef types first
- * This is the main entry point for converting inferred types to schema TypeNodes
+ * Convert a TypeScript type to a TypeNode for schema generation
+ * Note: Does NOT unwrap Cell/OpaqueRef types - the schema generator handles those
  */
 export function typeToSchemaTypeNode(
   type: ts.Type | undefined,
   checker: ts.TypeChecker,
   location: ts.Node,
 ): ts.TypeNode | undefined {
-  const normalized = unwrapOpaqueLikeType(type, checker);
-  if (!normalized) {
+  if (!type) {
     return undefined;
   }
-  const result = typeToTypeNode(normalized, checker, location);
+  // Don't unwrap Cell/OpaqueRef types - let the schema generator handle them
+  const result = typeToTypeNode(type, checker, location);
   return result;
 }

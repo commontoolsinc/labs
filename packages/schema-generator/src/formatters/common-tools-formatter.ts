@@ -109,14 +109,12 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
-    // Prepare inner context (preserve node when available)
-    const innerContext = innerTypeNode
-      ? { ...context, typeNode: innerTypeNode }
-      : context;
+    // Don't pass synthetic TypeNodes to formatChildType - they don't have full type info
+    // Only pass the Type, and let the schema generator work directly with that
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
-      innerContext,
-      innerTypeNode,
+      context, // Use parent context without the typeNode
+      undefined, // Don't pass typeNode
     );
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
