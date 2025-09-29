@@ -343,3 +343,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   creating the handler references - it doesn't need to receive all the context
   cells separately. Pass the cells once to the adjustment handler factory, and
   reference them by index within the lift's mapping operation.
+- When working with handler-spawned child recipes, accessing nested cell values
+  requires navigating the cell structure: use `.key("fieldName")` to get a child
+  cell, then `.get()` or `.set()` on that cell. For example, to modify a child's
+  value field: `childCell.key("value").set(newValue)`. The type system may
+  require casting (`as Cell<T>`) but the framework handles the actual cell
+  navigation at runtime.
+- For patterns that spawn child recipes from handlers, the spawned children
+  maintain their own independent state. When displaying children in the UI, lift
+  over the children array and extract the relevant fields (value, label) from
+  each child object in the array rather than trying to access the child recipe
+  instances directly.
+- When implementing UI handlers that need to modify spawned child state,
+  validate the index bounds first (check against array length), then use the
+  cell navigation pattern (`childCell.key("field")`) to access and modify nested
+  fields within the child's state object.

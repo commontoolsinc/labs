@@ -36,7 +36,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-enumeration-state
 - [x] counter-filtered-projection
 - [x] counter-grouped-summary
-- [ ] counter-handler-spawn
+- [x] counter-handler-spawn
 - [x] counter-hierarchical-defaults
 - [ ] counter-hierarchical-key-path
 - [ ] counter-history-tracker
