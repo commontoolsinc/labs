@@ -35,7 +35,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-dynamic-step
 - [x] counter-enumeration-state
 - [x] counter-filtered-projection
-- [ ] counter-grouped-summary
+- [x] counter-grouped-summary
 - [ ] counter-handler-spawn
 - [ ] counter-hierarchical-defaults
 - [ ] counter-hierarchical-key-path
