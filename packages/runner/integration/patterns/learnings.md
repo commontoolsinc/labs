@@ -79,6 +79,8 @@ offline-friendly recipes that the harness can assert confidently.
 - Aggregate compliance-style metrics in one `lift` snapshot and let smaller
   derives reuse those counts, labels, and gaps so handlers only update the
   canonical task list once.
+- Collapse checklist readiness into a single sanitized lift so status labels,
+  gating reasons, and summary strings reuse the same counts without drift.
 - When deriving keyed collections, sanitize the key list first and iterate that
   order everywhere so handlers and derives reuse a deterministic sequence even
   after fallback entries populate missing items.
