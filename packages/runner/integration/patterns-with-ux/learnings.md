@@ -416,3 +416,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   you can bind them directly to buttons in a unified UI. The framework handles
   the cell references correctly even though the handlers were created in
   different recipe contexts.
+- For optional/fallback patterns that track undefined vs defined state, use
+  `lift` to create a boolean derived cell (e.g., `typeof val === "number"`) and
+  bind it to dynamic styling and status text. This provides clear visual
+  feedback about whether a value is using its actual value or falling back to a
+  default.
+- Conditional status indicators work well with color-coded backgrounds: use
+  yellow/amber for warning states (undefined, using fallback) and green for
+  success states (value is set). Compute the complete style string including
+  background, border, color, and padding in a single `lift` function.
+- For patterns demonstrating fallback behavior, include both "set value" and
+  "clear value" actions in the UI so users can easily toggle between defined and
+  undefined states to observe the fallback logic in action.

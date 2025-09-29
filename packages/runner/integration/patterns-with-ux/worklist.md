@@ -52,7 +52,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-nested-stream
 - [ ] counter-no-op-events
 - [ ] counter-opaque-ref-map
-- [ ] counter-optional-fallback
+- [x] counter-optional-fallback
 - [x] counter-parent-cell-arguments
 - [ ] counter-parent-child-bubble
 - [ ] counter-persistence-defaults
