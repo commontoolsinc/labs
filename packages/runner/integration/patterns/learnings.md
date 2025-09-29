@@ -69,6 +69,9 @@ offline-friendly recipes that the harness can assert confidently.
   guards can short-circuit before mutating shared state.
 - To re-open staged workflows, re-sanitize the full list before writing so
   downstream derives recompute from the canonical stage definitions.
+- Capture both successful and rejected handler attempts in a normalized history
+  cell so derives can expose deterministic audit logs without reusing transient
+  event payloads.
 
 ## Derived Views & Determinism
 
