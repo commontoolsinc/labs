@@ -323,6 +323,9 @@ import {
   scenarios as componentLibraryCatalogScenarios,
 } from "./patterns/component-library-catalog.ts";
 import {
+  scenarios as complianceChecklistScenarios,
+} from "./patterns/compliance-checklist.ts";
+import {
   scenarios as editorialCalendarScenarios,
 } from "./patterns/editorial-calendar.ts";
 import {
@@ -445,6 +448,7 @@ const allScenarios = [
   ...designTokenSwitcherScenarios,
   ...contentPublishingWorkflowScenarios,
   ...componentLibraryCatalogScenarios,
+  ...complianceChecklistScenarios,
   ...editorialCalendarScenarios,
   ...documentSignatureWorkflowScenarios,
   ...formWizardStepperScenarios,

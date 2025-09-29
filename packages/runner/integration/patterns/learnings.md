@@ -76,6 +76,9 @@ offline-friendly recipes that the harness can assert confidently.
   ordering.
 - Build cross-field validation snapshots with a single `lift` so boolean flags
   and delta views stay aligned across every exposed field.
+- Aggregate compliance-style metrics in one `lift` snapshot and let smaller
+  derives reuse those counts, labels, and gaps so handlers only update the
+  canonical task list once.
 - When deriving keyed collections, sanitize the key list first and iterate that
   order everywhere so handlers and derives reuse a deterministic sequence even
   after fallback entries populate missing items.
