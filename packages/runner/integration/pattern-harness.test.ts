@@ -239,6 +239,9 @@ import {
   scenarios as patientVitalsDashboardScenarios,
 } from "./patterns/patient-vitals-dashboard.ts";
 import {
+  scenarios as podcastEpisodePlannerScenarios,
+} from "./patterns/podcast-episode-planner.ts";
+import {
   scenarios as procurementRequestScenarios,
 } from "./patterns/procurement-request.ts";
 import {
@@ -412,6 +415,7 @@ const allScenarios = [
   ...moodDiaryScenarios,
   ...medicationAdherenceScenarios,
   ...patientVitalsDashboardScenarios,
+  ...podcastEpisodePlannerScenarios,
   ...procurementRequestScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,

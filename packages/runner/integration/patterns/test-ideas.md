@@ -255,7 +255,7 @@ current offline harness.
       calendar view groups entries by channel.
 - [ ] Media playlist curator pattern — curate playlists ensure handlers reorder
       tracks and derived runtime recalcs.
-- [ ] Podcast episode planner pattern — plan episode segments ensure derived
+- [x] Podcast episode planner pattern — plan episode segments ensure derived
       outline strings segment order and timing.
 - [x] Image gallery variant pattern — manage per-device variants ensure derived
       selection mirrors active device mode cells.
