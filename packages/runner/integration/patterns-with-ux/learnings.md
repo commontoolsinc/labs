@@ -400,3 +400,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   "+5" for step size 5), bind the button content directly to the underlying
   parameter cell rather than a sanitized UI field. This keeps the displayed
   action accurate to what will actually happen.
+- When displaying parent-child recipe relationships where cells are passed as
+  arguments, use side-by-side layouts with color-coded sections to visually
+  distinguish the parent and child UIs. This helps users understand which
+  controls belong to which recipe while demonstrating shared state.
+- For patterns demonstrating cell-level state sharing, include a real-time
+  alignment indicator that shows when parent and child values are synchronized.
+  Use color-coded badges (green for aligned, red for misaligned) to provide
+  immediate visual feedback about the state relationship.
+- Child recipe outputs can be accessed via `.key("fieldName")` in the parent's
+  JSX, allowing you to display child-derived values (like parity, nextPreview)
+  alongside parent controls. This demonstrates how derives propagate across
+  recipe boundaries.
+- When both parent and child recipes expose handlers that mutate the same cells,
+  you can bind them directly to buttons in a unified UI. The framework handles
+  the cell references correctly even though the handlers were created in
+  different recipe contexts.
