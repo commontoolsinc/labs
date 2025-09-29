@@ -212,3 +212,12 @@ Add short notes after each run so the next agent can build on proven approaches.
   `if (!form ||
   !Array.isArray(form.groups) || form.groups.length === 0)` for
   robust empty state detection.
+- When a `lift` needs to both transform data and render JSX, compute all
+  transformation logic (like mapping array values into objects with computed
+  properties) directly within the lift function rather than creating a separate
+  intermediate derived cell. This simplifies the derive chain and avoids type
+  mismatches when passing complex structures between lifts.
+- For checksum or hash computation patterns displayed in the UI, showing a
+  breakdown of the computation steps (value → normalized → weighted →
+  contribution) helps users understand the algorithm. Use monospace fonts for
+  numeric values and hex representations to maintain visual alignment.
