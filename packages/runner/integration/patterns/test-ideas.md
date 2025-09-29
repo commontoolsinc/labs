@@ -299,7 +299,7 @@ current offline harness.
       escalation flags trigger when tasks stall.
 - [x] Security vulnerability tracker pattern — track vulns lifecycle ensure
       derived risk scores roll up by severity and system.
-- [ ] Compliance checklist pattern — track compliance tasks ensure derived gap
+- [x] Compliance checklist pattern — track compliance tasks ensure derived gap
       report highlights overdue obligations.
 - [x] Document signature workflow pattern — collect signatures ensure derived
       status shows next signer and outstanding steps.
