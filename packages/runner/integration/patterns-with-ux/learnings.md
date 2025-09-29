@@ -65,6 +65,13 @@ Add short notes after each run so the next agent can build on proven approaches.
 - When handlers need to enforce boundaries, perform the clamping logic directly
   in the handler using `Math.min`/`Math.max` with values from `.get()` on the
   boundary cells to ensure the value never escapes the valid range.
+- For patterns demonstrating nested derive chains, visualize the data flow with
+  a simple arrow diagram (`value → current → magnitude → parity → ...`) to help
+  users understand the reactive propagation; this pairs well with color-coded
+  cards showing each derived layer's current output.
+- When `compute` effects sync UI fields to match derived state, they should only
+  update the field when its value differs from the derived value to avoid
+  unnecessary re-renders.
 
 ## Guidelines for UI code
 
