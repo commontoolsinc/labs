@@ -72,6 +72,10 @@ Add short notes after each run so the next agent can build on proven approaches.
 - When `compute` effects sync UI fields to match derived state, they should only
   update the field when its value differs from the derived value to avoid
   unnecessary re-renders.
+- For dynamic styles that depend on multiple derived cells, extract the style
+  computation into separate `lift` calls that return style strings, then bind
+  those derived style cells directly to JSX `style` attributes. This keeps the
+  JSX clean and ensures proper reactive updates.
 
 ## Guidelines for UI code
 
