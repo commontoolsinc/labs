@@ -66,6 +66,7 @@ const handleNewBacklink = handler<
   {
     detail: {
       text: string;
+      charmId: any;
     };
   },
   {
@@ -73,12 +74,12 @@ const handleNewBacklink = handler<
     justCreated: Cell<MentionableCharm | null>;
   }
 >(({ detail }, { allCharms, justCreated }) => {
-  console.log("new charm", detail.text);
-  const n = Note({
-    title: detail.text,
-    content: "",
-    allCharms,
-  });
+  console.log("new charm", detail.text, detail.charmId);
+  // const n = Note({
+  //   title: detail.text,
+  //   content: "",
+  //   allCharms,
+  // });
 
   /*
   The below line triggers
@@ -91,8 +92,8 @@ const handleNewBacklink = handler<
       at areMaybeLinkAndNormalizedLinkSame (link-utils.ts:359:27)
       at normalizeAndDiff (data-updating.ts:236:7)
   */
-  justCreated.set(n as any);
-  return navigateTo(n);
+  // justCreated.set(n as any);
+  // return navigateTo(n);
 });
 
 const handleCharmLinkClicked = handler(
@@ -101,17 +102,17 @@ const handleCharmLinkClicked = handler(
   },
 );
 
-const reactToJustCreated = lift(
-  toSchema<{ justCreated: Cell<MentionableCharm | null> }>(),
-  undefined,
-  ({ justCreated }) => {
-    if (justCreated.get()) {
-      console.log("just created", justCreated.get());
-      justCreated.set(null);
-      return justCreated;
-    }
-  },
-);
+// const reactToJustCreated = lift(
+//   toSchema<{ justCreated: Cell<MentionableCharm | null> }>(),
+//   undefined,
+//   ({ justCreated }) => {
+//     if (justCreated.get()) {
+//       console.log("just created", justCreated.get());
+//       justCreated.set(null);
+//       return justCreated;
+//     }
+//   },
+// );
 
 const stringify = lift(({ pattern }) => {
   return JSON.stringify(pattern);
@@ -123,7 +124,7 @@ const Note = recipe<Input, Output>(
     const mentioned = cell<MentionableCharm[]>([]);
     const justCreated = cell<MentionableCharm | null>(null);
 
-    reactToJustCreated({ justCreated });
+    // reactToJustCreated({ justCreated });
 
     const computeBacklinks = lift<
       { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
@@ -150,7 +151,8 @@ const Note = recipe<Input, Output>(
       content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
-    const pattern = stringify({ pattern: Note });
+    // const pattern = stringify({ pattern: Note });
+    const pattern = derive(undefined, () => JSON.stringify(Note));
 
     return {
       [NAME]: title,
@@ -167,7 +169,7 @@ const Note = recipe<Input, Output>(
             $value={content}
             $mentionable={allCharms}
             $mentioned={mentioned}
-            $pattern={Note}
+            $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,

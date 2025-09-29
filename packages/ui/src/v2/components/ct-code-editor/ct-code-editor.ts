@@ -152,7 +152,7 @@ export class CTCodeEditor extends BaseElement {
   declare timingDelay: number;
   declare mentionable: Cell<MentionableArray>;
   declare mentioned?: Cell<MentionableArray>;
-  declare pattern: any;
+  declare pattern: Cell<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -368,20 +368,27 @@ export class CTCodeEditor extends BaseElement {
           return true;
         }
 
-        // No ID or no matching item: request creation
-        this.emit("backlink-create", { text: backlinkText });
-
+        // TODO: rt from this.pattern?
         if (this._rt && this._session && this.pattern) {
           const tx = this._rt.edit();
+          const spaceName = this.pattern.space;
           const result = this._rt.getCell<any>(
-            this._session.spaceName as MemorySpace,
-            backlinkText,
+            spaceName,
+            { note: this.value, title: backlinkText },
           );
-          this._rt.run(tx, this.pattern, {
-            title: backlinkText,
+          const pattern = JSON.parse(this.pattern.get());
+
+          this._rt.run(tx, pattern, {
+            title: backlinkText, // TODO: unqiueness
             content: "",
             allCharms: [], // TODO: what do
           }, result);
+
+          tx.commit();
+          this.emit("backlink-create", {
+            text: backlinkText,
+            charmId: getEntityId(result),
+          });
         }
 
         return true;
