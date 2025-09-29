@@ -183,7 +183,7 @@ current offline harness.
       history produces burndown curve after updates.
 - [x] Issue dependency graph pattern — manage dependency edges ensure derived
       order validates acyclic structure post updates.
-- [ ] Release checklist pattern — gate releases on task completion ensure
+- [x] Release checklist pattern — gate releases on task completion ensure
       readiness flips only when all checklist items pass.
 - [ ] Undo history stack pattern — capture undoable states ensure handlers
       manage twin stacks and derived pointer location.
