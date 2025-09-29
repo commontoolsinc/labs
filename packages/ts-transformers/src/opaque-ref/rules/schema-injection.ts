@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
 import { detectCallKind } from "../call-kind.ts";
+import { isOpaqueRefType } from "../types.ts";
 
 const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
@@ -13,32 +14,16 @@ function isFunctionLikeExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function isSchematizableType(type: ts.Type): boolean {
-  const flags = type.getFlags();
-  if (flags & ts.TypeFlags.Any) return false;
-  if (flags & ts.TypeFlags.Unknown) return false;
-  if (flags & ts.TypeFlags.Never) return false;
-  return true;
-}
-
-function tryCreateTypeNode(
-  checker: ts.TypeChecker,
+function isPromiseLikeType(
   type: ts.Type,
-  location: ts.Node,
-): ts.TypeNode | undefined {
-  try {
-    return checker.typeToTypeNode(type, location, TYPE_NODE_FLAGS);
-  } catch {
-    return undefined;
-  }
-}
-
-function isPromiseLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  const extendedChecker = checker as ts.TypeChecker & {
-    getPromisedTypeOfPromise?: (input: ts.Type) => ts.Type | undefined;
+  checker: ts.TypeChecker,
+): boolean {
+  const extended = checker as ts.TypeChecker & {
+    getPromisedTypeOfPromise?: (type: ts.Type) => ts.Type | undefined;
   };
-  if (extendedChecker.getPromisedTypeOfPromise) {
-    return extendedChecker.getPromisedTypeOfPromise(type) !== undefined;
+  if (extended.getPromisedTypeOfPromise) {
+    const promised = extended.getPromisedTypeOfPromise(type);
+    if (promised) return true;
   }
   if (type.isUnion()) {
     return type.types.some((candidate) =>
@@ -48,148 +33,227 @@ function isPromiseLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
   const symbol = type.getSymbol();
   if (!symbol) return false;
   const name = symbol.getName();
-  if (name === "Promise" || name === "PromiseLike") {
-    return true;
-  }
+  if (name === "Promise" || name === "PromiseLike") return true;
   if (symbol.flags & ts.SymbolFlags.Alias) {
     const aliased = checker.getAliasedSymbol(symbol);
-    if (aliased) {
-      const aliasName = aliased.getName();
-      if (aliasName === "Promise" || aliasName === "PromiseLike") {
-        return true;
-      }
-    }
+    if (!aliased) return false;
+    const aliasName = aliased.getName();
+    return aliasName === "Promise" || aliasName === "PromiseLike";
   }
   return false;
 }
 
-interface InferredFunctionSchemas {
-  argument: { node: ts.TypeNode; type: ts.Type };
-  result: { node: ts.TypeNode; type: ts.Type };
+function isAnyType(type: ts.Type | undefined): boolean {
+  return !!type && (type.flags & ts.TypeFlags.Any) !== 0;
 }
 
-function inferSchemaTypesFromFunction(
-  checker: ts.TypeChecker,
+function inferReturnTypeFromBody(
   fn: ts.ArrowFunction | ts.FunctionExpression,
-): InferredFunctionSchemas | undefined {
-  const signature = checker.getSignatureFromDeclaration(fn);
-  if (!signature) return undefined;
-
-  const parameterSymbol = signature.parameters[0];
-  if (!parameterSymbol) return undefined;
-
-  const parameterType = checker.getTypeOfSymbolAtLocation(parameterSymbol, fn);
-  if (!isSchematizableType(parameterType)) return undefined;
-  const argumentTypeNode = tryCreateTypeNode(checker, parameterType, fn);
-  if (!argumentTypeNode) return undefined;
-
-  const returnType = checker.getReturnTypeOfSignature(signature);
-  if (isPromiseLikeType(returnType, checker)) return undefined;
-  if (!isSchematizableType(returnType)) return undefined;
-  const resultTypeNode = tryCreateTypeNode(checker, returnType, fn);
-  if (!resultTypeNode) return undefined;
-
-  return {
-    argument: { node: argumentTypeNode, type: parameterType },
-    result: { node: resultTypeNode, type: returnType },
-  };
-}
-
-function getParameterTypeNode(
-  factory: ts.NodeFactory,
-  parameter: ts.ParameterDeclaration | undefined,
-): ts.TypeNode {
-  return parameter?.type ??
-    factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-}
-
-function typeNodeProducesSchema(
-  typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
-): boolean {
-  const type = checker.getTypeFromTypeNode(typeNode);
-  return isSchematizableType(type);
+): ts.Type | undefined {
+  const body = fn.body;
+  if (!body) return undefined;
+  if (ts.isBlock(body)) {
+    for (const statement of body.statements) {
+      if (ts.isReturnStatement(statement) && statement.expression) {
+        return checker.getTypeAtLocation(statement.expression);
+      }
+    }
+    const extended = checker as ts.TypeChecker & {
+      getVoidType?: () => ts.Type;
+    };
+    return extended.getVoidType ? extended.getVoidType() : undefined;
+  }
+  return checker.getTypeAtLocation(body);
 }
 
-function updateCallWithSchemas(
-  node: ts.CallExpression,
-  schemaTypeNodes: readonly ts.TypeNode[],
-  transformation: ts.TransformationContext,
-  visit: (node: ts.Node) => ts.Node,
-  ensureToSchemaImport: () => void,
-  remainingArgs: readonly ts.Expression[] = Array.from(node.arguments),
-): ts.Node {
-  if (schemaTypeNodes.length === 0) return node;
-  const factory = transformation.factory;
-  const schemaArgs = schemaTypeNodes.map((typeNode) =>
-    factory.createCallExpression(
-      factory.createIdentifier("toSchema"),
-      [typeNode],
-      [],
-    )
-  );
+function isInsideJsx(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (
+      ts.isJsxExpression(current) ||
+      ts.isJsxElement(current) ||
+      ts.isJsxSelfClosingElement(current) ||
+      ts.isJsxFragment(current) ||
+      ts.isJsxAttribute(current)
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
 
-  ensureToSchemaImport();
+function getTypeReferenceArgument(type: ts.Type): ts.Type | undefined {
+  if ("aliasTypeArguments" in type && type.aliasTypeArguments) {
+    const [arg] = type.aliasTypeArguments;
+    if (arg) return arg;
+  }
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const ref = objectType as ts.TypeReference;
+      if (ref.typeArguments && ref.typeArguments.length > 0) {
+        return ref.typeArguments[0];
+      }
+    }
+  }
+  return undefined;
+}
 
-  const updated = factory.createCallExpression(
-    node.expression,
-    undefined,
-    [...schemaArgs, ...remainingArgs],
-  );
+function unwrapOpaqueLikeType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Type>(),
+): ts.Type | undefined {
+  if (!type) return undefined;
+  if (seen.has(type)) return type;
+  seen.add(type);
 
-  return ts.visitEachChild(updated, visit, transformation);
+  if (type.isUnion()) {
+    const unwrapped = type.types.map((candidate) =>
+      unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
+    );
+    const merged = (checker as ts.TypeChecker & {
+      getUnionType?: (types: readonly ts.Type[], node?: ts.Node) => ts.Type;
+    }).getUnionType?.(unwrapped) ?? type;
+    return merged;
+  }
+
+  if (type.isIntersection()) {
+    const intersection = (checker as ts.TypeChecker & {
+      getIntersectionType?: (types: readonly ts.Type[]) => ts.Type;
+    }).getIntersectionType;
+    if (intersection) {
+      const parts = type.types.map((candidate) =>
+        unwrapOpaqueLikeType(candidate, checker, seen) ?? candidate
+      );
+      return intersection(parts);
+    }
+    return type;
+  }
+
+  if (isOpaqueRefType(type, checker)) {
+    const inner = unwrapOpaqueLikeType(
+      getTypeReferenceArgument(type),
+      checker,
+      seen,
+    );
+    if (inner) return inner;
+  }
+
+  return type;
+}
+
+function typeToSchemaTypeNode(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+): ts.TypeNode | undefined {
+  const normalized = unwrapOpaqueLikeType(type, checker);
+  if (!normalized) return undefined;
+  try {
+    return checker.typeToTypeNode(normalized, location, TYPE_NODE_FLAGS);
+  } catch {
+    return undefined;
+  }
 }
 
 function collectFunctionSchemaTypeNodes(
-  checker: ts.TypeChecker,
   fn: ts.ArrowFunction | ts.FunctionExpression,
-): { argument?: ts.TypeNode; result?: ts.TypeNode } | undefined {
-  let argumentTypeNode: ts.TypeNode | undefined = fn.parameters[0]?.type;
-  let resultTypeNode: ts.TypeNode | undefined = fn.type;
+  checker: ts.TypeChecker,
+  fallbackArgType?: ts.Type,
+): {
+  argument?: ts.TypeNode;
+  result?: ts.TypeNode;
+} {
+  const signature = checker.getSignatureFromDeclaration(fn);
+  if (!signature) return {};
 
-  const hasAnnotatedArgument = Boolean(argumentTypeNode);
-  const hasAnnotatedResult = Boolean(resultTypeNode);
-
-  if (!hasAnnotatedArgument && !hasAnnotatedResult) {
-    return undefined;
-  }
-
-  let inferred: InferredFunctionSchemas | undefined;
-  if (!argumentTypeNode || !resultTypeNode) {
-    inferred = inferSchemaTypesFromFunction(checker, fn);
-  }
-
-  const ensureValid = (candidate?: ts.TypeNode): ts.TypeNode | undefined => {
-    if (!candidate) return undefined;
-    if (!typeNodeProducesSchema(candidate, checker)) return undefined;
-    return candidate;
+  const parameter = fn.parameters.length > 0 ? fn.parameters[0] : undefined;
+  let argumentNode: ts.TypeNode | undefined;
+  const resolveArgumentNode = (
+    type: ts.Type | undefined,
+    location: ts.Node,
+  ): ts.TypeNode | undefined => {
+    if (!type) return undefined;
+    if (isAnyType(type) && fallbackArgType) {
+      type = fallbackArgType;
+    }
+    return typeToSchemaTypeNode(type, checker, location);
   };
 
-  argumentTypeNode = ensureValid(argumentTypeNode);
-  resultTypeNode = ensureValid(resultTypeNode);
-
-  if (!argumentTypeNode && inferred) {
-    if (isSchematizableType(inferred.argument.type)) {
-      argumentTypeNode = inferred.argument.node;
+  if (parameter?.type) {
+    argumentNode = parameter.type;
+  } else if (parameter) {
+    argumentNode = resolveArgumentNode(
+      checker.getTypeAtLocation(parameter),
+      parameter,
+    );
+  } else if (signature.parameters.length > 0) {
+    const parameterSymbol = signature.parameters[0];
+    if (parameterSymbol) {
+      argumentNode = resolveArgumentNode(
+        checker.getTypeOfSymbolAtLocation(
+          parameterSymbol,
+          parameterSymbol.valueDeclaration ?? fn,
+        ),
+        fn,
+      );
     }
   }
-  if (!resultTypeNode && inferred) {
-    if (isSchematizableType(inferred.result.type)) {
-      resultTypeNode = inferred.result.node;
+
+  if (!argumentNode && fallbackArgType) {
+    argumentNode = typeToSchemaTypeNode(fallbackArgType, checker, fn);
+  }
+
+  const rawReturnType = checker.getReturnTypeOfSignature(signature);
+  if (isPromiseLikeType(rawReturnType, checker)) {
+    const result: { argument?: ts.TypeNode; result?: ts.TypeNode } = {};
+    if (argumentNode) result.argument = argumentNode;
+    return result;
+  }
+  let returnTypeForSchema = rawReturnType;
+  if (isAnyType(returnTypeForSchema)) {
+    const inferredReturn = inferReturnTypeFromBody(fn, checker);
+    if (inferredReturn && !isAnyType(inferredReturn)) {
+      returnTypeForSchema = inferredReturn;
     }
   }
+  const resultNode = typeToSchemaTypeNode(returnTypeForSchema, checker, fn);
 
-  if (!argumentTypeNode && !resultTypeNode) return undefined;
+  const result: { argument?: ts.TypeNode; result?: ts.TypeNode } = {};
+  if (argumentNode) result.argument = argumentNode;
+  if (resultNode) result.result = resultNode;
+  return result;
+}
 
-  const collected: { argument?: ts.TypeNode; result?: ts.TypeNode } = {};
-  if (argumentTypeNode) {
-    collected.argument = argumentTypeNode;
-  }
-  if (resultTypeNode) {
-    collected.result = resultTypeNode;
-  }
+function createToSchemaCall(
+  factory: ts.NodeFactory,
+  typeNode: ts.TypeNode,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createIdentifier("toSchema"),
+    [typeNode],
+    [],
+  );
+}
 
-  return collected;
+function prependSchemaArguments(
+  factory: ts.NodeFactory,
+  node: ts.CallExpression,
+  argumentType: ts.TypeNode,
+  resultType: ts.TypeNode,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    node.expression,
+    undefined,
+    [
+      createToSchemaCall(factory, argumentType),
+      createToSchemaCall(factory, resultType),
+      ...node.arguments,
+    ],
+  );
 }
 
 export function createSchemaInjectionRule(): OpaqueRefRule {
@@ -214,6 +278,17 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
         if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
           const typeArgs = node.typeArguments;
           if (typeArgs && typeArgs.length >= 1) {
+            const factory = transformation.factory;
+            const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
+              typeArg,
+            ) =>
+              factory.createCallExpression(
+                factory.createIdentifier("toSchema"),
+                [typeArg],
+                [],
+              )
+            );
+
             const argsArray = Array.from(node.arguments);
             let remainingArgs = argsArray;
             if (
@@ -223,34 +298,49 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               remainingArgs = argsArray.slice(1);
             }
 
-            return updateCallWithSchemas(
-              node,
-              Array.from(typeArgs),
-              transformation,
-              visit,
-              ensureToSchemaImport,
-              remainingArgs,
+            ensureToSchemaImport();
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              [...schemaArgs, ...remainingArgs],
             );
+
+            return ts.visitEachChild(updated, visit, transformation);
           }
         }
 
         if (
           callKind?.kind === "builder" && callKind.builderName === "handler"
         ) {
+          const factory = transformation.factory;
+
           if (node.typeArguments && node.typeArguments.length >= 2) {
             const eventType = node.typeArguments[0];
             const stateType = node.typeArguments[1];
             if (!eventType || !stateType) {
               return ts.visitEachChild(node, visit, transformation);
             }
-
-            return updateCallWithSchemas(
-              node,
-              [eventType, stateType],
-              transformation,
-              visit,
-              ensureToSchemaImport,
+            const toSchemaEvent = factory.createCallExpression(
+              factory.createIdentifier("toSchema"),
+              [eventType],
+              [],
             );
+            const toSchemaState = factory.createCallExpression(
+              factory.createIdentifier("toSchema"),
+              [stateType],
+              [],
+            );
+
+            ensureToSchemaImport();
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              [toSchemaEvent, toSchemaState, ...node.arguments],
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
           }
 
           if (node.arguments.length === 1) {
@@ -264,24 +354,32 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
               if (handlerFn.parameters.length >= 2) {
                 const eventParam = handlerFn.parameters[0];
                 const stateParam = handlerFn.parameters[1];
+                const eventType = eventParam?.type ??
+                  factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+                const stateType = stateParam?.type ??
+                  factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
                 if (eventParam || stateParam) {
-                  const eventType = getParameterTypeNode(
-                    transformation.factory,
-                    eventParam,
+                  const toSchemaEvent = factory.createCallExpression(
+                    factory.createIdentifier("toSchema"),
+                    [eventType],
+                    [],
                   );
-                  const stateType = getParameterTypeNode(
-                    transformation.factory,
-                    stateParam,
+                  const toSchemaState = factory.createCallExpression(
+                    factory.createIdentifier("toSchema"),
+                    [stateType],
+                    [],
                   );
 
-                  return updateCallWithSchemas(
-                    node,
-                    [eventType, stateType],
-                    transformation,
-                    visit,
-                    ensureToSchemaImport,
-                    [handlerFn],
+                  ensureToSchemaImport();
+
+                  const updated = factory.createCallExpression(
+                    node.expression,
+                    undefined,
+                    [toSchemaEvent, toSchemaState, handlerFn],
                   );
+
+                  return ts.visitEachChild(updated, visit, transformation);
                 }
               }
             }
@@ -289,108 +387,94 @@ export function createSchemaInjectionRule(): OpaqueRefRule {
         }
 
         if (callKind?.kind === "derive") {
-          if (
-            (!node.typeArguments || node.typeArguments.length === 0) &&
-            node.arguments.length === 2
-          ) {
-            const callback = node.arguments[1];
-            if (callback && isFunctionLikeExpression(callback)) {
-              const collected = collectFunctionSchemaTypeNodes(
-                context.checker,
-                callback,
-              );
-              if (collected) {
-                const schemaTypeNodes: ts.TypeNode[] = [
-                  collected.argument ??
-                    transformation.factory.createKeywordTypeNode(
-                      ts.SyntaxKind.UnknownKeyword,
-                    ),
-                  collected.result ??
-                    transformation.factory.createKeywordTypeNode(
-                      ts.SyntaxKind.UnknownKeyword,
-                    ),
-                ];
-
-                if (collected.argument || collected.result) {
-                  return updateCallWithSchemas(
-                    node,
-                    schemaTypeNodes,
-                    transformation,
-                    visit,
-                    ensureToSchemaImport,
-                  );
-                }
-              }
-            }
-          }
+          const factory = transformation.factory;
+          const insideJsx = isInsideJsx(node);
+          const updateWithSchemas = (
+            argumentType: ts.TypeNode,
+            resultType: ts.TypeNode,
+          ): ts.Node => {
+            ensureToSchemaImport();
+            const updated = prependSchemaArguments(
+              factory,
+              node,
+              argumentType,
+              resultType,
+            );
+            return ts.visitEachChild(updated, visit, transformation);
+          };
 
           if (node.typeArguments && node.typeArguments.length >= 2) {
-            const argumentType = node.typeArguments[0];
-            const resultType = node.typeArguments[1];
+            const [argumentType, resultType] = node.typeArguments;
             if (!argumentType || !resultType) {
               return ts.visitEachChild(node, visit, transformation);
             }
 
-            return updateCallWithSchemas(
-              node,
-              [argumentType, resultType],
-              transformation,
-              visit,
-              ensureToSchemaImport,
+            return updateWithSchemas(argumentType, resultType);
+          }
+
+          if (
+            !insideJsx &&
+            node.arguments.length >= 2 &&
+            isFunctionLikeExpression(node.arguments[1]!)
+          ) {
+            const callback = node.arguments[1] as
+              | ts.ArrowFunction
+              | ts.FunctionExpression;
+            const argumentType = context.checker.getTypeAtLocation(
+              node.arguments[0]!,
             );
+            const inferred = collectFunctionSchemaTypeNodes(
+              callback,
+              context.checker,
+              argumentType,
+            );
+
+            if (inferred.argument && inferred.result) {
+              return updateWithSchemas(inferred.argument, inferred.result);
+            }
           }
         }
 
         if (callKind?.kind === "builder" && callKind.builderName === "lift") {
-          if (
-            (!node.typeArguments || node.typeArguments.length === 0) &&
-            node.arguments.length === 1
-          ) {
-            const implementation = node.arguments[0];
-            if (implementation && isFunctionLikeExpression(implementation)) {
-              const collected = collectFunctionSchemaTypeNodes(
-                context.checker,
-                implementation,
-              );
-              if (collected) {
-                const schemaTypeNodes: ts.TypeNode[] = [
-                  collected.argument ??
-                    transformation.factory.createKeywordTypeNode(
-                      ts.SyntaxKind.UnknownKeyword,
-                    ),
-                  collected.result ??
-                    transformation.factory.createKeywordTypeNode(
-                      ts.SyntaxKind.UnknownKeyword,
-                    ),
-                ];
-
-                if (collected.argument || collected.result) {
-                  return updateCallWithSchemas(
-                    node,
-                    schemaTypeNodes,
-                    transformation,
-                    visit,
-                    ensureToSchemaImport,
-                  );
-                }
-              }
-            }
-          }
+          const factory = transformation.factory;
+          const updateWithSchemas = (
+            argumentType: ts.TypeNode,
+            resultType: ts.TypeNode,
+          ): ts.Node => {
+            ensureToSchemaImport();
+            const updated = prependSchemaArguments(
+              factory,
+              node,
+              argumentType,
+              resultType,
+            );
+            return ts.visitEachChild(updated, visit, transformation);
+          };
 
           if (node.typeArguments && node.typeArguments.length >= 2) {
-            const argumentType = node.typeArguments[0];
-            const resultType = node.typeArguments[1];
+            const [argumentType, resultType] = node.typeArguments;
             if (!argumentType || !resultType) {
               return ts.visitEachChild(node, visit, transformation);
             }
 
-            return updateCallWithSchemas(
-              node,
-              [argumentType, resultType],
-              transformation,
-              visit,
-              ensureToSchemaImport,
+            return updateWithSchemas(argumentType, resultType);
+          }
+
+          if (
+            node.arguments.length === 1 &&
+            isFunctionLikeExpression(node.arguments[0]!)
+          ) {
+            const callback = node.arguments[0] as
+              | ts.ArrowFunction
+              | ts.FunctionExpression;
+            const inferred = collectFunctionSchemaTypeNodes(
+              callback,
+              context.checker,
             );
+
+            if (inferred.argument && inferred.result) {
+              return updateWithSchemas(inferred.argument, inferred.result);
+            }
           }
         }
 
