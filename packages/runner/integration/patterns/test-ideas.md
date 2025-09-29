@@ -241,7 +241,7 @@ current offline harness.
       timeline updates when modules reorder.
 - [x] Assignment grading matrix pattern — record student grades ensure derived
       averages compute per student and assignment.
-- [ ] Student attendance tracker pattern — track attendance logs ensure derived
+- [x] Student attendance tracker pattern — track attendance logs ensure derived
       summaries highlight absences per session.
 - [ ] Curriculum prerequisite graph pattern — validate readiness ensure derived
       eligible modules update when completions change.
