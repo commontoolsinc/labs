@@ -27,7 +27,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-derived-canonical-form
 - [x] counter-derived-checksum
 - [x] counter-derived-color
-- [ ] counter-derived-difference
+- [x] counter-derived-difference
 - [ ] counter-derived-handler-gate
 - [x] counter-derived-min-max
 - [x] counter-derived-summary

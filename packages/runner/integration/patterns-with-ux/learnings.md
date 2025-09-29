@@ -221,3 +221,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   breakdown of the computation steps (value → normalized → weighted →
   contribution) helps users understand the algorithm. Use monospace fonts for
   numeric values and hex representations to maintain visual alignment.
+- When creating audit logs that track which source triggered a change (e.g.,
+  "primary" vs "secondary"), use descriptive helper functions like
+  `formatSource()` to convert internal enums into user-friendly labels. This
+  keeps the JSX clean and improves readability.
+- For patterns showing mathematical relationships (like difference = primary −
+  secondary), include a formula display section that shows the computation with
+  current values interpolated. This helps users understand the derive logic at a
+  glance.
+- When rendering audit cards with conditional styling (positive/negative
+  badges), compute color values as plain variables before the JSX to avoid
+  template literal scope issues. Use string concatenation to build inline styles
+  rather than template literals inside JSX attributes within `lift` functions.
+- Side-by-side layouts for dual counter patterns work well with CSS Grid's
+  two-column layout. Use colored borders (e.g., blue for primary, pink for
+  secondary) to visually distinguish the controls while maintaining symmetry.
