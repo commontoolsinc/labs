@@ -8,8 +8,8 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
-  typeToTypeNode,
   typeToSchemaTypeNode,
+  typeToTypeNode,
 } from "../type-inference.ts";
 import type { TypeRegistry } from "../../core/type-registry.ts";
 
