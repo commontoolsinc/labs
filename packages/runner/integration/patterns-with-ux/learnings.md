@@ -117,3 +117,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   sleeps whenever possible.
 - After navigating to a charm URL, wait 2 seconds before taking snapshots to
   allow the UI to fully render and become interactive.
+
+## Advanced patterns
+
+- When you need per-item actions in a list rendered by `lift`, you cannot create
+  handlers dynamically inside the lift function (they need CTS context).
+  Instead, create a centralized control section where users input an identifier
+  (like an asset ID) and then have separate handlers at the recipe level that
+  read from that input cell. This keeps handlers in the recipe scope while still
+  allowing item-specific actions.
+- The `ct-value` attribute doesn't appear to be a supported pattern in the
+  framework - avoid using it. Instead, use cells to capture user input and have
+  handlers read from those cells.
+- When rendering collections with `lift`, keep the JSX simple - display data
+  only, and avoid conditional rendering with boolean expressions like
+  `{condition && <Component />}` as the false value renders as text. Use ternary
+  operators with `null` instead: `{condition ? <Component /> : null}`.
+- For patterns that track transitions or history, make sure to update both the
+  primary state cell and the history cell within the same handler to keep
+  derived boundaries in sync.
