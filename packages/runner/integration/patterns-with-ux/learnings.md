@@ -284,3 +284,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   UI truly needs direct manipulation or can be display-only. For many scheduling
   and availability patterns, showing computed state visually is sufficient, with
   programmatic control available via the exported handlers.
+- For patterns that render dynamic collections with conditional styling based on
+  filter criteria, compute all style values (colors, borders, backgrounds) as
+  plain string variables before the JSX to avoid template literal scope issues.
+  Use string concatenation with `+` to build inline styles rather than template
+  literals.
+- Grid layouts with `grid-template-columns: repeat(auto-fill, minmax(Npx, 1fr))`
+  work well for displaying collections of items that should wrap responsively.
+  This is particularly effective for filtered collections where the number of
+  items changes dynamically.
+- When implementing filter/projection patterns, use distinct visual treatments
+  for included (green with solid borders) vs excluded (red with faded opacity)
+  items to make the filtering behavior immediately clear. Color-coded section
+  headers with indicator dots reinforce the visual distinction.
+- Empty state messages for filtered collections should be contextual: show "No
+  counters added yet" when the source is empty, "No values meet the threshold"
+  when the included filter is empty, and "All values meet the threshold" when
+  the excluded filter is empty. This helps users understand why sections are
+  empty.
