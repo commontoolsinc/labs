@@ -297,8 +297,10 @@ export default recipe<Input, Output>(
               rightOpen={false}
               tabNames={["Chat", "Note"]}
             >
-              {selected.chat}
-              {selected.note}
+              {/* workaround: this seems to correctly start the sub-recipes on a refresh while directly rendering does not */}
+              {/* this should be fixed after the builder-refactor (DX1) */}
+              <ct-render $cell={selected.chat} />
+              <ct-render $cell={selected.note} />
 
               <aside slot="left">
                 <div>
