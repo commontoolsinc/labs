@@ -23,6 +23,9 @@ offline-friendly recipes that the harness can assert confidently.
 
 - Normalize raw argument cells with a dedicated `lift` once, then share the
   sanitized cell across derives, handlers, and children.
+- Capture immutable argument snapshots during the first `lift` run with
+  `createCell`, then return cloned views so later mutations never leak back into
+  the preserved defaults.
 - Chain multiple `lift`s for multi-stage views; each stage should accept
   sanitized input and return a predictable shape.
 - Combine sanitized inputs by calling `lift(fn)({ ...cells })` so ratios or
