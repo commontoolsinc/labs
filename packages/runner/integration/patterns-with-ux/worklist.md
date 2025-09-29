@@ -31,7 +31,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-derived-handler-gate
 - [x] counter-derived-min-max
 - [x] counter-derived-summary
-- [ ] counter-dynamic-handler-list
+- [x] counter-dynamic-handler-list
 - [x] counter-dynamic-step
 - [x] counter-enumeration-state
 - [x] counter-filtered-projection
