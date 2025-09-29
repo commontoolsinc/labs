@@ -53,7 +53,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-no-op-events
 - [ ] counter-opaque-ref-map
 - [ ] counter-optional-fallback
-- [ ] counter-parent-cell-arguments
+- [x] counter-parent-cell-arguments
 - [ ] counter-parent-child-bubble
 - [ ] counter-persistence-defaults
 - [x] counter-range-slider
