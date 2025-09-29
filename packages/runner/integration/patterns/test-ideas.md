@@ -155,7 +155,7 @@ current offline harness.
       default cells.
 - [x] Markdown preview toggle pattern — switch raw text and preview ensure
       formatting derive updates when handlers change content.
-- [ ] Form wizard stepper pattern — advance gated multi-step flows ensure
+- [x] Form wizard stepper pattern — advance gated multi-step flows ensure
       invalid steps halt progress until fixes arrive.
 - [ ] Dynamic form schema loader pattern — swap field manifests live ensure
       lifted schemas rebuild inputs without stale defaults.
