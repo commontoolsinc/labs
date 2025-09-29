@@ -260,3 +260,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   use color-coded visual feedback: green backgrounds for successful operations,
   red backgrounds for blocked ones. This makes the pattern's behavior
   immediately clear to users.
+- For enumeration state patterns with a fixed sequence of states, use a progress
+  indicator (percentage and progress bar) to visualize how far along the state
+  machine has progressed. Combine this with color-coded state indicators that
+  change based on the current state (e.g., gray for idle, green for running,
+  orange for paused, purple for complete).
+- When displaying transition history with different transition types (advance,
+  retreat, reset, tick), use color-coded badges to distinguish each type
+  visually. This helps users quickly scan the history and understand the flow of
+  state changes.
+- State enumeration patterns benefit from showing both the current state name
+  and its position in the sequence (e.g., "RUNNING (1/3)") to give users a clear
+  sense of progress through the lifecycle.
