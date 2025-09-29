@@ -368,6 +368,9 @@ import {
   scenarios as recipeIngredientScalerScenarios,
 } from "./patterns/recipe-ingredient-scaler.ts";
 import {
+  scenarios as releaseChecklistScenarios,
+} from "./patterns/release-checklist.ts";
+import {
   scenarios as warehouseBinMapScenarios,
 } from "./patterns/warehouse-bin-map.ts";
 import {
@@ -476,6 +479,7 @@ const allScenarios = [
   ...researchCitationManagerScenarios,
   ...surveyResponseAnalyzerScenarios,
   ...recipeIngredientScalerScenarios,
+  ...releaseChecklistScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,
   ...counterAggregateScenarios,
