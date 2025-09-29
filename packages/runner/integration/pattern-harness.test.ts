@@ -245,6 +245,9 @@ import {
   scenarios as procurementRequestScenarios,
 } from "./patterns/procurement-request.ts";
 import {
+  scenarios as orderFulfillmentTrackerScenarios,
+} from "./patterns/order-fulfillment-tracker.ts";
+import {
   scenarios as toggleScenarios,
 } from "./patterns/toggle-derive-label.ts";
 import {
@@ -417,6 +420,7 @@ const allScenarios = [
   ...patientVitalsDashboardScenarios,
   ...podcastEpisodePlannerScenarios,
   ...procurementRequestScenarios,
+  ...orderFulfillmentTrackerScenarios,
   ...emailInboxThreadingScenarios,
   ...featureUsageAnalyticsScenarios,
   ...funnelAnalyticsScenarios,

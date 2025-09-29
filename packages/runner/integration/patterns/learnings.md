@@ -136,6 +136,9 @@ offline-friendly recipes that the harness can assert confidently.
 - For matrix-style summaries, build row and column order maps from sanitized
   inputs so handler writes can re-sort the combined entries deterministically.
 
+- Seed bucket derives from a canonical status list so empty statuses still
+  surface deterministic entries for assertions.
+
 ## Composition & Child Recipes
 
 - Pass argument cells straight into child recipes; let each child sanitize its
