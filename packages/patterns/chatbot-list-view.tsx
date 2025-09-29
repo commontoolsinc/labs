@@ -188,9 +188,10 @@ const selectCharm = handler<
   },
 );
 
-const logCharmsList = lift(
-  toSchema<{ charmsList: Cell<CharmEntry[]> }>(),
-  undefined,
+const logCharmsList = lift<
+  { charmsList: Cell<CharmEntry[]> },
+  Cell<CharmEntry[]>
+>(
   ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
