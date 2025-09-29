@@ -358,3 +358,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   validate the index bounds first (check against array length), then use the
   cell navigation pattern (`childCell.key("field")`) to access and modify nested
   fields within the child's state object.
+- Use `NAME` and `UI` constants from commontools imports, not string literals
+  `"[NAME]"` and `"[UI]"`. The constants are required for the framework to
+  properly recognize and render the UI exports in the return statement:
+  `return
+  { [NAME]: name, [UI]: ui }`.
+- For hierarchical key path patterns that dynamically traverse nested
+  structures, define handlers at the module level (not inside the recipe) and
+  factor out shared path traversal logic into a helper function. This avoids
+  "invalid handler, no schema provided" errors that occur when handlers are
+  defined inside the recipe function.
+- When displaying complex nested state (like multi-level hierarchies), use
+  `lift` to map over the structure and compute all display values (like totals)
+  before the JSX. This keeps the rendering logic clean and ensures proper
+  reactive updates when any part of the hierarchy changes.
+- Grid layouts with colored cluster indicators help users understand
+  hierarchical relationships. Use distinct colors for different clusters/groups
+  (e.g., blue for one cluster, red for another) with colored borders and
+  indicator dots to create clear visual groupings.
