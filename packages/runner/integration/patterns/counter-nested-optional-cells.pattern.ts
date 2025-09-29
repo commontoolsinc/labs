@@ -166,3 +166,5 @@ export const counterWithNestedOptionalCells = recipe<NestedOptionalArgs>(
     };
   },
 );
+
+export default counterWithNestedOptionalCells;
