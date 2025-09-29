@@ -109,12 +109,17 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
-    // Don't pass synthetic TypeNodes to formatChildType - they don't have full type info
-    // Only pass the Type, and let the schema generator work directly with that
+    // Don't pass synthetic TypeNodes - they lose type information (especially for arrays)
+    // Synthetic nodes have pos === -1 and end === -1
+    // But DO pass real TypeNodes from source code for proper type detection (e.g., Default)
+    const isSyntheticNode = innerTypeNode && innerTypeNode.pos === -1 &&
+      innerTypeNode.end === -1;
+
+    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode;
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
-      context, // Use parent context without the typeNode
-      undefined, // Don't pass typeNode
+      context,
+      shouldPassTypeNode ? innerTypeNode : undefined,
     );
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
