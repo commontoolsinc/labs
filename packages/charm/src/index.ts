@@ -40,7 +40,7 @@ export { type ParsedMention, type ProcessedPrompt } from "./imagine.ts";
 export { formatPromptWithMentions, parseComposerDocument } from "./format.ts";
 
 export const DEFAULT_MODEL = [
-  "anthropic:claude-sonnet-4-0",
+  "anthropic:claude-sonnet-4-5",
 ][0];
 
 // Export workflow module

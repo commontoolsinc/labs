@@ -101,7 +101,7 @@ export const TitleGenerator = recipe<
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme }) => {
-    const model = cell<string>("anthropic:claude-sonnet-4-0");
+    const model = cell<string>("anthropic:claude-sonnet-4-5");
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",

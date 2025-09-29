@@ -35,8 +35,8 @@ export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
 export const TASK_MODELS = {
-  coding: "anthropic:claude-sonnet-4-0", // Best for code
-  json: "anthropic:claude-sonnet-4-0", // Fast & good at structured output
+  coding: "anthropic:claude-sonnet-4-5", // Best for code
+  json: "anthropic:claude-sonnet-4-5", // Fast & good at structured output
   creative: "openai:gpt-5", // Best for creative tasks
   vision: "google:gemini-2.5-pro", // Best for vision tasks
 } as const;
@@ -161,6 +161,43 @@ if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
       "anthropic:claude-sonnet-4-0-thinking-latest",
       "claude-sonnet-4-0-thinking",
     ],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 64000 },
+      },
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-5",
+    aliases: ["sonnet-4-5", "sonnet-4.5"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-5-thinking",
+    aliases: ["sonnet-4-5-thinking", "sonnet-4.5-thinking"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 64000,
