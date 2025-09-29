@@ -188,21 +188,10 @@ const selectCharm = handler<
   },
 );
 
-// const logCharmsList = lift<
-//   { charmsList: Cell<CharmEntry[]> }
-// >(
-//   ({ charmsList }) => {
-//     // charmsList is a ProxyArray
-//     console.log("logCharmsList: ", charmsList.get());
-//     return charmsList;
-//   },
-// );
-
 const logCharmsList = lift(
   toSchema<{ charmsList: Cell<CharmEntry[]> }>(),
   undefined,
   ({ charmsList }) => {
-    // charmsList is a Cell
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
   },
@@ -236,6 +225,10 @@ const getSelectedCharm = lift<
     return entry?.charm;
   },
 );
+
+const getCharmName = lift(({ charm }: { charm: any }) => {
+  return charm?.[NAME] || "Unknown";
+});
 
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
@@ -318,7 +311,7 @@ export default recipe<Input, Output>(
                         charm: charmEntry.charm,
                       })}
                     >
-                      <span>{charmEntry.charm[NAME]}</span>
+                      <span>{getCharmName({ charm: charmEntry.charm })}</span>
                       <span slot="meta">{charmEntry.local_id}</span>
                       <ct-button
                         slot="actions"
