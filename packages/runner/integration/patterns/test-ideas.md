@@ -235,7 +235,7 @@ current offline harness.
       adherence percentage reflects doses taken.
 - [x] Patient vitals dashboard pattern — monitor vitals history ensure derived
       alerts trigger when readings hit critical ranges.
-- [ ] Clinical trial enrollment pattern — screen participants ensure derived
+- [x] Clinical trial enrollment pattern — screen participants ensure derived
       eligible list responds to criteria toggles.
 - [x] Education course planner pattern — arrange course modules ensure derived
       timeline updates when modules reorder.
