@@ -63,7 +63,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-replicator
 - [ ] counter-reset
 - [ ] counter-rich-label
-- [ ] counter-ring-buffer-history
+- [x] counter-ring-buffer-history
 - [x] counter-rolling-average
 - [ ] counter-scenario-driven-multi-step
 - [ ] counter-search-term-filter
