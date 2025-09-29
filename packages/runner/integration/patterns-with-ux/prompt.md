@@ -52,7 +52,9 @@ Steps:
 10. Update `packages/runner/integration/patterns-with-ux/worklist.md` to mark
     the pattern as completed.
 11. Format your changes with `deno fmt`.
-12. Stage the changes, commit with a concise summary, and exit.
+12. Add a screenshot to
+    `packages/runner/integration/patterns-with-ux/screenshots`.
+13. Stage the changes, commit with a concise summary, and exit.
 
 IMPORTANT: Only tackle one pattern per run. Quality beats quantity - ship a
 charm the shell team would demo proudly.
