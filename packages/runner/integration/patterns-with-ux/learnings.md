@@ -388,3 +388,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   (`overflow-x: auto`) that display bars side-by-side, allowing users to scan
   through the timeline naturally from newest (left) to oldest (right) after
   reversing the array.
+- For rich label patterns that compose multiple configuration values into a
+  single display, use `lift` to create a visually prominent label component that
+  shows all parts together. This helps users understand how their configuration
+  choices affect the final output.
+- When building configuration UIs that update separate parameters (prefix, step,
+  unit), initialize UI field cells with empty strings and rely on `compute`
+  effects to sync them from the actual parameter defaults. This ensures the UI
+  always reflects the current state without hardcoding initial values.
+- For patterns where button labels need to reflect current configuration (like
+  "+5" for step size 5), bind the button content directly to the underlying
+  parameter cell rather than a sanitized UI field. This keeps the displayed
+  action accurate to what will actually happen.
