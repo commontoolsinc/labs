@@ -6,4 +6,3 @@ if (!customElements.get("ct-tools-chip")) {
 
 export { CTToolsChip };
 export type { ToolsChipTool } from "./ct-tools-chip.ts";
-
