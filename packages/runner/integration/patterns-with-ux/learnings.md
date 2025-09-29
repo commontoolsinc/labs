@@ -29,6 +29,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   `handler` that takes the same cells instead of closing over the original
   callable; otherwise runtime errors like `TypeError: resize is not a function`
   can pop up once Playwright exercises the controls.
+- `lift` hands you the underlying values, not the `Cell`, so if you need both
+  min/max/value at once pass them as an object and sanitize inside the mapper
+  instead of expecting `.get()` on the inputs.
+- `ct-slider` works well once you bind `$value` to the derived number and adapt
+  its `ct-change` event through a dedicated handler; the slider's keyboard
+  controls are reliable for Playwright while buttons cover the rest of the
+  interactions.
 - If you need to reuse a business handler's logic inside new UI actions, factor
   the shared state mutation into a plain helper (e.g. `applyIncrementToState`)
   and call that from both places; invoking the original handler factory from
