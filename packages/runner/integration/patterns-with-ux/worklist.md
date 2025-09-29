@@ -56,7 +56,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-parent-cell-arguments
 - [ ] counter-parent-child-bubble
 - [ ] counter-persistence-defaults
-- [ ] counter-range-slider
+- [x] counter-range-slider
 - [ ] counter-redo-stack
 - [ ] counter-render-tree
 - [ ] counter-reorderable-list
