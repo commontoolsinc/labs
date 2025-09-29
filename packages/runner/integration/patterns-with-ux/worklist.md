@@ -18,7 +18,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-complex-union-state
 - [ ] counter-computed-child-selection
 - [ ] counter-computed-default-strings
-- [ ] counter-conditional-branch
+- [x] counter-conditional-branch
 - [ ] counter-conditional-child-instantiation
 - [ ] counter-conditional-ifelse
 - [x] counter-cross-field-validation
