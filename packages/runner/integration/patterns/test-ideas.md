@@ -115,7 +115,7 @@ current offline harness.
       forwards event payload into child handler stream.
 - [x] Counter with complex union state — manage union of shapes (e.g., loading |
       ready) and ensure transitions update cells correctly.
-- [ ] Counter with scenario-driven argument overrides — scenario modifies
+- [x] Counter with scenario-driven argument overrides — scenario modifies
       argument mid-test using runtime cell to simulate re-run.
 - [ ] Counter with time-sliced derive — derive uses argument to compute slice of
       array representing time window.
