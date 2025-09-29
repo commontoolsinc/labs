@@ -272,3 +272,15 @@ Add short notes after each run so the next agent can build on proven approaches.
 - State enumeration patterns benefit from showing both the current state name
   and its position in the sequence (e.g., "RUNNING (1/3)") to give users a clear
   sense of progress through the lifecycle.
+- When rendering collections inside `lift` functions, define the lift before the
+  return statement rather than inline in JSX. This avoids "ReferenceError: X is
+  not defined" errors during recipe compilation. Compute all dynamic styles and
+  content as variables before the JSX, then return the complete component tree.
+- For patterns with fixed catalogs (like time slots), display-only UIs work well
+  when interactive controls aren't required. Use color-coded visual states
+  (green for available, red for blocked, gray for unavailable) to clearly
+  communicate status without requiring user interaction.
+- When a pattern needs per-item handlers for a fixed list, consider whether the
+  UI truly needs direct manipulation or can be display-only. For many scheduling
+  and availability patterns, showing computed state visually is sufficient, with
+  programmatic control available via the exported handlers.

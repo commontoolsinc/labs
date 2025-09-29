@@ -6,7 +6,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] asset-lifecycle-tracker
 - [x] bounded-counter
 - [x] budget-planner
-- [ ] calendar-availability
+- [x] calendar-availability
 - [ ] call-center-schedule
 - [ ] catalog-search-facets
 - [ ] composed-counter
