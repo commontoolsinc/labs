@@ -75,9 +75,13 @@ export class PrimitiveFormatter implements TypeFormatter {
       // never cannot occur in JSON - return {} which matches anything
       return {};
     }
-    if ((flags & ts.TypeFlags.Unknown) || (flags & ts.TypeFlags.Any)) {
-      // unknown/any can be any JSON value (primitive or object) - {} matches everything
-      return {};
+    if (flags & ts.TypeFlags.Any) {
+      // any: return true to indicate "allow any value"
+      return true;
+    }
+    if (flags & ts.TypeFlags.Unknown) {
+      // unknown: return false to indicate "reject all values"
+      return false;
     }
 
     // Fallback

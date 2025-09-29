@@ -79,7 +79,7 @@ const createSimpleRecipe = handler({} as const satisfies JSONSchema, {
 const goToCharm = handler({} as const satisfies JSONSchema, {
     type: "object",
     properties: {
-        charm: {}
+        charm: true
     },
     required: ["charm"]
 } as const satisfies JSONSchema, (_, { charm }) => {
