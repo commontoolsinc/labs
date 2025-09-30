@@ -122,7 +122,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] form-wizard-stepper
 - [x] shopping-cart-aggregation
 - [ ] clinical-trial-enrollment
-- [ ] education-course-planner
+- [x] education-course-planner
 - [x] assignment-grading-matrix
 - [x] student-attendance-tracker
 - [x] editorial-calendar

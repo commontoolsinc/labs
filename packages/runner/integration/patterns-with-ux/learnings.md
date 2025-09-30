@@ -648,6 +648,15 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Handlers created with JSX syntax (not `h()`) work correctly when bound to
   buttons at the recipe level. Mix JSX for static UI structure with `h()` inside
   `lift` only for dynamic collections that need to render based on state.
+- For sequential timeline patterns displaying modules or segments with
+  calculated start/end times, use `lift` with `h()` to generate cards
+  dynamically. Color-code each card with alternating colors from a palette to
+  visually distinguish sequential items. Display both absolute positions (week
+  ranges) and durations to provide complete temporal context.
+- When implementing add/create handlers that build IDs from titles, always check
+  for duplicate IDs before adding new items to prevent collisions. Display
+  user-friendly error messages in the lastAction cell when duplicates are
+  detected, helping users understand why their action was rejected.
 - When calling `.get()` inside a `lift` function throws "derive is not defined"
   errors, it means you're trying to read a cell directly instead of receiving
   its value as a parameter. Always pass cells as parameters to lift and extract
