@@ -168,7 +168,7 @@ export async function transformSource(
   const afterTransformers = after.map((factory) => factory(program));
 
   // Create a TypeRegistry shared between OpaqueRef and Schema transformers
-  const typeRegistry = new TypeRegistry();
+  const typeRegistry = new WeakMap<ts.Node, ts.Type>();
 
   const transformers: ts.TransformerFactory<ts.SourceFile>[] = [
     ...beforeTransformers,

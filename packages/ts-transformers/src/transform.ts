@@ -16,7 +16,7 @@ export function commonTypeScriptTransformer(
 
   // Create a TypeRegistry scoped to this transformation pipeline
   // This allows schema-injection to pass Type information to schema-transformer
-  const typeRegistry = new TypeRegistry();
+  const typeRegistry = new WeakMap<ts.Node, ts.Type>();
 
   return [
     createModularOpaqueRefTransformer(program, { typeRegistry }),
