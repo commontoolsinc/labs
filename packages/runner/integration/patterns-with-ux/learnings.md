@@ -1111,3 +1111,26 @@ Add short notes after each run so the next agent can build on proven approaches.
   health visibility. Compute the conditional colors directly in the lift using
   ternary operators rather than nested lifts to avoid runtime errors with
   `.startsWith()` on cells.
+- For signature workflow patterns tracking multi-stage approval processes, use
+  color-coded status badges with distinct colors for each state (green for
+  signed, red for declined, amber for pending). Displaying order numbers and IDs
+  alongside signer information helps users quickly identify which signer to
+  target for actions.
+- When building workflow UIs that need multiple action types on the same items
+  (sign, decline, reset), use a shared ID input field with separate optional
+  fields for each action type (signed date, decline reason). This keeps the form
+  compact while supporting all operations through different button handlers.
+- Progress indicators showing both percentage and fraction (e.g., "67%, 2 of 3
+  signatures collected") with a visual progress bar provide comprehensive
+  workflow status at a glance. Computing percentage dynamically from
+  completed/total counts ensures accuracy as state changes.
+- Activity logs displaying workflow history in reverse chronological order with
+  alternating row backgrounds improve scannability. Including contextual details
+  in log messages (e.g., "Noah Chen (Account Executive) signed on 2024-07-15")
+  provides complete audit trail information without requiring users to cross-
+  reference other sections.
+- For workflows with business handler logic that needs UI equivalents, replicate
+  the exact sanitization and state mutation logic in UI-specific handlers rather
+  than trying to invoke the original handlers. This ensures consistent behavior
+  while allowing form field clearing and other UI-specific operations after
+  successful actions.
