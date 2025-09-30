@@ -817,3 +817,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   parse numeric values, validate bounds, and only update state when inputs are
   valid. This prevents invalid state and provides implicit feedback through
   no-ops on bad input.
+- For A/B testing or experiment assignment patterns that track allocation
+  balance, use dynamic color-coded status indicators to show when assignments
+  are balanced (green) vs imbalanced (yellow/amber). Computing the balance
+  status with a threshold (e.g., max difference ≤ 25%) provides clear visual
+  feedback about distribution quality.
+- When displaying allocation statistics for weighted variants, show both target
+  share (based on weights) and actual share (based on current assignments)
+  side-by-side with the difference highlighted. This helps users understand how
+  well the assignment algorithm is maintaining the desired distribution.
+- For patterns that accumulate history (like assignment logs), displaying
+  entries in reverse chronological order with alternating row backgrounds
+  improves scannability. Limit the display to recent entries (e.g., last 10) to
+  prevent UI clutter while maintaining complete history in the underlying cell.
+- Assignment or allocation UIs benefit from prominent summary metrics at the
+  top: total count and balance status provide at-a-glance understanding of
+  system state without requiring users to scan through detailed breakdowns.

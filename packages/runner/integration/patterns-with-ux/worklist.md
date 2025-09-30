@@ -79,7 +79,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] echo
 - [ ] email-inbox-threading
 - [ ] expense-reimbursement
-- [ ] experiment-assignment
+- [x] experiment-assignment
 - [ ] feature-usage-analytics
 - [x] heatmap-aggregation
 - [ ] incident-response-playbook
