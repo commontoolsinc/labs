@@ -32,17 +32,24 @@ the recipe itself.
 **notification-preference**
 
 - Pattern compiles successfully and UI renders correctly
-- Handlers are defined correctly and bound to buttons with `ct-channel` and `ct-frequency` attributes
-- Buttons are clickable but handlers don't execute (no state changes, no console errors)
+- Handlers are defined correctly and bound to buttons with `ct-channel` and
+  `ct-frequency` attributes
+- Buttons are clickable but handlers don't execute (no state changes, no console
+  errors)
 - Tried multiple approaches:
   - Binding handlers outside lift (like echo pattern)
   - Creating handlers inside lift per-item (like counter-replicator pattern)
   - Both approaches fail silently - no errors, just no handler execution
 - Possible issues:
-  - `ct-channel` and `ct-frequency` custom attributes may not be properly passing through to event object
-  - Handler event extraction logic `event?.channel` may not be receiving the attributes
-  - There may be a framework limitation with custom attributes on dynamically rendered buttons inside lifts
-- Next steps: Investigate whether ct- prefixed attributes work reliably, or if a different approach is needed (e.g., creating individual handlers per channel/frequency combination)
+  - `ct-channel` and `ct-frequency` custom attributes may not be properly
+    passing through to event object
+  - Handler event extraction logic `event?.channel` may not be receiving the
+    attributes
+  - There may be a framework limitation with custom attributes on dynamically
+    rendered buttons inside lifts
+- Next steps: Investigate whether ct- prefixed attributes work reliably, or if a
+  different approach is needed (e.g., creating individual handlers per
+  channel/frequency combination)
 
 ## Handler-Spawn Pattern (StorageTransactionCompleteError)
 
@@ -60,3 +67,27 @@ the recipe itself.
   and immediately adding them to reactive arrays
 - Pattern demonstrates an edge case that may not be fully supported by the
   current framework architecture
+
+## Customer Satisfaction Tracker (Unknown type undefined)
+
+**customer-satisfaction-tracker**
+
+- Pattern compiles successfully but fails to render with "Error rendering
+  content: Unknown type undefined"
+- Console shows repeated "TypeError: Unknown type undefined at Object.toTree10"
+- Attempted fixes:
+  - Moved lift() calls out of JSX style attributes into separate derived cells
+  - Added empty state handling for dynamic collections
+  - Simplified UI structure to match working patterns
+  - Removed nested lift() calls
+- The NAME export works correctly (shows "Customer Satisfaction (0.00/5.0)" in
+  title)
+- The error occurs during UI rendering, suggesting something in the [UI] export
+  has an unserializable type
+- May be related to how Record<string, number> types from channelAverages are
+  being handled
+- Pattern is complex with multiple derived cells, aggregations, and dynamic
+  rendering
+- Issue persists across multiple reimplementations
+- Needs further investigation into what specific value/type is causing the
+  serialization failure
