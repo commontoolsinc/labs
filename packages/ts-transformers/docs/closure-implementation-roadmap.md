@@ -10,13 +10,17 @@ case (map callbacks) and progressively build toward full closure support.
 
 ## Implementation Status
 
-✅ **COMPLETED**: Basic closure transformer structure created in `src/closures/` directory
+✅ **COMPLETED**: Basic closure transformer structure created in `src/closures/`
+directory
+
 - Separate from opaque-ref for clean architecture
 - Runs FIRST in the pipeline (before OpaqueRef and Schema transformers)
 - Has its own types and rules system
 
 ⚠️ **IN PROGRESS**: Fixing capture detection bug
-- Currently capturing wrong variables (individual identifiers instead of full expressions)
+
+- Currently capturing wrong variables (individual identifiers instead of full
+  expressions)
 - Need to properly handle property access like `state.discount`
 
 ## Implementation Phases
@@ -148,9 +152,9 @@ export function commonTypeScriptTransformer(
   program: ts.Program,
 ): ts.TransformerFactory<ts.SourceFile>[] {
   return [
-    createClosureTransformer(program),  // ✅ Runs FIRST to handle closures
-    createModularOpaqueRefTransformer(program),  // Then OpaqueRef transformations
-    createSchemaTransformer(program),  // Finally schema injection
+    createClosureTransformer(program), // ✅ Runs FIRST to handle closures
+    createModularOpaqueRefTransformer(program), // Then OpaqueRef transformations
+    createSchemaTransformer(program), // Finally schema injection
   ];
 }
 ```
@@ -284,9 +288,11 @@ graph TD
 
 ### Core Changes ✅
 
-1. `src/opaque-ref/dataflow.ts` - Added synthetic node handling for nodes created by closure transformer
+1. `src/opaque-ref/dataflow.ts` - Added synthetic node handling for nodes
+   created by closure transformer
 2. `src/transform.ts` - Added closure transformer to pipeline (runs first)
-3. `test/utils.ts` - Updated to use commonTypeScriptTransformer instead of individual transformers
+3. `test/utils.ts` - Updated to use commonTypeScriptTransformer instead of
+   individual transformers
 
 ### New Files ✅
 
@@ -367,18 +373,24 @@ When starting implementation:
 
 ## Resolved Implementation Questions
 
-1. **Import management**: ✅ Using context.imports.request() to add necessary imports
-2. **Synthetic nodes**: ✅ Added handling in dataflow.ts for nodes without source files
+1. **Import management**: ✅ Using context.imports.request() to add necessary
+   imports
+2. **Synthetic nodes**: ✅ Added handling in dataflow.ts for nodes without
+   source files
 3. **Transformer ordering**: ✅ Closure transformer runs FIRST in the pipeline
 
 ## Current Implementation Issues
 
-1. **Capture Detection Bug**: Currently capturing individual identifiers instead of full property access expressions
+1. **Capture Detection Bug**: Currently capturing individual identifiers instead
+   of full property access expressions
    - Should capture: `state.discount` as a single unit
    - Currently capturing: `state` and `discount` separately (incorrectly)
    - Also mysteriously capturing non-existent variables like "span" and "price"
 
 2. **Outstanding Questions**:
-   - **Curry implementation**: Still need to verify runtime support for lift+curry pattern
-   - **Type preservation**: Need to ensure transformed code maintains TypeScript types
-   - **Debugging experience**: Source maps through transformation not yet addressed
+   - **Curry implementation**: Still need to verify runtime support for
+     lift+curry pattern
+   - **Type preservation**: Need to ensure transformed code maintains TypeScript
+     types
+   - **Debugging experience**: Source maps through transformation not yet
+     addressed
