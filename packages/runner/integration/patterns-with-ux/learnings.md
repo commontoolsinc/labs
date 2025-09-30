@@ -757,3 +757,10 @@ Add short notes after each run so the next agent can build on proven approaches.
   `const adjustPlus1 =
   createAdjustHandler(1)`. This ensures parameters are
   properly captured at handler creation time.
+- For dynamic lists where per-item handlers are needed (like increment/
+  decrement buttons for each counter), creating handlers inside `lift` functions
+  doesn't work reliably even when using factory functions. Instead, use a
+  centralized control approach: create input fields where users specify the item
+  index and adjustment value, then have a single handler read from those fields.
+  This pattern works well for collection management UIs where the collection
+  size changes dynamically.
