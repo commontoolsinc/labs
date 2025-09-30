@@ -641,3 +641,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   strings as plain variables using string concatenation (`+` operator) before
   passing them to the `h()` function. This avoids template literal scope issues
   and keeps the code clean.
+- For quote/configuration patterns with dynamic option lists, using a text input
+  where users enter an option ID or name to toggle is more reliable than trying
+  to create per-item button handlers inside `lift` functions. Display each
+  option's ID clearly so users know what to type.
+- Handlers created with JSX syntax (not `h()`) work correctly when bound to
+  buttons at the recipe level. Mix JSX for static UI structure with `h()` inside
+  `lift` only for dynamic collections that need to render based on state.
+- When calling `.get()` inside a `lift` function throws "derive is not defined"
+  errors, it means you're trying to read a cell directly instead of receiving
+  its value as a parameter. Always pass cells as parameters to lift and extract
+  their values as function arguments.

@@ -97,7 +97,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] nested-counters
 - [ ] notification-preference
 - [ ] patient-vitals-dashboard
-- [ ] quote-configuration
+- [x] quote-configuration
 - [ ] recipe-ingredient-scaler
 - [ ] research-citation-manager
 - [ ] saved-search-subscription
