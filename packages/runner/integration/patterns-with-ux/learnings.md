@@ -1057,3 +1057,13 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Sales pipeline visualizations benefit from showing both raw totals (open
   pipeline) and probability-weighted forecasts side-by-side in a prominent
   header, helping users understand both current value and expected outcomes.
+- For aggregation patterns that dynamically compute statistics from collections
+  (sum, count, average), display the aggregate metrics prominently at the top
+  with large typography and gradient backgrounds to create visual hierarchy. Use
+  progress bars or percentage indicators within individual items to show each
+  item's contribution to the total, helping users understand the distribution at
+  a glance.
+- When collections can start empty (using `Default<T[], []>`), always provide UI
+  handlers to add items. Empty state messages with dashed borders and helpful
+  prompts ("No counters yet. Add one to get started!") create clear user
+  guidance when the collection is empty.
