@@ -85,7 +85,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] incident-response-playbook
 - [x] inventory-reorder-threshold
 - [ ] invoice-generator
-- [ ] kanban-board-grouping
+- [x] kanban-board-grouping
 - [ ] lead-scoring
 - [ ] library-checkout-system
 - [x] list-manager
