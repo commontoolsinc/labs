@@ -1,5 +1,5 @@
 {
-  "definitions": {
+  "$defs": {
     "Item": {
       "properties": {
         "text": {
@@ -17,7 +17,7 @@
     "items": {
       "default": [],
       "items": {
-        "$ref": "#/definitions/Item"
+        "$ref": "#/$defs/Item"
       },
       "type": "array"
     },

@@ -17,11 +17,11 @@ const timedHandler = handler({
             format: "date-time"
         },
         data: {
-            $ref: "#/definitions/Map"
+            $ref: "#/$defs/Map"
         }
     },
     required: ["timestamp", "data"],
-    definitions: {
+    $defs: {
         Map: {
             type: "object",
             properties: {
@@ -41,11 +41,11 @@ const timedHandler = handler({
             format: "date-time"
         },
         history: {
-            $ref: "#/definitions/Map"
+            $ref: "#/$defs/Map"
         }
     },
     required: ["lastUpdate", "history"],
-    definitions: {
+    $defs: {
         Map: {
             type: "object",
             properties: {

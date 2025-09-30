@@ -59,9 +59,9 @@ describe("Schema: Type aliases and shared types", () => {
     const s = createSchemaTransformerV2()(type, checker);
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;
-    expect(b1.$ref).toBe("#/definitions/B");
-    expect(b2.$ref).toBe("#/definitions/B");
-    const defB = (s as any).definitions?.B as any;
+    expect(b1.$ref).toBe("#/$defs/B");
+    expect(b2.$ref).toBe("#/$defs/B");
+    const defB = (s as any).$defs?.B as any;
     expect(defB.type).toBe("object");
     expect(defB.properties?.value?.type).toBe("string");
     expect(defB.required).toContain("value");

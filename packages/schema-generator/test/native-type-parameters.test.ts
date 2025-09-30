@@ -19,6 +19,6 @@ interface Wrapper {
       | undefined;
     expect(props?.value).toBe(true);
     expect(props?.pointer).toBe(true);
-    expect((schema as Record<string, unknown>).definitions).toBeUndefined();
+    expect((schema as Record<string, unknown>).$defs).toBeUndefined();
   });
 });

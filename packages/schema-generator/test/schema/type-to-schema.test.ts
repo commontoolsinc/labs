@@ -36,8 +36,8 @@ describe("Schema: type-to-schema parity", () => {
     expect(o.properties?.values?.items?.type).toBe("string");
     const upd = o.properties?.updater as any;
     expect(upd.asStream).toBe(true);
-    expect(upd.$ref).toBe("#/definitions/UpdaterInput");
-    const defU = (o as any).definitions?.UpdaterInput as any;
+    expect(upd.$ref).toBe("#/$defs/UpdaterInput");
+    const defU = (o as any).$defs?.UpdaterInput as any;
     expect(defU.type).toBe("object");
     expect(defU.properties?.newValues?.type).toBe("array");
     expect(defU.properties?.newValues?.items?.type).toBe("string");

@@ -1,9 +1,9 @@
 {
-  "definitions": {
+  "$defs": {
     "LinkedList": {
       "properties": {
         "next": {
-          "$ref": "#/definitions/LinkedList"
+          "$ref": "#/$defs/LinkedList"
         },
         "value": {
           "type": "number"
@@ -17,7 +17,7 @@
   },
   "properties": {
     "list": {
-      "$ref": "#/definitions/LinkedList"
+      "$ref": "#/$defs/LinkedList"
     }
   },
   "required": [

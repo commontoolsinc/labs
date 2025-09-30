@@ -1,10 +1,10 @@
 {
-  "$ref": "#/definitions/SchemaRoot",
-  "definitions": {
+  "$ref": "#/$defs/SchemaRoot",
+  "$defs": {
     "B": {
       "properties": {
         "c": {
-          "$ref": "#/definitions/C"
+          "$ref": "#/$defs/C"
         }
       },
       "required": [
@@ -15,7 +15,7 @@
     "C": {
       "properties": {
         "a": {
-          "$ref": "#/definitions/SchemaRoot"
+          "$ref": "#/$defs/SchemaRoot"
         }
       },
       "required": [
@@ -26,7 +26,7 @@
     "SchemaRoot": {
       "properties": {
         "b": {
-          "$ref": "#/definitions/B"
+          "$ref": "#/$defs/B"
         }
       },
       "required": [

@@ -13,7 +13,7 @@ const removeItem = handler(true as const satisfies JSONSchema, {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         },
@@ -22,7 +22,7 @@ const removeItem = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["items", "index"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -50,7 +50,7 @@ const removeItemAlias = handler(true as const satisfies JSONSchema, {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         },
@@ -59,7 +59,7 @@ const removeItemAlias = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["items", "index"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

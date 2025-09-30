@@ -23,7 +23,7 @@ describe("Schema: Default<T,V> does not mutate shared definitions", () => {
     expect(b.default?.city).toBe("SF");
 
     // If a definition for Address exists, it should not carry a default
-    const defs = (s as any).definitions as Record<string, unknown> | undefined;
+    const defs = (s as any).$defs as Record<string, unknown> | undefined;
     const address = defs?.["Address"] as any | undefined;
     if (address) {
       expect(address.default).toBeUndefined();

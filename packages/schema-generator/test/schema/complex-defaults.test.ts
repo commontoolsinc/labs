@@ -24,8 +24,8 @@ describe("Schema: Complex defaults", () => {
     expect(empty.type).toBe("array");
     const emptyItems = empty.items as any;
     if (emptyItems.$ref) {
-      expect(emptyItems.$ref).toBe("#/definitions/TodoItem");
-      const def = (s as any).definitions?.TodoItem as any;
+      expect(emptyItems.$ref).toBe("#/$defs/TodoItem");
+      const def = (s as any).$defs?.TodoItem as any;
       expect(def.type).toBe("object");
       expect(def.properties?.title?.type).toBe("string");
       expect(def.properties?.done?.type).toBe("boolean");

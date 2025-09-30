@@ -13,13 +13,13 @@ const logCharmsList = lift({
         charmsList: {
             type: "array",
             items: {
-                $ref: "#/definitions/CharmEntry"
+                $ref: "#/$defs/CharmEntry"
             },
             asCell: true
         }
     },
     required: ["charmsList"],
-    definitions: {
+    $defs: {
         CharmEntry: {
             type: "object",
             properties: {

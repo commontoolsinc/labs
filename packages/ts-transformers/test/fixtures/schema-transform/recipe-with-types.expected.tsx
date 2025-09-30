@@ -27,13 +27,13 @@ const inputSchema = {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             default: []
         }
     },
     required: ["title", "items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -60,13 +60,13 @@ const outputSchema = {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             default: []
         }
     },
     required: ["items_count", "title", "items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -101,13 +101,13 @@ const addItem = handler({
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         }
     },
     required: ["items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

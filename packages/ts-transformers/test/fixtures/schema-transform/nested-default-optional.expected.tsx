@@ -19,17 +19,17 @@ const increment = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
         state: {
-            $ref: "#/definitions/NestedOptionalState",
+            $ref: "#/$defs/NestedOptionalState",
             asCell: true
         }
     },
     required: ["state"],
-    definitions: {
+    $defs: {
         NestedOptionalState: {
             type: "object",
             properties: {
                 nested: {
-                    $ref: "#/definitions/OptionalNested"
+                    $ref: "#/$defs/OptionalNested"
                 }
             }
         },
@@ -37,7 +37,7 @@ const increment = handler(true as const satisfies JSONSchema, {
             type: "object",
             properties: {
                 branch: {
-                    $ref: "#/definitions/OptionalBranch"
+                    $ref: "#/$defs/OptionalBranch"
                 }
             }
         },
@@ -66,17 +66,17 @@ export default recipe({
     type: "object",
     properties: {
         state: {
-            $ref: "#/definitions/NestedOptionalState",
+            $ref: "#/$defs/NestedOptionalState",
             default: {}
         }
     },
     required: ["state"],
-    definitions: {
+    $defs: {
         NestedOptionalState: {
             type: "object",
             properties: {
                 nested: {
-                    $ref: "#/definitions/OptionalNested"
+                    $ref: "#/$defs/OptionalNested"
                 }
             }
         },
@@ -84,7 +84,7 @@ export default recipe({
             type: "object",
             properties: {
                 branch: {
-                    $ref: "#/definitions/OptionalBranch"
+                    $ref: "#/$defs/OptionalBranch"
                 }
             }
         },

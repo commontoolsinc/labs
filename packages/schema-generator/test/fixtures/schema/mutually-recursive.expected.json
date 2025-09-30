@@ -1,10 +1,10 @@
 {
-  "$ref": "#/definitions/NodeA",
-  "definitions": {
+  "$ref": "#/$defs/NodeA",
+  "$defs": {
     "NodeA": {
       "properties": {
         "nodeB": {
-          "$ref": "#/definitions/NodeB"
+          "$ref": "#/$defs/NodeB"
         },
         "value": {
           "type": "string"
@@ -19,7 +19,7 @@
     "NodeB": {
       "properties": {
         "nodeA": {
-          "$ref": "#/definitions/NodeA"
+          "$ref": "#/$defs/NodeA"
         },
         "value": {
           "type": "number"

@@ -11,13 +11,13 @@ describe("Schema: Recursion variants", () => {
     const { type, checker } = await getTypeFromCode(code, "Node");
     const gen = createSchemaTransformerV2();
     const result = gen(type, checker);
-    expect(result.$ref).toBe("#/definitions/Node");
-    const defs = result.definitions as Record<string, any>;
+    expect(result.$ref).toBe("#/$defs/Node");
+    const defs = result.$defs as Record<string, any>;
     expect(defs).toBeDefined();
     expect(defs.Node?.type).toBe("object");
     expect(defs.Node?.properties?.value?.type).toBe("number");
     const next = defs.Node?.properties?.next;
-    expect(next?.$ref).toBe("#/definitions/Node");
+    expect(next?.$ref).toBe("#/$defs/Node");
   });
 
   it("nested recursive: children?: Node[]", async () => {
@@ -26,11 +26,11 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
     const s = createSchemaTransformerV2()(type, checker);
-    expect(s.$ref).toBe("#/definitions/Node");
-    const d = s.definitions as any;
+    expect(s.$ref).toBe("#/$defs/Node");
+    const d = s.$defs as any;
     const node = d.Node;
     expect(node.properties?.children?.type).toBe("array");
-    expect(node.properties?.children?.items?.$ref).toBe("#/definitions/Node");
+    expect(node.properties?.children?.items?.$ref).toBe("#/$defs/Node");
   });
 
   it("multi-hop circular A -> B -> C -> A", async () => {
@@ -41,11 +41,11 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
     const s = createSchemaTransformerV2()(type, checker);
-    expect(s.$ref).toBe("#/definitions/A");
-    const defs = s.definitions as any;
-    expect(defs.A?.properties?.b?.$ref).toBe("#/definitions/B");
-    expect(defs.B?.properties?.c?.$ref).toBe("#/definitions/C");
-    expect(defs.C?.properties?.a?.$ref).toBe("#/definitions/A");
+    expect(s.$ref).toBe("#/$defs/A");
+    const defs = s.$defs as any;
+    expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
+    expect(defs.B?.properties?.c?.$ref).toBe("#/$defs/C");
+    expect(defs.C?.properties?.a?.$ref).toBe("#/$defs/A");
   });
 
   it("mutually recursive A <-> B", async () => {
@@ -55,9 +55,9 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
     const s = createSchemaTransformerV2()(type, checker);
-    expect(s.$ref).toBe("#/definitions/A");
-    const defs = s.definitions as any;
-    expect(defs.A?.properties?.b?.$ref).toBe("#/definitions/B");
-    expect(defs.B?.properties?.a?.$ref).toBe("#/definitions/A");
+    expect(s.$ref).toBe("#/$defs/A");
+    const defs = s.$defs as any;
+    expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
+    expect(defs.B?.properties?.a?.$ref).toBe("#/$defs/A");
   });
 });

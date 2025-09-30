@@ -36,10 +36,10 @@ export default recipe({
     type: "object",
     properties: {
         user: {
-            $ref: "#/definitions/User"
+            $ref: "#/$defs/User"
         },
         config: {
-            $ref: "#/definitions/Config"
+            $ref: "#/$defs/Config"
         },
         items: {
             type: "array",
@@ -58,7 +58,7 @@ export default recipe({
         }
     },
     required: ["user", "config", "items", "index", "numbers"],
-    definitions: {
+    $defs: {
         Config: {
             type: "object",
             properties: {

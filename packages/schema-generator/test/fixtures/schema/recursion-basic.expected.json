@@ -1,10 +1,10 @@
 {
-  "$ref": "#/definitions/SchemaRoot",
-  "definitions": {
+  "$ref": "#/$defs/SchemaRoot",
+  "$defs": {
     "SchemaRoot": {
       "properties": {
         "next": {
-          "$ref": "#/definitions/SchemaRoot"
+          "$ref": "#/$defs/SchemaRoot"
         },
         "value": {
           "type": "number"

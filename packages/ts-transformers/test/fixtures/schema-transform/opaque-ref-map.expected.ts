@@ -10,12 +10,12 @@ export default recipe({
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/TodoItem"
+                $ref: "#/$defs/TodoItem"
             }
         }
     },
     required: ["items"],
-    definitions: {
+    $defs: {
         TodoItem: {
             type: "object",
             properties: {

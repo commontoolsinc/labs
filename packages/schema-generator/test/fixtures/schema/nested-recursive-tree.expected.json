@@ -1,13 +1,13 @@
 {
-  "$ref": "#/definitions/TreeNode",
-  "definitions": {
+  "$ref": "#/$defs/TreeNode",
+  "$defs": {
     "TreeBranch": {
       "properties": {
         "metadata": {
           "type": "string"
         },
         "node": {
-          "$ref": "#/definitions/TreeNode"
+          "$ref": "#/$defs/TreeNode"
         }
       },
       "required": [
@@ -19,10 +19,10 @@
     "TreeNode": {
       "properties": {
         "left": {
-          "$ref": "#/definitions/TreeBranch"
+          "$ref": "#/$defs/TreeBranch"
         },
         "right": {
-          "$ref": "#/definitions/TreeBranch"
+          "$ref": "#/$defs/TreeBranch"
         },
         "value": {
           "type": "number"

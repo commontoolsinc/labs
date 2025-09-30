@@ -170,7 +170,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         context.definitionStack.delete(
           this.createStackKey(type, context.typeNode, context.typeChecker),
         );
-        return { "$ref": `#/definitions/${namedKey}` };
+        return { "$ref": `#/$defs/${namedKey}` };
       }
       // Start building this named type; we'll store the result below
       context.inProgressNames.add(namedKey);
@@ -185,12 +185,12 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (context.definitionStack.has(stackKey)) {
       if (namedKey) {
         context.emittedRefs.add(namedKey);
-        return { "$ref": `#/definitions/${namedKey}` };
+        return { "$ref": `#/$defs/${namedKey}` };
       }
       const syntheticKey = this.ensureSyntheticName(type, context);
       context.inProgressNames.add(syntheticKey);
       context.emittedRefs.add(syntheticKey);
-      return { "$ref": `#/definitions/${syntheticKey}` };
+      return { "$ref": `#/$defs/${syntheticKey}` };
     }
 
     // Push current type onto the stack
@@ -213,7 +213,7 @@ export class SchemaGenerator implements ISchemaGenerator {
           );
           if (!isRootType) {
             context.emittedRefs.add(keyForDef);
-            return { "$ref": `#/definitions/${keyForDef}` };
+            return { "$ref": `#/$defs/${keyForDef}` };
           }
           // For root, keep inline; buildFinalSchema may promote if we choose
         }
@@ -267,7 +267,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (!definitions[namedKey]) {
         definitions[namedKey] = rootSchema;
       }
-      base = { $ref: `#/definitions/${namedKey}` } as SchemaDefinition;
+      base = { $ref: `#/$defs/${namedKey}` } as SchemaDefinition;
     } else {
       base = rootSchema;
     }
@@ -289,7 +289,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       $schema: "https://json-schema.org/draft/2020-12/schema",
       ...(base as Record<string, unknown>),
     };
-    if (Object.keys(filtered).length > 0) out.definitions = filtered;
+    if (Object.keys(filtered).length > 0) out.$defs = filtered;
     return out as SchemaDefinition;
   }
 
@@ -416,7 +416,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const visited = new Set<string>();
 
     const enqueueFromRef = (ref: string) => {
-      const prefix = "#/definitions/";
+      const prefix = "#/$defs/";
       if (typeof ref === "string" && ref.startsWith(prefix)) {
         const name = ref.slice(prefix.length);
         if (name) needed.add(name);
@@ -432,9 +432,9 @@ export class SchemaGenerator implements ISchemaGenerator {
       const obj = node as Record<string, unknown>;
       for (const [k, v] of Object.entries(obj)) {
         if (k === "$ref" && typeof v === "string") enqueueFromRef(v);
-        // Skip descending into existing definitions blocks to avoid pulling in
+        // Skip descending into existing $defs blocks to avoid pulling in
         // already-attached subsets recursively
-        if (k === "definitions") continue;
+        if (k === "$defs" || k === "definitions") continue;
         scan(v);
       }
     };

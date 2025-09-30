@@ -19,7 +19,7 @@ export default recipe({
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             }
         },
         filter: {
@@ -33,7 +33,7 @@ export default recipe({
         }
     },
     required: ["items", "filter", "discount", "taxRate"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

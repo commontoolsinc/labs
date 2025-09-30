@@ -1,11 +1,11 @@
 {
-  "$ref": "#/definitions/SchemaRoot",
-  "definitions": {
+  "$ref": "#/$defs/SchemaRoot",
+  "$defs": {
     "SchemaRoot": {
       "properties": {
         "children": {
           "items": {
-            "$ref": "#/definitions/SchemaRoot"
+            "$ref": "#/$defs/SchemaRoot"
           },
           "type": "array"
         },

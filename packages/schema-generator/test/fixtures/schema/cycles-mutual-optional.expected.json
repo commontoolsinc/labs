@@ -1,10 +1,10 @@
 {
-  "$ref": "#/definitions/SchemaRoot",
-  "definitions": {
+  "$ref": "#/$defs/SchemaRoot",
+  "$defs": {
     "SchemaRoot": {
       "properties": {
         "a": {
-          "$ref": "#/definitions/SchemaRootA"
+          "$ref": "#/$defs/SchemaRootA"
         }
       },
       "type": "object"
@@ -12,7 +12,7 @@
     "SchemaRootA": {
       "properties": {
         "b": {
-          "$ref": "#/definitions/SchemaRoot"
+          "$ref": "#/$defs/SchemaRoot"
         }
       },
       "type": "object"
