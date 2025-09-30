@@ -76,7 +76,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] currency-conversion
 - [ ] design-token-switcher
 - [x] double-counter-shared-increment
-- [ ] echo
+- [x] echo
 - [ ] email-inbox-threading
 - [ ] expense-reimbursement
 - [ ] experiment-assignment
