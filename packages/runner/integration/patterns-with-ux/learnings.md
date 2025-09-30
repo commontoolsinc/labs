@@ -833,3 +833,10 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Assignment or allocation UIs benefit from prominent summary metrics at the
   top: total count and balance status provide at-a-glance understanding of
   system state without requiring users to scan through detailed breakdowns.
+- Custom attributes on `ct-button` (like `ct-amount={5}`) are not reliably
+  passed through to handlers as event parameters. Instead, create separate
+  handler instances for each button using a factory function that captures the
+  parameter value at creation time (e.g.,
+  `const increment5 =
+  createIncrementHandler(5)`). This pattern is more
+  reliable than trying to pass parameters via custom attributes.
