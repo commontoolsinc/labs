@@ -30,6 +30,27 @@ export class CTRender extends BaseElement {
       width: 100%;
       height: 100%;
     }
+
+    .loading-spinner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--ct-color-border, #e0e0e0);
+      border-top-color: var(--ct-color-primary, #000);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   `;
 
   static override properties = {
@@ -41,6 +62,7 @@ export class CTRender extends BaseElement {
   private _renderContainer?: HTMLDivElement;
   private _cleanup?: () => void;
   private _isRenderInProgress = false;
+  private _hasRendered = false;
 
   // Debug helpers
   private _instanceId = DEBUG_LOGGING
@@ -54,6 +76,11 @@ export class CTRender extends BaseElement {
 
   protected override render() {
     return html`
+      ${!this._hasRendered ? html`
+        <div class="loading-spinner">
+          <div class="spinner"></div>
+        </div>
+      ` : null}
       <div class="render-container"></div>
     `;
   }
@@ -95,24 +122,35 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private async _loadAndRenderRecipe(recipeId: string) {
+  private async _loadAndRenderRecipe(recipeId: string, retry: boolean = true) {
     this._log("loading recipe:", recipeId);
 
-    // Load and run the recipe
-    const recipe = await this.cell.runtime.recipeManager.loadRecipe(
-      recipeId,
-      this.cell.space,
-    );
-    await this.cell.runtime.runSynced(this.cell, recipe);
-    await this.cell.runtime.idle();
+    try {
+      // Load and run the recipe
+      const recipe = await this.cell.runtime.recipeManager.loadRecipe(
+        recipeId,
+        this.cell.space,
+      );
+      await this.cell.runtime.runSynced(this.cell, recipe);
 
-    // Render the UI output
-    if (!this._renderContainer) {
-      throw new Error("Render container not found");
+      // Render the UI output
+      if (!this._renderContainer) {
+        throw new Error("Render container not found");
+      }
+
+      this._log("rendering UI");
+      this._cleanup = render(this._renderContainer, this.cell.key(UI));
+    } catch (error) {
+      if (retry) {
+        console.warn("Failed to load recipe, retrying...");
+        // First failure, sync and retry once
+        await this.cell.sync();
+        await this._loadAndRenderRecipe(recipeId, false);
+      } else {
+        // Second failure, give up
+        throw error;
+      }
     }
-
-    this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, this.cell.key(UI));
   }
 
   private async _renderCell() {
@@ -132,7 +170,6 @@ export class CTRender extends BaseElement {
 
     // Mark render as in progress
     this._isRenderInProgress = true;
-
     try {
       // Clean up any previous render
       this._cleanupPreviousRender();
@@ -149,6 +186,10 @@ export class CTRender extends BaseElement {
 
       // Load and render the recipe
       await this._loadAndRenderRecipe(recipeId);
+
+      // Mark as rendered and trigger re-render to hide spinner
+      this._hasRendered = true;
+      this.requestUpdate();
     } catch (error) {
       this._handleRenderError(error);
     } finally {
