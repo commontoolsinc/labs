@@ -330,16 +330,22 @@ const results: ReturnType<typeof analyzeNode>[] = [];
 // Visit all variable declarations and function parameters
 function visit(node: ts.Node) {
   // Function parameters
-  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+  if (
+    ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node)
+  ) {
     const funcName = ts.isFunctionDeclaration(node) && node.name
       ? node.name.text
-      : ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
+      : ts.isVariableDeclaration(node.parent) &&
+          ts.isIdentifier(node.parent.name)
       ? node.parent.name.text
       : "anonymous";
 
     node.parameters.forEach((param, idx) => {
       if (ts.isIdentifier(param.name)) {
-        results.push(analyzeNode(param, `${funcName}::param[${idx}] '${param.name.text}'`));
+        results.push(
+          analyzeNode(param, `${funcName}::param[${idx}] '${param.name.text}'`),
+        );
       }
     });
   }
@@ -351,9 +357,10 @@ function visit(node: ts.Node) {
 
   // Class fields
   if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
-    const className = node.parent && ts.isClassDeclaration(node.parent) && node.parent.name
-      ? node.parent.name.text
-      : "anonymous";
+    const className =
+      node.parent && ts.isClassDeclaration(node.parent) && node.parent.name
+        ? node.parent.name.text
+        : "anonymous";
     results.push(analyzeNode(node, `${className}.${node.name.text}`));
   }
 
@@ -372,10 +379,12 @@ visit(sourceFile);
 
 // Group results by category
 const scenarios = {
-  "Function Parameters (unused/unreferenced)": results.filter(r => r.name.includes("::param")),
-  "Variables": results.filter(r => r.name.startsWith("var")),
-  "Class Fields": results.filter(r => r.name.includes(".")),
-  "Error Handling": results.filter(r => r.name.startsWith("catch")),
+  "Function Parameters (unused/unreferenced)": results.filter((r) =>
+    r.name.includes("::param")
+  ),
+  "Variables": results.filter((r) => r.name.startsWith("var")),
+  "Class Fields": results.filter((r) => r.name.includes(".")),
+  "Error Handling": results.filter((r) => r.name.startsWith("catch")),
 };
 
 for (const [category, items] of Object.entries(scenarios)) {
@@ -397,15 +406,36 @@ console.log(`\n${"=".repeat(80)}`);
 console.log("Summary Statistics");
 console.log("=".repeat(80));
 
-const anyCount = results.filter(r => r.flags.includes("Any")).length;
-const unknownCount = results.filter(r => r.flags.includes("Unknown")).length;
-const undefinedCount = results.filter(r => r.flags.includes("Undefined")).length;
-const voidCount = results.filter(r => r.flags.includes("Void")).length;
-const neverCount = results.filter(r => r.flags.includes("Never")).length;
+const anyCount = results.filter((r) => r.flags.includes("Any")).length;
+const unknownCount = results.filter((r) => r.flags.includes("Unknown")).length;
+const undefinedCount =
+  results.filter((r) => r.flags.includes("Undefined")).length;
+const voidCount = results.filter((r) => r.flags.includes("Void")).length;
+const neverCount = results.filter((r) => r.flags.includes("Never")).length;
 
 console.log(`\nTotal items analyzed: ${results.length}`);
-console.log(`  'any' type: ${anyCount} (${(anyCount / results.length * 100).toFixed(1)}%)`);
-console.log(`  'unknown' type: ${unknownCount} (${(unknownCount / results.length * 100).toFixed(1)}%)`);
-console.log(`  'undefined' type: ${undefinedCount} (${(undefinedCount / results.length * 100).toFixed(1)}%)`);
-console.log(`  'void' type: ${voidCount} (${(voidCount / results.length * 100).toFixed(1)}%)`);
-console.log(`  'never' type: ${neverCount} (${(neverCount / results.length * 100).toFixed(1)}%)`);
+console.log(
+  `  'any' type: ${anyCount} (${
+    (anyCount / results.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'unknown' type: ${unknownCount} (${
+    (unknownCount / results.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'undefined' type: ${undefinedCount} (${
+    (undefinedCount / results.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'void' type: ${voidCount} (${
+    (voidCount / results.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'never' type: ${neverCount} (${
+    (neverCount / results.length * 100).toFixed(1)
+  }%)`,
+);

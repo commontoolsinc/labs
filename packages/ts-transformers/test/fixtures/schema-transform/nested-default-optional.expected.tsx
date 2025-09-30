@@ -11,6 +11,7 @@ interface NestedOptionalState {
     nested?: OptionalNested;
 }
 interface NestedOptionalArgs {
+    // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
 const increment = handler(true as const satisfies JSONSchema, {

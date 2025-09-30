@@ -87,10 +87,15 @@ function analyzeWithMode(strict: boolean) {
   const program = ts.createProgram([fileName], options, host);
   const checker = program.getTypeChecker();
 
-  const results: Array<{ name: string; typeString: string; isAny: boolean; isUnknown: boolean }> = [];
+  const results: Array<
+    { name: string; typeString: string; isAny: boolean; isUnknown: boolean }
+  > = [];
 
   function visit(node: ts.Node) {
-    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+    if (
+      ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node)
+    ) {
       const funcName = ts.isFunctionDeclaration(node) && node.name
         ? node.name.text
         : "anonymous";
@@ -132,9 +137,10 @@ function analyzeWithMode(strict: boolean) {
     }
 
     if (ts.isPropertyDeclaration(node) && ts.isIdentifier(node.name)) {
-      const className = node.parent && ts.isClassDeclaration(node.parent) && node.parent.name
-        ? node.parent.name.text
-        : "anonymous";
+      const className =
+        node.parent && ts.isClassDeclaration(node.parent) && node.parent.name
+          ? node.parent.name.text
+          : "anonymous";
       const type = checker.getTypeAtLocation(node);
       results.push({
         name: `${className}.${node.name.text}`,
@@ -161,7 +167,9 @@ const strictResults = analyzeWithMode(true);
 console.log("\n" + "=".repeat(80));
 console.log("COMPARISON TABLE");
 console.log("=".repeat(80));
-console.log("\nIdentifier                          | Non-Strict Mode | Strict Mode");
+console.log(
+  "\nIdentifier                          | Non-Strict Mode | Strict Mode",
+);
 console.log("-".repeat(80));
 
 for (let i = 0; i < nonStrictResults.length; i++) {
@@ -172,7 +180,9 @@ for (let i = 0; i < nonStrictResults.length; i++) {
   const nonStrictType = nonStrict.typeString.padEnd(15);
   const strictType = strict.typeString.padEnd(15);
 
-  const diff = nonStrict.typeString !== strict.typeString ? " ⚠️ DIFFERENT" : "";
+  const diff = nonStrict.typeString !== strict.typeString
+    ? " ⚠️ DIFFERENT"
+    : "";
 
   console.log(`${identifier} | ${nonStrictType} | ${strictType}${diff}`);
 }
@@ -181,18 +191,34 @@ console.log("\n" + "=".repeat(80));
 console.log("SUMMARY");
 console.log("=".repeat(80));
 
-const nonStrictAny = nonStrictResults.filter(r => r.isAny).length;
-const strictAny = strictResults.filter(r => r.isAny).length;
-const nonStrictUnknown = nonStrictResults.filter(r => r.isUnknown).length;
-const strictUnknown = strictResults.filter(r => r.isUnknown).length;
+const nonStrictAny = nonStrictResults.filter((r) => r.isAny).length;
+const strictAny = strictResults.filter((r) => r.isAny).length;
+const nonStrictUnknown = nonStrictResults.filter((r) => r.isUnknown).length;
+const strictUnknown = strictResults.filter((r) => r.isUnknown).length;
 
 console.log(`\nNon-Strict Mode:`);
-console.log(`  'any' inferences: ${nonStrictAny} / ${nonStrictResults.length} (${(nonStrictAny / nonStrictResults.length * 100).toFixed(1)}%)`);
-console.log(`  'unknown' inferences: ${nonStrictUnknown} / ${nonStrictResults.length} (${(nonStrictUnknown / nonStrictResults.length * 100).toFixed(1)}%)`);
+console.log(
+  `  'any' inferences: ${nonStrictAny} / ${nonStrictResults.length} (${
+    (nonStrictAny / nonStrictResults.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'unknown' inferences: ${nonStrictUnknown} / ${nonStrictResults.length} (${
+    (nonStrictUnknown / nonStrictResults.length * 100).toFixed(1)
+  }%)`,
+);
 
 console.log(`\nStrict Mode:`);
-console.log(`  'any' inferences: ${strictAny} / ${strictResults.length} (${(strictAny / strictResults.length * 100).toFixed(1)}%)`);
-console.log(`  'unknown' inferences: ${strictUnknown} / ${strictResults.length} (${(strictUnknown / strictResults.length * 100).toFixed(1)}%)`);
+console.log(
+  `  'any' inferences: ${strictAny} / ${strictResults.length} (${
+    (strictAny / strictResults.length * 100).toFixed(1)
+  }%)`,
+);
+console.log(
+  `  'unknown' inferences: ${strictUnknown} / ${strictResults.length} (${
+    (strictUnknown / strictResults.length * 100).toFixed(1)
+  }%)`,
+);
 
 // Find specific cases where strict mode changes behavior
 console.log("\n" + "=".repeat(80));
@@ -228,10 +254,14 @@ console.log("\n" + "=".repeat(80));
 console.log("CASES WHERE 'unknown' IS INFERRED");
 console.log("=".repeat(80));
 
-const unknownCases = [...nonStrictResults, ...strictResults].filter(r => r.isUnknown);
+const unknownCases = [...nonStrictResults, ...strictResults].filter((r) =>
+  r.isUnknown
+);
 if (unknownCases.length === 0) {
   console.log("\nNo cases where 'unknown' was inferred.");
-  console.log("TypeScript strongly prefers 'any' for implicit/underspecified types.");
+  console.log(
+    "TypeScript strongly prefers 'any' for implicit/underspecified types.",
+  );
 } else {
   for (const unk of unknownCases) {
     console.log(`\n${unk.name}: ${unk.typeString}`);

@@ -248,21 +248,14 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
 
     if (defaultValue !== undefined) {
-      // If the schema is a $ref, we can't add properties directly to it.
-      // Use allOf to combine the $ref with the default value.
-      if (
-        typeof valueSchema === "object" && valueSchema !== null &&
-        "$ref" in valueSchema
-      ) {
-        const result = {
-          allOf: [valueSchema],
-          default: defaultValue,
-        };
-        return result as SchemaDefinition;
-      } else {
-        // For inline schemas, we can add the default directly
-        (valueSchema as any).default = defaultValue;
+      // JSON Schema Draft 2020-12 allows default as a sibling of $ref
+      // Simply add the default property directly to the schema
+      if (typeof valueSchema === "boolean") {
+        // Boolean schemas (true/false) cannot have properties
+        // Wrap in an object schema
+        return { allOf: [valueSchema], default: defaultValue } as SchemaDefinition;
       }
+      (valueSchema as any).default = defaultValue;
     }
 
     return valueSchema;

@@ -112,7 +112,10 @@ const testCases = [
   },
 ];
 
-function analyzeCase(testCase: { name: string; code: string }, strict: boolean) {
+function analyzeCase(
+  testCase: { name: string; code: string },
+  strict: boolean,
+) {
   const fileName = "test.ts";
   const sourceFile = ts.createSourceFile(
     fileName,
@@ -143,19 +146,23 @@ function analyzeCase(testCase: { name: string; code: string }, strict: boolean) 
 
   function visit(node: ts.Node) {
     // Function/method parameters
-    if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
-        ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) {
+    if (
+      ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) || ts.isMethodDeclaration(node)
+    ) {
       node.parameters.forEach((param) => {
         const type = checker.getTypeAtLocation(param);
         const typeStr = checker.typeToString(type);
-        const paramName = ts.isIdentifier(param.name) ? param.name.text :
-                         ts.isObjectBindingPattern(param.name) ? "{...}" :
-                         "...rest";
+        const paramName = ts.isIdentifier(param.name)
+          ? param.name.text
+          : ts.isObjectBindingPattern(param.name)
+          ? "{...}"
+          : "...rest";
         results.push(`param '${paramName}': ${typeStr}`);
       });
 
       // Type parameters
-      if ('typeParameters' in node && node.typeParameters) {
+      if ("typeParameters" in node && node.typeParameters) {
         node.typeParameters.forEach((tp) => {
           const type = checker.getTypeAtLocation(tp);
           const typeStr = checker.typeToString(type);

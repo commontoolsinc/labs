@@ -274,8 +274,8 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
     if (typeof base === "boolean") {
-      return base ? { $schema: "https://json-schema.org/draft-07/schema#" } : {
-        $schema: "https://json-schema.org/draft-07/schema#",
+      return base ? { $schema: "https://json-schema.org/draft/2020-12/schema" } : {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
         not: true,
       };
     }
@@ -284,7 +284,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     // final output
     const filtered = this.collectReferencedDefinitions(base, definitions);
     const out: Record<string, unknown> = {
-      $schema: "https://json-schema.org/draft-07/schema#",
+      $schema: "https://json-schema.org/draft/2020-12/schema",
       ...(base as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.definitions = filtered;
