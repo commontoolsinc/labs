@@ -935,3 +935,24 @@ Add short notes after each run so the next agent can build on proven approaches.
   rather than trying to use duck-typed `{ get(): T }` interfaces. The framework
   handles Cell/OpaqueRef conversion automatically between derived and mutable
   cells.
+- When creating forms with ct-input elements, use JSX syntax at the recipe
+  return level rather than creating them with `h()` inside `lift` functions. The
+  `$value` binding for ct-input works correctly in JSX but may not bind properly
+  when using `h("ct-input", { $value: cell })` inside a lift. This prevents the
+  "[object Object]" display issue in form fields.
+- For editorial/scheduling patterns with multiple channels, using color-coded
+  borders and badges helps users visually distinguish between different content
+  channels. Assigning consistent colors (blue for Blog, purple for Newsletter,
+  pink for Podcast) creates clear visual grouping across the schedule display.
+- When sharing form field cells between multiple UI sections (like "Add" and
+  "Update" forms), be aware that typing in one section will show in the other.
+  If this is undesirable, create separate cell instances for each form section
+  to maintain independent state.
+- For calendar/scheduling UIs with sortable entries, displaying entries
+  chronologically within each channel helps users understand the publication
+  timeline at a glance. Combining this with monospace date formatting
+  (YYYY-MM-DD) improves scannability.
+- Activity history displayed as a single concatenated string (using
+  `.join(" • ")`) provides compact feedback for recent operations without taking
+  up excessive vertical space. Limiting to the last 5 entries prevents clutter
+  while still showing meaningful context.
