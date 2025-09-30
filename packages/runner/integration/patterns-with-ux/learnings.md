@@ -1001,6 +1001,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   with `.set("")` after successful submission to provide clear UX feedback and
   ready the form for the next entry. This is especially important for
   multi-field forms where users need to see that their submission was processed.
+- When you need multiple buttons that call the same handler logic with different
+  fixed parameter values (like increment/decrement), create separate handler
+  functions rather than trying to pass parameters through the context object at
+  binding time. The framework validates context parameters against the handler
+  schema, so extra properties will cause compilation errors. Define handlers
+  like `increment` and `decrement` separately instead of trying to use
+  `adjustSingle({ target: cell, amount: 1 })` in the onClick binding.
 - For progress tracking patterns with weighted items, use conditional color
   coding based on completion percentage thresholds (e.g., red <33%, orange
   33-66%, green

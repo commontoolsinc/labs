@@ -94,7 +94,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] meeting-scheduler
 - [ ] menu-planner
 - [ ] mood-diary
-- [ ] nested-counters
+- [x] nested-counters
 - [ ] notification-preference
 - [ ] patient-vitals-dashboard
 - [x] quote-configuration
