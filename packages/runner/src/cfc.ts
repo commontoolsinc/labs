@@ -176,12 +176,12 @@ export class ContextualFlowControl {
     joined: Set<string>,
     schema: JSONSchema,
     rootSchema: JSONSchema,
-    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(true),
+    cycleTracker: CycleTracker<string> = new CycleTracker<string>(true),
   ): Set<string> {
     if (typeof schema === "boolean") {
       return joined;
     }
-    using t = cycleTracker.include(schema);
+    using t = cycleTracker.include(JSON.stringify(schema));
     if (t === null) {
       // we've already joined this
       return joined;
@@ -221,12 +221,6 @@ export class ContextualFlowControl {
         cycleTracker,
       );
     } else if (schema.$ref) {
-      // Support ifc tags beside the ref tag
-      if (schema.ifc !== undefined && schema.ifc.classification) {
-        for (const classification of schema.ifc.classification) {
-          joined.add(classification);
-        }
-      }
       // Follow the reference
       const resolvedSchema = ContextualFlowControl.resolveSchemaRefOrThrow(
         rootSchema,
