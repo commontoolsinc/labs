@@ -49,7 +49,9 @@ export class CTRender extends BaseElement {
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
   `;
 
@@ -76,11 +78,13 @@ export class CTRender extends BaseElement {
 
   protected override render() {
     return html`
-      ${!this._hasRendered ? html`
-        <div class="loading-spinner">
-          <div class="spinner"></div>
-        </div>
-      ` : null}
+      ${!this._hasRendered
+        ? html`
+          <div class="loading-spinner">
+            <div class="spinner"></div>
+          </div>
+        `
+        : null}
       <div class="render-container"></div>
     `;
   }
