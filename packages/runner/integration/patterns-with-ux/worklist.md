@@ -89,7 +89,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] lead-scoring
 - [ ] library-checkout-system
 - [x] list-manager
-- [ ] logistics-routing
+- [x] logistics-routing
 - [ ] medication-adherence
 - [x] meeting-scheduler
 - [ ] menu-planner
