@@ -130,6 +130,11 @@ export class CTRender extends BaseElement {
     this._log("loading recipe:", recipeId);
 
     try {
+      const recipeId = getRecipeIdFromCharm(this.cell);
+      if (!recipeId) {
+        throw new Error("No recipe ID found in charm");
+      }
+
       // Load and run the recipe
       const recipe = await this.cell.runtime.recipeManager.loadRecipe(
         recipeId,
@@ -183,13 +188,8 @@ export class CTRender extends BaseElement {
         throw new Error("Invalid cell: expected a Cell object");
       }
 
-      const recipeId = getRecipeIdFromCharm(this.cell);
-      if (!recipeId) {
-        throw new Error("No recipe ID found in charm");
-      }
-
       // Load and render the recipe
-      await this._loadAndRenderRecipe(recipeId);
+      await this._loadAndRenderRecipe();
 
       // Mark as rendered and trigger re-render to hide spinner
       this._hasRendered = true;
