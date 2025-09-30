@@ -1047,6 +1047,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   showing both the emoji and count in a compact pill-style format. This creates
   a familiar chat-like interface that users recognize from platforms like Slack
   and Discord.
+- For subscription/notification management patterns, using color-coded frequency
+  badges (red for daily, orange for weekly, blue for monthly) helps users
+  quickly distinguish between different update cadences at a glance. Small
+  inline channel badges with uppercase text create clear visual hierarchy
+  without overwhelming the card layout.
+- When rendering dynamic collections of subscription items with `h()` inside
+  `lift`, compute channel badge elements in a loop and spread them into the
+  parent container. This allows flexible multi-channel display where each
+  subscription can have a different number of channels without breaking layout.
+- Multi-field subscription forms benefit from a two-column grid for related
+  fields (frequency and channels) to create compact, organized input areas. This
+  keeps the form visually balanced while making efficient use of horizontal
+  space on wider screens.
 - For inbox/threading patterns with grouped messages, display threads in reverse
   chronological order (most recent first) and highlight the active thread with
   distinct background colors and border styling. Use badges to show message

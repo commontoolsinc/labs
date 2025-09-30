@@ -100,7 +100,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] quote-configuration
 - [x] recipe-ingredient-scaler
 - [x] research-citation-manager
-- [ ] saved-search-subscription
+- [x] saved-search-subscription
 - [ ] search-relevance-tuning
 - [ ] security-vulnerability-tracker
 - [x] simple-counter
