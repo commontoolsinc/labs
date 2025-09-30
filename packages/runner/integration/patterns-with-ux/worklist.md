@@ -69,7 +69,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-search-term-filter
 - [ ] counter-shared-alias
 - [x] counter-sort-direction-toggle
-- [ ] counter-toggled-derive-pipelines
+- [x] counter-toggled-derive-pipelines
 - [x] counter-typed-handler-record
 - [ ] counter-with-reference-equality-assertions
 - [ ] crm-pipeline
