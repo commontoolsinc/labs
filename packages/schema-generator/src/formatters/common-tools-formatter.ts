@@ -251,12 +251,12 @@ export class CommonToolsFormatter implements TypeFormatter {
       // JSON Schema Draft 2020-12 allows default as a sibling of $ref
       // Simply add the default property directly to the schema
       if (typeof valueSchema === "boolean") {
-        // Boolean schemas (true/false) cannot have properties
-        // Wrap in an object schema
-        return {
-          allOf: [valueSchema],
-          default: defaultValue,
-        } as SchemaDefinition;
+        // Boolean schemas (true/false) cannot have properties directly
+        // For true: { default: value } (any value is valid)
+        // For false: { not: true, default: value } (no value is valid)
+        return valueSchema === false
+          ? { not: true, default: defaultValue } as SchemaDefinition
+          : { default: defaultValue } as SchemaDefinition;
       }
       (valueSchema as any).default = defaultValue;
     }

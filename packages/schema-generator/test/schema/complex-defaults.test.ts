@@ -116,4 +116,34 @@ describe("Schema: Complex defaults", () => {
     expect(u.anyOf).toBeDefined();
     expect(u.anyOf).toEqual([{ type: "string" }]);
   });
+
+  it("boolean schema defaults (any/never with Default)", async () => {
+    const code = `
+      interface Default<T,V> {}
+      interface WithBooleanSchemas {
+        anyWithDefault: Default<any, "defaultValue">;
+        neverWithDefault: Default<never, "fallbackValue">;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(
+      code,
+      "WithBooleanSchemas",
+    );
+    const s = createSchemaTransformerV2()(type, checker);
+
+    // Validate root schema required fields
+    expect(s.required).toEqual(["anyWithDefault", "neverWithDefault"]);
+
+    const anyProp = s.properties?.anyWithDefault as any;
+    // any becomes boolean schema true, with default should be { default: "defaultValue" }
+    expect(anyProp.default).toBe("defaultValue");
+    expect(anyProp.not).toBeUndefined();
+    expect(anyProp.allOf).toBeUndefined();
+
+    const neverProp = s.properties?.neverWithDefault as any;
+    // never becomes boolean schema false, with default should be { not: true, default: "fallbackValue" }
+    expect(neverProp.default).toBe("fallbackValue");
+    expect(neverProp.not).toBe(true);
+    expect(neverProp.allOf).toBeUndefined();
+  });
 });
