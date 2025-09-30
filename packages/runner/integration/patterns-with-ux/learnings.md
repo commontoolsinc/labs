@@ -601,3 +601,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   after handlers successfully apply a one-time action, reset the field to a
   sensible default to clearly signal the action completed and ready the form for
   the next input.
+- For logistics/routing patterns with capacity constraints, use color-coded
+  visual indicators to show route status: green for available capacity, yellow
+  for at-capacity, red for over-capacity. Progress bars showing utilization
+  percentages provide at-a-glance understanding of system load distribution.
+- When displaying collections of metrics (like route loads), compute all dynamic
+  style values before JSX to avoid template literal scope issues. Use string
+  concatenation with `+` operator for building inline styles.
+- Activity history with color-coded entries (green checkmarks for success, red
+  X's for blocked operations) creates clear visual feedback about operation
+  outcomes without requiring users to parse text carefully.
