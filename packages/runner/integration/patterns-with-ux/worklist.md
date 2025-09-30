@@ -108,7 +108,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] sprint-burndown
 - [ ] subscription-billing
 - [ ] template-gallery
-- [ ] toggle-derive-label
+- [x] toggle-derive-label
 - [ ] user-journey-map
 - [ ] user-permission-matrix
 - [ ] warehouse-bin-map

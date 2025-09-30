@@ -701,3 +701,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   The `ct-button` and other ct components are typically nested in shadow DOMs,
   so direct `querySelector` won't find them - you need to recursively check
   `shadowRoot` properties.
+- For simple toggle patterns with derived status labels, use `lift` to compute
+  dynamic styles (colors, backgrounds) based on the derived status string. This
+  creates clean visual feedback with smooth transitions between states using CSS
+  transitions on inline styles.
+- Status indicator patterns work well with a combination of a colored dot (using
+  inline span with dynamic background color) and large uppercase status text,
+  both driven by the same derived status cell. This creates clear, at-a-glance
+  visual feedback about the current state.
+- Dynamic button labels based on state (`lift` to compute "Enable" vs "Disable")
+  provide better UX than static labels, making the available action always clear
+  to users.
