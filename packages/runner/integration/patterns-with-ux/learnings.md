@@ -539,3 +539,14 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Grid layouts with two equal columns work well for displaying related metrics
   side-by-side (like current value and update count), helping users understand
   the relationship between different state values.
+- For patterns demonstrating typed handler records, organize handler invocation
+  counts in a grid with color-coded cards (green for increments, amber for
+  decrements, indigo for set operations) to create clear visual distinction
+  between different handler types while maintaining symmetry.
+- When rendering history with color-coded badges inside a `lift`, compute all
+  color values as plain variables before JSX (e.g., `const actionColor = ...`)
+  and use string concatenation to build inline styles. Use a for...of loop with
+  `.push()` to build the elements array rather than `.map()`.
+- Three-column grid layouts with `grid-template-columns: repeat(3, 1fr)` work
+  well for displaying per-handler statistics that should have equal visual
+  weight, creating a balanced dashboard-like layout for invocation counts.

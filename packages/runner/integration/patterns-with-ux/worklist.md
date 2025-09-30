@@ -70,7 +70,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-shared-alias
 - [x] counter-sort-direction-toggle
 - [ ] counter-toggled-derive-pipelines
-- [ ] counter-typed-handler-record
+- [x] counter-typed-handler-record
 - [ ] counter-with-reference-equality-assertions
 - [ ] crm-pipeline
 - [ ] currency-conversion
