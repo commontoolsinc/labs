@@ -67,7 +67,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-rolling-average
 - [x] counter-scenario-driven-multi-step
 - [x] counter-search-term-filter
-- [ ] counter-shared-alias
+- [x] counter-shared-alias
 - [x] counter-sort-direction-toggle
 - [x] counter-toggled-derive-pipelines
 - [x] counter-typed-handler-record
