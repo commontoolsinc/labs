@@ -144,4 +144,4 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-nested-computed-percentages
 - [ ] counter-nested-computed-totals
 - [ ] counter-persistence-initial-arguments
-- [ ] counter-scenario-argument-overrides
+- [x] counter-scenario-argument-overrides

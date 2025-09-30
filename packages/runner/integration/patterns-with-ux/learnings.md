@@ -1279,3 +1279,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   (e.g., different colored borders for left/right mirrors) while showing the
   same value to clearly communicate that they're synchronized views of a single
   state cell. This helps users understand the aliasing concept at a glance.
+- When creating UI handlers that reuse the same input cell for multiple purposes
+  (like a shared customAmountField for both increment and step change), ensure
+  the handlers clear the field with `.set("")` after successful operations to
+  provide clear UX feedback and prevent confusion about which operation will use
+  the entered value.
+- For argument override patterns that track baseline vs. runtime state, use
+  visual distinction between the immutable baseline arguments (displayed in a
+  read-only info box) and the active runtime values (shown in the main display
+  and modifiable through controls). This helps users understand that overrides
+  change runtime state while preserving the original argument baseline.
+- The `compute` effect is useful for syncing UI form fields with derived state
+  when you want fields to initialize with current values but also allow user
+  edits. Check if the field is empty/undefined before setting it to avoid
+  overwriting user input mid-edit.
