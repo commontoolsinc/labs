@@ -90,7 +90,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] library-checkout-system
 - [x] list-manager
 - [x] logistics-routing
-- [ ] medication-adherence
+- [x] medication-adherence
 - [x] meeting-scheduler
 - [ ] menu-planner
 - [ ] mood-diary
