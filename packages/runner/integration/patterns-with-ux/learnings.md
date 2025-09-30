@@ -764,3 +764,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   index and adjustment value, then have a single handler read from those fields.
   This pattern works well for collection management UIs where the collection
   size changes dynamically.
+- For batch processing patterns where handlers need to parse user input (like
+  comma-separated numbers), create a separate UI-specific handler that reads
+  from input cells, parses the data, and replicates the business handler's state
+  mutation logic. This keeps the original business handler clean while providing
+  a user-friendly input mechanism. Clear form fields after successful submission
+  with `.set("")` to provide feedback and ready the form for the next operation.
+- When displaying historical data in reverse chronological order, use
+  `.slice().reverse()` and limit display with `Math.min(reversed.length, N)` to
+  show only the most recent N entries. This prevents UI clutter while still
+  maintaining complete history in the underlying cell.
