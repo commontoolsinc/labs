@@ -461,3 +461,16 @@ Add short notes after each run so the next agent can build on proven approaches.
   and completion metrics (scheduled, published) in a summary card provides
   at-a-glance workflow health. Use large, prominent numbers with descriptive
   labels underneath.
+- For list management patterns with dynamic collections, use alternating row
+  backgrounds (e.g., alternating between light gray and white) to improve visual
+  scanning of list items. This helps users quickly distinguish rows.
+- When rendering collections with item indices, display the index in a monospace
+  font with a distinct color to clearly indicate position. This is especially
+  helpful when other UI controls reference items by index.
+- Form inputs that clear after submission provide good UX feedback. After
+  handlers successfully process input (like adding an item), reset form field
+  cells to their default values (empty strings for text, "0" for counts) to
+  ready the form for the next entry.
+- For collection patterns where items have labels and numeric properties,
+  displaying the count in a styled badge (rounded background, monospace font)
+  creates visual separation from the label and emphasizes the numeric value.
