@@ -115,7 +115,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] workout-routine-planner
 - [ ] chat-reaction-tracker
 - [ ] support-ticket-triage
-- [ ] workflow-state-machine
+- [x] workflow-state-machine
 - [ ] issue-dependency-graph
 - [ ] release-checklist
 - [x] markdown-preview-toggle
