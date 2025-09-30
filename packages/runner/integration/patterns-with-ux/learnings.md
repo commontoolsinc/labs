@@ -919,3 +919,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   provides clean UX for handlers that validate complex business rules. Rather
   than showing error messages, handlers can simply return early when validation
   fails, keeping the form in its current state for users to correct.
+- Custom attributes on ct-button elements (like `ct-category="design"`) are not
+  reliably passed through to handlers as event parameters. When you need to
+  create multiple buttons that invoke the same handler with different
+  parameters, use an input-based approach instead: create a text input field
+  where users type the parameter value, then have a single handler read from
+  that input cell. Display available options as reference badges to guide users.
+- For patterns with dynamic filter/category lists, an input-based selection UI
+  is more reliable than trying to create handler-bound buttons inside `lift`
+  functions. Show available options as visual badges for reference, and let
+  users type the option key into an input field before clicking a single "Apply"
+  button that reads from the input cell.
+- When handlers need to read from derived cells (outputs of `lift` functions),
+  pass those derived cells directly in the handler context with type `Cell<T>`
+  rather than trying to use duck-typed `{ get(): T }` interfaces. The framework
+  handles Cell/OpaqueRef conversion automatically between derived and mutable
+  cells.
