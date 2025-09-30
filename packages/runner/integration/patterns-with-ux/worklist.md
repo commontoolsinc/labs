@@ -88,7 +88,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] kanban-board-grouping
 - [ ] lead-scoring
 - [ ] library-checkout-system
-- [ ] list-manager
+- [x] list-manager
 - [ ] logistics-routing
 - [ ] medication-adherence
 - [x] meeting-scheduler
