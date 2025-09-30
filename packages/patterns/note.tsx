@@ -98,7 +98,6 @@ const Note = recipe<Input, Output>(
   "Note",
   ({ title, content, allCharms }) => {
     const mentioned = cell<MentionableCharm[]>([]);
-    const justCreated = cell<MentionableCharm | null>(null);
 
     const computeBacklinks = lift<
       { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
