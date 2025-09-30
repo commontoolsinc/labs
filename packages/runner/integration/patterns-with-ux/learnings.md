@@ -1300,3 +1300,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   when you want fields to initialize with current values but also allow user
   edits. Check if the field is empty/undefined before setting it to avoid
   overwriting user input mid-edit.
+- For timeline/journey visualization patterns, use color-coded status indicators
+  (green for completed, blue for in-progress, gray for planned) with matching
+  left borders on cards to create clear visual hierarchy. Display both absolute
+  timing (day ranges) and duration to provide complete temporal context.
+- When building form handlers that accept partial updates to complex objects
+  (like milestones with multiple optional fields), check for the presence of
+  each field with `Object.hasOwn(event, "fieldName")` before applying updates.
+  This allows users to update individual fields without providing all values.
+- Progress indicators showing both percentage completion and categorical
+  breakdowns (completed/in-progress/planned counts) provide comprehensive status
+  at a glance. Use a gradient progress bar with large percentage display for
+  visual impact, then show detailed stats in a grid below.
+- For patterns that manage ordered collections with sequential timing
+  (milestones, schedule segments), ensure the timeline calculation accounts for
+  both planned offsets and actual sequencing to prevent overlaps. This keeps
+  derived timeline entries consistent with the underlying state.
