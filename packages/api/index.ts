@@ -755,6 +755,9 @@ export type Schema<
     // Handle asStream attribute - wrap the result in Stream<T>
     : T extends { asStream: true }
       ? Stream<Schema<Omit<T, "asStream">, Root, Depth>>
+    // Handle $ref: "#" (self-reference) specially to preserve recursion
+    : T extends { $ref: "#" }
+      ? Schema<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>>
     // Handle $ref - resolve and merge with ref site schema
     : T extends { $ref: infer RefStr extends string } ? MergeRefSiteWithTarget<
         T,
@@ -903,6 +906,13 @@ export type SchemaWithoutCell<
     // Handle asStream attribute - but DON'T wrap in Stream, just use the inner type
     : T extends { asStream: true }
       ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth>
+    // Handle $ref: "#" (self-reference) specially to preserve recursion
+    : T extends { $ref: "#" }
+      ? SchemaWithoutCell<
+        Omit<Root, "asCell" | "asStream">,
+        Root,
+        DecrementDepth<Depth>
+      >
     // Handle $ref - resolve and merge with ref site schema
     : T extends { $ref: infer RefStr extends string }
       ? MergeRefSiteWithTargetWithoutCell<

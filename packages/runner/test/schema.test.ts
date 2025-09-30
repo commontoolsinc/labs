@@ -975,8 +975,8 @@ describe("Schema Support", () => {
 
       expect(isCell(value)).toBe(true);
       expect(value.get().value).toBe(1);
-      expect(value.get().next.value).toBe(2);
-      expect(value.get().next.next.value).toBe(3);
+      expect(value.get().next!.value).toBe(2);
+      expect(value.get().next!.next!.value).toBe(3);
     });
   });
 
