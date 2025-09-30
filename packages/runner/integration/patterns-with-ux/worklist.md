@@ -73,7 +73,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-typed-handler-record
 - [ ] counter-with-reference-equality-assertions
 - [ ] crm-pipeline
-- [ ] currency-conversion
+- [x] currency-conversion
 - [ ] design-token-switcher
 - [x] double-counter-shared-increment
 - [x] echo

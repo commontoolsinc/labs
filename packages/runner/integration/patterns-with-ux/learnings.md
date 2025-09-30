@@ -840,3 +840,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   `const increment5 =
   createIncrementHandler(5)`). This pattern is more
   reliable than trying to pass parameters via custom attributes.
+- For currency conversion or multi-item transformation patterns, use `h()`
+  inside `lift` to dynamically render cards for each item in the collection. The
+  base currency should be visually distinguished (e.g., with blue background and
+  border) from other currencies to help users quickly identify it in the list.
+- When building forms that update dictionaries or maps (like exchange rates),
+  handlers should read from multiple input cells, validate all inputs, then
+  perform the state mutation. Clearing form fields with `.set("")` after
+  successful submission provides clear UX feedback that the operation completed.
+- `compute` effects work well for syncing UI form fields with derived state.
+  When a derived value updates (like normalizedAmount), the compute can update
+  the corresponding input field cell to keep them in sync, ensuring the form
+  always reflects current state.
+- For dictionary/map patterns where entries can be added or updated, a single
+  handler can serve both purposes by checking if the key exists and either
+  updating the existing value or adding a new entry. This simplifies the UI to a
+  single "Add/Update" button rather than separate actions.
