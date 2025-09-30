@@ -126,10 +126,14 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private async _loadAndRenderRecipe(recipeId: string, retry: boolean = true) {
-    this._log("loading recipe:", recipeId);
-
+  private async _loadAndRenderRecipe(retry: boolean = true) {
     try {
+      const recipeId = getRecipeIdFromCharm(this.cell);
+      if (!recipeId) {
+        throw new Error("No recipe ID found in charm");
+      }
+      this._log("loading recipe:", recipeId);
+
       // Load and run the recipe
       const recipe = await this.cell.runtime.recipeManager.loadRecipe(
         recipeId,
@@ -149,7 +153,7 @@ export class CTRender extends BaseElement {
         console.warn("Failed to load recipe, retrying...");
         // First failure, sync and retry once
         await this.cell.sync();
-        await this._loadAndRenderRecipe(recipeId, false);
+        await this._loadAndRenderRecipe(false);
       } else {
         // Second failure, give up
         throw error;
@@ -183,13 +187,8 @@ export class CTRender extends BaseElement {
         throw new Error("Invalid cell: expected a Cell object");
       }
 
-      const recipeId = getRecipeIdFromCharm(this.cell);
-      if (!recipeId) {
-        throw new Error("No recipe ID found in charm");
-      }
-
       // Load and render the recipe
-      await this._loadAndRenderRecipe(recipeId);
+      await this._loadAndRenderRecipe();
 
       // Mark as rendered and trigger re-render to hide spinner
       this._hasRendered = true;
