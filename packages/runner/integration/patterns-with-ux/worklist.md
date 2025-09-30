@@ -77,7 +77,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] design-token-switcher
 - [x] double-counter-shared-increment
 - [x] echo
-- [ ] email-inbox-threading
+- [x] email-inbox-threading
 - [ ] expense-reimbursement
 - [x] experiment-assignment
 - [ ] feature-usage-analytics
