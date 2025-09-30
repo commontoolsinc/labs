@@ -1026,3 +1026,15 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Status badges with uppercase text and conditional colors (green "OK" vs red
   "LOW STOCK") create immediate visual distinction in list items without
   requiring users to read numeric values first.
+- For chat/message reaction patterns, displaying reaction totals in a grid of
+  color-coded cards at the top provides an at-a-glance summary of engagement
+  across all messages. Using emoji as both the identifier and visual element
+  creates intuitive, language-independent UI that works across cultures.
+- When patterns track collections that can grow from empty (like messages in a
+  chat), providing an "add item" handler and form in the UI is essential for
+  usability, as Default<T> values only apply when explicitly undefined, not when
+  charms are created without initial arguments.
+- Reaction badge displays work well when grouped inline with flexbox wrapping,
+  showing both the emoji and count in a compact pill-style format. This creates
+  a familiar chat-like interface that users recognize from platforms like Slack
+  and Discord.
