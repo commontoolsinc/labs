@@ -49,7 +49,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-nested-handler-composition
 - [x] counter-nested-optional-cells
 - [x] counter-nested-parameterized
-- [ ] counter-nested-stream
+- [x] counter-nested-stream
 - [x] counter-no-op-events
 - [ ] counter-opaque-ref-map
 - [x] counter-optional-fallback
