@@ -528,3 +528,14 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Monospace fonts work well for displaying both raw numeric values and formatted
   strings to maintain consistency and emphasize the technical nature of the
   transformation.
+- For event validation patterns that demonstrate no-op behavior, use color-coded
+  visual feedback to distinguish between valid (green) and invalid (red) events.
+  A dynamic "Last Event" indicator with conditional styling based on the event
+  type helps users immediately understand whether their action was processed or
+  rejected.
+- When creating separate handlers for valid and invalid event paths, track both
+  the main state (counter value, updates count) and metadata (last event label)
+  to provide comprehensive feedback about what happened and why.
+- Grid layouts with two equal columns work well for displaying related metrics
+  side-by-side (like current value and update count), helping users understand
+  the relationship between different state values.
