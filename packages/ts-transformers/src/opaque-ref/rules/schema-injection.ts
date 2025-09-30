@@ -19,8 +19,6 @@ function isFunctionLikeExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-// Promise-related code removed - no longer supporting async derives/lifts
-
 function isInsideJsx(node: ts.Node): boolean {
   let current: ts.Node | undefined = node.parent;
   while (current) {

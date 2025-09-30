@@ -19,7 +19,7 @@ export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
 
 /**
  * Infer the type of a function parameter, with optional fallback
- * Returns undefined if the type cannot be inferred or is 'any'/'unknown'
+ * Returns undefined if the type cannot be inferred
  */
 export function inferParameterType(
   parameter: ts.ParameterDeclaration | undefined,
@@ -63,21 +63,14 @@ export function inferParameterType(
 
 /**
  * Infer return type from function signature
- * Returns undefined if the type cannot be inferred or is 'any'/'unknown'
+ * Returns undefined if the type cannot be inferred
  */
 export function inferReturnType(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   signature: ts.Signature,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
-  const returnType = checker.getReturnTypeOfSignature(signature);
-
-  // Don't use any/unknown types
-  if (isAnyOrUnknownType(returnType)) {
-    return undefined;
-  }
-
-  return returnType;
+  return checker.getReturnTypeOfSignature(signature);
 }
 
 /**
