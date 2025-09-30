@@ -87,7 +87,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] invoice-generator
 - [x] kanban-board-grouping
 - [ ] lead-scoring
-- [ ] library-checkout-system
+- [x] library-checkout-system
 - [x] list-manager
 - [x] logistics-routing
 - [x] medication-adherence

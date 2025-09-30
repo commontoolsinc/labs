@@ -1160,3 +1160,27 @@ Add short notes after each run so the next agent can build on proven approaches.
   the children array conditionally by pushing elements only when needed, then
   spread that array into the parent element with `...childrenArray`. This
   prevents TypeScript errors about null not being assignable to RenderNode.
+- For library circulation patterns with complex business logic (checkout,
+  return, hold placement, hold promotion), create separate UI handlers that
+  duplicate the business handler logic rather than trying to invoke the original
+  handlers. This allows form field clearing and other UI-specific operations
+  while maintaining consistent behavior. Clear all relevant input fields with
+  `.set("")` after successful operations to provide immediate UX feedback.
+- When displaying catalog items with dynamic availability status (available,
+  limited, on-hold, unavailable), use color-coded borders and status badges that
+  reactively update based on computed availability. Green for available, amber
+  for limited, red for on-hold/unavailable creates clear visual hierarchy.
+- For patterns that automatically promote queued requests (like hold-to-checkout
+  promotion), ensure the UI clearly shows both the primary action result and the
+  cascading effect in the activity log. For example, "member-luis returned
+  Modular Thoughts; promoted hold for member-jade" followed by "member-jade
+  checked out Modular Thoughts via hold" provides complete context about the
+  workflow automation.
+- Grid layouts with three equal columns work well for displaying item statistics
+  (Total, On Loan, Available) within catalog cards. Combining numeric values
+  with descriptive labels helps users quickly understand inventory status
+  without cognitive load.
+- When building forms with multiple operation types (checkout, return, place
+  hold, cancel hold), use a 2x2 grid layout to organize related operations
+  visually. This creates balanced symmetry while clearly separating different
+  workflow actions.
