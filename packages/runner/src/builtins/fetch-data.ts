@@ -176,7 +176,6 @@ export function fetchData(
         undefined,
         tx,
       );
-      pending.send(false);
 
       result = runtime.getCell<any | undefined>(
         parentCell.space,
@@ -214,13 +213,19 @@ export function fetchData(
       error.sync();
       internal.sync();
 
-      sendResult(tx, {
-        pending,
-        result,
-        error,
-      });
       cellsInitialized = true;
     }
+
+    // Set results to links to our cells. We have to do this outside of
+    // isInitialized since the write could conflict, and then this code will run
+    // again, but isInitialized will be true already. The framework will notice
+    // that this write is a no-op after the first successful write, so this
+    // should be fine.
+    sendResult(tx, {
+      pending,
+      result,
+      error,
+    });
 
     const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
     const inputHash = computeInputHash(url, mode, options);
