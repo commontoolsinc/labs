@@ -59,16 +59,17 @@ function resolveSchema(
 
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string" && rootSchema !== undefined) {
+    const { $ref, ...rest } = schema;
     const resolved = ContextualFlowControl.resolveSchemaRef(
       rootSchema,
-      schema.$ref,
+      $ref,
     );
     if (!isObject(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
     }
-    resolvedSchema = resolved;
+    resolvedSchema = { ...resolved, ...rest };
   }
 
   // Remove asCell flag from schema, so it's describing the destination
