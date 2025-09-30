@@ -17,7 +17,9 @@ const model = {
     }
 } as const satisfies JSONSchema;
 export default recipe(model, model, (cell) => {
-    const doubled = derive(cell.value, (v) => v * 2);
+    const doubled = derive(true as const satisfies JSONSchema, {
+        type: "number"
+    } as const satisfies JSONSchema, cell.value, (v) => v * 2);
     return {
         [UI]: (<div>
         <p>Value: {cell.value}</p>

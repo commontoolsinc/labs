@@ -4,18 +4,18 @@ interface TodoItem {
     done: boolean;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/TodoItem"
+                $ref: "#/$defs/TodoItem"
             }
         }
     },
     required: ["items"],
-    definitions: {
+    $defs: {
         TodoItem: {
             type: "object",
             properties: {

@@ -64,20 +64,28 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "null" };
     }
     if (flags & ts.TypeFlags.Undefined) {
-      // undefined cannot occur in JSON - return {} which matches anything
-      return {};
+      // undefined: return true to indicate "accept any value"
+      // undefined is handled at runtime/compile time, not by JSON schema validation
+      return true;
     }
     if (flags & ts.TypeFlags.Void) {
-      // void cannot occur in JSON - return {} which matches anything
-      return {};
+      // void: return true to indicate "accept any value"
+      // void functions don't return meaningful values, so schema validation is permissive
+      return true;
     }
     if (flags & ts.TypeFlags.Never) {
-      // never cannot occur in JSON - return {} which matches anything
-      return {};
+      // never: return false to reject all values
+      // never means this type can never occur, so no value should validate
+      return false;
     }
-    if ((flags & ts.TypeFlags.Unknown) || (flags & ts.TypeFlags.Any)) {
-      // unknown/any can be any JSON value (primitive or object) - {} matches everything
-      return {};
+    if (flags & ts.TypeFlags.Any) {
+      // any: return true to indicate "allow any value"
+      return true;
+    }
+    if (flags & ts.TypeFlags.Unknown) {
+      // unknown: return true to indicate "accept any value"
+      // Type safety is enforced at compile time via TypeScript narrowing
+      return true;
     }
 
     // Fallback

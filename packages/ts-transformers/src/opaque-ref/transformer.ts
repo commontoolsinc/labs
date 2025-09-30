@@ -8,13 +8,17 @@ import {
 import { createJsxExpressionRule } from "./rules/jsx-expression.ts";
 import type { OpaqueRefRule } from "./rules/jsx-expression.ts";
 import { createSchemaInjectionRule } from "./rules/schema-injection.ts";
+import type { TypeRegistry } from "../core/type-registry.ts";
 
-export type ModularOpaqueRefTransformerOptions = TransformationOptions;
+export interface ModularOpaqueRefTransformerOptions
+  extends TransformationOptions {
+  typeRegistry?: TypeRegistry;
+}
 
-function createRules(): OpaqueRefRule[] {
+function createRules(typeRegistry?: TypeRegistry): OpaqueRefRule[] {
   return [
     createJsxExpressionRule(),
-    createSchemaInjectionRule(),
+    createSchemaInjectionRule(typeRegistry),
   ];
 }
 
@@ -22,7 +26,7 @@ export function createModularOpaqueRefTransformer(
   program: ts.Program,
   options: ModularOpaqueRefTransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
-  const rules = createRules();
+  const rules = createRules(options.typeRegistry);
 
   return (transformation) => (sourceFile) => {
     const imports = createImportManager();

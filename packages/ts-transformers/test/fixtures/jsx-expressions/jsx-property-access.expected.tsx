@@ -32,14 +32,14 @@ interface State {
     numbers: number[];
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         user: {
-            $ref: "#/definitions/User"
+            $ref: "#/$defs/User"
         },
         config: {
-            $ref: "#/definitions/Config"
+            $ref: "#/$defs/Config"
         },
         items: {
             type: "array",
@@ -58,7 +58,7 @@ export default recipe({
         }
     },
     required: ["user", "config", "items", "index", "numbers"],
-    definitions: {
+    $defs: {
         Config: {
             type: "object",
             properties: {

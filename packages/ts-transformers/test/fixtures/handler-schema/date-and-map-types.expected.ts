@@ -9,7 +9,7 @@ interface TimedState {
     history: Map<string, Date>;
 }
 const timedHandler = handler({
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         timestamp: {
@@ -17,11 +17,11 @@ const timedHandler = handler({
             format: "date-time"
         },
         data: {
-            $ref: "#/definitions/Map"
+            $ref: "#/$defs/Map"
         }
     },
     required: ["timestamp", "data"],
-    definitions: {
+    $defs: {
         Map: {
             type: "object",
             properties: {
@@ -33,7 +33,7 @@ const timedHandler = handler({
         }
     }
 } as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         lastUpdate: {
@@ -41,11 +41,11 @@ const timedHandler = handler({
             format: "date-time"
         },
         history: {
-            $ref: "#/definitions/Map"
+            $ref: "#/$defs/Map"
         }
     },
     required: ["lastUpdate", "history"],
-    definitions: {
+    $defs: {
         Map: {
             type: "object",
             properties: {

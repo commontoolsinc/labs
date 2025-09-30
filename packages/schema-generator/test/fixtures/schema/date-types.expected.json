@@ -1,5 +1,5 @@
 {
-  "definitions": {
+  "$defs": {
     "Document": {
       "properties": {
         "archivedAt": {
@@ -96,13 +96,13 @@
   },
   "properties": {
     "document": {
-      "$ref": "#/definitions/Document"
+      "$ref": "#/$defs/Document"
     },
     "eventLog": {
-      "$ref": "#/definitions/EventLog"
+      "$ref": "#/$defs/EventLog"
     },
     "userProfile": {
-      "$ref": "#/definitions/UserProfile"
+      "$ref": "#/$defs/UserProfile"
     }
   },
   "required": [

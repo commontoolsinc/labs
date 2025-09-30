@@ -1,5 +1,5 @@
 {
-  "definitions": {
+  "$defs": {
     "AppConfig": {
       "properties": {
         "features": {
@@ -201,22 +201,22 @@
   },
   "properties": {
     "appConfig": {
-      "$ref": "#/definitions/AppConfig"
+      "$ref": "#/$defs/AppConfig"
     },
     "cellDefaults": {
-      "$ref": "#/definitions/CellDefaults"
+      "$ref": "#/$defs/CellDefaults"
     },
     "complexDefault": {
-      "$ref": "#/definitions/ComplexDefault"
+      "$ref": "#/$defs/ComplexDefault"
     },
     "listConfig": {
-      "$ref": "#/definitions/ListConfig"
+      "$ref": "#/$defs/ListConfig"
     },
     "optionalDefaults": {
-      "$ref": "#/definitions/OptionalWithDefaults"
+      "$ref": "#/$defs/OptionalWithDefaults"
     },
     "userSettings": {
-      "$ref": "#/definitions/UserSettings"
+      "$ref": "#/$defs/UserSettings"
     }
   },
   "required": [

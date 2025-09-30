@@ -1,5 +1,5 @@
 {
-  "definitions": {
+  "$defs": {
     "ChildNode": {
       "properties": {
         "attachments": {
@@ -39,7 +39,7 @@
     "children": {
       "description": "Child nodes of this node",
       "items": {
-        "$ref": "#/definitions/ChildNode"
+        "$ref": "#/$defs/ChildNode"
       },
       "type": "array"
     },

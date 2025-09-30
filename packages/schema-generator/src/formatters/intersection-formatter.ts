@@ -186,7 +186,7 @@ export class IntersectionFormatter implements TypeFormatter {
       typeof (schema as Record<string, unknown>).$ref === "string"
     ) {
       const ref = (schema as Record<string, unknown>).$ref as string;
-      const prefix = "#/definitions/";
+      const prefix = "#/$defs/";
       if (ref.startsWith(prefix)) {
         const name = ref.slice(prefix.length);
         const def = context.definitions[name];

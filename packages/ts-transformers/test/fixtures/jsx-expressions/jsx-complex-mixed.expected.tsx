@@ -13,13 +13,13 @@ interface State {
     taxRate: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             }
         },
         filter: {
@@ -33,7 +33,7 @@ export default recipe({
         }
     },
     required: ["items", "filter", "discount", "taxRate"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

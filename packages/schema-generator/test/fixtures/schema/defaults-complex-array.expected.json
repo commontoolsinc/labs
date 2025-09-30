@@ -1,5 +1,5 @@
 {
-  "definitions": {
+  "$defs": {
     "TodoItem": {
       "properties": {
         "done": {
@@ -20,7 +20,7 @@
     "emptyItems": {
       "default": [],
       "items": {
-        "$ref": "#/definitions/TodoItem"
+        "$ref": "#/$defs/TodoItem"
       },
       "type": "array"
     },

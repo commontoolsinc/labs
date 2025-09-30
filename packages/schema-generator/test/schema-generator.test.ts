@@ -89,8 +89,8 @@ type CalculatorRequest = {
         "T",
       );
       const schema = generator.generateSchema(type, checker, typeNode);
-      // unknown/any returns {} which matches anything (primitives and objects)
-      expect(schema).toEqual({});
+      // unknown returns true (accept any value - type safety at compile time)
+      expect(schema).toEqual(true);
     });
   });
 
@@ -111,15 +111,15 @@ type Wrapper = {
       const properties = root.properties as
         | Record<string, Record<string, unknown>>
         | undefined;
-      const definitions = root.definitions as
+      const $defs = root.$defs as
         | Record<string, Record<string, unknown>>
         | undefined;
 
       expect(properties?.node).toEqual({
-        $ref: "#/definitions/AnonymousType_1",
+        $ref: "#/$defs/AnonymousType_1",
       });
-      expect(definitions).toBeDefined();
-      expect(Object.keys(definitions ?? {})).toContain("AnonymousType_1");
+      expect($defs).toBeDefined();
+      expect(Object.keys($defs ?? {})).toContain("AnonymousType_1");
       expect(JSON.stringify(schema)).not.toContain(
         "Anonymous recursive type",
       );
@@ -141,7 +141,7 @@ interface HasDate {
         | Record<string, Record<string, unknown>>
         | undefined;
 
-      expect(objectSchema.definitions).toBeUndefined();
+      expect(objectSchema.$defs).toBeUndefined();
       expect(props?.createdAt).toEqual({
         type: "string",
         format: "date-time",
@@ -162,7 +162,7 @@ interface HasUrl {
         | Record<string, Record<string, unknown>>
         | undefined;
 
-      expect(objectSchema.definitions).toBeUndefined();
+      expect(objectSchema.$defs).toBeUndefined();
       expect(props?.homepage).toEqual({
         type: "string",
         format: "uri",
@@ -183,7 +183,7 @@ interface BinaryHolder {
         | Record<string, unknown>
         | undefined;
 
-      expect(objectSchema.definitions).toBeUndefined();
+      expect(objectSchema.$defs).toBeUndefined();
       expect(props?.data).toBe(true);
     });
 
@@ -201,7 +201,7 @@ interface BufferHolder {
         | Record<string, unknown>
         | undefined;
 
-      expect(objectSchema.definitions).toBeUndefined();
+      expect(objectSchema.$defs).toBeUndefined();
       expect(props?.buffer).toBe(true);
     });
 
@@ -219,7 +219,7 @@ interface HasImage {
         | Record<string, Record<string, unknown> | boolean>
         | undefined;
 
-      expect(objectSchema.definitions).toBeUndefined();
+      expect(objectSchema.$defs).toBeUndefined();
       expect(props?.image).toEqual({
         anyOf: [
           { type: "string" },

@@ -6,14 +6,14 @@ interface Item {
 interface ListState {
     items: Cell<Item[]>;
 }
-const removeItem = handler({} as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+const removeItem = handler(true as const satisfies JSONSchema, {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         },
@@ -22,7 +22,7 @@ const removeItem = handler({} as const satisfies JSONSchema, {
         }
     },
     required: ["items", "index"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -43,14 +43,14 @@ const removeItem = handler({} as const satisfies JSONSchema, {
 type ListStateWithIndex = ListState & {
     index: number;
 };
-const removeItemAlias = handler({} as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+const removeItemAlias = handler(true as const satisfies JSONSchema, {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         },
@@ -59,7 +59,7 @@ const removeItemAlias = handler({} as const satisfies JSONSchema, {
         }
     },
     required: ["items", "index"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

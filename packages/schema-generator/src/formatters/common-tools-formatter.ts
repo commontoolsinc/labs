@@ -109,14 +109,17 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
-    // Prepare inner context (preserve node when available)
-    const innerContext = innerTypeNode
-      ? { ...context, typeNode: innerTypeNode }
-      : context;
+    // Don't pass synthetic TypeNodes - they lose type information (especially for arrays)
+    // Synthetic nodes have pos === -1 and end === -1
+    // But DO pass real TypeNodes from source code for proper type detection (e.g., Default)
+    const isSyntheticNode = innerTypeNode && innerTypeNode.pos === -1 &&
+      innerTypeNode.end === -1;
+
+    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode;
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
-      innerContext,
-      innerTypeNode,
+      context,
+      shouldPassTypeNode ? innerTypeNode : undefined,
     );
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
@@ -243,7 +246,18 @@ export class CommonToolsFormatter implements TypeFormatter {
       defaultTypeNode,
       context,
     );
+
     if (defaultValue !== undefined) {
+      // JSON Schema Draft 2020-12 allows default as a sibling of $ref
+      // Simply add the default property directly to the schema
+      if (typeof valueSchema === "boolean") {
+        // Boolean schemas (true/false) cannot have properties directly
+        // For true: { default: value } (any value is valid)
+        // For false: { not: true, default: value } (no value is valid)
+        return valueSchema === false
+          ? { not: true, default: defaultValue } as SchemaDefinition
+          : { default: defaultValue } as SchemaDefinition;
+      }
       (valueSchema as any).default = defaultValue;
     }
 

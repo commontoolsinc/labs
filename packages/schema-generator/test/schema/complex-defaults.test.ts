@@ -24,8 +24,8 @@ describe("Schema: Complex defaults", () => {
     expect(empty.type).toBe("array");
     const emptyItems = empty.items as any;
     if (emptyItems.$ref) {
-      expect(emptyItems.$ref).toBe("#/definitions/TodoItem");
-      const def = (s as any).definitions?.TodoItem as any;
+      expect(emptyItems.$ref).toBe("#/$defs/TodoItem");
+      const def = (s as any).$defs?.TodoItem as any;
       expect(def.type).toBe("object");
       expect(def.properties?.title?.type).toBe("string");
       expect(def.properties?.done?.type).toBe("boolean");
@@ -115,5 +115,35 @@ describe("Schema: Complex defaults", () => {
     // For undefined unions, typically generates anyOf with just the non-undefined type
     expect(u.anyOf).toBeDefined();
     expect(u.anyOf).toEqual([{ type: "string" }]);
+  });
+
+  it("boolean schema defaults (any/never with Default)", async () => {
+    const code = `
+      interface Default<T,V> {}
+      interface WithBooleanSchemas {
+        anyWithDefault: Default<any, "defaultValue">;
+        neverWithDefault: Default<never, "fallbackValue">;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(
+      code,
+      "WithBooleanSchemas",
+    );
+    const s = createSchemaTransformerV2()(type, checker);
+
+    // Validate root schema required fields
+    expect(s.required).toEqual(["anyWithDefault", "neverWithDefault"]);
+
+    const anyProp = s.properties?.anyWithDefault as any;
+    // any becomes boolean schema true, with default should be { default: "defaultValue" }
+    expect(anyProp.default).toBe("defaultValue");
+    expect(anyProp.not).toBeUndefined();
+    expect(anyProp.allOf).toBeUndefined();
+
+    const neverProp = s.properties?.neverWithDefault as any;
+    // never becomes boolean schema false, with default should be { not: true, default: "fallbackValue" }
+    expect(neverProp.default).toBe("fallbackValue");
+    expect(neverProp.not).toBe(true);
+    expect(neverProp.allOf).toBeUndefined();
   });
 });

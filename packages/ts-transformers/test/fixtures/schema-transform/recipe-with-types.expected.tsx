@@ -17,7 +17,7 @@ type InputEventType = {
     };
 };
 const inputSchema = {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         title: {
@@ -27,13 +27,13 @@ const inputSchema = {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             default: []
         }
     },
     required: ["title", "items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -47,7 +47,7 @@ const inputSchema = {
     }
 } as const satisfies JSONSchema;
 const outputSchema = {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items_count: {
@@ -60,13 +60,13 @@ const outputSchema = {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             default: []
         }
     },
     required: ["items_count", "title", "items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {
@@ -95,19 +95,19 @@ const addItem = handler({
     },
     required: ["detail"]
 } as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
             type: "array",
             items: {
-                $ref: "#/definitions/Item"
+                $ref: "#/$defs/Item"
             },
             asCell: true
         }
     },
     required: ["items"],
-    definitions: {
+    $defs: {
         Item: {
             type: "object",
             properties: {

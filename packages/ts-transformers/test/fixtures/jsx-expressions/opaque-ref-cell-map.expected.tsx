@@ -57,7 +57,7 @@ const addCharmAndNavigate = lift({
     return undefined;
 });
 // Create a new SimpleRecipe and add it to the array
-const createSimpleRecipe = handler({} as const satisfies JSONSchema, {
+const createSimpleRecipe = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -76,10 +76,10 @@ const createSimpleRecipe = handler({} as const satisfies JSONSchema, {
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler({} as const satisfies JSONSchema, {
+const goToCharm = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
-        charm: {}
+        charm: true
     },
     required: ["charm"]
 } as const satisfies JSONSchema, (_, { charm }) => {

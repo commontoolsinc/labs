@@ -33,13 +33,16 @@ export class ArrayFormatter implements TypeFormatter {
       );
     }
 
-    // Handle special cases for any[] and never[] with JSON Schema shortcuts
+    // Handle special cases for any[], unknown[], and never[] with JSON Schema shortcuts
     const elementFlags = info.elementType.flags;
 
-    if (
-      (elementFlags & ts.TypeFlags.Any) || (elementFlags & ts.TypeFlags.Unknown)
-    ) {
-      // any[] or unknown[] - allow any item type
+    if (elementFlags & ts.TypeFlags.Any) {
+      // any[] - allow any item type
+      return { type: "array", items: true };
+    }
+
+    if (elementFlags & ts.TypeFlags.Unknown) {
+      // unknown[] - allow any item type (type safety at compile time)
       return { type: "array", items: true };
     }
 

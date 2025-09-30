@@ -186,11 +186,11 @@ export function derive<
   input: Opaque<SchemaWithoutCell<InputSchema>>,
   f: (
     input: Schema<InputSchema>,
-  ) => Schema<ResultSchema> | Promise<Schema<ResultSchema>>,
+  ) => Schema<ResultSchema>,
 ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 export function derive<In, Out>(
   input: Opaque<In>,
-  f: (input: In) => Out | Promise<Out>,
+  f: (input: In) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
   if (args.length === 4) {
@@ -198,18 +198,18 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
       JSONSchema,
       JSONSchema,
       Opaque<SchemaWithoutCell<any>>,
-      (input: Schema<any>) => Schema<any> | Promise<Schema<any>>,
+      (input: Schema<any>) => Schema<any>,
     ];
     return lift(
       argumentSchema,
       resultSchema,
-      f as (input: Schema<any>) => Schema<any> | Promise<Schema<any>>,
+      f as (input: Schema<any>) => Schema<any>,
     )(input);
   }
 
   const [input, f] = args as [
     Opaque<In>,
-    (input: In) => Out | Promise<Out>,
+    (input: In) => Out,
   ];
   return lift(f)(input);
 }
