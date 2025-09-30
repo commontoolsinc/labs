@@ -1260,3 +1260,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   calculations and system counts update reactively as items transition between
   states. This provides accurate real-time metrics as vulnerabilities are
   tracked through registration, update, and resolution.
+- For multi-stage approval workflow patterns, create separate UI handlers for
+  each action type (approve, reject, reroute) that duplicate the business
+  handler logic. This allows form field clearing and provides better UX than
+  trying to reuse the business handlers directly.
+- When lift functions access derived objects with properties (like counts or
+  totals), add defensive null checks at the start of the lift function (e.g.,
+  `if (!t || !c || !reqs) return h("div", {}, "Loading...");`) to handle initial
+  render before all derived cells are computed. This prevents "Cannot read
+  properties of undefined" errors during initialization.
+- For procurement/approval workflow UIs, color-coding status badges (green for
+  approved, red for rejected, amber for routing/pending) creates immediate
+  visual feedback about request state. Apply the same color scheme consistently
+  across the request card borders, status badges, and stage indicators to
+  reinforce the visual language.
