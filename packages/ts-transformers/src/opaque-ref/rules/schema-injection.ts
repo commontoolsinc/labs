@@ -19,23 +19,6 @@ function isFunctionLikeExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function isInsideJsx(node: ts.Node): boolean {
-  let current: ts.Node | undefined = node.parent;
-  while (current) {
-    if (
-      ts.isJsxExpression(current) ||
-      ts.isJsxElement(current) ||
-      ts.isJsxSelfClosingElement(current) ||
-      ts.isJsxFragment(current) ||
-      ts.isJsxAttribute(current)
-    ) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
 function collectFunctionSchemaTypeNodes(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
@@ -294,7 +277,6 @@ export function createSchemaInjectionRule(
 
         if (callKind?.kind === "derive") {
           const factory = transformation.factory;
-          const insideJsx = isInsideJsx(node);
           const updateWithSchemas = (
             argumentType: ts.TypeNode,
             argumentTypeValue: ts.Type | undefined,
@@ -331,7 +313,6 @@ export function createSchemaInjectionRule(
           }
 
           if (
-            !insideJsx &&
             node.arguments.length >= 2 &&
             isFunctionLikeExpression(node.arguments[1]!)
           ) {

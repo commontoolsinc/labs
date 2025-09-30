@@ -1,8 +1,10 @@
 /// <cts-enable />
-import { derive, h } from "commontools";
+import { derive, h, JSONSchema } from "commontools";
 declare const value: number;
-// This derive is INSIDE JSX and should NOT be transformed with schemas
-// (JSX expressions are handled by the jsx-expression transformer instead)
 export const result = (<div>
-    {derive(value, (v) => v * 2)}
+    {derive({
+    type: "number"
+} as const satisfies JSONSchema, {
+    type: "number"
+} as const satisfies JSONSchema, value, (v) => v * 2)}
   </div>);
