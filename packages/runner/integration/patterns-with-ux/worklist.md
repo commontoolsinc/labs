@@ -11,7 +11,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] catalog-search-facets
 - [ ] composed-counter
 - [x] content-publishing-workflow
-- [ ] counter-aggregate
+- [x] counter-aggregate
 - [x] counter-aggregator
 - [ ] counter-alternate-initial-states
 - [x] counter-batched-handler-updates
