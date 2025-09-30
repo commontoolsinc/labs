@@ -982,6 +982,26 @@ Add short notes after each run so the next agent can build on proven approaches.
   "string" && amountStr.trim() !== ""` to safely handle
   cases where cell values haven't been initialized yet, preventing "Cannot read
   properties of undefined" errors during handler execution.
+- For patterns with dynamic collections that start empty (no defaults provided
+  at charm creation), add UI handlers that allow users to populate the
+  collection from scratch. When using `Default<T, defaultValue>` in the recipe
+  args, the defaults only apply when the value is explicitly undefined, not when
+  a charm is created without providing initial args—in that case the cell starts
+  empty.
+- When creating "add item" handlers for collections, clear all form input cells
+  with `.set("")` after successful submission to provide clear UX feedback and
+  ready the form for the next entry. This is especially important for
+  multi-field forms where users need to see that their submission was processed.
+- For progress tracking patterns with weighted items, use conditional color
+  coding based on completion percentage thresholds (e.g., red <33%, orange
+  33-66%, green
+  > 66%) to provide immediate visual feedback about goal progress. Combine with
+  > large percentage displays and progress bars for maximum clarity.
+- When mixing JSX and `h()` in the same pattern, use JSX at the recipe return
+  level for static structure and form inputs (to properly bind `$value` to
+  cells), and use `h()` inside `lift` functions only for dynamic collections
+  that need to render based on derived state. The `$value` binding doesn't work
+  reliably when using `h("ct-input", { $value: cell })` inside a lift.
 - For sparse array patterns that demonstrate fallback value filling, displaying
   the array values in a bordered list with alternating row backgrounds helps
   users see which slots have explicit values versus fallback-filled slots. The
