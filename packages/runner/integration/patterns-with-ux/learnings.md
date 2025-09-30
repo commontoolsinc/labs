@@ -956,3 +956,23 @@ Add short notes after each run so the next agent can build on proven approaches.
   `.join(" • ")`) provides compact feedback for recent operations without taking
   up excessive vertical space. Limiting to the last 5 entries prevents clutter
   while still showing meaningful context.
+- For state machine patterns with transition validation, replicate the business
+  handler logic directly in UI handlers rather than calling `.run()` on the
+  original handler - the `.run()` method doesn't exist and will cause runtime
+  errors. Duplicate the state mutation logic inline to ensure proper execution.
+- Workflow visualization benefits from dynamic color coding based on the current
+  stage, with gradient backgrounds that adapt to the active state. Use `lift` to
+  compute complete style strings including gradients that incorporate the stage
+  color for visual coherence.
+- Progress indicators showing percentage completion through sequential stages
+  work well alongside visual progress bars. Computing the percentage as
+  `(currentIndex / (totalStages - 1)) * 100` provides intuitive feedback about
+  workflow progression.
+- For patterns with allowed/forbidden transitions, showing both the current
+  stage prominently and the available next stages helps users understand the
+  state machine's constraints. Color-coded badges ("Current" vs "Available") on
+  stage displays create clear visual hierarchy.
+- Transition history with color-coded result badges (green ✓ for accepted, red ✗
+  for rejected) and human-readable rejection reasons ("Not allowed from current
+  stage", "Invalid target stage") provides excellent UX feedback for
+  understanding why transitions succeed or fail.
