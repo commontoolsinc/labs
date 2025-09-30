@@ -590,3 +590,14 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Recent activity logs showing the last 5 operations provide good context
   without overwhelming the UI. Use `.slice().reverse().slice(0, 5)` to show
   newest first and limit display to recent entries.
+- For patterns demonstrating Default<T> persistence, use visual indicators (like
+  colored info boxes) to clearly show which values have defaults and what those
+  defaults are. This helps users understand the fallback behavior at a glance.
+- When a pattern has both "apply and persist" vs "apply once" operations,
+  provide separate handlers and buttons to distinguish between updating stored
+  configuration versus one-time actions. Clear button labels like "Update step"
+  vs "Apply once" help users understand the difference.
+- Form fields that reset after one-time operations provide good UX feedback -
+  after handlers successfully apply a one-time action, reset the field to a
+  sensible default to clearly signal the action completed and ready the form for
+  the next input.
