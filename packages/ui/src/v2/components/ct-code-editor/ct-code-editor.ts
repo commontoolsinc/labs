@@ -13,9 +13,7 @@ import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Runtime } from "@commontools/runner";
-// Import contexts directly to avoid barrel self-import cycles.
-import { runtimeContext } from "../runtime-context.ts";
-import { sessionContext, type SessionInfo } from "../session-context.ts";
+import { ALL_CHARMS_ID } from "@commontools/charm";
 
 import {
   acceptCompletion,
@@ -186,12 +184,6 @@ export class CTCodeEditor extends BaseElement {
       this._updateMentionedFromContent();
     },
   });
-
-  @consume({ context: runtimeContext })
-  private _rt: Runtime | undefined = undefined;
-
-  @consume({ context: sessionContext })
-  private _session?: SessionInfo;
 
   constructor() {
     super();
@@ -368,28 +360,37 @@ export class CTCodeEditor extends BaseElement {
           return true;
         }
 
-        // TODO: rt from this.pattern?
-        if (this._rt && this._session && this.pattern) {
-          const tx = this._rt.edit();
-          const spaceName = this.pattern.space;
-          const result = this._rt.getCell<any>(
-            spaceName,
-            { note: this.value, title: backlinkText },
-          );
-          const pattern = JSON.parse(this.pattern.get());
+        // Instantiate the pattern and pass the ID so we can insert it into the text
+        if (this.pattern) {
+          try {
+            const rt = this.pattern.runtime;
+            const tx = rt.edit();
+            const spaceName = this.pattern.space;
+            const result = rt.getCell<any>(
+              spaceName,
+              { note: this.value, title: backlinkText },
+            );
 
-          const charm = this._rt.run(tx, pattern, {
-            title: backlinkText, // TODO: unqiueness
-            content: "",
-            allCharms: [], // TODO: what do
-          }, result);
+            const pattern = JSON.parse(this.pattern.get());
+            const allCharms = rt.getCellFromEntityId(spaceName, {
+              "/": ALL_CHARMS_ID,
+            });
 
-          tx.commit();
-          this.emit("backlink-create", {
-            text: backlinkText,
-            charmId: getEntityId(result),
-            charm: result,
-          });
+            rt.run(tx, pattern, {
+              title: backlinkText,
+              content: "",
+              allCharms,
+            }, result);
+
+            tx.commit();
+            this.emit("backlink-create", {
+              text: backlinkText,
+              charmId: getEntityId(result),
+              charm: result,
+            });
+          } catch (error) {
+            console.error("Error creating backlink:", error);
+          }
         }
 
         return true;
@@ -501,7 +502,6 @@ export class CTCodeEditor extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    // CellController handles subscription automatically via ReactiveController
   }
 
   override disconnectedCallback() {

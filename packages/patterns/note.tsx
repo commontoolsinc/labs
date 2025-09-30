@@ -94,29 +94,11 @@ const handleCharmLinkClicked = handler(
   },
 );
 
-// const reactToJustCreated = lift(
-//   toSchema<{ justCreated: Cell<MentionableCharm | null> }>(),
-//   undefined,
-//   ({ justCreated }) => {
-//     if (justCreated.get()) {
-//       console.log("just created", justCreated.get());
-//       justCreated.set(null);
-//       return justCreated;
-//     }
-//   },
-// );
-
-const stringify = lift(({ pattern }) => {
-  return JSON.stringify(pattern);
-});
-
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content, allCharms }) => {
     const mentioned = cell<MentionableCharm[]>([]);
     const justCreated = cell<MentionableCharm | null>(null);
-
-    // reactToJustCreated({ justCreated });
 
     const computeBacklinks = lift<
       { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
@@ -143,7 +125,7 @@ const Note = recipe<Input, Output>(
       content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
-    // const pattern = stringify({ pattern: Note });
+    // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
 
     return {

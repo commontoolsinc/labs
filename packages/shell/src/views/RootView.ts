@@ -9,9 +9,6 @@ import { KeyStore } from "@commontools/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { Runtime } from "@commontools/runner";
-import { provide } from "@lit/context";
-import { runtimeContext, sessionContext, type SessionInfo } from "@commontools/ui/v2";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -84,15 +81,6 @@ export class XRootView extends BaseView {
     },
   );
 
-  // Provide the public Runtime to descendants via context so
-  // components like ct-code-editor can consume it.
-  @provide({ context: runtimeContext })
-  private _providedRuntime: Runtime | undefined = undefined;
-
-  // Provide lightweight session info (space, identity) for UI needs.
-  @provide({ context: sessionContext })
-  private _providedSession: SessionInfo | undefined = undefined;
-
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener(SHELL_COMMAND, this.onCommand);
@@ -124,17 +112,6 @@ export class XRootView extends BaseView {
     if (flipState || stateChanged) {
       this._rt.run([current]);
     }
-
-    // Ensure provided context stays in sync when Task value updates.
-    // Expose the public Runtime rather than internal wrapper.
-    this._providedRuntime = this._rt.value?.cc().manager().runtime;
-
-    // Keep session info in sync
-    this._providedSession = {
-      spaceName: current.spaceName,
-      identityDid: current.identity?.did(),
-      apiUrl: current.apiUrl,
-    };
   }
 
   onCommand = (e: Event) => {
@@ -171,14 +148,6 @@ export class XRootView extends BaseView {
   }
 
   override render() {
-    // Reflect latest runtime into provided context each render as well,
-    // covering asynchronous Task completions.
-    this._providedRuntime = this._rt.value?.cc().manager().runtime;
-    this._providedSession = {
-      spaceName: this._app.spaceName,
-      identityDid: this._app.identity?.did(),
-      apiUrl: this._app.apiUrl,
-    };
     return html`
       <x-app-view
         .app="${this._app}"
