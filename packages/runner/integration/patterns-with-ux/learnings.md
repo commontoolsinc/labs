@@ -652,3 +652,23 @@ Add short notes after each run so the next agent can build on proven approaches.
   errors, it means you're trying to read a cell directly instead of receiving
   its value as a parameter. Always pass cells as parameters to lift and extract
   their values as function arguments.
+- For patterns displaying nested array structures with multiple levels (groups
+  containing entries), use nested loops within `lift` functions to iterate
+  through each level. Compute all intermediate values (like group totals) as
+  plain variables before building JSX to maintain clean, readable code.
+- When rendering optional content like notes within dynamic lists, always use
+  ternary operators with explicit `null` for the false case rather than boolean
+  expressions like `{condition && <Component />}`. The boolean expression will
+  render "false" as text when the condition fails, while the ternary with null
+  properly hides the content.
+- UI handlers that target specific items in nested arrays can accept index
+  parameters via form fields. Create cell-based form fields (e.g.,
+  `groupIndexField`, `entryIndexField`) and have handlers read from these cells
+  using `.get()` to determine which nested item to modify.
+- For patterns with multiple related operations (increment, decrement, update
+  label, update note), separate handlers provide clear, maintainable control
+  flow. Each handler can be specialized for its operation while sharing access
+  to the same underlying cell structure via `.key()` navigation.
+- Alternating background colors (`ei % 2 === 0 ? "#ffffff" : "#f1f5f9"`) on list
+  items improve visual scanning of dense nested structures, especially when
+  displaying multiple fields per item.
