@@ -123,7 +123,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] shopping-cart-aggregation
 - [ ] clinical-trial-enrollment
 - [ ] education-course-planner
-- [ ] assignment-grading-matrix
+- [x] assignment-grading-matrix
 - [x] student-attendance-tracker
 - [ ] editorial-calendar
 - [x] podcast-episode-planner

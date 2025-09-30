@@ -875,3 +875,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   human-readable names), implement resolver functions that check exact ID
   matches first, then try normalized keys, then case-insensitive label matches.
   This provides a good balance between precision and user-friendliness.
+- For complex grading matrix patterns with nested collections (students,
+  assignments, grades), separate the data display logic into individual `lift`
+  functions rather than building everything in one large lift. This makes the
+  code more maintainable and allows each section to be rendered independently.
+- When displaying reference lists (students, assignments) alongside form inputs,
+  use scrollable containers with `max-height` and `overflow-y: auto` to prevent
+  long lists from dominating the UI. This keeps the form accessible while still
+  showing all available options.
+- For grading or scoring UIs, color-code performance levels with distinct
+  background and border colors: green for excellent (≥90%), yellow for good
+  (≥70%), and red for needs improvement (<70%). Gray with lighter borders works
+  well for incomplete/ungraded items.
+- Grid layouts with `repeat(auto-fill, minmax(Npx, 1fr))` work excellently for
+  displaying variable-width grade cells that should wrap responsively while
+  maintaining readable card sizes.
