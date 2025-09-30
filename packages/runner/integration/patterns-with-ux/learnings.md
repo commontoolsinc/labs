@@ -1134,3 +1134,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   than trying to invoke the original handlers. This ensures consistent behavior
   while allowing form field clearing and other UI-specific operations after
   successful actions.
+- For search and filter patterns that display dynamic collections, use a
+  dedicated search input cell with separate handlers for applying and clearing
+  the search. This provides clear user control over the filtering behavior and
+  makes it easy to reset back to showing all items.
+- When rendering filtered collections inside `lift`, handle empty results with
+  contextual messaging (e.g., "No matching counters found") using color-coded
+  empty states that help users understand why no results are shown.
+- For patterns with per-item modification operations on collections, use a
+  centralized form approach where users input the item identifier (ID) and the
+  modification parameters, then separate handlers for each operation type
+  (increment, set value, update label). This avoids the complexity of creating
+  per-item handlers inside `lift` functions.
+- When displaying item IDs in the UI for user reference, use monospace fonts and
+  lighter colors to visually distinguish the technical identifier from the
+  human-readable label. This makes it easy for users to copy the correct ID
+  value.
