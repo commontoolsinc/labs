@@ -55,7 +55,9 @@ function collectCaptures(
     // For plain identifiers
     if (ts.isIdentifier(node)) {
       // Skip if this is part of a property access (handled above)
-      if (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+      if (
+        ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
+      ) {
         return;
       }
 
@@ -237,7 +239,10 @@ function transformMapCallback(
   for (const [varName, capturedExpr] of captures) {
     const visitor: ts.Visitor = (node) => {
       // Check if this node matches the captured expression
-      if (ts.isPropertyAccessExpression(node) && ts.isPropertyAccessExpression(capturedExpr)) {
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isPropertyAccessExpression(capturedExpr)
+      ) {
         // Compare property access expressions structurally
         if (node.name.text === capturedExpr.name.text) {
           // Check if the object part matches
