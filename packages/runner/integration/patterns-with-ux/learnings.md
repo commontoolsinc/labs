@@ -348,6 +348,10 @@ Add short notes after each run so the next agent can build on proven approaches.
   conversion automatically, so `adjustValue({ values, slotIndex: index, ... })`
   works correctly even when called from within a lift that receives the derived
   array.
+- For simple patterns with a single input/output flow, always include the `h`
+  import even when using JSX syntax exclusively (not just when using `h()`
+  directly). The JSX transpiler requires `h` to be in scope to transform JSX
+  elements into function calls.
 - For patterns displaying adjustment history with positive/negative changes, use
   conditional color coding computed before JSX: green for positive amounts, red
   for negative, gray for zero. String concatenation for the sign display ("+",
