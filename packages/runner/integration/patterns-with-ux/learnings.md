@@ -1091,3 +1091,23 @@ Add short notes after each run so the next agent can build on proven approaches.
   accents and monospace fonts to create visual distinction from active phase
   steps. Showing the summary (phase name, completion note, step count, final
   total) provides complete context at a glance.
+- When mixing `h()` and JSX in the same pattern, use `h()` inside `lift`
+  functions for dynamic collections, and JSX at the recipe return level for
+  static forms and inputs. The `$value` binding on `ct-input` works correctly in
+  JSX but shows "[object Object]" when using `h("ct-input", { $value: cell
+  })`
+  inside a lift.
+- For patterns that need to compute dynamic UI parts in a `lift` and then
+  combine them with JSX forms, return an object with named properties from the
+  lift (e.g., `{ header, board, historySection }`), then use additional `lift`
+  calls to extract each property and interpolate them into JSX at the top level.
+- Color-coded column backgrounds work well for kanban boards: use pastel colors
+  for normal state (light purple for backlog, light yellow for in-progress,
+  light blue for review, light green for done) and switch to red backgrounds
+  with red borders when columns exceed WIP limits. This creates immediate visual
+  feedback about capacity issues.
+- Dynamic status banners that change color based on derived state (green for
+  "all within limits", red for "over capacity") provide at-a-glance project
+  health visibility. Compute the conditional colors directly in the lift using
+  ternary operators rather than nested lifts to avoid runtime errors with
+  `.startsWith()` on cells.
