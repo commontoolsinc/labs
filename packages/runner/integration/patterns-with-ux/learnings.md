@@ -1226,3 +1226,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   draw attention to the most important metric. The purple gradient used for the
   current value display provides strong contrast with white text and makes the
   counter value the focal point of the interface.
+- For survey/analytics patterns with multiple aggregation dimensions (questions,
+  demographics), use color-coded left borders on cards to visually distinguish
+  different categories. Assigning different colors to demographic segments
+  (rotating through a palette) creates clear visual grouping while maintaining
+  consistency across the interface.
+- When displaying averaged metrics with color-coded thresholds, use conditional
+  coloring based on score ranges (green for high ≥4, orange for medium ≥3, red
+  for low <3) to provide instant visual feedback about performance. This works
+  well for question averages where users need to quickly identify problem areas.
+- Multi-metric summary cards displaying total, count, and average in a 3-column
+  grid provide comprehensive insight at a glance. Computing averages with proper
+  division-by-zero checks (using ternary operators) prevents NaN values in the
+  UI.
+- For patterns that accept JSON input via text fields, wrap JSON parsing in
+  try/catch blocks within handlers and silently fail (return early) on invalid
+  JSON rather than showing error messages. This provides clean UX where invalid
+  input is simply ignored until corrected.

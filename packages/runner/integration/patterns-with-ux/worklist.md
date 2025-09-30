@@ -130,7 +130,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] image-gallery-variant
 - [x] component-library-catalog
 - [ ] funnel-analytics
-- [ ] survey-response-analyzer
+- [x] survey-response-analyzer
 - [ ] customer-satisfaction-tracker
 - [ ] order-fulfillment-tracker
 - [x] compliance-checklist
