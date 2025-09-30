@@ -624,3 +624,16 @@ Add short notes after each run so the next agent can build on proven approaches.
 - JSX attribute values cannot use the `+` operator for string concatenation
   across multiple lines. Always use single-line style strings in JSX attributes,
   or compute the style string in a variable first and reference it.
+- When generating dynamic lists of elements with handlers (like replica cards
+  with per-item increment buttons), use the `h()` function instead of JSX within
+  `lift` functions. This allows you to create handlers at the recipe level and
+  pass them through to dynamically generated elements via the handler reference
+  stored in the derived object.
+- For patterns that manage collections of items (like replicas), handlers for
+  adding items should create new entries with appropriate default values (e.g.,
+  0 for counters). Removal handlers should validate index bounds and clear any
+  input fields after successful removal to provide clear UX feedback.
+- When using `h()` to build dynamic UI elements inside `lift`, compute all style
+  strings as plain variables using string concatenation (`+` operator) before
+  passing them to the `h()` function. This avoids template literal scope issues
+  and keeps the code clean.

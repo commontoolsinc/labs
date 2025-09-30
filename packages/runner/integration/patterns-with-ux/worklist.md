@@ -60,7 +60,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-redo-stack
 - [ ] counter-render-tree
 - [ ] counter-reorderable-list
-- [ ] counter-replicator
+- [x] counter-replicator
 - [ ] counter-reset
 - [x] counter-rich-label
 - [x] counter-ring-buffer-history
