@@ -318,7 +318,6 @@ export class CTCodeEditor extends BaseElement {
       },
     });
   }
-
   /**
    * Handle backlink activation (Cmd/Ctrl+Click on a backlink)
    */
@@ -362,35 +361,7 @@ export class CTCodeEditor extends BaseElement {
 
         // Instantiate the pattern and pass the ID so we can insert it into the text
         if (this.pattern) {
-          try {
-            const rt = this.pattern.runtime;
-            const tx = rt.edit();
-            const spaceName = this.pattern.space;
-            const result = rt.getCell<any>(
-              spaceName,
-              { note: this.value, title: backlinkText },
-            );
-
-            const pattern = JSON.parse(this.pattern.get());
-            const allCharms = rt.getCellFromEntityId(spaceName, {
-              "/": ALL_CHARMS_ID,
-            });
-
-            rt.run(tx, pattern, {
-              title: backlinkText,
-              content: "",
-              allCharms,
-            }, result);
-
-            tx.commit();
-            this.emit("backlink-create", {
-              text: backlinkText,
-              charmId: getEntityId(result),
-              charm: result,
-            });
-          } catch (error) {
-            console.error("Error creating backlink:", error);
-          }
+          this.createBacklinkFromPattern(backlinkText);
         }
 
         return true;
@@ -398,6 +369,43 @@ export class CTCodeEditor extends BaseElement {
     }
 
     return false;
+  }
+
+  /**
+   * Create a backlink from pattern
+   */
+  private createBacklinkFromPattern(backlinkText: string): void {
+    try {
+      const rt = this.pattern.runtime;
+      const tx = rt.edit();
+      const spaceName = this.pattern.space;
+      // ensure the cause is unique
+      const result = rt.getCell<any>(
+        spaceName,
+        { note: this.value, title: backlinkText },
+      );
+
+      // parse + start the recipe + link the inputs
+      const pattern = JSON.parse(this.pattern.get());
+      const allCharms = rt.getCellFromEntityId(spaceName, {
+        "/": ALL_CHARMS_ID,
+      });
+      rt.run(tx, pattern, {
+        title: backlinkText,
+        content: "",
+        allCharms,
+      }, result);
+
+      // let the pattern know about the new backlink
+      tx.commit();
+      this.emit("backlink-create", {
+        text: backlinkText,
+        charmId: getEntityId(result),
+        charm: result,
+      });
+    } catch (error) {
+      console.error("Error creating backlink:", error);
+    }
   }
 
   /**
