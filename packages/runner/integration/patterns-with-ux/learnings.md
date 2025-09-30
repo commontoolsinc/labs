@@ -611,3 +611,16 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Activity history with color-coded entries (green checkmarks for success, red
   X's for blocked operations) creates clear visual feedback about operation
   outcomes without requiring users to parse text carefully.
+- For faceted search patterns with dynamic filter lists, avoid using `ct-value`
+  or similar custom attributes to pass values to handlers (not supported).
+  Instead, use input fields where users type filter values and handlers read
+  from those input cells. Display available options as visual badges (spans with
+  conditional styling) that show selection state with checkmarks and color
+  changes.
+- When rendering dynamic collections of badges/pills inside `lift` functions,
+  use the `h()` function to create elements rather than JSX syntax. Build style
+  strings with concatenation before passing to `h()`, and use `...elements` to
+  spread arrays of children into parent elements.
+- JSX attribute values cannot use the `+` operator for string concatenation
+  across multiple lines. Always use single-line style strings in JSX attributes,
+  or compute the style string in a variable first and reference it.
