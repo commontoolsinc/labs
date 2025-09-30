@@ -1,8 +1,6 @@
 import ts from "typescript";
-
-import { applyPendingImports, createImportManager } from "../core/imports.ts";
 import {
-  createTransformationContext,
+  TransformationContext,
   type TransformationOptions,
 } from "../core/context.ts";
 import { createJsxExpressionRule } from "./rules/jsx-expression.ts";
@@ -29,14 +27,12 @@ export function createModularOpaqueRefTransformer(
   const rules = createRules(options.typeRegistry);
 
   return (transformation) => (sourceFile) => {
-    const imports = createImportManager();
-    const context = createTransformationContext(
+    const context = new TransformationContext({
       program,
       sourceFile,
       transformation,
       options,
-      imports,
-    );
+    });
 
     let current = sourceFile;
 
@@ -48,7 +44,10 @@ export function createModularOpaqueRefTransformer(
       }
     }
 
-    current = applyPendingImports(current, transformation.factory, imports);
+    current = context.imports.apply(
+      current,
+      transformation.factory,
+    );
     (context as { sourceFile: ts.SourceFile }).sourceFile = current;
 
     if (

@@ -1,71 +1,73 @@
 import ts from "typescript";
 
-export interface ImportSpec {
+export interface ImportRequest {
+  readonly name: string;
+  readonly module: string;
+  readonly typeOnly?: boolean;
+}
+
+interface ModuleRequirements {
+  readonly required: Set<string>;
+  readonly forbidden: Set<string>;
   readonly module: string;
   readonly typeOnly: boolean;
 }
 
-export interface ImportRequest extends Partial<ImportSpec> {
-  readonly name: string;
-}
+// Accumulates requirements in the form of required
+// or forbidden module imports. Once accumulated,
+// these requirements can be applied to a SourceFile.
+export class ImportRequirements {
+  #map = new Map<string, ModuleRequirements>();
 
-interface ImportRecord extends ImportSpec {
-  readonly names: Set<string>;
-}
+  // Marks the import as required, importing the
+  // symbol during render if not already imported.
+  require(request: ImportRequest): void {
+    const reqs = this.#get(request);
+    reqs.forbidden.delete(request.name);
+    reqs.required.add(request.name);
+  }
 
-export interface ImportManager {
-  request(request: ImportRequest): void;
-  has(request: ImportRequest): boolean;
-  entries(): Iterable<ImportRecord>;
-  clear(): void;
-}
+  // Marks the import for removal when rendered,
+  // if imported by the source code.
+  forbid(request: ImportRequest): void {
+    const reqs = this.#get(request);
+    reqs.required.delete(request.name);
+    reqs.forbidden.add(request.name);
+  }
 
-const DEFAULT_MODULE = "commontools";
-
-class SimpleImportManager implements ImportManager {
-  #records = new Map<string, ImportRecord>();
-
-  request(request: ImportRequest): void {
-    const module = request.module ?? DEFAULT_MODULE;
-    const key = `${module}|${request.typeOnly ? "t" : "v"}`;
-    const existing = this.#records.get(key);
+  // Returns the requirements scoped by the request,
+  // lazily creating and storing as needed.
+  #get(request: ImportRequest): ModuleRequirements {
+    const key = `${request.module}|${request.typeOnly ? "t" : "v"}`;
+    const existing = this.#map.get(key);
     if (existing) {
-      existing.names.add(request.name);
-      return;
+      return existing;
     }
-    this.#records.set(key, {
-      module,
+    const reqs = {
+      module: request.module,
       typeOnly: request.typeOnly ?? false,
-      names: new Set([request.name]),
-    });
+      required: new Set<string>(),
+      forbidden: new Set<string>(),
+    };
+    this.#map.set(key, reqs);
+    return reqs;
   }
 
-  has(request: ImportRequest): boolean {
-    const module = request.module ?? DEFAULT_MODULE;
-    const key = `${module}|${request.typeOnly ? "t" : "v"}`;
-    const existing = this.#records.get(key);
-    return existing ? existing.names.has(request.name) : false;
-  }
-
-  *entries(): Iterable<ImportRecord> {
-    for (const record of this.#records.values()) {
-      yield record;
+  // Applies all requirements to the provided SourceFile,
+  // returning the mapped source.
+  apply(sourceFile: ts.SourceFile, factory: ts.NodeFactory): ts.SourceFile {
+    let source = sourceFile;
+    for (const record of this.#map.values()) {
+      source = applyToSource(source, factory, record);
     }
-  }
-
-  clear(): void {
-    this.#records.clear();
+    return source;
   }
 }
 
-export function createImportManager(): ImportManager {
-  return new SimpleImportManager();
-}
-
-function ensureImport(
+function applyToSource(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  record: ImportRecord,
+  record: ModuleRequirements,
 ): ts.SourceFile {
   let existing: ts.ImportDeclaration | undefined;
   let existingIndex = -1;
@@ -95,34 +97,46 @@ function ensureImport(
   });
 
   if (existing) {
-    return updateImport(existing, existingIndex, sourceFile, factory, record);
+    const newStmt = applyToImport(existing, factory, record);
+    if (newStmt) {
+      const statements = [...sourceFile.statements];
+      statements[existingIndex] = newStmt;
+      return factory.updateSourceFile(sourceFile, statements);
+    } else {
+      return sourceFile;
+    }
   }
   return insertImport(sourceFile, factory, record);
 }
 
-function updateImport(
+// Transforms the given import statement with
+// the module requirements. Returns `undefined`
+// if no transformation could be applied.
+function applyToImport(
   existing: ts.ImportDeclaration,
-  index: number,
-  sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  record: ImportRecord,
-): ts.SourceFile {
+  record: ModuleRequirements,
+): ts.ImportDeclaration | undefined {
   const clause = existing.importClause;
   if (!clause || !clause.namedBindings) {
-    return sourceFile;
+    return undefined;
   }
 
   const named = clause.namedBindings;
   if (!ts.isNamedImports(named)) {
-    return sourceFile;
+    return undefined;
   }
 
-  const existingNames = new Set(
-    named.elements.map((element) => element.name.text),
+  const filteredExisting = named.elements.filter((element) =>
+    !record.forbidden.has(element.name.text)
   );
-  const nextElements = [...named.elements];
+  const didRemove = filteredExisting.length !== named.elements.length;
+  const existingNames = new Set(
+    filteredExisting.map((element) => element.name.text),
+  );
+  const nextElements = [...filteredExisting];
 
-  for (const name of record.names) {
+  for (const name of record.required) {
     if (existingNames.has(name)) continue;
     nextElements.push(
       factory.createImportSpecifier(
@@ -133,11 +147,11 @@ function updateImport(
     );
   }
 
-  if (nextElements.length === named.elements.length) {
-    return sourceFile;
+  if (!didRemove && nextElements.length === named.elements.length) {
+    return undefined;
   }
 
-  const updated = factory.updateImportDeclaration(
+  return factory.updateImportDeclaration(
     existing,
     existing.modifiers,
     factory.updateImportClause(
@@ -149,18 +163,14 @@ function updateImport(
     existing.moduleSpecifier,
     existing.assertClause,
   );
-
-  const statements = [...sourceFile.statements];
-  statements[index] = updated;
-  return factory.updateSourceFile(sourceFile, statements);
 }
 
 function insertImport(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  record: ImportRecord,
+  record: ModuleRequirements,
 ): ts.SourceFile {
-  const elements = Array.from(record.names).map((name) =>
+  const elements = Array.from(record.required).map((name) =>
     factory.createImportSpecifier(
       false,
       undefined,
@@ -196,17 +206,4 @@ function insertImport(
   }
   statements.splice(insertIndex, 0, declaration);
   return factory.updateSourceFile(sourceFile, statements);
-}
-
-export function applyPendingImports(
-  sourceFile: ts.SourceFile,
-  factory: ts.NodeFactory,
-  manager: ImportManager,
-): ts.SourceFile {
-  let updated = sourceFile;
-  for (const record of manager.entries()) {
-    updated = ensureImport(updated, factory, record);
-  }
-  manager.clear();
-  return updated;
 }

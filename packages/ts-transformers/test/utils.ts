@@ -6,7 +6,8 @@ import {
   createSchemaTransformer,
 } from "../src/mod.ts";
 import { TypeRegistry } from "../src/core/type-registry.ts";
-import { assertDefined } from "../src/core/assert.ts";
+import { assert } from "@std/assert";
+
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
 type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
@@ -183,8 +184,9 @@ export async function transformSource(
   }
   transformers.push(...afterTransformers);
 
-  const sourceFile = assertDefined(
-    program.getSourceFile(fileName),
+  const sourceFile = program.getSourceFile(fileName);
+  assert(
+    sourceFile,
     "Expected virtual source file to be present in program",
   );
   const result = ts.transform(sourceFile, transformers);
@@ -192,8 +194,9 @@ export async function transformSource(
     newLine: ts.NewLineKind.LineFeed,
     removeComments: false,
   });
-  const transformedFile = assertDefined(
-    result.transformed[0],
+  const transformedFile = result.transformed[0];
+  assert(
+    transformedFile,
     "Expected transformer pipeline to return a source file",
   );
   const output = printer.printFile(transformedFile);
