@@ -44,7 +44,7 @@ const logger = getLogger("validateAndTransform", {
  *  necessary when using the schedueler directly)
  */
 
-function resolveSchema(
+export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
@@ -58,17 +58,60 @@ function resolveSchema(
   }
 
   let resolvedSchema = schema;
+  let refSiteDefault: JSONValue | undefined = undefined;
+  let refSiteAsCell = false;
+  let refSiteAsStream = false;
+
   if (typeof schema.$ref === "string" && rootSchema !== undefined) {
+    // Capture ref site siblings BEFORE resolution (for precedence)
+    if (isObject(schema)) {
+      if ("default" in schema) {
+        refSiteDefault = schema.default;
+      }
+      if (schema.asCell) {
+        refSiteAsCell = true;
+      }
+      if (schema.asStream) {
+        refSiteAsStream = true;
+      }
+    }
+
     const resolved = ContextualFlowControl.resolveSchemaRef(
       rootSchema,
       schema.$ref,
     );
     if (!isObject(resolved)) {
-      // For boolean schema or the default `{}` schema, we don't have any
+      // For boolean true schema, convert to object if ref site has siblings
+      if (
+        resolved === true &&
+        (refSiteDefault !== undefined || refSiteAsCell || refSiteAsStream)
+      ) {
+        const result: any = {};
+        if (refSiteDefault !== undefined) result.default = refSiteDefault;
+        if (refSiteAsCell) result.asCell = true;
+        if (refSiteAsStream) result.asStream = true;
+        return result;
+      }
+      // For boolean false schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
     }
     resolvedSchema = resolved;
+
+    // Apply ref site siblings (override target per JSON Schema spec)
+    if (refSiteDefault !== undefined || refSiteAsCell || refSiteAsStream) {
+      const updates: any = {};
+      if (refSiteDefault !== undefined) {
+        updates.default = refSiteDefault;
+      }
+      if (refSiteAsCell) {
+        updates.asCell = true;
+      }
+      if (refSiteAsStream) {
+        updates.asStream = true;
+      }
+      resolvedSchema = { ...resolvedSchema, ...updates };
+    }
   }
 
   // Remove asCell flag from schema, so it's describing the destination

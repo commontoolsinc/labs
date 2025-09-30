@@ -468,6 +468,11 @@ export class ContextualFlowControl {
     ) {
       // If the cursor is a $ref, get the target location
       if (isObject(cursor) && "$ref" in cursor) {
+        // Capture ref site siblings before resolution
+        const refSiteDefault = cursor.default;
+        const refSiteAsCell = cursor.asCell;
+        const refSiteAsStream = cursor.asStream;
+
         // Support ifc tags beside the ref tag
         if (cursor.ifc !== undefined && cursor.ifc.classification) {
           for (const classification of cursor.ifc.classification) {
@@ -479,6 +484,40 @@ export class ContextualFlowControl {
           rootSchema,
           cursor.$ref,
         );
+
+        // Apply ref site siblings (they override target per JSON Schema spec)
+        if (typeof cursor === "boolean") {
+          // Convert boolean schema to object if needed to hold siblings
+          if (
+            cursor === true &&
+            (refSiteDefault !== undefined || refSiteAsCell || refSiteAsStream)
+          ) {
+            const result: any = {};
+            if (refSiteDefault !== undefined) result.default = refSiteDefault;
+            if (refSiteAsCell) result.asCell = true;
+            if (refSiteAsStream) result.asStream = true;
+            cursor = result;
+          } else if (cursor === false) {
+            // false schema - can't augment, leave as is
+          }
+        } else if (isObject(cursor)) {
+          // Apply ref site siblings to object schema
+          if (
+            refSiteDefault !== undefined || refSiteAsCell || refSiteAsStream
+          ) {
+            const updates: any = {};
+            if (refSiteDefault !== undefined) {
+              updates.default = refSiteDefault;
+            }
+            if (refSiteAsCell) {
+              updates.asCell = true;
+            }
+            if (refSiteAsStream) {
+              updates.asStream = true;
+            }
+            cursor = { ...cursor, ...updates };
+          }
+        }
       }
       if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
