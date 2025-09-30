@@ -378,7 +378,7 @@ export class CTCodeEditor extends BaseElement {
           );
           const pattern = JSON.parse(this.pattern.get());
 
-          this._rt.run(tx, pattern, {
+          const charm = this._rt.run(tx, pattern, {
             title: backlinkText, // TODO: unqiueness
             content: "",
             allCharms: [], // TODO: what do
@@ -388,6 +388,7 @@ export class CTCodeEditor extends BaseElement {
           this.emit("backlink-create", {
             text: backlinkText,
             charmId: getEntityId(result),
+            charm: result,
           });
         }
 
@@ -424,7 +425,7 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const charm = mentionableArray.key(i);
       if (charm) {
-        const charmIdObj = getEntityId(charm);
+        const charmIdObj = getEntityId(mentionableArray.get()[i]);
         const charmId = charmIdObj?.["/"] || "";
         if (charmId === id) {
           return charm;

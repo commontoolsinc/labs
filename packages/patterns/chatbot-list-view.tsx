@@ -351,7 +351,7 @@ export default recipe<Input, Output>(
                           <ct-button
                             onClick={handleCharmLinkClicked({ charm })}
                           >
-                            {charm[NAME]}
+                            {charm?.[NAME]}
                           </ct-button>
                         ))}
                       </ct-vstack>

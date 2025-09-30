@@ -67,33 +67,25 @@ const handleNewBacklink = handler<
     detail: {
       text: string;
       charmId: any;
+      charm: Cell<MentionableCharm>;
     };
   },
   {
-    allCharms: Cell<MentionableCharm[]>;
-    justCreated: Cell<MentionableCharm | null>;
+    content: Cell<string>;
   }
->(({ detail }, { allCharms, justCreated }) => {
+>(({ detail }, { content }) => {
   console.log("new charm", detail.text, detail.charmId);
-  // const n = Note({
-  //   title: detail.text,
-  //   content: "",
-  //   allCharms,
-  // });
 
-  /*
-  The below line triggers
-  RangeError: Maximum call stack size exceeded
-      at _ContextualFlowControl.getSchemaAtPath (cfc.ts:419:3)
-      at Object.key (opaque-ref.ts:78:17)
-      at Object.get (opaque-ref.ts:187:26)
-      at isJSONCellLink (link-utils.ts:101:20)
-      at parseLink (link-utils.ts:264:7)
-      at areMaybeLinkAndNormalizedLinkSame (link-utils.ts:359:27)
-      at normalizeAndDiff (data-updating.ts:236:7)
-  */
-  // justCreated.set(n as any);
-  // return navigateTo(n);
+  const text = content.get();
+  // find relevant area in the text content
+  // replace `[[${text}]]` with text + ID `[[${text} (${ID})]]`
+  const replaced = text.replace(
+    `[[${detail.text}]]`,
+    `[[${detail.text} (${detail.charmId["/"]})]]`,
+  );
+
+  content.set(replaced);
+  return navigateTo(detail.charm);
 });
 
 const handleCharmLinkClicked = handler(
@@ -171,10 +163,7 @@ const Note = recipe<Input, Output>(
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({
-              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
-              justCreated,
-            })}
+            onbacklink-create={handleNewBacklink({ content })}
             language="text/markdown"
             theme="light"
             wordWrap
