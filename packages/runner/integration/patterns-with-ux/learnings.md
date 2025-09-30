@@ -1076,3 +1076,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   handlers to add items. Empty state messages with dashed borders and helpful
   prompts ("No counters yet. Add one to get started!") create clear user
   guidance when the collection is empty.
+- For multi-step workflow patterns with phase management, use color-coded status
+  badges to distinguish between different phases (e.g., gray for "idle", green
+  for active phases). This provides immediate visual feedback about the current
+  state.
+- When displaying step history in reverse chronological order, use conditional
+  color coding for positive (green) vs negative (red) delta values to make the
+  flow of changes immediately clear. Showing both the delta and running total
+  for each step helps users understand the cumulative effect.
+- Phase completion workflows benefit from separate UI sections for starting,
+  stepping through, and completing sequences. This separation makes the workflow
+  clear and prevents accidental actions.
+- When tracking completed phases in a history log, display them with left-border
+  accents and monospace fonts to create visual distinction from active phase
+  steps. Showing the summary (phase name, completion note, step count, final
+  total) provides complete context at a glance.
