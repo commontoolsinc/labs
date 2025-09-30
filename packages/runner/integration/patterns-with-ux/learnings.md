@@ -990,3 +990,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   available, but handlers should still guard against edge cases where values
   might be empty strings or need default behavior (like defaulting to 1 for
   increment amounts when no value is provided).
+- For inventory/warehouse patterns with conditional alerts, use `lift` to
+  compute dynamic styles for alert status indicators that switch between success
+  (green) and warning (red/yellow) states. Gradient backgrounds that change
+  color based on alert state provide clear visual feedback.
+- When rendering collections with status-based styling (like inventory items
+  with low stock indicators), use the `h()` function inside `lift` to generate
+  cards with conditional backgrounds, borders, and badges. Compute all style
+  strings with concatenation before passing to `h()` to avoid template literal
+  scope issues.
+- Multi-action forms benefit from a shared SKU/identifier input with separate
+  fields for different operation types (quantity for stock operations, threshold
+  for configuration). This keeps the form compact while supporting multiple
+  distinct operations through different button handlers.
+- Status badges with uppercase text and conditional colors (green "OK" vs red
+  "LOW STOCK") create immediate visual distinction in list items without
+  requiring users to read numeric values first.
