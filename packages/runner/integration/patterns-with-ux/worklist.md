@@ -140,7 +140,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] vendor-risk-assessment
 - [ ] org-chart-hierarchy
 - [ ] goal-progress-tracker
-- [ ] counter-fallback-defaults
+- [x] counter-fallback-defaults
 - [ ] counter-nested-computed-percentages
 - [ ] counter-nested-computed-totals
 - [ ] counter-persistence-initial-arguments
