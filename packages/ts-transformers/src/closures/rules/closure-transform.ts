@@ -150,9 +150,9 @@ function transformMapCallback(
   }
 
   // Import recipe
-  imports.request({
+  imports.require({
     name: "recipe",
-    // module defaults to "commontools"
+    module: "commontools",
   });
 
   // Transform the callback parameters
