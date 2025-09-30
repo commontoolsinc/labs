@@ -749,3 +749,11 @@ Add short notes after each run so the next agent can build on proven approaches.
   Implement resolver functions (like resolveSlotId, resolveAgentId) that check
   both exact ID matches and case-insensitive label/name matches to support
   flexible user input.
+- When you need multiple buttons that call the same logic with different
+  parameter values (like +1, +2, -0.5), create a factory function that returns
+  individual handlers for each value rather than trying to pass parameters via
+  custom attributes. For example, `createAdjustHandler(delta)` that returns a
+  handler, then call it for each button:
+  `const adjustPlus1 =
+  createAdjustHandler(1)`. This ensures parameters are
+  properly captured at handler creation time.
