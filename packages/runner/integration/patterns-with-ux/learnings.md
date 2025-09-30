@@ -1150,3 +1150,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   lighter colors to visually distinguish the technical identifier from the
   human-readable label. This makes it easy for users to copy the correct ID
   value.
+- For catalog/coverage tracking patterns displaying completion metrics, use
+  color-coded cards with conditional backgrounds based on percentage thresholds
+  (green for complete, yellow/amber for partial, red for uncovered). Computing
+  these colors dynamically in `lift` functions and applying them to both borders
+  and backgrounds creates immediate visual feedback about coverage health.
+- When building nested conditional rendering inside `lift` functions with `h()`,
+  avoid using ternary operators that return `null` as children. Instead, build
+  the children array conditionally by pushing elements only when needed, then
+  spread that array into the parent element with `...childrenArray`. This
+  prevents TypeScript errors about null not being assignable to RenderNode.
