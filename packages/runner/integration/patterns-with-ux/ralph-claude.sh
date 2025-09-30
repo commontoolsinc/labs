@@ -10,5 +10,6 @@ while :; do
       "Summarize these changes into a short one-line description, \
 output just that one line: $(git diff --staged)")"
   fi;
+  git push origin
 done
 echo "Stopped because the command failed."
