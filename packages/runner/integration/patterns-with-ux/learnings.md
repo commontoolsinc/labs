@@ -489,3 +489,19 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Displaying reference data (like student rosters) in a scrollable list with
   monospace formatting helps users copy IDs accurately into input fields. Use
   `maxHeight` and `overflow-y: auto` for long lists.
+- When reimplementing business handler logic directly in UI handlers, avoid
+  calling `.run()` on factory-bound handlers—instead, duplicate the mutation
+  logic inline. This ensures proper cell updates without runtime errors about
+  missing `.run()` methods.
+- For union-state patterns that toggle between mutually exclusive modes
+  (loading/ready), use conditional visibility with `lift` to show/hide control
+  sections dynamically. Compute display style strings like `"display: block;"`
+  or `"display: none;"` based on derived mode booleans.
+- Status badges with dynamic colors work well for union state visualization. Use
+  `lift` to compute badge colors from the current state (e.g., orange for
+  loading, green for ready) and bind directly to inline styles for immediate
+  visual feedback.
+- Always defensively check string values with `typeof noteText === "string" &&
+  noteText.trim() !== ""` before calling `.trim()` on cell values, as cells may
+  return undefined during initialization. This prevents "Cannot read properties
+  of undefined" errors in handlers.
