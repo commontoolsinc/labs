@@ -712,3 +712,25 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Dynamic button labels based on state (`lift` to compute "Enable" vs "Disable")
   provide better UX than static labels, making the available action always clear
   to users.
+- For citation/bibliography patterns with multiple grouping dimensions (by
+  topic, by style), create separate derived cells for each grouping strategy
+  using `lift` to transform the base catalog. This allows the UI to display
+  filtered views (like a bibliography for a specific citation style) while
+  maintaining access to the complete dataset for listing all citations.
+- When building form handlers that process multiple input fields, create
+  dedicated UI cells for each form field and have handlers read from all
+  relevant cells using `.get()`. After successful processing, clear all form
+  fields with `.set("")` to provide clear feedback and ready the form for the
+  next entry.
+- For patterns with style/format filtering (like citation styles APA/MLA/
+  Chicago), use a badge-style indicator to show the active filter prominently.
+  Combine this with dynamic section headers (e.g., "Bibliography (APA)") that
+  update based on the active filter to reinforce which view is currently
+  displayed.
+- When rendering dynamic collections with `h()` inside `lift`, use a `for...of`
+  loop to build element arrays rather than `.map()`, as this avoids potential
+  "derive is not defined" errors. Compute all dynamic values (colors, styles) as
+  plain variables before creating elements with `h()`.
+- Multi-field forms benefit from grid layouts with two columns for related
+  fields. This creates a compact, organized input area while maintaining visual
+  balance and making efficient use of horizontal space.
