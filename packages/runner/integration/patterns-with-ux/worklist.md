@@ -41,7 +41,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-hierarchical-key-path
 - [x] counter-history-tracker
 - [ ] counter-keyed-map
-- [ ] counter-lift-formatting
+- [x] counter-lift-formatting
 - [ ] counter-matrix-state
 - [ ] counter-mutable-tuple
 - [ ] counter-nested-array-objects
