@@ -1038,3 +1038,11 @@ Add short notes after each run so the next agent can build on proven approaches.
   showing both the emoji and count in a compact pill-style format. This creates
   a familiar chat-like interface that users recognize from platforms like Slack
   and Discord.
+- For inbox/threading patterns with grouped messages, display threads in reverse
+  chronological order (most recent first) and highlight the active thread with
+  distinct background colors and border styling. Use badges to show message
+  counts and display multiple senders as comma-separated lists.
+- When building two-panel layouts (list + detail view), use CSS Grid with
+  proportional columns (e.g., 1fr 1.5fr) to give more space to the detail panel
+  while keeping the list visible. This works well for email, messaging, and
+  other item-detail patterns.
