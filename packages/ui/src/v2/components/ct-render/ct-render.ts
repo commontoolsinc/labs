@@ -126,14 +126,13 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private async _loadAndRenderRecipe(recipeId: string, retry: boolean = true) {
-    this._log("loading recipe:", recipeId);
-
+  private async _loadAndRenderRecipe(retry: boolean = true) {
     try {
       const recipeId = getRecipeIdFromCharm(this.cell);
       if (!recipeId) {
         throw new Error("No recipe ID found in charm");
       }
+      this._log("loading recipe:", recipeId);
 
       // Load and run the recipe
       const recipe = await this.cell.runtime.recipeManager.loadRecipe(
@@ -154,7 +153,7 @@ export class CTRender extends BaseElement {
         console.warn("Failed to load recipe, retrying...");
         // First failure, sync and retry once
         await this.cell.sync();
-        await this._loadAndRenderRecipe(recipeId, false);
+        await this._loadAndRenderRecipe(false);
       } else {
         // Second failure, give up
         throw error;
