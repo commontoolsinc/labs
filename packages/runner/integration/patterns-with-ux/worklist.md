@@ -103,7 +103,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] saved-search-subscription
 - [ ] search-relevance-tuning
 - [ ] security-vulnerability-tracker
-- [ ] simple-counter
+- [x] simple-counter
 - [ ] sleep-journal
 - [ ] sprint-burndown
 - [ ] subscription-billing
