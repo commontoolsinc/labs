@@ -1,44 +1,35 @@
 /// <cts-enable />
 import { h, recipe, UI, JSONSchema } from "commontools";
-
 interface State {
-  items: Array<{
-    price: number;
-  }>;
-  discount: number;
+    items: Array<{
+        price: number;
+    }>;
+    discount: number;
 }
-
 export default recipe({
-  type: "object",
-  properties: {
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          price: {
-            type: "number"
-          }
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
+            }
         },
-        required: ["price"]
-      }
+        discount: {
+            type: "number"
+        }
     },
-    discount: {
-      type: "number"
-    }
-  },
-  required: ["items", "discount"]
+    required: ["items", "discount"]
 } as const satisfies JSONSchema, (state) => {
-  return {
-    [UI]: (
-      <div>
-        {state.items.map({
-          op: recipe(({elem, params: {discount}}) => (
-            <span>{elem.price * discount}</span>
-          )),
-          params: {discount: state.discount}
-        })}
-      </div>
-    ),
-  };
+    return {
+        [UI]: (<div>
+        {state.items.map({ op: recipe(({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), params: { discount: state.discount } })}
+      </div>),
+    };
 });
