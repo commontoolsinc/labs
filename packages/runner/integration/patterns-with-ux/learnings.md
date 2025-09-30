@@ -550,3 +550,14 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Three-column grid layouts with `grid-template-columns: repeat(3, 1fr)` work
   well for displaying per-handler statistics that should have equal visual
   weight, creating a balanced dashboard-like layout for invocation counts.
+- For patterns with mode-switching behavior (like toggled derive pipelines),
+  color-code the mode indicators consistently across the UI - use the same color
+  scheme for the active mode badge and the corresponding action button to
+  reinforce the visual relationship between state and controls.
+- When passing event parameters to handlers via ct-button attributes (e.g.,
+  `ct-amount={1}`), bind the handler directly to `onClick` without calling it.
+  The framework will automatically pass the attributes as the event object to
+  the handler.
+- History displays work well with color-coded badges that match the mode colors
+  used elsewhere in the UI, creating a cohesive visual language that helps users
+  understand the pattern's behavior at a glance.
