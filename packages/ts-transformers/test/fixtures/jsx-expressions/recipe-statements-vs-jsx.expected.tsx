@@ -3,7 +3,7 @@ import { recipe, UI, NAME, str, handler, h, Cell, derive, ifElse, JSONSchema } f
 interface RecipeState {
     value: number;
 }
-const increment = handler({} as const satisfies JSONSchema, {
+const increment = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,7 +17,7 @@ const increment = handler({} as const satisfies JSONSchema, {
 }) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler({} as const satisfies JSONSchema, {
+const decrement = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
         value: {

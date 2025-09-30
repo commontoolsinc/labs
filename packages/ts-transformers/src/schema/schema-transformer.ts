@@ -64,7 +64,11 @@ export function createSchemaTransformer(
         }
 
         const schema = generateSchema(type, checker, typeArg);
-        const finalSchema = { ...schema, ...optionsObj };
+
+        // Handle boolean schemas (true/false) - can't spread them
+        const finalSchema = typeof schema === "boolean"
+          ? schema
+          : { ...schema, ...optionsObj };
         const schemaAst = createSchemaAst(finalSchema, context.factory);
 
         const constAssertion = context.factory.createAsExpression(

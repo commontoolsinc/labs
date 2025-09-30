@@ -89,8 +89,8 @@ type CalculatorRequest = {
         "T",
       );
       const schema = generator.generateSchema(type, checker, typeNode);
-      // unknown returns false (reject all values)
-      expect(schema).toEqual(false);
+      // unknown returns true (accept any value - type safety at compile time)
+      expect(schema).toEqual(true);
     });
   });
 

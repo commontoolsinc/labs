@@ -7,7 +7,7 @@ declare global {
         }
     }
 }
-const handleClick = handler({} as const satisfies JSONSchema, {
+const handleClick = handler(true as const satisfies JSONSchema, {
     type: "object",
     properties: {
         count: {

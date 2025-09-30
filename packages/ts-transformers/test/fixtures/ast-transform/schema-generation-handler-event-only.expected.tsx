@@ -12,6 +12,6 @@ export const incrementer = handler({
         }
     },
     required: ["amount"]
-} as const satisfies JSONSchema, {} as const satisfies JSONSchema, (event: IncrementEvent, state) => {
+} as const satisfies JSONSchema, true as const satisfies JSONSchema, (event: IncrementEvent, state) => {
     console.log("increment by", event.amount);
 });

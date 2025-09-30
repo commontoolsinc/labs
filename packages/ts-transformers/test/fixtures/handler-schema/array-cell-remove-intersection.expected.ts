@@ -6,7 +6,7 @@ interface Item {
 interface ListState {
     items: Cell<Item[]>;
 }
-const removeItem = handler({} as const satisfies JSONSchema, {
+const removeItem = handler(true as const satisfies JSONSchema, {
     $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
@@ -43,7 +43,7 @@ const removeItem = handler({} as const satisfies JSONSchema, {
 type ListStateWithIndex = ListState & {
     index: number;
 };
-const removeItemAlias = handler({} as const satisfies JSONSchema, {
+const removeItemAlias = handler(true as const satisfies JSONSchema, {
     $schema: "https://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
