@@ -124,7 +124,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] clinical-trial-enrollment
 - [ ] education-course-planner
 - [ ] assignment-grading-matrix
-- [ ] student-attendance-tracker
+- [x] student-attendance-tracker
 - [ ] editorial-calendar
 - [ ] podcast-episode-planner
 - [ ] image-gallery-variant

@@ -474,3 +474,18 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For collection patterns where items have labels and numeric properties,
   displaying the count in a styled badge (rounded background, monospace font)
   creates visual separation from the label and emphasizes the numeric value.
+- Sets are not JSON-serializable and cannot be stored in cells. Use arrays
+  instead and convert to Sets only within handler logic when needed for lookups.
+  This applies to any non-serializable data structures - stick to plain objects,
+  arrays, strings, numbers, and booleans for cell storage.
+- When creating handlers that need to reference derived cells (outputs of
+  `lift`), handlers can accept derived cells as context parameters - the
+  framework handles `.get()` calls on derived cells correctly. However, ensure
+  all context parameters are properly passed when invoking the handler.
+- For patterns with per-item interactions in dynamically rendered lists (like
+  toggling student attendance), consider using simpler input methods like
+  textarea with line-separated IDs rather than creating handlers inside `lift`
+  functions, which cannot access outer scope variables like handler references.
+- Displaying reference data (like student rosters) in a scrollable list with
+  monospace formatting helps users copy IDs accurately into input fields. Use
+  `maxHeight` and `overflow-y: auto` for long lists.
