@@ -254,7 +254,12 @@ export class CTCodeEditor extends BaseElement {
             type: "text",
             info: "Create new backlink",
             apply: () => {
-              this.emit("backlink-create", { text: raw });
+              // Instantiate the pattern if available
+              if (this.pattern) {
+                this.createBacklinkFromPattern(raw);
+              } else {
+                this.emit("backlink-create", { text: raw });
+              }
             },
           });
         }
@@ -436,9 +441,11 @@ export class CTCodeEditor extends BaseElement {
       if (charm) {
         // this is VERY specific
         // if you do `getEntityId(mentionableArray.key(i))` you'll get a different answer (the ID of the array itself)
-        const charmIdObj = getEntityId(mentionableArray.get()[i]);
-        const charmId = charmIdObj?.["/"] || "";
-        if (charmId === id) {
+        const charmIdObjA = getEntityId(mentionableArray.get()[i]);
+        const charmIdObjB = getEntityId(mentionableArray.key(i));
+        const charmIdA = charmIdObjA?.["/"] || "";
+        const charmIdB = charmIdObjB?.["/"] || "";
+        if (charmIdA === id || charmIdB === id) {
           return charm;
         }
       }
@@ -797,14 +804,19 @@ export class CTCodeEditor extends BaseElement {
           // Try accepting an active completion first
           if (acceptCompletion(view)) return true;
 
-          // If typing a backlink with no matches, emit create event
+          // If typing a backlink with no matches, create new backlink
           const query = this._currentBacklinkQuery(view);
           if (query != null) {
             const matches = this.getFilteredMentionable(query);
             if (matches.length === 0) {
               const text = query.trim();
               if (text.length > 0) {
-                this.emit("backlink-create", { text });
+                // Instantiate the pattern if available
+                if (this.pattern) {
+                  this.createBacklinkFromPattern(text);
+                } else {
+                  this.emit("backlink-create", { text });
+                }
                 return true;
               }
             }
