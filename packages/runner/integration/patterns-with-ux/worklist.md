@@ -59,7 +59,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-range-slider
 - [ ] counter-redo-stack
 - [ ] counter-render-tree
-- [ ] counter-reorderable-list
+- [x] counter-reorderable-list
 - [x] counter-replicator
 - [ ] counter-reset
 - [x] counter-rich-label
