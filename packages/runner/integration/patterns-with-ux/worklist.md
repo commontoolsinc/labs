@@ -118,7 +118,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] workflow-state-machine
 - [ ] issue-dependency-graph
 - [ ] release-checklist
-- [ ] markdown-preview-toggle
+- [x] markdown-preview-toggle
 - [ ] form-wizard-stepper
 - [x] shopping-cart-aggregation
 - [ ] clinical-trial-enrollment
