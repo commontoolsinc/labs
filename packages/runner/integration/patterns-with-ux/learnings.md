@@ -520,3 +520,11 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns with multiple control sections (update, reorder, etc.), separate
   them into distinct cards with clear headings. This helps users understand
   which controls affect which operations without cognitive overload.
+- For educational patterns demonstrating lift transformations, use visual flow
+  indicators (arrows, separators with labels) to clearly show the data
+  transformation pipeline. A gradient background for the raw value and a
+  bordered light background for the formatted output creates clear visual
+  distinction between input and output stages.
+- Monospace fonts work well for displaying both raw numeric values and formatted
+  strings to maintain consistency and emphasize the technical nature of the
+  transformation.
