@@ -27,7 +27,8 @@ Steps:
 4. Expand the recipe outputs to include:
    - `[NAME]`: a concise, human-friendly title derived from deterministic state.
    - `[UI]`: JSX that binds the existing derives and handlers into a polished,
-     accessible and mobile friendly interface. Favor ct components (`ct-button`,
+     accessible and mobile friendly interface. Avoid excessive white space.
+     Theme it appropropiate to the use-case. Favor ct components (`ct-button`,
      `ct-input`, etc.) and clearly communicate the pattern’s purpose. Keep the
      recipe deterministic and offline—reuse sanitized values instead of
      recomputing raw inputs inside the UI.
