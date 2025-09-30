@@ -1551,6 +1551,46 @@ describe("Schema Support", () => {
       expect(value.age).toBe(30);
     });
 
+    it("should resolve defaults when using $ref in property schemas", () => {
+      const schema = {
+        $defs: {
+          Settings: {
+            type: "object",
+            properties: {
+              enabled: { type: "boolean" },
+              label: { type: "string" },
+            },
+            default: { enabled: true, label: "from ref" },
+          },
+        },
+        type: "object",
+        properties: {
+          config: {
+            $ref: "#/$defs/Settings",
+            default: { enabled: false, label: "from property" },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{
+        config?: { enabled: boolean; label: string };
+      }>(
+        space,
+        "should resolve defaults when using $ref in property schemas",
+        undefined,
+        tx,
+      );
+      c.set({});
+
+      const cell = c.asSchema(schema);
+      const value = cell.get();
+
+      expect(value.config).toEqualIgnoringSymbols({
+        enabled: false,
+        label: "from property",
+      });
+    });
+
     it("should use the default value with asCell for objects", () => {
       const c = runtime.getCell<{
         name: string;

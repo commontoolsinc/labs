@@ -44,7 +44,7 @@ const logger = getLogger("validateAndTransform", {
  *  necessary when using the schedueler directly)
  */
 
-function resolveSchema(
+export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
@@ -62,6 +62,7 @@ function resolveSchema(
     const resolved = ContextualFlowControl.resolveSchemaRef(
       rootSchema,
       schema.$ref,
+      schema,
     );
     if (!isObject(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any

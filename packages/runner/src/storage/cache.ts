@@ -527,6 +527,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           item = ContextualFlowControl.resolveSchemaRef(
             rootSchema,
             item.$ref,
+            item,
           );
           // We might match after resolving the `$ref`
           return JSON.stringify(item) === schemaString;
