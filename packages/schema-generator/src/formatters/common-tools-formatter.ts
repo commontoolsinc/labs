@@ -253,7 +253,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (typeof valueSchema === "boolean") {
         // Boolean schemas (true/false) cannot have properties
         // Wrap in an object schema
-        return { allOf: [valueSchema], default: defaultValue } as SchemaDefinition;
+        return {
+          allOf: [valueSchema],
+          default: defaultValue,
+        } as SchemaDefinition;
       }
       (valueSchema as any).default = defaultValue;
     }

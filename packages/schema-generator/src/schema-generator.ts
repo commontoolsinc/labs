@@ -274,10 +274,12 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
     if (typeof base === "boolean") {
-      return base ? { $schema: "https://json-schema.org/draft/2020-12/schema" } : {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        not: true,
-      };
+      return base
+        ? { $schema: "https://json-schema.org/draft/2020-12/schema" }
+        : {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          not: true,
+        };
     }
 
     // Object schema: attach only the definitions actually referenced by the
