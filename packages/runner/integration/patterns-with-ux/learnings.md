@@ -976,3 +976,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   for rejected) and human-readable rejection reasons ("Not allowed from current
   stage", "Invalid target stage") provides excellent UX feedback for
   understanding why transitions succeed or fail.
+- When handlers read from UI input cells, always defensively check for undefined
+  values before calling string methods like `.trim()`. Use
+  `typeof amountStr ===
+  "string" && amountStr.trim() !== ""` to safely handle
+  cases where cell values haven't been initialized yet, preventing "Cannot read
+  properties of undefined" errors during handler execution.
+- For sparse array patterns that demonstrate fallback value filling, displaying
+  the array values in a bordered list with alternating row backgrounds helps
+  users see which slots have explicit values versus fallback-filled slots. The
+  visual representation makes the pattern's behavior immediately clear.
+- When creating form inputs with `cell()`, the initial value is immediately
+  available, but handlers should still guard against edge cases where values
+  might be empty strings or need default behavior (like defaulting to 1 for
+  increment amounts when no value is provided).
