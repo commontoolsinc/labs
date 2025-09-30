@@ -112,7 +112,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] user-journey-map
 - [ ] user-permission-matrix
 - [ ] warehouse-bin-map
-- [ ] workout-routine-planner
+- [x] workout-routine-planner
 - [ ] chat-reaction-tracker
 - [ ] support-ticket-triage
 - [ ] workflow-state-machine

@@ -672,3 +672,22 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Alternating background colors (`ei % 2 === 0 ? "#ffffff" : "#f1f5f9"`) on list
   items improve visual scanning of dense nested structures, especially when
   displaying multiple fields per item.
+- For schedule/calendar patterns displaying items grouped by day, use
+  color-coded left borders with distinct colors per day to create visual
+  distinction. This helps users quickly identify which day they're looking at
+  when scanning through a weekly view.
+- When building complex aggregation UIs (like muscle volume analysis), use `h()`
+  inside `lift` functions to dynamically generate cards based on computed
+  statistics. Compute all style strings with concatenation before passing to
+  `h()` to avoid template literal scope issues.
+- Grid layouts work well for displaying statistics within cards. A four-column
+  grid showing related metrics (sessions, total sets, total reps, volume)
+  provides a comprehensive view of aggregated data at a glance.
+- For patterns with rich catalogs of available options (like exercises), display
+  them in a separate section with clear visual categorization (color-coded
+  badges per category/group). This helps users understand what options are
+  available without cluttering the main interaction area.
+- When working with patterns that have multiple muscle groups or categories,
+  assign consistent colors throughout the UI - use the same color for a category
+  in the schedule view, volume analysis, and catalog sections to create visual
+  coherence.
