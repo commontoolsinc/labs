@@ -501,7 +501,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   `lift` to compute badge colors from the current state (e.g., orange for
   loading, green for ready) and bind directly to inline styles for immediate
   visual feedback.
-- Always defensively check string values with `typeof noteText === "string" &&
-  noteText.trim() !== ""` before calling `.trim()` on cell values, as cells may
-  return undefined during initialization. This prevents "Cannot read properties
-  of undefined" errors in handlers.
+- Always defensively check string values with
+  `typeof noteText === "string" &&
+  noteText.trim() !== ""` before calling
+  `.trim()` on cell values, as cells may return undefined during initialization.
+  This prevents "Cannot read properties of undefined" errors in handlers.
+- For timeline/scheduling patterns with sequential segments, use a flexible
+  layout (`display: flex; gap: 0.5rem;`) where each segment's flex value equals
+  its duration. This creates a proportional timeline visualization that scales
+  naturally with content. Color-code segments with alternating or themed colors
+  to distinguish them visually.
+- When rendering timelines, include both absolute timestamps (start/end minutes)
+  and duration in each segment card for complete context. Use monospace fonts
+  for numeric values to maintain visual alignment.
+- Form fields that clear after successful handler execution provide good UX
+  feedback. After updating state, call `.set("")` or `.set("defaultValue")` on
+  form field cells to reset them for the next operation.
+- For patterns with multiple control sections (update, reorder, etc.), separate
+  them into distinct cards with clear headings. This helps users understand
+  which controls affect which operations without cognitive overload.
