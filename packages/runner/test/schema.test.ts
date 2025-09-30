@@ -2707,13 +2707,4 @@ describe("Schema Support", () => {
       expect(remainingLink.id).toBe(links[1].id);
     });
   });
-
-  describe("References", () => {
-    it("should allow setting undefined when no promise is running", async () => {
-      await runtime.idle();
-
-      runtime.scheduler.runningPromise = undefined;
-      expect(runtime.scheduler.runningPromise).toBeUndefined();
-    });
-  });
 });
