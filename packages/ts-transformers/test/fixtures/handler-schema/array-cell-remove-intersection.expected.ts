@@ -7,7 +7,7 @@ interface ListState {
     items: Cell<Item[]>;
 }
 const removeItem = handler(true as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -44,7 +44,7 @@ type ListStateWithIndex = ListState & {
     index: number;
 };
 const removeItemAlias = handler(true as const satisfies JSONSchema, {
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {

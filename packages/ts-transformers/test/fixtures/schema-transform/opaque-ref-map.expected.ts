@@ -4,7 +4,7 @@ interface TodoItem {
     done: boolean;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft-07/schema#",
+    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
