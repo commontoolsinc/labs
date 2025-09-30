@@ -1046,3 +1046,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   proportional columns (e.g., 1fr 1.5fr) to give more space to the detail panel
   while keeping the list visible. This works well for email, messaging, and
   other item-detail patterns.
+- For CRM/pipeline patterns displaying weighted forecasts, use color gradients
+  based on probability to create visual hierarchy: green (high probability
+  ≥80%), blue (medium 50-80%), and purple (low <50%). This helps users quickly
+  identify deal stages and their likelihood of closing.
+- When building UIs with dynamic statistics that update reactively, create
+  separate lift functions for different UI sections (stage cards, deal cards)
+  and compose them with JSX at the top level. This keeps the code maintainable
+  while ensuring proper reactive updates.
+- Sales pipeline visualizations benefit from showing both raw totals (open
+  pipeline) and probability-weighted forecasts side-by-side in a prominent
+  header, helping users understand both current value and expected outcomes.
