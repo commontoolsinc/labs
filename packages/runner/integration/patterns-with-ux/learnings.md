@@ -561,3 +561,31 @@ Add short notes after each run so the next agent can build on proven approaches.
 - History displays work well with color-coded badges that match the mode colors
   used elsewhere in the UI, creating a cohesive visual language that helps users
   understand the pattern's behavior at a glance.
+- For shopping cart patterns with category-based aggregation, displaying both
+  line items and category rollups helps users understand how their purchases
+  group together. Use distinct visual sections: individual items with item-level
+  details (name, unit price, quantity, subtotal) and category cards showing
+  aggregated quantity and subtotal per category.
+- When building UIs with multiple related collections (items, categories,
+  discounts), organize them in a hierarchical layout: main cart items in the
+  largest section, summary/totals in a highlighted sidebar, and supporting data
+  (category breakdown, discount breakdown) in secondary sections below.
+- For discount rule patterns that depend on category thresholds, show both
+  qualified and unqualified discounts with clear visual distinction. Use green
+  backgrounds and "APPLIED" badges for active discounts, gray for inactive.
+  Display the rule criteria (e.g., "10% off when qty ≥ 5") alongside the
+  discount amount so users understand why discounts did or didn't apply.
+- When implementing handlers that clear form fields after submission, ensure all
+  related input cells are reset with `.set("")` or `.set("0")`. This provides
+  immediate feedback that the action completed and prepares the form for the
+  next operation.
+- For patterns with partial updates (like updating only quantity or only price),
+  handle optional parameters carefully in handlers. When a field isn't provided,
+  preserve the existing value rather than defaulting to zero. Check for empty
+  strings or undefined before applying new values.
+- Order summary cards with large, prominent totals work well in e-commerce
+  patterns. Use a distinct background color (like light yellow) and larger fonts
+  for the final total to draw user attention to the most important number.
+- Recent activity logs showing the last 5 operations provide good context
+  without overwhelming the UI. Use `.slice().reverse().slice(0, 5)` to show
+  newest first and limit display to recent entries.
