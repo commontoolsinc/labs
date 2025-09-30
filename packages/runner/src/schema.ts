@@ -44,7 +44,7 @@ const logger = getLogger("validateAndTransform", {
  *  necessary when using the schedueler directly)
  */
 
-function resolveSchema(
+export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
