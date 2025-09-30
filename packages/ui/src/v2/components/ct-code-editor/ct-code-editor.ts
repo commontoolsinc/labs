@@ -434,6 +434,8 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const charm = mentionableArray.key(i);
       if (charm) {
+        // this is VERY specific
+        // if you do `getEntityId(mentionableArray.key(i))` you'll get a different answer (the ID of the array itself)
         const charmIdObj = getEntityId(mentionableArray.get()[i]);
         const charmId = charmIdObj?.["/"] || "";
         if (charmId === id) {
