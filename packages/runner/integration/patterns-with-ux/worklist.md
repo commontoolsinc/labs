@@ -125,7 +125,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] education-course-planner
 - [x] assignment-grading-matrix
 - [x] student-attendance-tracker
-- [ ] editorial-calendar
+- [x] editorial-calendar
 - [x] podcast-episode-planner
 - [ ] image-gallery-variant
 - [ ] component-library-catalog
