@@ -428,3 +428,23 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns demonstrating fallback behavior, include both "set value" and
   "clear value" actions in the UI so users can easily toggle between defined and
   undefined states to observe the fallback logic in action.
+- When rendering collections within `lift` functions, avoid using `.map()` as it
+  can cause "derive is not defined" errors. Instead, use a `for...of` loop with
+  `.push()` to build an array of JSX elements, computing all dynamic styles as
+  variables before the JSX to avoid template literal scope issues.
+- For workflow patterns with multiple stages, use color-coded badges to visually
+  distinguish stages (e.g., blue for drafting, purple for review, cyan for
+  ready, green for scheduled). Apply colors consistently across different UI
+  sections (list items, stage distribution cards) to reinforce the visual
+  language.
+- Priority indicators work well as colored left borders on list items. Use
+  distinct colors (red for high, orange for medium, green for low) that create
+  clear visual hierarchy without requiring users to read labels.
+- When building forms that clear after submission, ensure handlers call
+  `.set("")` on all form field cells after successfully processing the input.
+  This provides clear feedback that the action completed and readies the form
+  for the next entry.
+- For editorial workflow patterns, showing both queue metrics (drafts awaiting)
+  and completion metrics (scheduled, published) in a summary card provides
+  at-a-glance workflow health. Use large, prominent numbers with descriptive
+  labels underneath.

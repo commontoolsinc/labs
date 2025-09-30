@@ -10,7 +10,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] call-center-schedule
 - [ ] catalog-search-facets
 - [ ] composed-counter
-- [ ] content-publishing-workflow
+- [x] content-publishing-workflow
 - [ ] counter-aggregate
 - [ ] counter-aggregator
 - [ ] counter-alternate-initial-states
