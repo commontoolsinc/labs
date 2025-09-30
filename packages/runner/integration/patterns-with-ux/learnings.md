@@ -1184,3 +1184,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   hold, cancel hold), use a 2x2 grid layout to organize related operations
   visually. This creates balanced symmetry while clearly separating different
   workflow actions.
+- For image gallery patterns with device-specific variants, using a gradient
+  background for image placeholder previews creates visual appeal even before
+  real images are loaded. The purple gradient
+  (`linear-gradient(135deg,
+  #667eea 0%, #764ba2 100%)`) provides good contrast
+  with white text.
+- When displaying collections of variants in a grid layout, color-coding the
+  active variant with a distinct border and background (blue border with light
+  blue background) provides immediate visual feedback about which variant is
+  currently selected without requiring users to read labels.
+- Badge indicators like "ACTIVE" work well as inline elements within headers,
+  using high-contrast colors (white text on blue background) to draw attention
+  to the current state while maintaining compact visual footprint.
+- For patterns that track selection history, displaying the last 5 selections in
+  reverse chronological order with arrow separators (e.g., "tablet → mobile →
+  desktop") provides useful context about user interaction patterns without
+  cluttering the UI.

@@ -127,7 +127,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] student-attendance-tracker
 - [x] editorial-calendar
 - [x] podcast-episode-planner
-- [ ] image-gallery-variant
+- [x] image-gallery-variant
 - [x] component-library-catalog
 - [ ] funnel-analytics
 - [ ] survey-response-analyzer
