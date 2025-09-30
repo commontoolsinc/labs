@@ -734,3 +734,18 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Multi-field forms benefit from grid layouts with two columns for related
   fields. This creates a compact, organized input area while maintaining visual
   balance and making efficient use of horizontal space.
+- When reimplementing business handler logic directly in UI handlers, avoid
+  calling `.run()` on factory-bound handlers—instead, duplicate the mutation
+  logic inline. This ensures proper cell updates without runtime errors about
+  missing `.run()` methods.
+- For scheduling patterns with dynamic coverage calculations, use color-coded
+  visual indicators (green for covered, red for gaps) on both summary cards and
+  individual slot cards to create clear at-a-glance status visibility.
+- When displaying slot assignments with agent names, lift over the coverage
+  array to render dynamic slot cards, computing all style values before JSX to
+  avoid template literal scope issues. Use conditional backgrounds and borders
+  based on the hasGap boolean.
+- Form inputs that accept both IDs and human-readable names provide better UX.
+  Implement resolver functions (like resolveSlotId, resolveAgentId) that check
+  both exact ID matches and case-insensitive label/name matches to support
+  flexible user input.
