@@ -63,6 +63,7 @@ function resolveSchema(
     const resolved = ContextualFlowControl.resolveSchemaRef(
       rootSchema,
       $ref,
+      schema,
     );
     if (!isObject(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any

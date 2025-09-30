@@ -789,6 +789,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       const resolved = ContextualFlowControl.resolveSchemaRef(
         schemaContext.rootSchema,
         schemaRef,
+        schemaContext.schema,
       );
       if (resolved === undefined) {
         return undefined;
