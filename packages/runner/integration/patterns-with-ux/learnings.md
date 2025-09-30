@@ -799,3 +799,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   with conditional backgrounds and text colors. Define color mappings at the
   logic level (in the lift) rather than in CSS to keep styling reactive and
   consistent with state changes.
+- For list management patterns with reordering functionality, using the `h()`
+  function inside `lift` to dynamically render list items provides clean,
+  reactive updates as the list changes. Compute all style strings with
+  concatenation before passing to `h()` to avoid template literal scope issues.
+- When creating handlers that modify array order (like reordering list items),
+  implement the mutation logic directly in the handler using array methods like
+  `.splice()` to remove and insert elements at specific indices. This keeps the
+  state updates atomic and ensures the UI reflects the correct order
+  immediately.
+- Alternating row backgrounds in list items (using index modulo 2) significantly
+  improves visual scanning, especially when items display multiple pieces of
+  information like index and value. Use contrasting but subtle colors like white
+  and light gray.
+- For patterns that accept user input via form fields, always validate and
+  sanitize inputs in handlers before applying them. Check for empty strings,
+  parse numeric values, validate bounds, and only update state when inputs are
+  valid. This prevents invalid state and provides implicit feedback through
+  no-ops on bad input.
