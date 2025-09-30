@@ -120,7 +120,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] release-checklist
 - [ ] markdown-preview-toggle
 - [ ] form-wizard-stepper
-- [ ] shopping-cart-aggregation
+- [x] shopping-cart-aggregation
 - [ ] clinical-trial-enrollment
 - [ ] education-course-planner
 - [ ] assignment-grading-matrix
