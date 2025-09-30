@@ -1201,3 +1201,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   reverse chronological order with arrow separators (e.g., "tablet → mobile →
   desktop") provides useful context about user interaction patterns without
   cluttering the UI.
+- For undo/redo stack patterns, the `disabled` attribute on buttons works
+  perfectly with derived boolean cells to prevent operations when stacks are
+  empty. Use `lift((can: boolean) => !can)(canUndo)` to invert the boolean for
+  the disabled state.
+- When implementing UI handlers that replicate business handler logic, it's
+  cleanest to duplicate the entire handler implementation rather than trying to
+  call the original handler. This allows you to read from UI-specific cells
+  (like form fields) while maintaining the same state mutation logic.
+- Gradient backgrounds on primary value displays create visual hierarchy and
+  draw attention to the most important metric. The purple gradient used for the
+  current value display provides strong contrast with white text and makes the
+  counter value the focal point of the interface.
