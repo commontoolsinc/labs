@@ -102,12 +102,27 @@ function isOpaqueRefMapCall(
 }
 
 /**
+ * Extract the root identifier name from an expression.
+ * For property access like state.discount, returns "discount".
+ * For plain identifiers, returns the identifier name.
+ */
+function getCaptureName(expr: ts.Expression): string | undefined {
+  if (ts.isPropertyAccessExpression(expr)) {
+    // For state.discount, capture as "discount"
+    return expr.name.text;
+  } else if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  return undefined;
+}
+
+/**
  * Transform a map callback that captures variables.
  */
 function transformMapCallback(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
-  captures: Map<string, ts.Identifier[]>,
+  captures: Map<string, ts.Expression>,
   context: TransformationContext,
   transformation: ts.TransformationContext,
 ): ts.CallExpression {
@@ -118,21 +133,15 @@ function transformMapCallback(
   const paramProperties: ts.PropertyAssignment[] = [];
   const capturedVarNames = new Set<string>();
 
-  for (const [varName, identifiers] of captures) {
-    if (identifiers.length > 0) {
-      capturedVarNames.add(varName);
-      // Use the first identifier's location for the param value
-      // Take the first identifier as the value expression
-      const firstIdentifier = identifiers[0];
-      if (firstIdentifier) {
-        paramProperties.push(
-          factory.createPropertyAssignment(
-            factory.createIdentifier(varName),
-            firstIdentifier,
-          ),
-        );
-      }
-    }
+  for (const [varName, expr] of captures) {
+    capturedVarNames.add(varName);
+    // Use the full expression as the param value
+    paramProperties.push(
+      factory.createPropertyAssignment(
+        factory.createIdentifier(varName),
+        expr,
+      ),
+    );
   }
 
   // If no captures, return the original call
@@ -223,20 +232,38 @@ function transformMapCallback(
     ) as typeof transformedBody;
   }
 
-  // Replace captured variable references with params.varName
-  for (const varName of capturedVarNames) {
+  // Replace captured expressions with their parameter names
+  // We need to match against the original captured expressions
+  for (const [varName, capturedExpr] of captures) {
     const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && node.text === varName) {
-        // Check if this identifier is actually a capture (not a local binding)
-        const symbol = context.checker.getSymbolAtLocation(node);
-        if (symbol) {
-          const declarations = symbol.getDeclarations();
-          if (declarations && declarations.length > 0) {
-            const isDeclaredOutside = declarations.some(
-              (decl) => !isNodeWithin(decl, callback),
-            );
-            if (isDeclaredOutside) {
+      // Check if this node matches the captured expression
+      if (ts.isPropertyAccessExpression(node) && ts.isPropertyAccessExpression(capturedExpr)) {
+        // Compare property access expressions structurally
+        if (node.name.text === capturedExpr.name.text) {
+          // Check if the object part matches
+          const nodeObj = node.expression;
+          const capturedObj = capturedExpr.expression;
+          if (ts.isIdentifier(nodeObj) && ts.isIdentifier(capturedObj)) {
+            if (nodeObj.text === capturedObj.text) {
+              // This matches the captured expression, replace with just the param name
               return factory.createIdentifier(varName);
+            }
+          }
+        }
+      } else if (ts.isIdentifier(node) && ts.isIdentifier(capturedExpr)) {
+        // For simple identifier captures
+        if (node.text === capturedExpr.text) {
+          // Verify it's actually the captured variable (not a local binding)
+          const symbol = context.checker.getSymbolAtLocation(node);
+          if (symbol) {
+            const declarations = symbol.getDeclarations();
+            if (declarations && declarations.length > 0) {
+              const isDeclaredOutside = declarations.some(
+                (decl) => !isNodeWithin(decl, callback),
+              );
+              if (isDeclaredOutside) {
+                return factory.createIdentifier(varName);
+              }
             }
           }
         }
@@ -319,17 +346,17 @@ export function createClosureTransformRule(): ClosureRule {
             (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
           ) {
             // Collect captures
-            const captures = collectCaptures(callback, checker);
+            const captureExpressions = collectCaptures(callback, checker);
 
-            if (captures.size > 0) {
-              // Group captures by variable name
-              const capturesByName = new Map<string, ts.Identifier[]>();
-              for (const identifier of captures) {
-                const name = identifier.text;
-                if (!capturesByName.has(name)) {
-                  capturesByName.set(name, []);
+            if (captureExpressions.size > 0) {
+              // Build map of capture name -> expression
+              // For property access like state.discount, we use "discount" as the name
+              const capturesByName = new Map<string, ts.Expression>();
+              for (const expr of captureExpressions) {
+                const name = getCaptureName(expr);
+                if (name && !capturesByName.has(name)) {
+                  capturesByName.set(name, expr);
                 }
-                capturesByName.get(name)!.push(identifier);
               }
 
               // Transform the map call
