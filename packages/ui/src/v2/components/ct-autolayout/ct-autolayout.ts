@@ -199,6 +199,7 @@ export class CTAutoLayout extends BaseElement {
           var(--ct-border-radius-md, 0.375rem)
         );
         padding: var(--ct-theme-spacing-loose, 1rem);
+        box-sizing: border-box;
       }
 
       .tabs {
