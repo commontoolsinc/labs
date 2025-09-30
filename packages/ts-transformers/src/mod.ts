@@ -1,15 +1,9 @@
-export { applyPendingImports, createImportManager } from "./core/imports.ts";
-export type {
-  ImportManager,
-  ImportRequest,
-  ImportSpec,
-} from "./core/imports.ts";
+export { ImportRequirements as ImportManager } from "./core/imports.ts";
+export type { ImportRequest } from "./core/imports.ts";
 
-export { createTransformationContext, withFlag } from "./core/context.ts";
 export type {
   TransformationContext,
   TransformationDiagnostic,
-  TransformationFlags,
   TransformationOptions,
   TransformMode,
 } from "./core/context.ts";

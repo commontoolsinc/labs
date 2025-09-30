@@ -1,6 +1,5 @@
 import ts from "typescript";
 
-import type { TransformationContext } from "../../core/context.ts";
 import type { OpaqueRefRule } from "./jsx-expression.ts";
 import { detectCallKind } from "../call-kind.ts";
 import { isOpaqueRefType } from "../types.ts";
@@ -154,7 +153,10 @@ export function createSchemaInjectionRule(
       const ensureToSchemaImport = (): void => {
         if (requestedToSchema) return;
         requestedToSchema = true;
-        context.imports.request({ name: "toSchema" });
+        context.imports.require({
+          module: "commontools",
+          name: "toSchema",
+        });
       };
 
       const visit = (node: ts.Node): ts.Node => {

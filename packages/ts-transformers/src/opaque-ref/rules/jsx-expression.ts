@@ -117,7 +117,10 @@ export function createJsxExpressionRule(): OpaqueRefRule {
       const updated = ts.visitEachChild(sourceFile, visit, transformation);
 
       for (const helper of helpers) {
-        context.imports.request({ name: helper });
+        context.imports.require({
+          module: "commontools",
+          name: helper,
+        });
       }
 
       return updated;

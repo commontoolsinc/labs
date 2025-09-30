@@ -1,13 +1,12 @@
 import ts from "typescript";
 import {
-  addCommonToolsImport,
-  hasCommonToolsImport,
-  removeCommonToolsImport,
-} from "../core/common-tools-imports.ts";
+  TransformationContext,
+  type TransformationOptions,
+} from "../core/context.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 import type { TypeRegistry } from "../core/type-registry.ts";
 
-export interface SchemaTransformerOptions {
+export interface SchemaTransformerOptions extends TransformationOptions {
   logger?: (message: string) => void;
   typeRegistry?: TypeRegistry;
 }
@@ -21,7 +20,15 @@ export function createSchemaTransformer(
   const typeRegistry = options.typeRegistry;
   const generateSchema = createSchemaTransformerV2();
 
-  return (context: ts.TransformationContext) => (sourceFile: ts.SourceFile) => {
+  return (transformation: ts.TransformationContext) =>
+  (sourceFile: ts.SourceFile) => {
+    const context = new TransformationContext({
+      program,
+      sourceFile,
+      transformation,
+      options,
+    });
+
     let needsJSONSchemaImport = false;
 
     const visit: ts.Visitor = (node) => {
@@ -34,7 +41,7 @@ export function createSchemaTransformer(
       ) {
         const typeArg = node.typeArguments[0];
         if (!typeArg) {
-          return ts.visitEachChild(node, visit, context);
+          return ts.visitEachChild(node, visit, transformation);
         }
 
         // First check if we have a registered Type for this node
@@ -87,32 +94,32 @@ export function createSchemaTransformer(
           ),
         );
 
-        if (!hasCommonToolsImport(sourceFile, "JSONSchema")) {
-          needsJSONSchemaImport = true;
-        }
+        needsJSONSchemaImport = true;
 
         return satisfiesExpression;
       }
 
-      return ts.visitEachChild(node, visit, context);
+      return ts.visitEachChild(node, visit, transformation);
     };
 
-    let result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
+    const result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
 
     if (needsJSONSchemaImport) {
-      result = addCommonToolsImport(result, context.factory, "JSONSchema");
+      context.imports.require({
+        module: "commontools",
+        name: "JSONSchema",
+      });
     }
 
-    if (hasCommonToolsImport(result, "toSchema")) {
-      if (logger) {
-        logger(
-          `[SchemaTransformer] Removing toSchema import (not available at runtime)`,
-        );
-      }
-      result = removeCommonToolsImport(result, context.factory, "toSchema");
-    }
+    context.imports.forbid({
+      module: "commontools",
+      name: "toSchema",
+    });
 
-    return result;
+    return context.imports.apply(
+      result,
+      transformation.factory,
+    );
   };
 }
 

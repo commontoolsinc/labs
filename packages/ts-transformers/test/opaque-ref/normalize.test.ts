@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { assertEquals } from "@std/assert";
-import { assertDefined } from "../../src/core/assert.ts";
+import { assert, assertEquals } from "@std/assert";
 
 import {
   normalizeDataFlows,
@@ -25,8 +24,9 @@ describe("normalizeDataFlows", () => {
 
     const filtered = selectDataFlowsWithin(dataFlows, predicate);
     assertEquals(filtered.length, 1);
-    const firstDependency = assertDefined(
-      filtered[0],
+    const firstDependency = filtered[0];
+    assert(
+      firstDependency,
       "Expected dataFlow inside predicate",
     );
     assertEquals(firstDependency.expression.getText(), "state.count");
