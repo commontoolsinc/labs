@@ -12,6 +12,9 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { Runtime } from "@commontools/runner";
+import { ALL_CHARMS_ID } from "@commontools/charm";
+
 import {
   acceptCompletion,
   autocompletion,
@@ -40,6 +43,8 @@ import {
   MentionableArray,
   mentionableArraySchema,
 } from "../../core/mentionable.ts";
+import { consume } from "@lit/context";
+import { MemorySpace } from "@commontools/runner";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -126,6 +131,7 @@ export class CTCodeEditor extends BaseElement {
     timingDelay: { type: Number },
     mentionable: { type: Array },
     mentioned: { type: Array },
+    pattern: { type: Object },
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
@@ -144,6 +150,7 @@ export class CTCodeEditor extends BaseElement {
   declare timingDelay: number;
   declare mentionable: Cell<MentionableArray>;
   declare mentioned?: Cell<MentionableArray>;
+  declare pattern: Cell<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -311,7 +318,6 @@ export class CTCodeEditor extends BaseElement {
       },
     });
   }
-
   /**
    * Handle backlink activation (Cmd/Ctrl+Click on a backlink)
    */
@@ -353,13 +359,53 @@ export class CTCodeEditor extends BaseElement {
           return true;
         }
 
-        // No ID or no matching item: request creation
-        this.emit("backlink-create", { text: backlinkText });
+        // Instantiate the pattern and pass the ID so we can insert it into the text
+        if (this.pattern) {
+          this.createBacklinkFromPattern(backlinkText);
+        }
+
         return true;
       }
     }
 
     return false;
+  }
+
+  /**
+   * Create a backlink from pattern
+   */
+  private createBacklinkFromPattern(backlinkText: string): void {
+    try {
+      const rt = this.pattern.runtime;
+      const tx = rt.edit();
+      const spaceName = this.pattern.space;
+      // ensure the cause is unique
+      const result = rt.getCell<any>(
+        spaceName,
+        { note: this.value, title: backlinkText },
+      );
+
+      // parse + start the recipe + link the inputs
+      const pattern = JSON.parse(this.pattern.get());
+      const allCharms = rt.getCellFromEntityId(spaceName, {
+        "/": ALL_CHARMS_ID,
+      });
+      rt.run(tx, pattern, {
+        title: backlinkText,
+        content: "",
+        allCharms,
+      }, result);
+
+      // let the pattern know about the new backlink
+      tx.commit();
+      this.emit("backlink-create", {
+        text: backlinkText,
+        charmId: getEntityId(result),
+        charm: result,
+      });
+    } catch (error) {
+      console.error("Error creating backlink:", error);
+    }
   }
 
   /**
@@ -388,7 +434,9 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const charm = mentionableArray.key(i);
       if (charm) {
-        const charmIdObj = getEntityId(charm);
+        // this is VERY specific
+        // if you do `getEntityId(mentionableArray.key(i))` you'll get a different answer (the ID of the array itself)
+        const charmIdObj = getEntityId(mentionableArray.get()[i]);
         const charmId = charmIdObj?.["/"] || "";
         if (charmId === id) {
           return charm;
@@ -464,7 +512,6 @@ export class CTCodeEditor extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    // CellController handles subscription automatically via ReactiveController
   }
 
   override disconnectedCallback() {

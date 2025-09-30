@@ -3,6 +3,7 @@ import {
   Cell,
   cell,
   Default,
+  derive,
   h,
   handler,
   lift,
@@ -65,20 +66,26 @@ const handleNewBacklink = handler<
   {
     detail: {
       text: string;
+      charmId: any;
+      charm: Cell<MentionableCharm>;
     };
   },
   {
-    allCharms: Cell<MentionableCharm[]>;
+    content: Cell<string>;
   }
->(({ detail }, { allCharms }) => {
-  console.log("new charm", detail.text);
-  const n = Note({
-    title: detail.text,
-    content: "",
-    allCharms,
-  });
+>(({ detail }, { content }) => {
+  console.log("new charm", detail.text, detail.charmId);
 
-  return navigateTo(n);
+  const text = content.get();
+  // find relevant area in the text content
+  // replace `[[${text}]]` with text + ID `[[${text} (${ID})]]`
+  const replaced = text.replace(
+    `[[${detail.text}]]`,
+    `[[${detail.text} (${detail.charmId["/"]})]]`,
+  );
+
+  content.set(replaced);
+  return navigateTo(detail.charm);
 });
 
 const handleCharmLinkClicked = handler(
@@ -117,6 +124,9 @@ const Note = recipe<Input, Output>(
       content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
+    // The only way to serialize a pattern, apparently?
+    const pattern = derive(undefined, () => JSON.stringify(Note));
+
     return {
       [NAME]: title,
       [UI]: (
@@ -132,10 +142,9 @@ const Note = recipe<Input, Output>(
             $value={content}
             $mentionable={allCharms}
             $mentioned={mentioned}
+            $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({
-              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
-            })}
+            onbacklink-create={handleNewBacklink({ content })}
             language="text/markdown"
             theme="light"
             wordWrap
