@@ -890,3 +890,32 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Grid layouts with `repeat(auto-fill, minmax(Npx, 1fr))` work excellently for
   displaying variable-width grade cells that should wrap responsively while
   maintaining readable card sizes.
+- For healthcare/medication tracking patterns with time-based schedules, use
+  monospace fonts for scheduled times and display them prominently with colored
+  backgrounds (e.g., cyan for upcoming doses). This creates clear visual
+  hierarchy and makes times easily scannable.
+- When rendering lists of scheduled items with multiple properties (medication,
+  dosage, time, instructions), use nested `h()` elements with structured layouts
+  rather than trying to build complex JSX inside `lift` functions. Compute all
+  dynamic styles as string variables before passing to `h()` to avoid template
+  literal scope issues.
+- Completion tracking UIs benefit from large, prominent percentage displays in
+  gradient backgrounds with supporting metrics (taken/total/remaining) shown in
+  a grid below. This provides at-a-glance status while surfacing detailed
+  breakdowns for users who want them.
+- When displaying both upcoming and completed items in separate sections, use
+  distinct color schemes: neutral/cool colors (blues, grays) for upcoming items
+  and warm success colors (greens) for completed items. This reinforces the
+  conceptual difference between pending and done states.
+- For patterns with empty state variations (all completed vs none scheduled),
+  provide positive, celebratory messaging when work is done ("🎉 All doses
+  completed!") rather than neutral "no items" text. This creates emotional
+  engagement and reward for task completion.
+- Activity history logs showing recent actions work well when limited to last
+  5-6 entries and displayed in reverse chronological order. Use left borders
+  with accent colors to create visual consistency across log entries without
+  overwhelming the interface.
+- Form validation that silently fails (no-op when invalid input is submitted)
+  provides clean UX for handlers that validate complex business rules. Rather
+  than showing error messages, handlers can simply return early when validation
+  fails, keeping the form in its current state for users to correct.
