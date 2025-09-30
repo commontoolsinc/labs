@@ -81,7 +81,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] expense-reimbursement
 - [ ] experiment-assignment
 - [ ] feature-usage-analytics
-- [ ] heatmap-aggregation
+- [x] heatmap-aggregation
 - [ ] incident-response-playbook
 - [ ] inventory-reorder-threshold
 - [ ] invoice-generator

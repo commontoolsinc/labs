@@ -167,6 +167,19 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For budget/allocation patterns with multiple categories, using a grid layout
   with `grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))` creates a
   responsive card layout that adapts to different screen sizes.
+- When building dynamic grid visualizations (like heatmaps), use `lift` to
+  generate an array of JSX elements by iterating with a for loop, computing all
+  dynamic styles (colors, borders, backgrounds) as string variables before the
+  JSX to avoid template literal issues. The grid can then be bound to a dynamic
+  column count using
+  `style={lift((w: number) => "display: grid;
+  grid-template-columns: repeat(" + String(w) + ", 1fr); gap: 8px;")(width)}`.
+- For visualization patterns with computed color gradients based on normalized
+  values, build HSL color strings with concatenation (e.g., `"hsl(" +
+  String(hue)
+  - ", " + String(saturation) + "%, " + String(lightness) + "%)"`) to create
+    smooth intensity transitions. This works well for heatmaps where lightness
+    varies with intensity.
 - Visual indicators for variance (positive/negative deltas from targets) work
   well with conditional color logic computed before the JSX. Use distinct colors
   for negative (red), positive (green), and neutral (gray) variances.
