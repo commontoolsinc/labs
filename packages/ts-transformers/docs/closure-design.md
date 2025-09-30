@@ -304,7 +304,8 @@ const compute = () => state.a + state.b;
 
 ## Implementation Decisions Made
 
-1. **Architecture**: Created separate `src/closures/` module instead of embedding in opaque-ref
+1. **Architecture**: Created separate `src/closures/` module instead of
+   embedding in opaque-ref
 2. **Ordering**: Closure transformer runs FIRST in the pipeline
 3. **Synthetic Nodes**: Implemented inheritance approach in dataflow.ts
 4. **Testing**: Using commonTypeScriptTransformer for all tests
@@ -313,16 +314,20 @@ const compute = () => state.a + state.b;
 ## Known Issues
 
 1. **Capture Detection Bug**:
-   - Currently captures individual identifiers instead of full property expressions
-   - Example: `state.discount` is incorrectly captured as "state" and "discount" separately
-   - Root cause identified: `collectCaptures` function needs to handle property access expressions as units
+   - Currently captures individual identifiers instead of full property
+     expressions
+   - Example: `state.discount` is incorrectly captured as "state" and "discount"
+     separately
+   - Root cause identified: `collectCaptures` function needs to handle property
+     access expressions as units
 
 ## Open Questions
 
 1. **Performance**: Should we cache capture analysis results?
 2. **Debugging**: How do we preserve source maps through transformation?
 3. **Type Safety**: How do we ensure transformed code maintains type safety?
-4. **Runtime Support**: Does the runtime support lift+curry pattern for generic closures?
+4. **Runtime Support**: Does the runtime support lift+curry pattern for generic
+   closures?
 
 ## Success Metrics
 
