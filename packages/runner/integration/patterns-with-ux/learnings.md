@@ -1243,3 +1243,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   try/catch blocks within handlers and silently fail (return early) on invalid
   JSON rather than showing error messages. This provides clean UX where invalid
   input is simply ignored until corrected.
+- For security tracking patterns with severity-based risk aggregation, use
+  color-coded severity cards with distinct colors (red for critical, orange for
+  high, yellow for medium, green for low) to provide instant visual hierarchy.
+  Display both raw scores and aggregated totals to help users understand risk
+  distribution at a glance.
+- When building vulnerability management UIs that track multiple systems, sort
+  system risk entries by risk score (highest first) with a secondary sort by
+  system name for consistent display. This helps security teams prioritize
+  remediation efforts by focusing on the highest-risk systems.
+- Status badges with conditional colors (red for "open", orange for
+  "in_progress", green for "resolved") create clear visual feedback about
+  vulnerability lifecycle state. Using uppercase text and distinct background
+  colors makes status immediately scannable in dense lists.
+- For patterns that filter out resolved items from active views, ensure the risk
+  calculations and system counts update reactively as items transition between
+  states. This provides accurate real-time metrics as vulnerabilities are
+  tracked through registration, update, and resolution.
