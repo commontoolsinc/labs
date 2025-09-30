@@ -856,3 +856,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   handler can serve both purposes by checking if the key exists and either
   updating the existing value or adding a new entry. This simplifies the UI to a
   single "Add/Update" button rather than separate actions.
+- For permission matrix patterns displaying role-permission relationships, using
+  `h()` inside `lift` to dynamically render role cards with color-coded badges
+  works well. Compute all style strings with concatenation before passing to
+  `h()` to avoid template literal scope issues. Green badges for granted
+  permissions and gray badges for not-granted permissions create clear visual
+  distinction.
+- When building matrix UIs that need per-cell toggle interactions, a centralized
+  form-based approach (input fields for role/permission identifiers + toggle
+  button) is more reliable than trying to create handlers inside `lift`
+  functions. This pattern works well when the matrix displays derived state
+  while mutations happen through a separate control panel.
+- Progress indicators showing permission coverage (e.g., "3/4 permissions") can
+  be displayed using both numeric ratios and visual progress bars. Computing the
+  percentage width with `lift` and binding to an inner div's width creates a
+  responsive visual indicator that updates as permissions change.
+- For patterns with flexible input resolution (accepting both IDs and
+  human-readable names), implement resolver functions that check exact ID
+  matches first, then try normalized keys, then case-insensitive label matches.
+  This provides a good balance between precision and user-friendliness.
