@@ -27,6 +27,23 @@ the recipe itself.
 - Tested with entries: computed summaries correctly (alpha: 15/2, beta: 15/1)
 - Overall total: 30, dominant group: alpha (alphabetically tie-broken)
 
+## Notification Preference Pattern (Handlers not triggering)
+
+**notification-preference**
+
+- Pattern compiles successfully and UI renders correctly
+- Handlers are defined correctly and bound to buttons with `ct-channel` and `ct-frequency` attributes
+- Buttons are clickable but handlers don't execute (no state changes, no console errors)
+- Tried multiple approaches:
+  - Binding handlers outside lift (like echo pattern)
+  - Creating handlers inside lift per-item (like counter-replicator pattern)
+  - Both approaches fail silently - no errors, just no handler execution
+- Possible issues:
+  - `ct-channel` and `ct-frequency` custom attributes may not be properly passing through to event object
+  - Handler event extraction logic `event?.channel` may not be receiving the attributes
+  - There may be a framework limitation with custom attributes on dynamically rendered buttons inside lifts
+- Next steps: Investigate whether ct- prefixed attributes work reliably, or if a different approach is needed (e.g., creating individual handlers per channel/frequency combination)
+
 ## Handler-Spawn Pattern (StorageTransactionCompleteError)
 
 **counter-handler-spawn**
