@@ -774,3 +774,28 @@ Add short notes after each run so the next agent can build on proven approaches.
   `.slice().reverse()` and limit display with `Math.min(reversed.length, N)` to
   show only the most recent N entries. This prevents UI clutter while still
   maintaining complete history in the underlying cell.
+- For compliance tracking patterns with dynamic status indicators, use `lift` to
+  compute conditional colors based on derived compliance state. Map state
+  strings directly to color values (e.g., "Compliant" → green, "At Risk" →
+  orange, "Non-Compliant" → red) to create clear visual feedback that updates
+  reactively as tasks progress through completion.
+- When building status badge UIs that need to show percentage-based progress
+  bars, compute the width as a string percentage in a `lift` function and bind
+  it directly to the progress bar element's width style. This creates smooth
+  visual transitions as the underlying metrics change.
+- For multi-category aggregation patterns (like compliance by category), use the
+  `h()` function inside `lift` to dynamically generate cards with color-coded
+  borders and backgrounds. Compute all style strings with concatenation before
+  passing to `h()` to avoid template literal scope issues.
+- When rendering collections of items with multiple fields (tasks, entries,
+  records), use nested `h()` calls to build structured card layouts with
+  consistent spacing. This approach works well for displaying complex data with
+  headers, badges, and grid-based detail sections.
+- For patterns that track gaps or outstanding items, display an empty state with
+  positive messaging (e.g., "No compliance gaps!") using conditional rendering
+  based on array length. This provides clear feedback when all requirements are
+  met.
+- Color-coded status badges computed dynamically in `lift` functions work well
+  with conditional backgrounds and text colors. Define color mappings at the
+  logic level (in the lift) rather than in CSS to keep styling reactive and
+  consistent with state changes.
