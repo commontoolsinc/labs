@@ -1274,3 +1274,8 @@ Add short notes after each run so the next agent can build on proven approaches.
   visual feedback about request state. Apply the same color scheme consistently
   across the request card borders, status badges, and stage indicators to
   reinforce the visual language.
+- For patterns demonstrating shared aliases (multiple references to the same
+  underlying value), use distinct visual treatments for each alias display
+  (e.g., different colored borders for left/right mirrors) while showing the
+  same value to clearly communicate that they're synchronized views of a single
+  state cell. This helps users understand the aliasing concept at a glance.
