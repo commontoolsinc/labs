@@ -109,7 +109,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] subscription-billing
 - [x] template-gallery
 - [x] toggle-derive-label
-- [ ] user-journey-map
+- [x] user-journey-map
 - [x] user-permission-matrix
 - [ ] warehouse-bin-map
 - [x] workout-routine-planner
