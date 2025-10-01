@@ -444,6 +444,23 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
 
     const name = str`Customer Satisfaction (${overallAverageLabel}/5.0)`;
 
+    const logSurveyResponse = handler(
+      (
+        event: SatisfactionSampleInput | undefined,
+        context: {
+          responses: Cell<SatisfactionSampleInput[]>;
+          runtimeSeed: Cell<number>;
+        },
+      ) => {
+        const existing = sanitizeEntryList(context.responses.get());
+        const currentSeed = context.runtimeSeed.get() ?? 0;
+        const candidate = sanitizeEntry(event, `runtime-${currentSeed + 1}`);
+        const updated = normalizeEntries([...existing, candidate]);
+        context.responses.set(updated);
+        context.runtimeSeed.set(currentSeed + 1);
+      },
+    );
+
     return {
       [NAME]: name,
       [UI]: (
@@ -930,6 +947,7 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
       trendDirection,
       channelAverages,
       summary,
+      recordResponse: logSurveyResponse({ responses, runtimeSeed }),
     };
   },
 );
