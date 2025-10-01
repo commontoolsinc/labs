@@ -1808,3 +1808,13 @@ Add short notes after each run so the next agent can build on proven approaches.
   testing and building visual editors. The UI can both visualize the live
   counter and display the structure of the render tree itself, making the
   pattern self-documenting.
+- For tuple-based state patterns, consider color-coding each component of the
+  tuple with distinct backgrounds (e.g., yellow for left, blue for right) to
+  make it visually clear which controls affect which part of the state. This
+  visual distinction helps users understand the independent manipulation of
+  tuple elements.
+- When syncing form inputs with derived state using `compute`, the input fields
+  may briefly show stale values between user interactions and handler execution.
+  This is expected behavior - the sync effect updates them on the next
+  computation cycle. Users can still type freely and the sanitized values will
+  be applied through handlers.
