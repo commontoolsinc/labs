@@ -183,6 +183,60 @@ const readNoteByIndex = handler<
   },
 );
 
+const editNoteByIndex = handler<
+  {
+    /** The index of the note to edit */
+    index: number;
+    /** The new text content of the note */
+    body: string;
+    /** A cell to store the result message indicating success or error */
+    result: Cell<string>;
+  },
+  { allCharms: Cell<MentionableCharm[]> }
+>(
+  (args, state) => {
+    try {
+      const charms = state.allCharms.get();
+      if (args.index < 0 || args.index >= charms.length) {
+        args.result.set(`Error: Invalid index ${args.index}`);
+        return;
+      }
+
+      state.allCharms.key(args.index).key('content').set(args.body);
+      args.result.set(`Updated note at index ${args.index}!`);
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
+const navigateToNote = handler<
+  {
+    /** The index of the note to navigate to */
+    index: number;
+    /** A cell to store the result message indicating success or error */
+    result: Cell<string>;
+  },
+  { allCharms: Cell<MentionableCharm[]> }
+>(
+  (args, state) => {
+    try {
+      const charms = state.allCharms.get();
+      if (args.index < 0 || args.index >= charms.length) {
+        args.result.set(`Error: Invalid index ${args.index}`);
+        return;
+      }
+
+      const targetCharm = charms[args.index];
+      args.result.set(`Navigating to note: ${targetCharm[NAME]}`);
+
+      return navigateTo(state.allCharms.key(args.index));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages, content, allCharms }) => {
@@ -251,6 +305,42 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
           required: ["index"],
         } as JSONSchema,
         handler: readNoteByIndex({
+          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+        }),
+      },
+      editNoteByIndex: {
+        description: "Edit the body of a note by its index in the listNotes() list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            index: {
+              type: "number",
+              description: "The index of the note in the notes list.",
+            },
+            body: {
+              type: "string",
+              description: "The new content of the note.",
+            },
+          },
+          required: ["index", "body"],
+        } as JSONSchema,
+        handler: editNoteByIndex({
+          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+        }),
+      },
+      navigateToNote: {
+        description: "Navigate to a note by its index in the listNotes() list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            index: {
+              type: "number",
+              description: "The index of the note in the notes list.",
+            },
+          },
+          required: ["index"],
+        } as JSONSchema,
+        handler: navigateToNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
       },
