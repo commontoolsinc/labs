@@ -17,41 +17,32 @@
 - Pattern demonstrates that complex financial displays with nested calculations
   can be rendered successfully when using proper iteration patterns
 
-## Expense Reimbursement (Handler invocation with dynamic parameters inside lift)
+## Expense Reimbursement (RESOLVED - Centralized control pattern for per-item actions)
 
 **expense-reimbursement**
 
-- Pattern needs to render a list of claims where each claim has action buttons
-  (Approve, Reject, Pay)
-- Problem: Cannot invoke handlers with parameters inside a lift's map function
-- Attempted approaches:
-  1. Creating handlers inside lift per-item → "ReferenceError: derive is not
-     defined"
-  2. Passing parameters to pre-defined handlers like
-     `onClick={handler({ id: claim.id })}` → "TypeError: handler is not a
-     function"
-  3. Using $onClick with parameterized handlers → Same "not a function" error
-  4. Creating separate handlers (approve, pay, reject) that take event.id →
-     Still fails when called inside lift with
-     `$onClick={handler({ id:
-     claim.id })}`
-  5. Using data attributes on buttons → No way to extract them in handler
-  6. Using a selectedClaimId cell → Still requires calling handler with params
-     in lift
-- The framework requires handlers to be defined at the top level without
-  parameters
-- The list-manager pattern uses text input fields where users type indices, but
-  that UX doesn't fit this use case (users would need to memorize/type claim
-  IDs)
-- For dynamic lists where each item needs unique button actions with different
-  parameters, there's no clear pattern that works
-- Root cause: Handlers cannot be invoked with runtime-determined parameters
-  inside a lift's map function. The framework only supports binding handlers
-  defined at recipe top-level, not parameterized handler invocations created
-  during render
-- This appears to be a fundamental limitation with how handlers and lifts
-  interact when dealing with collections that need per-item actions
-- Pattern deferred until framework supports this interaction model
+- ✅ **RESOLVED**: Pattern successfully implemented with centralized control
+  approach
+- Original issue: Cannot invoke handlers with parameters inside a lift's map
+  function
+- Solution: Use centralized control pattern with a selection cell:
+  1. Create a `cell` to hold the selected item ID (e.g., `selectedClaimId`)
+  2. Render items inside `lift` as read-only display with prominently shown IDs
+  3. Provide a text input bound to the selection cell where users enter the
+     target ID
+  4. Create handlers at recipe top level that read from `selectedClaimId.get()`
+     to determine which item to act upon
+  5. Handlers validate the selected ID exists and is in the correct state before
+     applying the action
+- This pattern successfully works around the framework limitation while
+  maintaining full handler functionality
+- The UI trades direct manipulation (per-item buttons) for an explicit selection
+  workflow, but business logic remains clean and testable
+- Pattern demonstrates that complex multi-status workflows (submitted → approved
+  → paid) can be managed through a single selection input combined with multiple
+  action buttons
+- Display item IDs in monospace font with lighter colors to help users identify
+  which value to enter
 
 ## UI Rendering Issue (Affects multiple patterns)
 

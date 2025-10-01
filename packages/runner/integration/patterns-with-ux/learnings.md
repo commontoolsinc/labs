@@ -1841,3 +1841,22 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Complex financial calculations (multi-step discounts, tax, totals) should be
   performed in pure helper functions and wrapped in `lift` for display. The UI
   can then simply render the pre-computed results without additional logic.
+- For patterns with dynamic lists that require per-item actions (like approving
+  individual expense claims), use a centralized control approach: create a
+  `cell` to hold the selected item ID, render the item list inside `lift` with
+  read-only display (showing IDs), provide a text input where users enter the
+  target ID, then create handlers at the recipe top level that read from the
+  selection cell. This pattern successfully works around the limitation that
+  handlers cannot be invoked with runtime-determined parameters inside `lift`
+  functions.
+- When implementing the centralized control pattern, display item IDs
+  prominently in the list (using monospace font and lighter colors to
+  distinguish from labels) so users know what value to enter in the selection
+  input. This UX pattern trades direct manipulation (clicking buttons on each
+  item) for a more explicit selection workflow, but maintains full handler
+  functionality.
+- The expense-reimbursement pattern demonstrates that complex multi-status
+  workflows (submitted → approved → paid, with rejection as an alternative path)
+  can be managed through a single selection input combined with multiple action
+  buttons, each checking the current status before allowing transitions. This
+  keeps all business logic in top-level handlers where the framework expects it.
