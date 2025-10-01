@@ -1369,4 +1369,62 @@ describe("Recipe Runner", () => {
 
     expect(charm.key("text").get()).toEqual("b");
   });
+
+  it("allows accessing own cell via `this` in recipes", async () => {
+    // Create an inner recipe that returns `this`
+    const innerRecipe = recipe(
+      {
+        type: "object",
+        properties: {},
+      },
+      {
+        type: "object",
+        properties: {
+          self: { asCell: true },
+        },
+      },
+      function (this: any) {
+        return { self: this };
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        node: { asCell: true },
+        selfFromNode: { asCell: true },
+      },
+      required: ["node", "selfFromNode"],
+    } as const satisfies JSONSchema;
+
+    // Create an outer recipe that calls the inner recipe and accesses its result
+    const outerRecipe = recipe(
+      {
+        type: "object",
+        properties: {},
+      },
+      resultSchema,
+      function (this: any) {
+        const node = innerRecipe({});
+        return {
+          node,
+          selfFromNode: node.self,
+        };
+      },
+    );
+
+    const charm = runtime.getCell(space, "test-this-equality");
+    runtime.run(undefined, outerRecipe, {}, charm);
+    await runtime.idle();
+
+    const result = charm.asSchema(resultSchema).get();
+
+    // Both node and selfFromNode should be cells
+    expect(isCell(result.node)).toBe(true);
+    expect(isCell(result.selfFromNode)).toBe(true);
+
+    // The inner recipe's `this` should create a reference back to itself
+    // So node.self should equal node
+    expect(result.node.equals(result.selfFromNode)).toBe(true);
+  });
 });
