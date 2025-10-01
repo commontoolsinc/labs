@@ -13,7 +13,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] content-publishing-workflow
 - [x] counter-aggregate
 - [x] counter-aggregator
-- [ ] counter-alternate-initial-states
+- [x] counter-alternate-initial-states
 - [x] counter-batched-handler-updates
 - [x] counter-complex-union-state
 - [x] counter-computed-child-selection
