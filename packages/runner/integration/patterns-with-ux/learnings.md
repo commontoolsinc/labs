@@ -1383,3 +1383,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   section above or below the grid using color-coded badges. Blue badges for row
   totals and pink/magenta badges for column totals creates clear visual
   distinction between the two aggregation dimensions.
+- For recipe composition patterns demonstrating parent-child relationships, use
+  color-coded cards with distinct colors (cyan for left/first, pink for
+  right/second) to visually distinguish the composed child recipes. This helps
+  users understand which controls belong to which child instance.
+- When displaying aggregate derived values from multiple child recipes (like a
+  total from two counters), use a prominent gradient header with large text to
+  emphasize the combined result. Including the formula (e.g., "5 + 5") below the
+  total helps users understand how the value is computed.
+- Progress bars driven by `lift` that compute percentages from aggregated values
+  work well for visualizing combined state. Use `h()` to build dynamic progress
+  bar elements where the width is computed as a string percentage.
+- Child recipe outputs can be accessed via `.key("fieldName")` to display
+  child-derived values and bind child-exposed handlers directly in the parent
+  UI. This demonstrates how recipe composition allows parent UIs to interact
+  with both parent-level and child-level state and actions.
