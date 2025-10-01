@@ -1316,3 +1316,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   (milestones, schedule segments), ensure the timeline calculation accounts for
   both planned offsets and actual sequencing to prevent overlaps. This keeps
   derived timeline entries consistent with the underlying state.
+- For notification preference patterns with channel configuration, using
+  color-coded status indicators (green for active, gray for paused) with
+  matching backgrounds creates immediate visual feedback about channel states.
+  Display both the frequency label and timing window (e.g., "Daily summary
+  (08:00 local time)") to provide complete context about when notifications will
+  be sent.
+- When building configuration UIs that manage multiple related settings (like
+  notification channels with enabled/disabled and frequency options), use a
+  card-based grid layout for the channel displays with separate control forms
+  for toggling and frequency updates. This separates the display of current
+  state from the controls that modify it, reducing cognitive load.
+- For patterns tracking configuration history, displaying the last 5 changes in
+  reverse chronological order with left-border accents provides useful context
+  about recent modifications without cluttering the interface. The activity log
+  helps users verify their actions were applied correctly.
