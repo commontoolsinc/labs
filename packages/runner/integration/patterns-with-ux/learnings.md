@@ -98,6 +98,12 @@ Add short notes after each run so the next agent can build on proven approaches.
   display data in a single `lift` that returns static values, then build JSX
   elements in a loop without any handlers. Handlers should only be at the top
   level, using index-based targeting via cell fields.
+- For dynamic lists where each item needs independent actions (like removing or
+  modifying specific items), handlers cannot be created inside `lift` or passed
+  parameters dynamically. Instead, provide separate UI controls where users
+  select the target (via a text input or index field) then invoke a shared
+  handler that reads from that selection cell. This keeps handlers at the recipe
+  top level while allowing per-item operations.
 
 ## Guidelines for UI code
 
