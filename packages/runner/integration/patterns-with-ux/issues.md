@@ -39,16 +39,29 @@
   1. Creating handlers inside lift per-item → "ReferenceError: derive is not
      defined"
   2. Passing parameters to pre-defined handlers like
-     `onClick={handler({ id: claim.id })}` → Same error
-  3. Using data attributes on buttons → No way to extract them in handler
+     `onClick={handler({ id: claim.id })}` → "TypeError: handler is not a
+     function"
+  3. Using $onClick with parameterized handlers → Same "not a function" error
+  4. Creating separate handlers (approve, pay, reject) that take event.id →
+     Still fails when called inside lift with
+     `$onClick={handler({ id:
+     claim.id })}`
+  5. Using data attributes on buttons → No way to extract them in handler
+  6. Using a selectedClaimId cell → Still requires calling handler with params
+     in lift
 - The framework requires handlers to be defined at the top level without
   parameters
 - The list-manager pattern uses text input fields where users type indices, but
-  that UX doesn't fit this use case
-- For dynamic lists where each item needs unique button actions, there's no
-  clear pattern that works
-- This appears to be a limitation with how handlers and lifts interact when
-  dealing with collections
+  that UX doesn't fit this use case (users would need to memorize/type claim
+  IDs)
+- For dynamic lists where each item needs unique button actions with different
+  parameters, there's no clear pattern that works
+- Root cause: Handlers cannot be invoked with runtime-determined parameters
+  inside a lift's map function. The framework only supports binding handlers
+  defined at recipe top-level, not parameterized handler invocations created
+  during render
+- This appears to be a fundamental limitation with how handlers and lifts
+  interact when dealing with collections that need per-item actions
 - Pattern deferred until framework supports this interaction model
 
 ## UI Rendering Issue (Affects multiple patterns)

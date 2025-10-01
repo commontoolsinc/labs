@@ -78,7 +78,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] double-counter-shared-increment
 - [x] echo
 - [x] email-inbox-threading
-- [ ] expense-reimbursement
+- [⚠️] expense-reimbursement (has issues - see issues.md)
 - [x] experiment-assignment
 - [x] feature-usage-analytics
 - [x] heatmap-aggregation
