@@ -106,7 +106,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] simple-counter
 - [ ] sleep-journal
 - [ ] sprint-burndown
-- [ ] subscription-billing
+- [x] subscription-billing
 - [x] template-gallery
 - [x] toggle-derive-label
 - [x] user-journey-map
