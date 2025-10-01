@@ -901,20 +901,6 @@ export class Runner implements IRunner {
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
-    // TODO(seefeld): We should probably just pass the result cell to these
-    // instantiate* functions, but really we should clean up that increasingly
-    // complex signature.
-    const charmCell = processCell.withTx(tx).asSchema({
-      type: "object",
-      properties: {
-        resultRef: {
-          ...(isRecord(recipe.resultSchema) && recipe.resultSchema),
-          asCell: true,
-        },
-      },
-      required: ["resultRef"],
-    }).key("resultRef").get();
-
     let fn: (inputs: any) => any;
 
     if (typeof module.implementation === "string") {
@@ -994,9 +980,7 @@ export class Runner implements IRunner {
         const argument = module.argumentSchema
           ? inputsCell.asSchema(module.argumentSchema).get()
           : inputsCell.getAsQueryResult([], tx);
-
-        // .bind() allows the function to refer to the charm cell via `this`
-        const result = fn.bind(charmCell)(argument);
+        const result = fn(argument);
 
         const postRun = (result: any) => {
           if (containsOpaqueRef(result)) {
@@ -1075,9 +1059,7 @@ export class Runner implements IRunner {
             tx,
           } satisfies UnsafeBinding,
         );
-
-        // .bind() allows the function to refer to the charm cell via `this`
-        const result = fn.bind(charmCell)(argument);
+        const result = fn(argument);
 
         const postRun = (result: any) => {
           if (containsOpaqueRef(result)) {
