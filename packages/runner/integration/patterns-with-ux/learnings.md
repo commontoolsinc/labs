@@ -1520,3 +1520,24 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Alert displays with left-border accents (red for warnings) and emoji
   indicators (⚠) create clear visual hierarchy and draw attention to critical
   issues without overwhelming the interface.
+- For graph/network patterns with complex state (adjacency, order, cycles),
+  compute all derived graph properties once using a single comprehensive lift
+  function, then extract individual properties via additional lifts. This avoids
+  redundant graph traversals and keeps the topology analysis consistent.
+- When rendering dynamic collections with `h()` inside lift functions that need
+  to display computed properties from objects passed as parameters, destructure
+  the parameter object immediately in the lift function signature to access all
+  properties. Pass cells as a single object parameter rather than multiple
+  positional arguments to ensure proper reactive tracking.
+- Rejection/validation logs displaying recent failures with color-coded reason
+  badges (amber for "missing", red for "cycle") provide excellent debugging
+  feedback for complex graph operations. Limiting to the last 4-5 entries
+  prevents clutter while maintaining useful context about why operations failed.
+- For dependency graph patterns, displaying both roots (nodes with no
+  dependencies) and execution order (topological sort) helps users understand
+  both the starting points and the full sequence of operations. The arrow
+  notation (A → B → C) creates clear visual representation of execution flow.
+- Status badges that dynamically switch between success (green "VALID GRAPH")
+  and error (red "CYCLE DETECTED") states with matching backgrounds and borders
+  provide immediate visual feedback about graph validity without requiring users
+  to read detailed error messages.
