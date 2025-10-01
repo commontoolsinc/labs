@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 while :; do
-  cat packages/runner/integration/patterns/prompt.md | \
+  cat packages/runner/ralph/prompt.md | \
   claude --print --dangerously-skip-permissions \
   --verbose --output-format=stream-json 2&>1 | \
   tee -a ~/ralph-claude.log

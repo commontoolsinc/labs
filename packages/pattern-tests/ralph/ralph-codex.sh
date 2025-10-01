@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-while codex exec --sandbox=danger-full-access "$(cat packages/runner/integration/patterns/prompt.md)" 2>&1 | tee -a ~/ralph.log; do
+while codex exec --sandbox=danger-full-access "$(cat packages/runner/ralph/prompt.md)" 2>&1 | tee -a ~/ralph.log; do
   echo "Run succeeded, retrying..."
   if [[ -n "$(git status --porcelain)" ]]; then
     git add -A
