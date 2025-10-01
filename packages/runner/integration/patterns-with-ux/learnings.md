@@ -147,6 +147,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- Hierarchical data structures (like org charts or tree views) can be rendered
+  effectively by defining a recursive rendering function outside the recipe
+  scope and calling it from within `lift`. Each level of the hierarchy can be
+  styled with progressive indentation using dynamic margin/padding values.
+- When working with select dropdowns that control related data, create a lift
+  that maps the source collection into option objects with id/name pairs. This
+  keeps the select element simple while ensuring options stay in sync with the
+  underlying data.
+- The web UI charm rendering may not work correctly in all scenarios even when
+  `$NAME` and `$UI` exports are correctly defined and verified via
+  `ct charm
+  get`. If the UI doesn't render in the browser, verify the charm
+  works via ct commands (`ct charm get`, `ct dev`) before assuming the pattern
+  is broken.
 - **Critical:** When using `lift` to render dynamic lists with JSX, use `for`
   loops instead of `.map()` to build arrays of elements. The `.map()` approach
   with `if` statements inside the mapper triggers "ifElse is not defined" errors

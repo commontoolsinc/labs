@@ -138,7 +138,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] legal-clause-library
 - [x] procurement-request
 - [x] vendor-risk-assessment
-- [ ] org-chart-hierarchy
+- [x] org-chart-hierarchy
 - [x] goal-progress-tracker
 - [x] counter-fallback-defaults
 - [x] counter-nested-computed-percentages
