@@ -231,7 +231,8 @@ export function getNamedTypeKey(
   // Check if this is a Default/Cell/Stream/OpaqueRef wrapper type via alias
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
-    aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream" || aliasName === "OpaqueRef"
+    aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream" ||
+    aliasName === "OpaqueRef"
   ) {
     return undefined;
   }
