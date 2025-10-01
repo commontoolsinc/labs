@@ -1369,3 +1369,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   monospace font within each card helps users copy the exact value needed for
   the update form. Clear form fields with `.set("")` after successful updates
   provides immediate feedback and prepares for the next operation.
+- For matrix/grid patterns with dynamic dimensions, use `h()` inside `lift` to
+  generate grid layouts where cell styling depends on values. Computing grid
+  column count dynamically with string concatenation (e.g.,
+  `"grid-template-columns: repeat(" + String(cols + 1) + ", 1fr)"`) creates
+  responsive grids that adapt to the matrix dimensions. Color-code cells based
+  on value (gray for zero, cyan for non-zero) to create visual emphasis on
+  active cells.
+- Matrix row and column headers work well as colored boxes (dark background with
+  white text) positioned in the first row and first column of the grid. Using
+  `R0, R1` and `C0, C1` labels creates compact, scannable headers.
+- For patterns with row and column aggregations, display totals in a separate
+  section above or below the grid using color-coded badges. Blue badges for row
+  totals and pink/magenta badges for column totals creates clear visual
+  distinction between the two aggregation dimensions.
