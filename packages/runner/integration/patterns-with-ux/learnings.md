@@ -1640,3 +1640,18 @@ Add short notes after each run so the next agent can build on proven approaches.
   5-6 entries displayed in reverse chronological order with left-border accents.
   Empty states should communicate "No switches yet" rather than showing empty
   sections.
+- For patterns with fixed-size collections (like 3 counters), explicitly
+  creating handlers for each item at the recipe level (e.g., `inc0`, `inc1`,
+  `inc2`) and computing individual derived values for each counter
+  (`counter0Value`, `counter1Value`, etc.) provides clean, maintainable code.
+  This approach avoids the complexity of trying to create handlers dynamically
+  inside `lift` functions or using `h()` with closures.
+- When multiple elements need to show/hide based on the same condition, compute
+  the visibility style string once with `lift` (e.g., `badge0Style`) and reuse
+  it rather than repeating the logic. This keeps the derives clean and ensures
+  consistent behavior.
+- For selection patterns where one item in a collection should be highlighted,
+  compute separate boolean cells for each item (`counter0IsSelected`,
+  `counter1IsSelected`) using `lift` with the selection index. Then use these
+  booleans to compute dynamic styles (colors, badges) that update reactively as
+  the selection changes.

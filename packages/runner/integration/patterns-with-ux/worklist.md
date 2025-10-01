@@ -16,7 +16,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-alternate-initial-states
 - [x] counter-batched-handler-updates
 - [x] counter-complex-union-state
-- [ ] counter-computed-child-selection
+- [x] counter-computed-child-selection
 - [x] counter-computed-default-strings
 - [x] counter-conditional-branch
 - [x] counter-conditional-child-instantiation
