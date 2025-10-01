@@ -147,6 +147,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- When `Default<T[], defaultArray>` arguments are used in recipes, the defaults
+  may not always propagate correctly when charms are created without explicit
+  arguments. If a pattern requires specific default values to showcase its
+  features (e.g., multiple initial states), consider using a simpler pattern or
+  ensuring the defaults are properly handled in the sanitizer functions.
+- When wrapping state-selection buttons inside containers with text content, the
+  inner divs can intercept pointer events and prevent clicks from reaching the
+  button. Use `pointer-events: none` on display-only child elements or structure
+  buttons without nested clickable content to ensure proper interaction.
 - When creating multiple handlers that share similar logic but read different
   inputs (e.g., advance, cancel, reopen order actions), define each handler
   separately at the recipe level rather than trying to parameterize a single
