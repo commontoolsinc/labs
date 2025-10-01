@@ -493,3 +493,39 @@ describe("recipe with mixed ifc properties", () => {
   // in such a way that it does not end up classified. For now, I've decided
   // not to do this, since I'm not confident enough that code can't get out.
 });
+
+describe("recipe with `this` binding to self", () => {
+  it("allows accessing the cell via `this` in the recipe function", () => {
+    const selfAccessRecipe = recipe<{ x: number }>(
+      "Access self via this",
+      function (this: any, { x }) {
+        const double = lift<number>((x) => x * 2);
+        return { double: double(x), self: this };
+      },
+    );
+
+    expect(isRecipe(selfAccessRecipe)).toBe(true);
+    expect(selfAccessRecipe.result).toEqual({
+      double: { $alias: { path: ["internal", "double"] } },
+      self: { $alias: { path: ["resultRef"] } },
+    });
+  });
+
+  it("allows using `this` in lift functions", () => {
+    const selfInLiftRecipe = recipe<{ x: number }>(
+      "Use self in lift",
+      function (this: any, { x }) {
+        const addSelf = lift<{ x: number; self: any }>(
+          function ({ x, self }) {
+            return { result: x + (self?.magic || 0) };
+          },
+        );
+        return addSelf({ x, self: this });
+      },
+    );
+
+    expect(isRecipe(selfInLiftRecipe)).toBe(true);
+    const liftInputs = selfInLiftRecipe.nodes[0].inputs as any;
+    expect(liftInputs.self).toEqual({ $alias: { path: ["resultRef"] } });
+  });
+});
