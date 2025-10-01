@@ -1576,3 +1576,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   2-column grid layouts that keep related fields together. Clear all form fields
   with `.set("")` after successful submission to provide immediate feedback and
   ready the form for the next entry.
+- For risk assessment patterns with tiered categorization (high/medium/low), use
+  distinct color schemes consistently throughout the UI: red for high risk,
+  amber/orange for medium, green for low. Apply these colors to borders,
+  backgrounds, badges, and text to create immediate visual hierarchy that helps
+  users quickly identify critical items without reading detailed scores.
+- When displaying collections sorted by risk tier, visual sorting (high to low)
+  combined with color-coded cards creates natural scanning patterns. Users can
+  quickly identify high-risk items at the top with red borders before scanning
+  down through medium (orange) and low (green) risk items.
+- Breakdown displays showing computation formulas (rating × weight =
+  contribution) help users understand how aggregate risk scores are calculated.
+  Use monospace fonts for numeric values and mathematical operators to maintain
+  visual alignment and create a calculator-like feel that reinforces the
+  computational nature of the data.
+- For vendor/entity management patterns with nested response arrays, displaying
+  all breakdown items in a scrollable list within each card provides complete
+  transparency into risk calculations without requiring additional navigation or
+  drill-down interactions.
