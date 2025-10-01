@@ -1558,3 +1558,21 @@ Add short notes after each run so the next agent can build on proven approaches.
   color-coded badges in history displays (blue for SET operations, purple for
   DELTA operations) to help users distinguish between absolute value changes and
   relative adjustments at a glance.
+- For satisfaction tracking or survey analytics patterns with weighted averages
+  across channels and time periods, use a prominent gradient header for the
+  overall average score with large typography (3.5rem+) to create visual impact.
+  Include trend indicators (↗/↘/→) with dynamic color coding (green for rising,
+  red for falling, gray for steady) to provide immediate insight into
+  trajectory.
+- Channel breakdown cards work well when color-coded by performance thresholds
+  (green for ≥4.5, amber for ≥3.5, red for <3.5) with matching backgrounds and
+  borders. Using `h()` inside `lift` to dynamically generate these cards based
+  on the computed channel averages keeps the UI reactive as new data arrives.
+- For daily summary displays showing recent activity, limiting to the last 5-7
+  entries with `summaries.slice(-7)` prevents UI clutter while providing useful
+  context. Build the cards with `h()` in a loop, computing color values before
+  JSX to avoid template literal scope issues.
+- Multi-field forms for data entry (date, channel, score, count) benefit from
+  2-column grid layouts that keep related fields together. Clear all form fields
+  with `.set("")` after successful submission to provide immediate feedback and
+  ready the form for the next entry.
