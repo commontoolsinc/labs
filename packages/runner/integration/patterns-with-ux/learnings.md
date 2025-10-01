@@ -1734,3 +1734,10 @@ Add short notes after each run so the next agent can build on proven approaches.
   breakdowns in the middle (features and cohorts lists), and pattern
   explanations at the bottom. Use gradient backgrounds to highlight key metric
   areas.
+- The counter-render-tree pattern demonstrates exposing UI structure as a
+  declarative data tree. The `renderTree` output makes the component hierarchy,
+  labels, and handlers introspectable and portable across different rendering
+  targets. This separation of business logic from presentation is valuable for
+  testing and building visual editors. The UI can both visualize the live
+  counter and display the structure of the render tree itself, making the
+  pattern self-documenting.
