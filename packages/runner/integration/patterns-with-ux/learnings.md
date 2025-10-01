@@ -1599,6 +1599,16 @@ Add short notes after each run so the next agent can build on proven approaches.
   fields always reflect the current normalized state while allowing user edits.
   Check if fields are empty before syncing to avoid overwriting user input
   mid-edit.
+- For meal planning or scheduling patterns with grid layouts showing days x time
+  slots, use color-coded backgrounds per slot type (e.g., different pastel
+  colors for breakfast/lunch/dinner) to create visual distinction. Border colors
+  can indicate whether a slot is filled (blue) or empty (gray), providing
+  immediate visual feedback about plan completeness.
+- Weekly grid layouts with
+  `grid-template-columns: repeat(auto-fit, minmax(Npx,
+  1fr))` work well for
+  responsive day-based schedules that should adapt to different screen widths
+  while maintaining readable card sizes.
 - When building UIs that display collections of ranked items with detailed score
   breakdowns, use `h()` inside `lift` to dynamically generate cards. Color-code
   top-ranked items differently (e.g., green border and background for #1) to
