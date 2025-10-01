@@ -1163,6 +1163,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   than trying to invoke the original handlers. This ensures consistent behavior
   while allowing form field clearing and other UI-specific operations after
   successful actions.
+- For patterns demonstrating computed default strings with override behavior,
+  use dynamic gradient backgrounds that change color based on whether an
+  override is active. The visual distinction (purple gradient for override, pink
+  for fallback) creates immediate feedback about the label source without
+  requiring users to read state indicators.
+- When displaying computed fallback values that dynamically update based on
+  inputs, show both the fallback formula explanation and the current computed
+  result to help users understand the derive chain at a glance.
 - For search and filter patterns that display dynamic collections, use a
   dedicated search input cell with separate handlers for applying and clearing
   the search. This provides clear user control over the filtering behavior and
