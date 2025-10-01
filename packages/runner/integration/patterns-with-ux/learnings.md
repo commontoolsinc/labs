@@ -1833,3 +1833,11 @@ Add short notes after each run so the next agent can build on proven approaches.
   This is expected behavior - the sync effect updates them on the next
   computation cycle. Users can still type freely and the sanitized values will
   be applied through handlers.
+- For read-only display UIs (like invoices or reports), build the entire display
+  inside a `lift` function that returns JSX. This works well when you don't need
+  individual item interaction - just format and display computed results. Keep
+  interactive handlers (like "add item" or "update settings") at the recipe's
+  top level, outside any lift functions.
+- Complex financial calculations (multi-step discounts, tax, totals) should be
+  performed in pure helper functions and wrapped in `lift` for display. The UI
+  can then simply render the pre-computed results without additional logic.

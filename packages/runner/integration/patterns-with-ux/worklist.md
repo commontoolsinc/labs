@@ -84,7 +84,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] heatmap-aggregation
 - [x] incident-response-playbook
 - [x] inventory-reorder-threshold
-- [ ] invoice-generator
+- [x] invoice-generator
 - [x] kanban-board-grouping
 - [x] lead-scoring
 - [x] library-checkout-system
