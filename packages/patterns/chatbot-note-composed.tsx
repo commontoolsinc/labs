@@ -103,7 +103,7 @@ const newNote = handler<
         `Created note ${args.title}!`,
       );
 
-      return navigateTo(n);
+      state.allCharms.push(n as unknown as MentionableCharm);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
