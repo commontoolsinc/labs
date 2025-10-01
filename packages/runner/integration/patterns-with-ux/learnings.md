@@ -242,7 +242,30 @@ Add short notes after each run so the next agent can build on proven approaches.
   chain by using `lift` to extract individual properties from the branched
   object rather than passing through the entire `ifElse` result. This makes it
   easier to bind specific values (header, description, variant) to different UI
-  elements while maintaining reactivity.
+- When wrapping business handlers for form submission in the UI, avoid passing
+  handlers as context properties to other handlers - this causes "is not a
+  function" runtime errors. Instead, inline the business logic directly in the
+  UI handler or factor shared state mutation into plain helper functions that
+  both handlers can call.
+- For SVG charts generated inside `lift` functions, use IIFE (immediately
+  invoked function expressions) with `for` loops instead of `.map()` when
+  conditionally rendering elements. The `.map()` approach with ternary operators
+  triggers "ifElse is not defined" errors at runtime.
+- When building line charts with SVG paths, construct path strings by
+  concatenating coordinates in loops rather than using array methods. Start with
+  `M x y` for the first point and append `L x y` for subsequent points to create
+  a continuous line path.
+- SVG charts work well inside `lift` functions that compute all visualization
+  data (scaling, paths, circles) from the derived curve data. Use inline styles
+  on the SVG element for responsive sizing with `width: 100%; height: auto;`.
+- For sprint/project tracking patterns with chart visualizations, use distinct
+  visual styles for different data series: dashed lines for ideal/planned, solid
+  lines for projected/forecast, and bold lines with markers for actual progress.
+  This provides clear visual distinction.
+- Input field clearing after form submission should happen in the handler by
+  calling `.set("")` on the input cell refs. This provides immediate visual
+  feedback that the action was processed successfully. elements while
+  maintaining reactivity.
 - Conditional visibility in `ifElse` patterns works cleanly with `lift`
   functions that return complete style strings including `display: flex;` or
   `display: none;` based on the boolean state. This provides smooth UI

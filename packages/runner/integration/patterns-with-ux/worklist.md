@@ -105,7 +105,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] security-vulnerability-tracker
 - [x] simple-counter
 - [x] sleep-journal
-- [ ] sprint-burndown
+- [x] sprint-burndown
 - [x] subscription-billing
 - [x] template-gallery
 - [x] toggle-derive-label
