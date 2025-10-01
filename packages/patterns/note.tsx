@@ -151,7 +151,10 @@ const Note = recipe<Input, Output>(
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ content, allCharms: allCharms as unknown as MentionableCharm[] })}
+            onbacklink-create={handleNewBacklink({
+              content,
+              allCharms: allCharms as unknown as MentionableCharm[],
+            })}
             language="text/markdown"
             theme="light"
             wordWrap
