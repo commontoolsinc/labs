@@ -70,6 +70,7 @@ export type {
   ModuleFactory,
   NodeFactory,
   Opaque,
+  OpaqueOrCells,
   OpaqueRef,
   Props,
   Recipe,
