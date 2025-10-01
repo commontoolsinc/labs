@@ -77,7 +77,6 @@ const handleNewBacklink = handler<
 >(({ detail }, { allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
 
-
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
