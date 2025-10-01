@@ -147,6 +147,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- **Critical:** When using `lift` to render dynamic lists with JSX, use `for`
+  loops instead of `.map()` to build arrays of elements. The `.map()` approach
+  with `if` statements inside the mapper triggers "ifElse is not defined" errors
+  at runtime. Build the JSX elements by iterating with `for` loops and pushing
+  to an array, then return that array.
+- **Critical:** Do not expose JSX/vnode arrays (like `groupsDisplay`) in the
+  recipe's return object. These should only be used inline within the `[UI]`
+  block. Exposing them causes TypeMismatchError because the framework tries to
+  serialize them as data schemas. Keep all lift-generated JSX confined to the UI
+  rendering context.
+- For budget/financial tracking patterns, a green gradient theme with clear
+  subtotal badges works well. Use `$` prefixes consistently and show item counts
+  alongside monetary totals to give users both value and quantity context.
 - For leaderboard/ranking UIs, use emoji badges (🥇🥈🥉) for top positions and
   `#N` format for others. Compute colors dynamically based on score thresholds
   to provide instant visual feedback about lead quality or performance levels.
