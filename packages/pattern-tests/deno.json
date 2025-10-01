@@ -1,11 +1,7 @@
 {
-  "name": "@commontools/patterns",
+  "name": "@commontools/pattern-tests",
   "tasks": {
     "integration": "LOG_LEVEL=warn deno test --trace-leaks -A ./integration/*.test.ts",
-    "integration:all": "TEST_HTTP=1 TEST_LLM=1 LOG_LEVEL=warn deno test --trace-leaks -A ./integration/*.test.ts",
     "test": "echo 'No tests defined.'"
-  },
-  "exports": {
-    ".": "./mod.ts"
   }
 }
