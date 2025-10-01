@@ -68,24 +68,20 @@ const handleNewBacklink = handler<
       text: string;
       charmId: any;
       charm: Cell<MentionableCharm>;
+      navigate: boolean;
     };
   },
   {
-    content: Cell<string>;
+    allCharms: Cell<MentionableCharm[]>;
   }
->(({ detail }, { content }) => {
+>(({ detail }, { allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
 
-  const text = content.get();
-  // find relevant area in the text content
-  // replace `[[${text}]]` with text + ID `[[${text} (${ID})]]`
-  const replaced = text.replace(
-    `[[${detail.text}]]`,
-    `[[${detail.text} (${detail.charmId["/"]})]]`,
-  );
-
-  content.set(replaced);
-  return navigateTo(detail.charm);
+  if (detail.navigate) {
+    return navigateTo(detail.charm);
+  } else {
+    allCharms.push(detail.charm as unknown as MentionableCharm);
+  }
 });
 
 const handleCharmLinkClicked = handler(
@@ -144,7 +140,9 @@ const Note = recipe<Input, Output>(
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ content })}
+            onbacklink-create={handleNewBacklink({
+              allCharms: allCharms as unknown as MentionableCharm[],
+            })}
             language="text/markdown"
             theme="light"
             wordWrap

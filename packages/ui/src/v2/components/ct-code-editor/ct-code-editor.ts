@@ -113,7 +113,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, charm }
  * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
  *   or confirmed with Enter during autocomplete with no matches. Detail:
- *   { text }
+ *   { text: string, charmId: any, charm: Cell<MentionableCharm>, navigate: boolean }
  *
  * @example
  * <ct-code-editor language="text/javascript" placeholder="Enter code..."></ct-code-editor>
@@ -256,9 +256,9 @@ export class CTCodeEditor extends BaseElement {
             apply: () => {
               // Instantiate the pattern if available
               if (this.pattern) {
-                this.createBacklinkFromPattern(raw);
+                this.createBacklinkFromPattern(raw, false);
               } else {
-                this.emit("backlink-create", { text: raw });
+                this.emit("backlink-create", { text: raw, navigate: false });
               }
             },
           });
@@ -366,7 +366,7 @@ export class CTCodeEditor extends BaseElement {
 
         // Instantiate the pattern and pass the ID so we can insert it into the text
         if (this.pattern) {
-          this.createBacklinkFromPattern(backlinkText);
+          this.createBacklinkFromPattern(backlinkText, true);
         }
 
         return true;
@@ -379,7 +379,10 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Create a backlink from pattern
    */
-  private createBacklinkFromPattern(backlinkText: string): void {
+  private createBacklinkFromPattern(
+    backlinkText: string,
+    navigate: boolean,
+  ): void {
     try {
       const rt = this.pattern.runtime;
       const tx = rt.edit();
@@ -403,14 +406,58 @@ export class CTCodeEditor extends BaseElement {
 
       // let the pattern know about the new backlink
       tx.commit();
+
+      const charmId = getEntityId(result);
+
+      // Insert the ID into the text if we have an editor
+      if (this._editorView && charmId) {
+        this._insertBacklinkId(backlinkText, charmId["/"], navigate);
+      }
+
       this.emit("backlink-create", {
         text: backlinkText,
-        charmId: getEntityId(result),
+        charmId,
         charm: result,
+        navigate,
       });
     } catch (error) {
       console.error("Error creating backlink:", error);
     }
+  }
+
+  /**
+   * Insert the ID into an incomplete backlink and position cursor appropriately.
+   * Replaces [[text]] with [[text (id)]] and positions cursor after ]].
+   */
+  private _insertBacklinkId(
+    backlinkText: string,
+    id: string,
+    navigate: boolean,
+  ): void {
+    if (!this._editorView) return;
+
+    const view = this._editorView;
+    const state = view.state;
+    const doc = state.doc;
+    const content = doc.toString();
+
+    // Find the incomplete backlink: [[backlinkText]]
+    const searchPattern = `[[${backlinkText}]]`;
+    const index = content.indexOf(searchPattern);
+
+    if (index === -1) return;
+
+    // Replace with complete backlink including ID
+    const replacement = `[[${backlinkText} (${id})]]`;
+    const from = index;
+    const to = index + searchPattern.length;
+
+    view.dispatch({
+      changes: { from, to, insert: replacement },
+      selection: navigate
+        ? undefined // Keep current selection if navigating away
+        : { anchor: from + replacement.length }, // Position after ]] if staying
+    });
   }
 
   /**
@@ -813,9 +860,9 @@ export class CTCodeEditor extends BaseElement {
               if (text.length > 0) {
                 // Instantiate the pattern if available
                 if (this.pattern) {
-                  this.createBacklinkFromPattern(text);
+                  this.createBacklinkFromPattern(text, false);
                 } else {
-                  this.emit("backlink-create", { text });
+                  this.emit("backlink-create", { text, navigate: false });
                 }
                 return true;
               }

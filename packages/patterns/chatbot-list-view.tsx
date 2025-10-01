@@ -374,11 +374,15 @@ export default recipe<Input, Output>(
                         {selected?.mentioned?.map((
                           charm: MentionableCharm,
                         ) => (
-                          <ct-button
-                            onClick={handleCharmLinkClicked({ charm })}
-                          >
-                            {charm[NAME]}
-                          </ct-button>
+                          charm
+                            ? (
+                              <ct-button
+                                onClick={handleCharmLinkClicked({ charm })}
+                              >
+                                {charm[NAME]}
+                              </ct-button>
+                            )
+                            : null
                         ))}
                       </ct-vstack>
                     </ct-collapsible>
