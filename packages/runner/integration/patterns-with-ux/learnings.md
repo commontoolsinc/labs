@@ -1541,3 +1541,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   and error (red "CYCLE DETECTED") states with matching backgrounds and borders
   provide immediate visual feedback about graph validity without requiring users
   to read detailed error messages.
+- For funnel analytics patterns with sequential stages, use progressive bar
+  chart visualizations where each stage's width scales proportionally to its
+  count relative to the maximum stage. Color-code stages with distinct colors
+  (blue, purple, pink, orange) to create clear visual distinction while
+  maintaining cohesive design language.
+- When displaying drop-off metrics between funnel stages, show both absolute
+  lost users and percentage drop-off rates side by side in separate metrics
+  cards. This dual presentation helps analysts understand both magnitude and
+  proportion of funnel leakage.
+- Funnel visualization patterns benefit from displaying multiple views: a visual
+  funnel chart showing relative stage sizes, detailed drop-off analysis between
+  consecutive stages, and summary metrics (overall conversion, worst performing
+  stage). This multi-faceted approach provides comprehensive insight.
+- For analytics patterns tracking mode-tagged updates (delta vs. value), use
+  color-coded badges in history displays (blue for SET operations, purple for
+  DELTA operations) to help users distinguish between absolute value changes and
+  relative adjustments at a glance.
