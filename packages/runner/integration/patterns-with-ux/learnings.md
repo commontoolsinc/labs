@@ -1008,6 +1008,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   schema, so extra properties will cause compilation errors. Define handlers
   like `increment` and `decrement` separately instead of trying to use
   `adjustSingle({ target: cell, amount: 1 })` in the onClick binding.
+- For subscription/billing patterns with plan catalogs, displaying available
+  plans in a grid with clear pricing and cycle information helps users
+  understand their options at a glance. Use color-coded borders or backgrounds
+  to distinguish plan tiers visually.
+- When implementing UI handlers that accept optional parameters (like custom
+  cycle days), check if the input field is empty with
+  `typeof str === "string" && str.trim() !== ""` before parsing and applying the
+  value. This allows users to change plans without overriding cycle days when
+  they leave that field blank.
 - For progress tracking patterns with weighted items, use conditional color
   coding based on completion percentage thresholds (e.g., red <33%, orange
   33-66%, green
