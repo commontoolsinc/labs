@@ -247,7 +247,14 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns with deeply nested data structures rendered via `lift`, extract
   inner collections into separate mapping operations with their own variable
   assignments. Build the JSX from the inside out, storing intermediate results
-  (like `entryElements`) before composing the outer structure.
+- When creating UI patterns that need to iterate over nested collections (e.g.,
+  entries that each contain an array of tags), attempting to build complex JSX
+  structures inside lift functions with nested loops can cause serialization
+  errors like "entry.tags is not iterable". The framework may struggle to
+  properly serialize deeply nested JSX element arrays created within lifts.
+  Simpler approaches work better: either flatten the data structure before the
+  lift, or keep JSX generation at a single level of iteration (like
+  `entryElements`) before composing the outer structure.
 - When a `lift` renders an empty state vs. actual data, check both null/
   undefined and array length before attempting to map. Use
   `if (!form ||

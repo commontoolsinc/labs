@@ -93,7 +93,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] medication-adherence
 - [x] meeting-scheduler
 - [x] menu-planner
-- [ ] mood-diary
+- [⚠️] mood-diary (has issues - see issues.md)
 - [x] nested-counters
 - [x] notification-preference
 - [x] patient-vitals-dashboard

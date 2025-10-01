@@ -91,3 +91,27 @@ the recipe itself.
 - Issue persists across multiple reimplementations
 - Needs further investigation into what specific value/type is causing the
   serialization failure
+
+## Mood Diary (Complex JSX rendering in lift)
+
+**mood-diary**
+
+- Pattern partially works: form inputs work correctly, entries can be logged,
+  metrics are calculated
+- Error: "TypeError: entry.tags is not iterable" when trying to render entries
+  with tags
+- The issue occurs when building complex JSX structures inside lift() functions
+  that iterate over nested arrays
+- Attempted approach: Create display-ready data structures in lift, then iterate
+  to build JSX elements
+- Problem: When a lift function builds JSX elements in a loop (for tags within
+  entries), the framework can't properly serialize or render the nested
+  structure
+- Basic UI works (form, title, empty state), but complex sections (recent
+  entries with tags, time/tag breakdowns) fail
+- This suggests a limitation with how deeply nested JSX can be constructed
+  within lift functions
+- Simpler patterns that don't require iteration inside lift-generated JSX work
+  fine
+- May need to either: (1) simplify the UI to avoid nested loops in lift, or (2)
+  find a different pattern for rendering complex nested collections
