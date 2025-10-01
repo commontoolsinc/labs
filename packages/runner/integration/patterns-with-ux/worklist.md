@@ -71,7 +71,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-sort-direction-toggle
 - [x] counter-toggled-derive-pipelines
 - [x] counter-typed-handler-record
-- [ ] counter-with-reference-equality-assertions
+- [x] counter-with-reference-equality-assertions
 - [x] crm-pipeline
 - [x] currency-conversion
 - [x] design-token-switcher
