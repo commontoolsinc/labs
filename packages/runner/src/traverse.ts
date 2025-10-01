@@ -319,6 +319,10 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
+        using t = tracker.include(doc.value, SchemaAll, doc);
+        if (t === null) {
+          return null;
+        }
         const [newDoc, _] = getAtPath(
           this.manager,
           doc,
