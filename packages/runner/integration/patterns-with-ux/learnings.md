@@ -1594,3 +1594,20 @@ Add short notes after each run so the next agent can build on proven approaches.
   all breakdown items in a scrollable list within each card provides complete
   transparency into risk calculations without requiring additional navigation or
   drill-down interactions.
+- For search/ranking patterns with normalized weights, use `compute` effects to
+  sync UI input fields with the normalized derived values. This ensures form
+  fields always reflect the current normalized state while allowing user edits.
+  Check if fields are empty before syncing to avoid overwriting user input
+  mid-edit.
+- When building UIs that display collections of ranked items with detailed score
+  breakdowns, use `h()` inside `lift` to dynamically generate cards. Color-code
+  top-ranked items differently (e.g., green border and background for #1) to
+  create immediate visual hierarchy showing which result leads the ranking.
+- For patterns with multi-dimensional scoring (text, clicks, freshness), display
+  contribution breakdowns in a grid within each result card. Use distinct colors
+  for each dimension consistently across the UI to help users understand how
+  different factors contribute to the final score.
+- Weight normalization patterns benefit from showing both the input controls and
+  the normalized output prominently. Use gradient card backgrounds for weight
+  displays with large monospace numbers to create visual impact and emphasize
+  the current configuration.
