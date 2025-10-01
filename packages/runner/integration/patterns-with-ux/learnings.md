@@ -1331,3 +1331,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   reverse chronological order with left-border accents provides useful context
   about recent modifications without cluttering the interface. The activity log
   helps users verify their actions were applied correctly.
+- For warehouse/logistics patterns with bin occupancy tracking, use conditional
+  color-coding based on utilization percentage thresholds: green backgrounds for
+  available bins (<80%), yellow/amber for nearly full (80-99%), and red for full
+  (100%). Computing utilization as `(used / capacity) * 100` and applying colors
+  dynamically in `lift` functions creates immediate visual feedback about
+  capacity constraints.
+- Progress bars within bin status cards work well when synchronized with the
+  same utilization percentage used for background colors. Set the inner progress
+  bar width to the utilization percentage with a matching status color for
+  visual consistency across the card.
+- When displaying inventory items in a warehouse context, alternating row
+  backgrounds improve scannability in dense lists. Use monospace fonts for item
+  IDs and color-coded badges for bin assignments to create clear visual
+  hierarchy between technical identifiers and location information.
+- For relocation/transfer patterns where handlers update both primary state and
+  history logs, ensure UI handlers replicate the exact business logic including
+  capacity validation, duplicate bin checking, and history message formatting.
+  Clear form fields after successful operations to provide immediate UX feedback
+  that the relocation completed.
