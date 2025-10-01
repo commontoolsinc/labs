@@ -80,7 +80,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] email-inbox-threading
 - [ ] expense-reimbursement
 - [x] experiment-assignment
-- [ ] feature-usage-analytics
+- [x] feature-usage-analytics
 - [x] heatmap-aggregation
 - [x] incident-response-playbook
 - [x] inventory-reorder-threshold
