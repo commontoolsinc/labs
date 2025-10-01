@@ -1484,3 +1484,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   with left-border accents provide excellent context for operational patterns.
   Limiting display to last 8 entries prevents clutter while maintaining useful
   audit trail visibility.
+- For patterns demonstrating opaque ref maps (array entry cell references), use
+  alternating row backgrounds to improve scannability of history lists. Display
+  entry indices in monospace font with lighter color to distinguish them from
+  values.
+- When using `history.key(index)` to get cell references to array entries, the
+  returned cell can be cast as `Cell<T>` and modified with `.set()`. This allows
+  individual array elements to be rewritten without replacing the entire array,
+  demonstrating fine-grained reactivity.
+- For rewrite/edit operations on array entries, clear form input fields after
+  successful operations with `.set("")` to provide immediate feedback that the
+  action completed and prepare for the next operation.
