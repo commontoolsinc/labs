@@ -11,10 +11,11 @@ const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 const internalSchema = {
   type: "object",
   properties: {
-    requestId: { type: "string" },
-    lastActivity: { type: "number" },
-    inputHash: { type: "string" },
+    requestId: { type: "string", default: "" },
+    lastActivity: { type: "number", default: 0 },
+    inputHash: { type: "string", default: "" },
   },
+  default: {},
   required: ["requestId", "lastActivity", "inputHash"],
 } as const satisfies JSONSchema;
 
@@ -112,7 +113,7 @@ async function tryWriteResult(
     if (currentHash === expectedHash) {
       action(tx);
       // Also update the internal state to reflect this hash
-      internal.withTx(tx).key("inputHash").set(currentHash);
+      internal.withTx(tx).update({ inputHash: currentHash });
       success = true;
     }
   });
@@ -230,11 +231,7 @@ export function fetchData(
     // again, but isInitialized will be true already. The framework will notice
     // that this write is a no-op after the first successful write, so this
     // should be fine.
-    sendResult(tx, {
-      pending,
-      result,
-      error,
-    });
+    sendResult(tx, { pending, result, error });
 
     const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
     const inputHash = computeInputHash(url, mode, options);
