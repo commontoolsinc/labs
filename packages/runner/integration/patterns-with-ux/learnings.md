@@ -1443,3 +1443,24 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For SLA deadline visualization, use dynamic color coding based on remaining
   time thresholds (e.g., red for ≤4h) to highlight tickets approaching their
   deadlines. This helps support teams identify urgent tickets at a glance.
+- For sleep tracking or time-series health patterns, bar chart visualizations of
+  weekday averages work well when dynamically scaled relative to the maximum
+  value. Compute height percentages in the lift and apply them to inner divs to
+  create proportional visual comparisons across categories.
+- Health metric patterns benefit from color-coded value displays based on
+  recommended ranges (green for optimal 7-9h sleep, amber for acceptable 6-7h,
+  red for poor <6h). Computing these colors dynamically in lift functions and
+  applying them to prominent metric displays creates immediate feedback about
+  health status.
+- When displaying collections with multiple attributes (dates, tags, metrics),
+  use a combination of typography hierarchy and color-coded badges to create
+  scannable layouts. Larger bold text for primary values, smaller subdued text
+  for metadata, and colored pill-style badges for categorical tags creates clear
+  visual organization.
+- Gradient backgrounds work well for form sections to visually separate input
+  areas from data display sections. Light complementary gradients (like
+  blue-to-purple tints) create visual interest without overwhelming the content
+  while providing clear boundaries between UI sections.
+- For patterns tracking sessions over time, displaying entries in reverse
+  chronological order (newest first) provides better UX, allowing users to see
+  their most recent activity immediately without scrolling to the bottom.
