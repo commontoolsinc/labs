@@ -166,6 +166,23 @@ const listMentionable = handler<
   },
 );
 
+const readNoteByIndex = handler<
+  {
+    /** A cell to store the result text */
+    index: number;
+    result: Cell<string>;
+  },
+  { allCharms: { [NAME]: string, content?: string }[] }
+>(
+  (args, state) => {
+    try {
+      args.result.set(state.allCharms[args.index]?.content || "No content found");
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages, content, allCharms }) => {
@@ -187,7 +204,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       readListItems: {
         handler: readListItems({ list }),
       },
-      editNote: {
+      editActiveNote: {
         description: "Modify the shared note.",
         inputSchema: {
           type: "object",
@@ -201,8 +218,8 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         } as JSONSchema,
         handler: editNote({ content }),
       },
-      readNote: {
-        description: "Read the shared note.",
+      readActiveNote: {
+        description: "Read the currently focused note.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -211,13 +228,29 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         handler: readNote({ content }),
       },
       listNotes: {
-        description: "List all mentionable notes.",
+        description: "List all mentionable note titles (read the body with readNoteByIndex).",
         inputSchema: {
           type: "object",
           properties: {},
           required: [],
         } as JSONSchema,
         handler: listMentionable({
+          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+        }),
+      },
+      readNoteByIndex: {
+        description: "Read the body of a note by its index in the listNotes() list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            index: {
+              type: "number",
+              description: "The index of the note in the notes list.",
+            },
+          },
+          required: ["index"],
+        } as JSONSchema,
+        handler: readNoteByIndex({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
       },
