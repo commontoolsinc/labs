@@ -1,5 +1,28 @@
 # Known Issues
 
+## Expense Reimbursement (Handler invocation with dynamic parameters inside lift)
+
+**expense-reimbursement**
+
+- Pattern needs to render a list of claims where each claim has action buttons
+  (Approve, Reject, Pay)
+- Problem: Cannot invoke handlers with parameters inside a lift's map function
+- Attempted approaches:
+  1. Creating handlers inside lift per-item → "ReferenceError: derive is not
+     defined"
+  2. Passing parameters to pre-defined handlers like
+     `onClick={handler({ id: claim.id })}` → Same error
+  3. Using data attributes on buttons → No way to extract them in handler
+- The framework requires handlers to be defined at the top level without
+  parameters
+- The list-manager pattern uses text input fields where users type indices, but
+  that UX doesn't fit this use case
+- For dynamic lists where each item needs unique button actions, there's no
+  clear pattern that works
+- This appears to be a limitation with how handlers and lifts interact when
+  dealing with collections
+- Pattern deferred until framework supports this interaction model
+
 ## UI Rendering Issue (Affects multiple patterns)
 
 When navigating to a charm URL that has `[NAME]` and `[UI]` exports, the web
