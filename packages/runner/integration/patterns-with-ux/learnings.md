@@ -147,6 +147,12 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- Using `lift` functions with side effects (like calling `.set()` on cells to
+  update version counters) may not work as expected in all scenarios due to
+  reactive caching behavior. The framework may optimize away repeated lift
+  executions. For version tracking, consider using separate handlers to
+  explicitly increment counters, or accept that version tracking via side
+  effects in lifts has limitations.
 - When implementing patterns that demonstrate event bubbling or stream
   forwarding, create UI handlers that replicate the business logic rather than
   trying to invoke the original handlers. The UI handlers should directly
