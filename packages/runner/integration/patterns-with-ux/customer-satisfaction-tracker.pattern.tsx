@@ -3,7 +3,6 @@
 import {
   type Cell,
   cell,
-  compute,
   Default,
   h,
   handler,
@@ -300,10 +299,32 @@ const determineTrend = (
   return "steady";
 };
 
+const logSurveyResponse = handler(
+  (
+    event: SatisfactionSampleInput | undefined,
+    context: {
+      responses: Cell<SatisfactionSampleInput[]>;
+      runtimeSeed: Cell<number>;
+    },
+  ) => {
+    const existing = sanitizeEntryList(context.responses.get());
+    const currentSeed = context.runtimeSeed.get() ?? 0;
+    const candidate = sanitizeEntry(event, `runtime-${currentSeed + 1}`);
+    const updated = normalizeEntries([...existing, candidate]);
+    context.responses.set(updated);
+    context.runtimeSeed.set(currentSeed + 1);
+  },
+);
+
 export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
   "Customer Satisfaction Tracker (UX)",
   ({ responses }) => {
     const runtimeSeed = cell(0);
+
+    const dateField = cell("");
+    const scoreField = cell("");
+    const responsesField = cell("");
+    const channelField = cell("");
 
     const responseLog = lift((
       value: readonly SatisfactionSampleInput[] | undefined,
@@ -348,37 +369,25 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
     const summary =
       str`${responseCount} responses across ${dayCount} days avg ${overallAverageLabel} trend ${trendDirection}`;
 
-    const dateField = cell<string>("");
-    const scoreField = cell<string>("");
-    const responsesField = cell<string>("");
-    const channelField = cell<string>("");
-    const lastAction = cell<string>("");
+    const trendIcon = lift((trend: TrendDirection) => {
+      if (trend === "rising") return "↗";
+      if (trend === "falling") return "↘";
+      return "→";
+    })(trendDirection);
 
-    const logSurveyResponseUi = handler<
-      unknown,
-      {
+    const logSurveyResponseUi = handler(
+      (_event: unknown, context: {
         responses: Cell<SatisfactionSampleInput[]>;
         runtimeSeed: Cell<number>;
         dateField: Cell<string>;
         scoreField: Cell<string>;
         responsesField: Cell<string>;
         channelField: Cell<string>;
-        lastAction: Cell<string>;
-      }
-    >(
-      (_event, {
-        responses,
-        runtimeSeed,
-        dateField,
-        scoreField,
-        responsesField,
-        channelField,
-        lastAction,
       }) => {
-        const dateStr = dateField.get();
-        const scoreStr = scoreField.get();
-        const responsesStr = responsesField.get();
-        const channelStr = channelField.get();
+        const dateStr = context.dateField.get();
+        const scoreStr = context.scoreField.get();
+        const responsesStr = context.responsesField.get();
+        const channelStr = context.channelField.get();
 
         if (
           typeof dateStr !== "string" || dateStr.trim() === "" ||
@@ -388,8 +397,8 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
           return;
         }
 
-        const existing = sanitizeEntryList(responses.get());
-        const currentSeed = runtimeSeed.get() ?? 0;
+        const existing = sanitizeEntryList(context.responses.get());
+        const currentSeed = context.runtimeSeed.get() ?? 0;
 
         const event: SatisfactionSampleInput = {
           date: dateStr,
@@ -400,16 +409,13 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
 
         const candidate = sanitizeEntry(event, `runtime-${currentSeed + 1}`);
         const updated = normalizeEntries([...existing, candidate]);
-        responses.set(updated);
-        runtimeSeed.set(currentSeed + 1);
+        context.responses.set(updated);
+        context.runtimeSeed.set(currentSeed + 1);
 
-        dateField.set("");
-        scoreField.set("");
-        responsesField.set("");
-        channelField.set("");
-        lastAction.set(
-          `Added: ${candidate.date} | ${candidate.channel} | ${candidate.score} (${candidate.responses} responses)`,
-        );
+        context.dateField.set("");
+        context.scoreField.set("");
+        context.responsesField.set("");
+        context.channelField.set("");
       },
     )({
       responses,
@@ -418,48 +424,116 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
       scoreField,
       responsesField,
       channelField,
-      lastAction,
     });
-
-    const trendColor = lift((trend: TrendDirection) => {
-      if (trend === "rising") return "#10b981";
-      if (trend === "falling") return "#ef4444";
-      return "#64748b";
-    })(trendDirection);
-
-    const trendIcon = lift((trend: TrendDirection) => {
-      if (trend === "rising") return "↗";
-      if (trend === "falling") return "↘";
-      return "→";
-    })(trendDirection);
-
-    const trendBoxStyle = lift((color: string) =>
-      "background: rgba(255, 255, 255, 0.2); border-radius: 0.5rem; padding: 0.75rem 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; border: 2px solid " +
-      color + ";"
-    )(trendColor);
-
-    const trendIconStyle = lift((color: string) =>
-      "font-size: 1.5rem; color: " + color + ";"
-    )(trendColor);
 
     const name = str`Customer Satisfaction (${overallAverageLabel}/5.0)`;
 
-    const logSurveyResponse = handler(
-      (
-        event: SatisfactionSampleInput | undefined,
-        context: {
-          responses: Cell<SatisfactionSampleInput[]>;
-          runtimeSeed: Cell<number>;
-        },
-      ) => {
-        const existing = sanitizeEntryList(context.responses.get());
-        const currentSeed = context.runtimeSeed.get() ?? 0;
-        const candidate = sanitizeEntry(event, `runtime-${currentSeed + 1}`);
-        const updated = normalizeEntries([...existing, candidate]);
-        context.responses.set(updated);
-        context.runtimeSeed.set(currentSeed + 1);
-      },
-    );
+    const channelCards = lift((channels: Record<string, number>) => {
+      const entries = Object.entries(channels);
+      const elements: any[] = [];
+      for (const [channel, avg] of entries) {
+        const channelColor = avg >= 4.5
+          ? "#10b981"
+          : avg >= 3.5
+          ? "#f59e0b"
+          : "#ef4444";
+        const channelBg = avg >= 4.5
+          ? "#d1fae5"
+          : avg >= 3.5
+          ? "#fef3c7"
+          : "#fee2e2";
+
+        elements.push(
+          h(
+            "div",
+            {
+              style:
+                "padding: 0.875rem; border-radius: 0.5rem; border-left: 4px solid " +
+                channelColor + "; background: " + channelBg + ";",
+            },
+            h(
+              "div",
+              {
+                style:
+                  "font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem; text-transform: capitalize; color: #64748b;",
+              },
+              channel,
+            ),
+            h(
+              "div",
+              {
+                style: "font-size: 1.5rem; font-weight: bold; color: " +
+                  channelColor + ";",
+              },
+              String(avg.toFixed(2)) + " ⭐",
+            ),
+          ),
+        );
+      }
+      return h("div", {
+        style:
+          "display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem;",
+      }, ...elements);
+    })(channelAverages);
+
+    const recentData = lift((summaries: readonly DailySummary[]) => {
+      if (summaries.length === 0) {
+        return h(
+          "div",
+          {
+            style:
+              "background: #f1f5f9; border-radius: 0.5rem; padding: 1rem; text-align: center; color: #64748b; font-size: 0.875rem;",
+          },
+          "No daily summaries yet",
+        );
+      }
+      const recent = summaries.slice(-7);
+      const dayCards = [];
+      for (const day of recent) {
+        const scoreColor = day.average >= 4.5
+          ? "#10b981"
+          : day.average >= 3.5
+          ? "#f59e0b"
+          : "#ef4444";
+        const card = h(
+          "div",
+          {
+            style:
+              "background: #f8fafc; border-radius: 0.5rem; padding: 0.875rem; display: flex; justify-content: space-between; align-items: center;",
+          },
+          h(
+            "div",
+            {
+              style: "display: flex; flex-direction: column; gap: 0.25rem;",
+            },
+            h(
+              "span",
+              {
+                style: "font-size: 0.875rem; color: #334155; font-weight: 500;",
+              },
+              day.date,
+            ),
+            h(
+              "span",
+              { style: "font-size: 0.75rem; color: #64748b;" },
+              String(day.responseCount) + " responses",
+            ),
+          ),
+          h(
+            "strong",
+            {
+              style: "font-size: 1.5rem; color: " + scoreColor +
+                "; font-weight: 700;",
+            },
+            String(day.average.toFixed(2)) + " ⭐",
+          ),
+        );
+        dayCards.push(card);
+      }
+      return h("div", {
+        style: "display: flex; flex-direction: column; gap: 0.625rem;",
+      }, ...dayCards);
+    })(dailySummaries);
 
     return {
       [NAME]: name,
@@ -482,20 +556,22 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
               <div style="
                   display: flex;
                   flex-direction: column;
-                  gap: 0.25rem;
+                  gap: 0.375rem;
                 ">
                 <span style="
-                    color: #475569;
+                    color: #64748b;
                     font-size: 0.75rem;
-                    letter-spacing: 0.08em;
+                    letter-spacing: 0.1em;
                     text-transform: uppercase;
+                    font-weight: 600;
                   ">
-                  Customer Satisfaction
+                  Customer Satisfaction Dashboard
                 </span>
                 <h2 style="
                     margin: 0;
-                    font-size: 1.3rem;
+                    font-size: 1.5rem;
                     color: #0f172a;
+                    font-weight: 700;
                   ">
                   Track satisfaction scores across channels
                 </h2>
@@ -504,47 +580,55 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
               <div style="
                   background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
                   border-radius: 0.75rem;
-                  padding: 1.5rem;
+                  padding: 1.75rem;
                   display: flex;
                   flex-direction: column;
-                  gap: 0.5rem;
+                  gap: 1rem;
                   color: white;
                 ">
                 <div style="
                     display: flex;
                     justify-content: space-between;
-                    align-items: center;
+                    align-items: flex-start;
                   ">
                   <div style="
                       display: flex;
                       flex-direction: column;
-                      gap: 0.25rem;
+                      gap: 0.5rem;
                     ">
                     <span style="
-                        font-size: 0.85rem;
+                        font-size: 0.875rem;
                         opacity: 0.9;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
                       ">
                       Overall average
                     </span>
                     <strong style="
-                        font-size: 3rem;
-                        font-weight: 700;
+                        font-size: 3.5rem;
+                        font-weight: 800;
                         letter-spacing: -0.02em;
+                        line-height: 1;
                       ">
                       {overallAverageLabel}
-                      <span style="font-size: 1.5rem; opacity: 0.7;">/5.0</span>
+                      <span style="font-size: 1.75rem; opacity: 0.7; font-weight: 600;">
+                        /5.0
+                      </span>
                     </strong>
                   </div>
-                  <div style={trendBoxStyle}>
-                    <span style="font-size: 0.75rem; opacity: 0.9;">Trend</span>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                      <span style={trendIconStyle}>
+                  <div style="background: rgba(255, 255, 255, 0.2); border-radius: 0.625rem; padding: 1rem 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 0.375rem;">
+                    <span style="font-size: 0.75rem; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.05em;">
+                      Trend
+                    </span>
+                    <div style="display: flex; align-items: center; gap: 0.625rem;">
+                      <span style="font-size: 2rem;">
                         {trendIcon}
                       </span>
                       <span style="
-                          font-size: 1rem;
-                          font-weight: 600;
+                          font-size: 1.125rem;
+                          font-weight: 700;
                           text-transform: uppercase;
+                          letter-spacing: 0.05em;
                         ">
                         {trendDirection}
                       </span>
@@ -555,23 +639,22 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
                 <div style="
                     display: grid;
                     grid-template-columns: repeat(2, 1fr);
-                    gap: 1rem;
-                    margin-top: 0.5rem;
+                    gap: 1.25rem;
                   ">
                   <div style="
                       display: flex;
                       flex-direction: column;
-                      gap: 0.25rem;
+                      gap: 0.375rem;
                     ">
                     <span style="
-                        font-size: 0.75rem;
-                        opacity: 0.8;
+                        font-size: 0.875rem;
+                        opacity: 0.85;
                       ">
                       Total responses
                     </span>
                     <strong style="
-                        font-size: 1.5rem;
-                        font-weight: 600;
+                        font-size: 2rem;
+                        font-weight: 700;
                       ">
                       {responseCount}
                     </strong>
@@ -579,17 +662,17 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
                   <div style="
                       display: flex;
                       flex-direction: column;
-                      gap: 0.25rem;
+                      gap: 0.375rem;
                     ">
                     <span style="
-                        font-size: 0.75rem;
-                        opacity: 0.8;
+                        font-size: 0.875rem;
+                        opacity: 0.85;
                       ">
                       Days tracked
                     </span>
                     <strong style="
-                        font-size: 1.5rem;
-                        font-weight: 600;
+                        font-size: 2rem;
+                        font-weight: 700;
                       ">
                       {dayCount}
                     </strong>
@@ -600,172 +683,33 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
               <div style="
                   display: flex;
                   flex-direction: column;
-                  gap: 0.75rem;
+                  gap: 0.875rem;
                 ">
                 <h3 style="
                     margin: 0;
-                    font-size: 1rem;
-                    color: #334155;
-                    font-weight: 600;
+                    font-size: 1.125rem;
+                    color: #0f172a;
+                    font-weight: 700;
                   ">
-                  Channel averages (3 channels tracked)
+                  📊 By Channel
                 </h3>
-                <div style="
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: 0.75rem;
-                  ">
-                  <div style="
-                      background: #ffffff;
-                      border-left: 4px solid #3b82f6;
-                      border-radius: 0.5rem;
-                      padding: 1rem;
-                      display: flex;
-                      flex-direction: column;
-                      gap: 0.25rem;
-                    ">
-                    <span style="
-                        font-size: 0.75rem;
-                        text-transform: uppercase;
-                        letter-spacing: 0.05em;
-                        color: #64748b;
-                      ">
-                      email
-                    </span>
-                    <strong style="font-size: 1.5rem; color: #0f172a;">
-                      {lift((channels: Record<string, number>) =>
-                        (channels["email"] ?? 0).toFixed(2)
-                      )(channelAverages)}
-                    </strong>
-                  </div>
-
-                  <div style="
-                      background: #ffffff;
-                      border-left: 4px solid #8b5cf6;
-                      border-radius: 0.5rem;
-                      padding: 1rem;
-                      display: flex;
-                      flex-direction: column;
-                      gap: 0.25rem;
-                    ">
-                    <span style="
-                        font-size: 0.75rem;
-                        text-transform: uppercase;
-                        letter-spacing: 0.05em;
-                        color: #64748b;
-                      ">
-                      chat
-                    </span>
-                    <strong style="font-size: 1.5rem; color: #0f172a;">
-                      {lift((channels: Record<string, number>) =>
-                        (channels["chat"] ?? 0).toFixed(2)
-                      )(channelAverages)}
-                    </strong>
-                  </div>
-
-                  <div style="
-                      background: #ffffff;
-                      border-left: 4px solid #ec4899;
-                      border-radius: 0.5rem;
-                      padding: 1rem;
-                      display: flex;
-                      flex-direction: column;
-                      gap: 0.25rem;
-                    ">
-                    <span style="
-                        font-size: 0.75rem;
-                        text-transform: uppercase;
-                        letter-spacing: 0.05em;
-                        color: #64748b;
-                      ">
-                      in-app
-                    </span>
-                    <strong style="font-size: 1.5rem; color: #0f172a;">
-                      {lift((channels: Record<string, number>) =>
-                        (channels["in-app"] ?? 0).toFixed(2)
-                      )(channelAverages)}
-                    </strong>
-                  </div>
-                </div>
+                {channelCards}
               </div>
 
               <div style="
                   display: flex;
                   flex-direction: column;
-                  gap: 0.75rem;
+                  gap: 0.875rem;
                 ">
                 <h3 style="
                     margin: 0;
-                    font-size: 1rem;
-                    color: #334155;
-                    font-weight: 600;
+                    font-size: 1.125rem;
+                    color: #0f172a;
+                    font-weight: 700;
                   ">
-                  Recent daily summaries
+                  📅 Recent Daily Averages (Last 7 Days)
                 </h3>
-                <div style="
-                    display: flex;
-                    flex-direction: column;
-                    gap: 0.5rem;
-                  ">
-                  {lift((summaries: readonly DailySummary[]) => {
-                    if (summaries.length === 0) {
-                      return h(
-                        "div",
-                        {
-                          style:
-                            "background: #f1f5f9; border-radius: 0.5rem; padding: 1rem; text-align: center; color: #64748b; font-size: 0.85rem;",
-                        },
-                        "No daily summaries yet",
-                      );
-                    }
-                    const recent = summaries.slice(-5);
-                    const dayCards = [];
-                    for (const day of recent) {
-                      const scoreColor = day.average >= 4.5
-                        ? "#10b981"
-                        : day.average >= 3.5
-                        ? "#f59e0b"
-                        : "#ef4444";
-                      const card = h(
-                        "div",
-                        {
-                          style:
-                            "background: #f8fafc; border-radius: 0.5rem; padding: 0.75rem; display: flex; justify-content: space-between; align-items: center;",
-                        },
-                        h(
-                          "div",
-                          {
-                            style:
-                              "display: flex; flex-direction: column; gap: 0.25rem;",
-                          },
-                          h(
-                            "span",
-                            {
-                              style:
-                                "font-size: 0.85rem; color: #334155; font-weight: 500;",
-                            },
-                            day.date,
-                          ),
-                          h(
-                            "span",
-                            { style: "font-size: 0.75rem; color: #64748b;" },
-                            String(day.responseCount) + " responses",
-                          ),
-                        ),
-                        h(
-                          "strong",
-                          {
-                            style: "font-size: 1.25rem; color: " + scoreColor +
-                              "; font-weight: 600;",
-                          },
-                          String(day.average.toFixed(2)),
-                        ),
-                      );
-                      dayCards.push(card);
-                    }
-                    return h("div", {}, ...dayCards);
-                  })(dailySummaries)}
-                </div>
+                {recentData}
               </div>
             </div>
           </ct-card>
@@ -781,39 +725,34 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
             >
               <h3 style="
                   margin: 0;
-                  font-size: 1rem;
-                  color: #334155;
-                  font-weight: 600;
+                  font-size: 1.125rem;
+                  color: #0f172a;
+                  font-weight: 700;
                 ">
-                Log new survey response
+                ➕ Log New Survey Response
               </h3>
 
               <div style="
                   display: grid;
                   grid-template-columns: repeat(2, 1fr);
-                  gap: 0.75rem;
+                  gap: 0.875rem;
                 ">
                 <div style="
                     display: flex;
                     flex-direction: column;
-                    gap: 0.4rem;
+                    gap: 0.5rem;
                   ">
-                  <label
-                    for="date-input"
-                    style="
-                      font-size: 0.85rem;
-                      font-weight: 500;
-                      color: #334155;
-                    "
-                  >
+                  <label style="
+                      font-size: 0.875rem;
+                      font-weight: 600;
+                      color: #475569;
+                    ">
                     Date (YYYY-MM-DD)
                   </label>
                   <ct-input
-                    id="date-input"
                     type="text"
                     placeholder="2024-05-04"
                     $value={dateField}
-                    aria-label="Date of survey response"
                   >
                   </ct-input>
                 </div>
@@ -821,24 +760,19 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
                 <div style="
                     display: flex;
                     flex-direction: column;
-                    gap: 0.4rem;
+                    gap: 0.5rem;
                   ">
-                  <label
-                    for="channel-input"
-                    style="
-                      font-size: 0.85rem;
-                      font-weight: 500;
-                      color: #334155;
-                    "
-                  >
+                  <label style="
+                      font-size: 0.875rem;
+                      font-weight: 600;
+                      color: #475569;
+                    ">
                     Channel
                   </label>
                   <ct-input
-                    id="channel-input"
                     type="text"
                     placeholder="Email, Chat, In-App"
                     $value={channelField}
-                    aria-label="Survey channel"
                   >
                   </ct-input>
                 </div>
@@ -846,27 +780,19 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
                 <div style="
                     display: flex;
                     flex-direction: column;
-                    gap: 0.4rem;
+                    gap: 0.5rem;
                   ">
-                  <label
-                    for="score-input"
-                    style="
-                      font-size: 0.85rem;
-                      font-weight: 500;
-                      color: #334155;
-                    "
-                  >
+                  <label style="
+                      font-size: 0.875rem;
+                      font-weight: 600;
+                      color: #475569;
+                    ">
                     Score (1-5)
                   </label>
                   <ct-input
-                    id="score-input"
                     type="number"
-                    min="1"
-                    max="5"
-                    step="0.1"
                     placeholder="4.5"
                     $value={scoreField}
-                    aria-label="Satisfaction score"
                   >
                   </ct-input>
                 </div>
@@ -874,67 +800,29 @@ export const customerSatisfactionTrackerUx = recipe<CustomerSatisfactionArgs>(
                 <div style="
                     display: flex;
                     flex-direction: column;
-                    gap: 0.4rem;
+                    gap: 0.5rem;
                   ">
-                  <label
-                    for="responses-input"
-                    style="
-                      font-size: 0.85rem;
-                      font-weight: 500;
-                      color: #334155;
-                    "
-                  >
-                    Responses count
+                  <label style="
+                      font-size: 0.875rem;
+                      font-weight: 600;
+                      color: #475569;
+                    ">
+                    # Responses
                   </label>
                   <ct-input
-                    id="responses-input"
                     type="number"
-                    min="1"
-                    step="1"
                     placeholder="20"
                     $value={responsesField}
-                    aria-label="Number of responses"
                   >
                   </ct-input>
                 </div>
               </div>
 
-              <ct-button
-                onClick={logSurveyResponseUi}
-                aria-label="Log survey response"
-              >
+              <ct-button onClick={logSurveyResponseUi}>
                 Log response
               </ct-button>
-
-              {lift((
-                action: string,
-              ) =>
-                action !== ""
-                  ? h(
-                    "div",
-                    {
-                      style:
-                        "background: #f0fdf4; border-left: 3px solid #10b981; border-radius: 0.5rem; padding: 0.75rem; font-size: 0.85rem; color: #166534;",
-                    },
-                    action,
-                  )
-                  : null
-              )(lastAction)}
             </div>
           </ct-card>
-
-          <div
-            role="status"
-            aria-live="polite"
-            data-testid="status"
-            style="
-              font-size: 0.85rem;
-              color: #475569;
-              text-align: center;
-            "
-          >
-            {summary}
-          </div>
         </div>
       ),
       responseLog,
