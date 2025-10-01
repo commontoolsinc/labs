@@ -119,7 +119,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] issue-dependency-graph
 - [x] release-checklist
 - [x] markdown-preview-toggle
-- [ ] form-wizard-stepper
+- [x] form-wizard-stepper
 - [x] shopping-cart-aggregation
 - [ ] clinical-trial-enrollment
 - [x] education-course-planner
