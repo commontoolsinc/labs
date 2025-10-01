@@ -406,15 +406,58 @@ export class CTCodeEditor extends BaseElement {
 
       // let the pattern know about the new backlink
       tx.commit();
+
+      const charmId = getEntityId(result);
+
+      // Insert the ID into the text if we have an editor
+      if (this._editorView && charmId) {
+        this._insertBacklinkId(backlinkText, charmId["/"], navigate);
+      }
+
       this.emit("backlink-create", {
         text: backlinkText,
-        charmId: getEntityId(result),
+        charmId,
         charm: result,
         navigate,
       });
     } catch (error) {
       console.error("Error creating backlink:", error);
     }
+  }
+
+  /**
+   * Insert the ID into an incomplete backlink and position cursor appropriately.
+   * Replaces [[text]] with [[text (id)]] and positions cursor after ]].
+   */
+  private _insertBacklinkId(
+    backlinkText: string,
+    id: string,
+    navigate: boolean,
+  ): void {
+    if (!this._editorView) return;
+
+    const view = this._editorView;
+    const state = view.state;
+    const doc = state.doc;
+    const content = doc.toString();
+
+    // Find the incomplete backlink: [[backlinkText]]
+    const searchPattern = `[[${backlinkText}]]`;
+    const index = content.indexOf(searchPattern);
+
+    if (index === -1) return;
+
+    // Replace with complete backlink including ID
+    const replacement = `[[${backlinkText} (${id})]]`;
+    const from = index;
+    const to = index + searchPattern.length;
+
+    view.dispatch({
+      changes: { from, to, insert: replacement },
+      selection: navigate
+        ? undefined // Keep current selection if navigating away
+        : { anchor: from + replacement.length }, // Position after ]] if staying
+    });
   }
 
   /**
