@@ -84,9 +84,13 @@ export class PassKey {
     };
 
     const publicKey: PublicKeyCredentialCreationOptions = {
-      challenge,
+      challenge: challenge as BufferSource,
       rp: { id: RP_ID(), name: RP },
-      user,
+      user: {
+        id: userId as BufferSource,
+        name,
+        displayName,
+      },
       attestation: "none", // default
       authenticatorSelection: {
         // "Resident Keys" have been renamed to "Discoverable Keys",
@@ -130,7 +134,7 @@ export class PassKey {
     const credential = (await navigator.credentials.get({
       publicKey: {
         allowCredentials,
-        challenge: random(32),
+        challenge: random(32) as BufferSource,
         rpId: RP_ID(),
         userVerification: userVerification ?? "preferred",
         extensions: { prf: { eval: { first: PRF_SALT } } },

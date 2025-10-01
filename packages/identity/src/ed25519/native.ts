@@ -59,7 +59,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
         await globalThis.crypto.subtle.sign(
           ED25519_ALG,
           this.#keypair.privateKey,
-          payload,
+          payload as BufferSource,
         ),
       );
 
@@ -76,7 +76,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     const rawPublic = await ed25519.getPublicKeyAsync(rawPrivateKey);
     const privateKey = await globalThis.crypto.subtle.importKey(
       "pkcs8",
-      pkcs8Private,
+      pkcs8Private as BufferSource,
       ED25519_ALG,
       false,
       ["sign"],
@@ -84,7 +84,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     // Set the public key to be extractable for DID generation.
     const publicKey = await globalThis.crypto.subtle.importKey(
       "raw",
-      rawPublic,
+      rawPublic as BufferSource,
       ED25519_ALG,
       true,
       [
@@ -135,8 +135,8 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
       await globalThis.crypto.subtle.verify(
         ED25519_ALG,
         this.#publicKey,
-        signature,
-        payload,
+        signature as BufferSource,
+        payload as BufferSource,
       )
     ) {
       return { ok: {} };
@@ -159,7 +159,7 @@ export class NativeEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
     // Set the public key to be extractable for DID generation.
     const publicKey = await globalThis.crypto.subtle.importKey(
       "raw",
-      rawPublicKey,
+      rawPublicKey as BufferSource,
       ED25519_ALG,
       true,
       [

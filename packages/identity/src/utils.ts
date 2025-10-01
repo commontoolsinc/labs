@@ -26,5 +26,7 @@ export function once(
 const HASH_ALG = "SHA-256";
 // Hash input via SHA-256.
 export async function hash(input: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await globalThis.crypto.subtle.digest(HASH_ALG, input));
+  return new Uint8Array(
+    await globalThis.crypto.subtle.digest(HASH_ALG, input as BufferSource),
+  );
 }
