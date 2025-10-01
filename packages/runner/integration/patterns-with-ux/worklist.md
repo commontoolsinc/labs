@@ -101,7 +101,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] recipe-ingredient-scaler
 - [x] research-citation-manager
 - [x] saved-search-subscription
-- [ ] search-relevance-tuning
+- [x] search-relevance-tuning
 - [x] security-vulnerability-tracker
 - [x] simple-counter
 - [x] sleep-journal
