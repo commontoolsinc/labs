@@ -147,6 +147,17 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- When implementing patterns that demonstrate event bubbling or stream
+  forwarding, create UI handlers that replicate the business logic rather than
+  trying to invoke the original handlers. The UI handlers should directly
+  manipulate cells and call `.send()` on streams, mirroring what the original
+  pattern does while staying in the recipe's handler scope.
+- Number inputs work well with `ct-input type="number"` bound to a string cell.
+  Handlers can read the cell value and parse it with `parseInt()` or similar,
+  applying sanitization before using the value in business logic.
+- Event history displays benefit from showing newest-first ordering using
+  `.slice().reverse()` in the lift function. Each history item can be styled
+  distinctively with border accents and badge-style amount indicators.
 - Hierarchical data structures (like org charts or tree views) can be rendered
   effectively by defining a recursive rendering function outside the recipe
   scope and calling it from within `lift`. Each level of the hierarchy can be
