@@ -1611,3 +1611,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   the normalized output prominently. Use gradient card backgrounds for weight
   displays with large monospace numbers to create visual impact and emphasize
   the current configuration.
+- For design token or theme switching patterns, use a large theme preview box
+  that dynamically updates with the current token's colors (background,
+  foreground, accent). Display the theme name prominently and show all color
+  values in monospace font for technical clarity.
+- When building token/theme switchers with history tracking, create separate
+  UI-specific handlers that replicate the business logic while adding
+  UI-specific functionality like clearing input fields after operations. This
+  keeps form inputs responsive and provides clear feedback.
+- Visual token lists work well when displaying available tokens as badges with
+  conditional styling - use bold borders and colored backgrounds for the active
+  token, subtle borders for inactive tokens. This creates immediate visual
+  feedback about which token is currently applied.
+- For patterns with cycle-through behavior (like token switching), provide both
+  a "next" button for quick cycling and a text input for direct token selection.
+  This accommodates both exploratory and targeted workflows.
+- History displays showing recent token switches should be limited to the last
+  5-6 entries displayed in reverse chronological order with left-border accents.
+  Empty states should communicate "No switches yet" rather than showing empty
+  sections.
