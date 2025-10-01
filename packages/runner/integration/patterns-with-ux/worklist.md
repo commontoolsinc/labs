@@ -141,7 +141,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] org-chart-hierarchy
 - [x] goal-progress-tracker
 - [x] counter-fallback-defaults
-- [ ] counter-nested-computed-percentages
+- [x] counter-nested-computed-percentages
 - [ ] counter-nested-computed-totals
 - [ ] counter-persistence-initial-arguments
 - [x] counter-scenario-argument-overrides
