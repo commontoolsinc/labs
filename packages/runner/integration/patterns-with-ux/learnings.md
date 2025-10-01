@@ -147,6 +147,11 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- When displaying multiple properties from a complex object (like configuration
+  settings), avoid wrapping all the JSX in a single `lift((obj) => ...)`.
+  Instead, create individual `lift` calls for each property value (e.g.,
+  `{lift((crit) => crit.minAge)(criteriaView)}`). This approach is more explicit
+  and avoids potential issues with JSX fragments in lift functions.
 - For patterns that track transitions or history, make sure to update both the
   primary state cell and the history cell within the same handler to keep
   derived boundaries in sync.
