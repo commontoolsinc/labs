@@ -96,27 +96,34 @@ const Note = recipe<Input, Output>(
     const mentioned = cell<MentionableCharm[]>([]);
 
     const computeBacklinks = lift<
-      { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
+      { allCharms: Cell<MentionableCharm[]>; content: Cell<string>; self: Cell<Output> },
       MentionableCharm[]
     >(
-      ({ allCharms, content }) => {
+      ({ allCharms, content, self }) => {
         const cs = allCharms.get();
         if (!cs) return [];
 
-        const self = cs.find((c) => c.content === content.get());
+        let results = [];
+        for (let i = 0; i < cs.length; i++) {
+          const c = cs[i];
+          if (c.mentioned?.some((m) => self.equals(allCharms.key(i)))) {
+            results.push(c);
+          }
+        }
 
-        const results = self
-          ? cs.filter((c) =>
-            c.mentioned?.some((m) => m.content === self.content) ?? false
-          )
-          : [];
+        // const results = cs.filter((c) =>
+        //   c.mentioned?.some((m) => self.equals(m)) ?? false
+        // )
 
         return results;
       },
     );
 
+    const self = derive(undefined, () => this as unknown as Output)
+
     const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
       allCharms,
+      self: self as unknown as Cell<Output>,
       content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
     });
 
