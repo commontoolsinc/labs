@@ -40,7 +40,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-hierarchical-defaults
 - [x] counter-hierarchical-key-path
 - [x] counter-history-tracker
-- [ ] counter-keyed-map
+- [x] counter-keyed-map
 - [x] counter-lift-formatting
 - [x] counter-matrix-state
 - [x] counter-mutable-tuple
