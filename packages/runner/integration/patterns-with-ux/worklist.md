@@ -111,7 +111,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] toggle-derive-label
 - [x] user-journey-map
 - [x] user-permission-matrix
-- [ ] warehouse-bin-map
+- [x] warehouse-bin-map
 - [x] workout-routine-planner
 - [x] chat-reaction-tracker
 - [ ] support-ticket-triage
