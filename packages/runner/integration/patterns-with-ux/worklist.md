@@ -42,7 +42,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-history-tracker
 - [ ] counter-keyed-map
 - [x] counter-lift-formatting
-- [ ] counter-matrix-state
+- [x] counter-matrix-state
 - [ ] counter-mutable-tuple
 - [x] counter-nested-array-objects
 - [x] counter-nested-derive-watchers
