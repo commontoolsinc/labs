@@ -155,17 +155,26 @@ export function fetchData(
     // Abort the request if it's still pending.
     abortController?.abort("Recipe stopped");
 
+    // Only try to update state if cells were initialized
+    if (!cellsInitialized) return;
+
     const tx = runtime.edit();
 
-    // If the pending request is ours, set pending to false and clear the requestId.
-    if (internal.withTx(tx).key("requestId").get() === myRequestId) {
-      pending.withTx(tx).set(false);
-      internal.withTx(tx).key("requestId").set("");
-    }
+    try {
+      // If the pending request is ours, set pending to false and clear the requestId.
+      const currentRequestId = internal.withTx(tx).key("requestId").get();
+      if (currentRequestId === myRequestId) {
+        pending.withTx(tx).set(false);
+        internal.withTx(tx).key("requestId").set("");
+      }
 
-    // Since we're aborting, don't retry. If the above fails, it's because the
-    // requestId was already changing under us.
-    tx.commit();
+      // Since we're aborting, don't retry. If the above fails, it's because the
+      // requestId was already changing under us.
+      tx.commit();
+    } catch (e) {
+      // Ignore errors during cleanup - the runtime might be shutting down
+      tx.abort();
+    }
   });
 
   return (tx: IExtendedStorageTransaction) => {
@@ -239,7 +248,7 @@ export function fetchData(
 
     // Check if inputs changed - if so, abort any in-flight request
     const currentInternal = internal.withTx(tx).get();
-    if (myRequestId && currentInternal.inputHash !== inputHash) {
+    if (myRequestId && currentInternal?.inputHash !== inputHash) {
       abortController?.abort("Inputs changed");
       myRequestId = undefined;
     }
