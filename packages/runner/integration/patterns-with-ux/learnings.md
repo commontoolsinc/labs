@@ -1689,3 +1689,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   computed dynamically based on step status (complete/active/pending). Use
   connector lines between steps that also change color based on the next step's
   status to create visual flow through the wizard progression.
+- For analytics patterns displaying aggregated metrics, use a single `lift`
+  function to compute all derived metrics (totals, percentages, top entries) at
+  once from the base data structure. This ensures all related values stay in
+  sync and avoids redundant computations.
+- When displaying ranked lists (e.g., features by usage, cohorts by usage),
+  compute percentages and sort entries inside a `lift` function, then render
+  them in a loop. Use visual highlighting (background colors, border accents) to
+  distinguish top performers from other entries.
+- For forms with multiple text inputs that need to clear after submission, call
+  `.set("")` on each cell field at the end of the handler to reset the form
+  state for the next entry.
+- When building analytics dashboards, structure the layout with clear visual
+  hierarchy: summary stats at the top (total counts, top performers), detailed
+  breakdowns in the middle (features and cohorts lists), and pattern
+  explanations at the bottom. Use gradient backgrounds to highlight key metric
+  areas.
