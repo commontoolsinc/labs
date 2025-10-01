@@ -132,7 +132,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] funnel-analytics
 - [x] survey-response-analyzer
 - [x] customer-satisfaction-tracker
-- [ ] order-fulfillment-tracker
+- [x] order-fulfillment-tracker
 - [x] compliance-checklist
 - [x] document-signature-workflow
 - [x] legal-clause-library

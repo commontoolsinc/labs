@@ -147,6 +147,14 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- When creating multiple handlers that share similar logic but read different
+  inputs (e.g., advance, cancel, reopen order actions), define each handler
+  separately at the recipe level rather than trying to parameterize a single
+  handler. Each handler can read from the same UI cell (like `selectedOrderId`)
+  and apply different business logic, keeping the pattern clean and explicit.
+- Console warnings like "unexpected object when value was expected" during
+  button clicks appear to be framework internals and don't affect functionality
+  - handlers still execute correctly and state updates propagate as expected.
 - When rendering arrays with `.map()` inside JSX, use `derive` instead of
   `lift`. The `derive` function properly handles array mapping, while `lift`
   with `.map()` causes "derive is not defined" runtime errors. Pattern:
