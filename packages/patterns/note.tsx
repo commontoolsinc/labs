@@ -101,7 +101,8 @@ const computeBacklinks = lift<
     const cs = allCharms.get();
     if (!cs) return [];
 
-    let results = [];
+    const results = [];
+    
     for (let i = 0; i < cs.length; i++) {
       const c = cs[i];
       if (c.mentioned?.some((m) => self.equals(allCharms.key(i)))) {
