@@ -1464,3 +1464,23 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For patterns tracking sessions over time, displaying entries in reverse
   chronological order (newest first) provides better UX, allowing users to see
   their most recent activity immediately without scrolling to the bottom.
+- For incident response or operational playbook patterns, use color-coded status
+  badges (green for complete, blue for in_progress, red for blocked, gray for
+  pending) with matching progress bars to create clear visual hierarchy. Card
+  backgrounds can change dynamically (red background for stalled steps) to
+  immediately draw attention to items needing escalation.
+- When building playbook UIs with multiple step statuses, derive escalation
+  state from elapsed vs. expected time thresholds. Display escalation status
+  prominently with gradient backgrounds that shift color (green for clear, red
+  for required) to provide at-a-glance incident health visibility.
+- Progress bars showing time elapsed vs. expected time work well with dynamic
+  color coding that matches the status badge color. This creates visual
+  consistency across the card while making progress immediately scannable.
+- For workflow patterns with HTML select dropdowns, use the standard `onChange`
+  event with `e.target.value` to update cell state rather than trying to bind
+  `$value` directly to select elements. The `ct-select` component isn't
+  available, so native select works better for status/option selection.
+- Activity timelines displaying recent actions in reverse chronological order
+  with left-border accents provide excellent context for operational patterns.
+  Limiting display to last 8 entries prevents clutter while maintaining useful
+  audit trail visibility.

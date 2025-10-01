@@ -82,7 +82,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] experiment-assignment
 - [ ] feature-usage-analytics
 - [x] heatmap-aggregation
-- [ ] incident-response-playbook
+- [x] incident-response-playbook
 - [x] inventory-reorder-threshold
 - [ ] invoice-generator
 - [x] kanban-board-grouping
