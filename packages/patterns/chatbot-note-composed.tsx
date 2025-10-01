@@ -172,11 +172,13 @@ const readNoteByIndex = handler<
     index: number;
     result: Cell<string>;
   },
-  { allCharms: { [NAME]: string, content?: string }[] }
+  { allCharms: { [NAME]: string; content?: string }[] }
 >(
   (args, state) => {
     try {
-      args.result.set(state.allCharms[args.index]?.content || "No content found");
+      args.result.set(
+        state.allCharms[args.index]?.content || "No content found",
+      );
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
@@ -202,7 +204,7 @@ const editNoteByIndex = handler<
         return;
       }
 
-      state.allCharms.key(args.index).key('content').set(args.body);
+      state.allCharms.key(args.index).key("content").set(args.body);
       args.result.set(`Updated note at index ${args.index}!`);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
@@ -282,7 +284,8 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         handler: readNote({ content }),
       },
       listNotes: {
-        description: "List all mentionable note titles (read the body with readNoteByIndex).",
+        description:
+          "List all mentionable note titles (read the body with readNoteByIndex).",
         inputSchema: {
           type: "object",
           properties: {},
@@ -293,7 +296,8 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         }),
       },
       readNoteByIndex: {
-        description: "Read the body of a note by its index in the listNotes() list.",
+        description:
+          "Read the body of a note by its index in the listNotes() list.",
         inputSchema: {
           type: "object",
           properties: {
@@ -309,7 +313,8 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         }),
       },
       editNoteByIndex: {
-        description: "Edit the body of a note by its index in the listNotes() list.",
+        description:
+          "Edit the body of a note by its index in the listNotes() list.",
         inputSchema: {
           type: "object",
           properties: {
