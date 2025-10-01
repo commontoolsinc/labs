@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter } from "./types.ts";
+import type { Emitter } from "../types.ts";
 
 const isContainerExpression = (expression: ts.Expression): boolean => {
   return ts.isObjectLiteralExpression(expression) ||

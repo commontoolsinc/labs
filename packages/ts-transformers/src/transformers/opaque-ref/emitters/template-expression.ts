@@ -1,20 +1,19 @@
 import ts from "typescript";
 
-import type { OpaqueRefHelperName } from "../transforms.ts";
-import type { Emitter, EmitterResult } from "./types.ts";
-import { createBindingPlan } from "./bindings.ts";
+import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
-} from "./helpers.ts";
+} from "../helpers.ts";
 
-export const emitBinaryExpression: Emitter = ({
+export const emitTemplateExpression: Emitter = ({
   expression,
   dataFlows,
   analysis,
   context,
 }) => {
-  if (!ts.isBinaryExpression(expression)) return undefined;
+  if (!ts.isTemplateExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
 
   const relevantDataFlows = filterRelevantDataFlows(

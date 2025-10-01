@@ -1,13 +1,16 @@
 import ts from "typescript";
 
-import type { OpaqueRefHelperName } from "../transforms.ts";
-import type { EmitterParams, EmitterResult } from "./types.ts";
-import { createBindingPlan } from "./bindings.ts";
+import type {
+  EmitterParams,
+  EmitterResult,
+  OpaqueRefHelperName,
+} from "../types.ts";
+import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
-} from "./helpers.ts";
-import { isSafeEventHandlerCall } from "./event-handlers.ts";
+} from "../helpers.ts";
+import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
 
 export function emitPropertyAccess(
   params: EmitterParams,

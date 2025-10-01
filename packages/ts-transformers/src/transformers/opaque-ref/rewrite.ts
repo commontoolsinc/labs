@@ -1,21 +1,23 @@
 import ts from "typescript";
 
-import { normalizeDataFlows } from "../normalize.ts";
+import { normalizeDataFlows } from "../../ast/mod.ts";
 import type {
   Emitter,
   EmitterContext,
   EmitterResult,
+  OpaqueRefHelperName,
   RewriteParams,
 } from "./types.ts";
-import { emitPropertyAccess } from "./property-access.ts";
-import { emitBinaryExpression } from "./binary-expression.ts";
-import { emitCallExpression } from "./call-expression.ts";
-import { emitTemplateExpression } from "./template-expression.ts";
-import { emitConditionalExpression } from "./conditional-expression.ts";
-import { emitElementAccessExpression } from "./element-access-expression.ts";
-import { emitContainerExpression } from "./container-expression.ts";
-import { emitPrefixUnaryExpression } from "./prefix-unary-expression.ts";
-import type { OpaqueRefHelperName } from "../transforms.ts";
+import {
+  emitBinaryExpression,
+  emitCallExpression,
+  emitConditionalExpression,
+  emitContainerExpression,
+  emitElementAccessExpression,
+  emitPrefixUnaryExpression,
+  emitPropertyAccess,
+  emitTemplateExpression,
+} from "./emitters/mod.ts";
 
 const EMITTERS: readonly Emitter[] = [
   emitPropertyAccess,

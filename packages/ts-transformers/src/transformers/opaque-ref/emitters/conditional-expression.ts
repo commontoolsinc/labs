@@ -1,15 +1,14 @@
 import ts from "typescript";
 
-import type { OpaqueRefHelperName } from "../transforms.ts";
-import { createIfElseCall } from "../transforms.ts";
-import { selectDataFlowsWithin } from "../normalize.ts";
-import { isSimpleOpaqueRefAccess } from "../types.ts";
-import type { Emitter } from "./types.ts";
-import { createBindingPlan } from "./bindings.ts";
+import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import { createIfElseCall } from "../builtins.ts";
+import { selectDataFlowsWithin } from "../../../ast/mod.ts";
+import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
+import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
-} from "./helpers.ts";
+} from "../helpers.ts";
 
 export const emitConditionalExpression: Emitter = ({
   expression,

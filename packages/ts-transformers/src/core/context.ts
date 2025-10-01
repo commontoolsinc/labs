@@ -1,28 +1,12 @@
 import ts from "typescript";
 import { ImportRequirements } from "./imports.ts";
+import {
+  DiagnosticInput,
+  TransformationDiagnostic,
+  TransformationOptions,
+} from "./types.ts";
 
-export type TransformMode = "transform" | "error";
-
-export interface TransformationOptions {
-  readonly mode?: TransformMode;
-  readonly debug?: boolean;
-}
-
-export interface TransformationDiagnostic {
-  readonly type: string;
-  readonly message: string;
-  readonly fileName: string;
-  readonly line: number;
-  readonly column: number;
-}
-
-export interface DiagnosticInput {
-  readonly type: string;
-  readonly message: string;
-  readonly node: ts.Node;
-}
-
-const DEFAULT_OPTIONS: Required<TransformationOptions> = {
+const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
   debug: false,
 };
@@ -40,14 +24,16 @@ export class TransformationContext {
   readonly checker: ts.TypeChecker;
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
-  readonly options: Required<TransformationOptions>;
+  readonly options: TransformationOptions;
   readonly imports: ImportRequirements;
   readonly diagnostics: TransformationDiagnostic[] = [];
+  readonly transformation: ts.TransformationContext;
   #typeCache = new Map<ts.Node, ts.Type>();
 
   constructor(config: TransformationContextConfig) {
     this.program = config.program;
     this.checker = config.program.getTypeChecker();
+    this.transformation = config.transformation;
     this.factory = config.transformation.factory;
     this.sourceFile = config.sourceFile;
     this.imports = config.imports ?? new ImportRequirements();
@@ -57,6 +43,7 @@ export class TransformationContext {
     };
   }
 
+  // Currently unused function
   getType(node: ts.Node): ts.Type {
     const cached = this.#typeCache.get(node);
     if (cached) {

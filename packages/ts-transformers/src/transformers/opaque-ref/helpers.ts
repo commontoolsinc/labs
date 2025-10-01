@@ -1,12 +1,15 @@
 import ts from "typescript";
 
-import { createDeriveCall } from "../transforms.ts";
-import { detectCallKind } from "../call-kind.ts";
+import { createDeriveCall } from "./builtins.ts";
+import {
+  type DataFlowAnalysis,
+  detectCallKind,
+  type NormalizedDataFlow,
+} from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
 import type { RewriteContext } from "./types.ts";
-import type { NormalizedDataFlow } from "../normalize.ts";
-import type { DataFlowAnalysis } from "../dataflow.ts";
-import { isFunctionParameter } from "../types.ts";
+import { getHelperIdentifier } from "./import-resolver.ts";
+import { isFunctionParameter } from "../../ast/mod.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,

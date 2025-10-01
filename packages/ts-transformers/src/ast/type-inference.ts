@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isOpaqueRefType } from "./types.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 /**
  * Type inference utilities for function signatures

@@ -2,10 +2,11 @@ import ts from "typescript";
 import { join } from "@std/path";
 import { StaticCache } from "@commontools/static";
 import {
-  createModularOpaqueRefTransformer,
-  createSchemaTransformer,
-} from "../src/mod.ts";
-import { TypeRegistry } from "../src/core/type-registry.ts";
+  createOpaqueRefJSXTransformer,
+  createSchemaGeneratorTransformer,
+  createSchemaInjectionTransformer,
+} from "../src/transformers/mod.ts";
+import { TypeRegistry } from "../src/core/mod.ts";
 import { assert } from "@std/assert";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
@@ -17,8 +18,9 @@ export interface TransformOptions {
   mode?: "transform" | "error";
   types?: Record<string, string>;
   logger?: (message: string) => void;
-  applySchemaTransformer?: boolean;
-  applyOpaqueRefTransformer?: boolean;
+  applySchemaInjectionTransformer?: boolean;
+  applyOpaqueRefJSXTransformer?: boolean;
+  applySchemaGeneratorTransformer?: boolean;
   before?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
   after?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
 }
@@ -31,8 +33,9 @@ export async function transformSource(
     mode = "transform",
     types = {},
     logger,
-    applySchemaTransformer = false,
-    applyOpaqueRefTransformer = true,
+    applySchemaInjectionTransformer = true,
+    applyOpaqueRefJSXTransformer = true,
+    applySchemaGeneratorTransformer = false,
     before = [],
     after = [],
   } = options;
@@ -174,13 +177,20 @@ export async function transformSource(
   const transformers: ts.TransformerFactory<ts.SourceFile>[] = [
     ...beforeTransformers,
   ];
-  if (applyOpaqueRefTransformer) {
+  if (applySchemaInjectionTransformer) {
     transformers.push(
-      createModularOpaqueRefTransformer(program, { mode, typeRegistry }),
+      createSchemaInjectionTransformer(program, { mode, typeRegistry }),
     );
   }
-  if (applySchemaTransformer) {
-    transformers.push(createSchemaTransformer(program, { typeRegistry }));
+  if (applyOpaqueRefJSXTransformer) {
+    transformers.push(
+      createOpaqueRefJSXTransformer(program, { mode, typeRegistry }),
+    );
+  }
+  if (applySchemaGeneratorTransformer) {
+    transformers.push(
+      createSchemaGeneratorTransformer(program, { typeRegistry }),
+    );
   }
   transformers.push(...afterTransformers);
 
