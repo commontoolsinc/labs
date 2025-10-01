@@ -42,7 +42,7 @@ describe("OpaqueRef map callbacks", () => {
   it("derives map callback parameters and unary negations", async () => {
     const output = await transformSource(SOURCE, {
       types: { "commontools.d.ts": commontools },
-      applySchemaTransformer: true,
+      applySchemaGeneratorTransformer: true,
     });
 
     assertStringIncludes(

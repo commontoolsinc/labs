@@ -4,7 +4,7 @@ import { assert, assertEquals } from "@std/assert";
 import {
   normalizeDataFlows,
   selectDataFlowsWithin,
-} from "../../src/opaque-ref/normalize.ts";
+} from "../../src/ast/mod.ts";
 import { analyzeExpression } from "./harness.ts";
 
 describe("normalizeDataFlows", () => {

@@ -2,18 +2,13 @@ import ts from "typescript";
 import {
   TransformationContext,
   type TransformationOptions,
-} from "../core/context.ts";
+  type TypeRegistry,
+} from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
-import type { TypeRegistry } from "../core/type-registry.ts";
 
-export interface SchemaTransformerOptions extends TransformationOptions {
-  logger?: (message: string) => void;
-  typeRegistry?: TypeRegistry;
-}
-
-export function createSchemaTransformer(
+export function createSchemaGeneratorTransformer(
   program: ts.Program,
-  options: SchemaTransformerOptions = {},
+  options: TransformationOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
   const logger = options.logger;

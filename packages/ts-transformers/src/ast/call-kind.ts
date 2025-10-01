@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { isCommonToolsDeclaration } from "../core/common-tools-symbols.ts";
+import { isCommonToolsSymbol } from "../core/mod.ts";
 
 const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
@@ -154,15 +154,15 @@ function resolveSymbolKind(
     }
   }
 
-  if (name === "ifElse" && symbolIsCommonTools(resolved)) {
+  if (name === "ifElse" && isCommonToolsSymbol(resolved)) {
     return { kind: "ifElse", symbol: resolved };
   }
 
-  if (name === "derive" && symbolIsCommonTools(resolved)) {
+  if (name === "derive" && isCommonToolsSymbol(resolved)) {
     return { kind: "derive", symbol: resolved };
   }
 
-  if (BUILDER_SYMBOL_NAMES.has(name) && symbolIsCommonTools(resolved)) {
+  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
@@ -269,9 +269,4 @@ function getSignatureSymbol(signature: ts.Signature): ts.Symbol | undefined {
   // deno-lint-ignore no-explicit-any
   const declWithSymbol = declaration as any;
   return declWithSymbol.symbol as ts.Symbol | undefined;
-}
-
-function symbolIsCommonTools(symbol: ts.Symbol): boolean {
-  const declarations = symbol.declarations ?? [];
-  return declarations.some(isCommonToolsDeclaration);
 }

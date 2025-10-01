@@ -6,11 +6,18 @@ const COMMONTOOLS_DECLARATION = "commontools.d.ts";
 /**
  * Checks if a declaration comes from the CommonTools library
  */
-export function isCommonToolsDeclaration(
-  declaration: ts.Declaration,
+export function isCommonToolsSymbol(
+  symbol: ts.Symbol,
 ): boolean {
-  const fileName = declaration.getSourceFile().fileName.replace(/\\/g, "/");
-  return fileName.endsWith(COMMONTOOLS_DECLARATION);
+  const declarations = symbol.getDeclarations();
+  if (
+    declarations && declarations[0]
+  ) {
+    const source = declarations[0].getSourceFile();
+    const fileName = source.fileName.replace(/\\/g, "/");
+    return fileName.endsWith(COMMONTOOLS_DECLARATION);
+  }
+  return false;
 }
 
 /**
@@ -26,8 +33,7 @@ export function resolvesToCommonToolsSymbol(
   seen.add(symbol);
 
   if (symbol.getName() === targetName) {
-    const declarations = symbol.getDeclarations();
-    if (declarations && declarations.some(isCommonToolsDeclaration)) {
+    if (isCommonToolsSymbol(symbol)) {
       return true;
     }
   }
@@ -65,57 +71,6 @@ export function resolvesToCommonToolsSymbol(
   }
 
   return false;
-}
-
-/**
- * Helper to resolve the base type of an expression
- */
-function resolveBaseType(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): ts.Type | undefined {
-  let baseType = checker.getTypeAtLocation(expression);
-  if (baseType.flags & ts.TypeFlags.Any) {
-    const baseSymbol = checker.getSymbolAtLocation(expression);
-    if (baseSymbol) {
-      const resolved = checker.getTypeOfSymbolAtLocation(
-        baseSymbol,
-        expression,
-      );
-      if (resolved) {
-        baseType = resolved;
-      }
-    }
-  }
-  return baseType;
-}
-
-/**
- * Gets the symbol for a property or element access expression
- */
-export function getMemberSymbol(
-  expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
-  checker: ts.TypeChecker,
-): ts.Symbol | undefined {
-  if (ts.isPropertyAccessExpression(expression)) {
-    const direct = checker.getSymbolAtLocation(expression.name);
-    if (direct) return direct;
-    const baseType = resolveBaseType(expression.expression, checker);
-    if (!baseType) return undefined;
-    return baseType.getProperty(expression.name.text);
-  }
-
-  if (
-    ts.isElementAccessExpression(expression) &&
-    expression.argumentExpression &&
-    ts.isStringLiteralLike(expression.argumentExpression)
-  ) {
-    const baseType = resolveBaseType(expression.expression, checker);
-    if (!baseType) return undefined;
-    return baseType.getProperty(expression.argumentExpression.text);
-  }
-
-  return checker.getSymbolAtLocation(expression) ?? undefined;
 }
 
 /**

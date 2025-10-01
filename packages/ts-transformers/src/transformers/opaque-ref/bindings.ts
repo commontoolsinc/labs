@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { NormalizedDataFlow } from "../normalize.ts";
+import type { NormalizedDataFlow } from "../../ast/mod.ts";
 
 export interface BindingPlanEntry {
   readonly dataFlow: NormalizedDataFlow;

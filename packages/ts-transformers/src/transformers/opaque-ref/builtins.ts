@@ -3,13 +3,13 @@ import {
   containsOpaqueRef,
   isOpaqueRefType,
   isSimpleOpaqueRefAccess,
-} from "./types.ts";
+} from "./opaque-ref.ts";
 import {
   createDataFlowAnalyzer,
   type DataFlowAnalysis,
   dedupeExpressions,
-} from "./dataflow.ts";
-import { getHelperIdentifier } from "./rewrite/import-resolver.ts";
+} from "../../ast/mod.ts";
+import { getHelperIdentifier } from "./import-resolver.ts";
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 
@@ -50,32 +50,6 @@ export interface IfElseOverrides {
   readonly predicate?: ts.Expression;
   readonly whenTrue?: ts.Expression;
   readonly whenFalse?: ts.Expression;
-}
-
-export function createIfElseCall(
-  ternary: ts.ConditionalExpression,
-  factory: ts.NodeFactory,
-  sourceFile: ts.SourceFile,
-  overrides: IfElseOverrides = {},
-): ts.CallExpression {
-  const ifElseIdentifier = getHelperIdentifier(factory, sourceFile, "ifElse");
-
-  let predicate = overrides.predicate ?? ternary.condition;
-  let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
-  let whenFalse = overrides.whenFalse ?? ternary.whenFalse;
-  while (ts.isParenthesizedExpression(predicate)) {
-    predicate = predicate.expression;
-  }
-  while (ts.isParenthesizedExpression(whenTrue)) whenTrue = whenTrue.expression;
-  while (ts.isParenthesizedExpression(whenFalse)) {
-    whenFalse = whenFalse.expression;
-  }
-
-  return factory.createCallExpression(
-    ifElseIdentifier,
-    undefined,
-    [predicate, whenTrue, whenFalse],
-  );
 }
 
 function getSimpleName(ref: ts.Expression): string | undefined {
@@ -423,4 +397,36 @@ export function transformExpressionWithOpaqueRef(
   }
 
   return expression;
+}
+
+export interface IfElseOverrides {
+  readonly predicate?: ts.Expression;
+  readonly whenTrue?: ts.Expression;
+  readonly whenFalse?: ts.Expression;
+}
+
+export function createIfElseCall(
+  ternary: ts.ConditionalExpression,
+  factory: ts.NodeFactory,
+  sourceFile: ts.SourceFile,
+  overrides: IfElseOverrides = {},
+): ts.CallExpression {
+  const ifElseIdentifier = getHelperIdentifier(factory, sourceFile, "ifElse");
+
+  let predicate = overrides.predicate ?? ternary.condition;
+  let whenTrue = overrides.whenTrue ?? ternary.whenTrue;
+  let whenFalse = overrides.whenFalse ?? ternary.whenFalse;
+  while (ts.isParenthesizedExpression(predicate)) {
+    predicate = predicate.expression;
+  }
+  while (ts.isParenthesizedExpression(whenTrue)) whenTrue = whenTrue.expression;
+  while (ts.isParenthesizedExpression(whenFalse)) {
+    whenFalse = whenFalse.expression;
+  }
+
+  return factory.createCallExpression(
+    ifElseIdentifier,
+    undefined,
+    [predicate, whenTrue, whenFalse],
+  );
 }

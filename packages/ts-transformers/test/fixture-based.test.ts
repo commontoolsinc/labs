@@ -19,20 +19,20 @@ const configs: FixtureConfig[] = [
   {
     directory: "ast-transform",
     describe: "AST Transformation",
-    transformerOptions: { applySchemaTransformer: true },
+    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
   {
     directory: "handler-schema",
     describe: "Handler Schema Transformation",
-    transformerOptions: { applySchemaTransformer: true },
+    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
   {
     directory: "jsx-expressions",
     describe: "JSX Expression Transformer",
     transformerOptions: {
-      applySchemaTransformer: true,
+      applySchemaGeneratorTransformer: true,
     },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
@@ -45,7 +45,7 @@ const configs: FixtureConfig[] = [
   {
     directory: "schema-transform",
     describe: "Schema Transformer",
-    transformerOptions: { applySchemaTransformer: true },
+    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
       if (name === "with-opaque-ref") return "works with OpaqueRef transformer";

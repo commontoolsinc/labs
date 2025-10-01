@@ -1,11 +1,8 @@
 import ts from "typescript";
 
-import {
-  getMemberSymbol,
-  isFunctionParameter,
-  isOpaqueRefType,
-  symbolDeclaresCommonToolsDefault,
-} from "./types.ts";
+import { getMemberSymbol, isFunctionParameter } from "./utils.ts";
+import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { detectCallKind } from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {

@@ -1,8 +1,8 @@
 import ts from "typescript";
 
-import type { DataFlowAnalysis } from "../dataflow.ts";
-import type { NormalizedDataFlowSet } from "../normalize.ts";
-import type { OpaqueRefHelperName } from "../transforms.ts";
+import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
+
+export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
 
 export interface RewriteContext {
   readonly factory: ts.NodeFactory;

@@ -1,8 +1,10 @@
 import * as ts from "typescript";
-import { hasCtsEnableDirective } from "./cts-directive.ts";
-import { createModularOpaqueRefTransformer } from "./opaque-ref/transformer.ts";
-import { createSchemaTransformer } from "./schema/schema-transformer.ts";
-import { TypeRegistry } from "./core/type-registry.ts";
+import { hasCtsEnableDirective } from "./core/cts-directive.ts";
+import {
+  createOpaqueRefJSXTransformer,
+  createSchemaGeneratorTransformer,
+  createSchemaInjectionTransformer,
+} from "./transformers/mod.ts";
 
 export function commonTypeScriptTransformer(
   program: ts.Program,
@@ -19,7 +21,8 @@ export function commonTypeScriptTransformer(
   const typeRegistry = new WeakMap<ts.Node, ts.Type>();
 
   return [
-    createModularOpaqueRefTransformer(program, { typeRegistry }),
-    createSchemaTransformer(program, { typeRegistry }),
+    createSchemaInjectionTransformer(program, { typeRegistry }),
+    createOpaqueRefJSXTransformer(program, { typeRegistry }),
+    createSchemaGeneratorTransformer(program, { typeRegistry }),
   ];
 }
