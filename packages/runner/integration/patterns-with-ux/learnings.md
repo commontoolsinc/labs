@@ -1655,3 +1655,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   `counter1IsSelected`) using `lift` with the selection index. Then use these
   booleans to compute dynamic styles (colors, badges) that update reactively as
   the selection changes.
+- For multi-step wizard patterns with dynamic field visibility, use conditional
+  display with `lift` to show/hide step content based on the active step index.
+  Computing a display string (e.g., "step1", "step2") and binding it to style
+  attributes with ternary operators
+  (`display === "step1" ? "display: block;" :
+  "display: none;"`) provides
+  clean step transitions.
+- When building multi-step forms with ct-input elements, place the input
+  elements directly in JSX outside of `lift` functions to ensure proper `$value`
+  binding. The `$value` attribute doesn't work correctly when ct-input is
+  created with `h()` inside a `lift` function, as it renders as "[object
+  Object]" instead of binding to the cell properly.
+- Step indicator visualizations with numbered circles work well when colors are
+  computed dynamically based on step status (complete/active/pending). Use
+  connector lines between steps that also change color based on the next step's
+  status to create visual flow through the wizard progression.
