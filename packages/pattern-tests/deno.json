@@ -8,5 +8,8 @@
     "rules": {
       "exclude": ["ban-types"]
     }
+  },
+  "exports": {
+    ".": "./mod.ts"
   }
 }

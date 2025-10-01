@@ -149,7 +149,7 @@ const normalizeId = (value: string): string =>
     .replace(/^-+/, "").replace(/-+$/, "");
 
 const ensureUniqueId = (candidate: string, used: Set<string>): string => {
-  let base = candidate.length > 0 ? candidate : "item";
+  const base = candidate.length > 0 ? candidate : "item";
   if (!used.has(base)) {
     used.add(base);
     return base;
