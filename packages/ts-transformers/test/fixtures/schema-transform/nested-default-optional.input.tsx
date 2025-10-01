@@ -15,7 +15,6 @@ interface NestedOptionalState {
 }
 
 interface NestedOptionalArgs {
-  // deno-lint-ignore ban-types
   state: Default<NestedOptionalState, {}>;
 }
 

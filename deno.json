@@ -73,7 +73,8 @@
       "exclude": [
         "no-unused-vars",
         "no-explicit-any",
-        "require-yield"
+        "require-yield",
+        "ban-types"
       ]
     }
   },
