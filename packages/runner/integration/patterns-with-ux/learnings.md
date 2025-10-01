@@ -1350,3 +1350,22 @@ Add short notes after each run so the next agent can build on proven approaches.
   capacity validation, duplicate bin checking, and history message formatting.
   Clear form fields after successful operations to provide immediate UX feedback
   that the relocation completed.
+- For library/catalog patterns with multi-dimensional filtering (topic, region,
+  status), separating the filter display (showing available options with counts)
+  from filter application (form inputs) creates clear UX. Display filter options
+  as color-coded badges that show active state with distinct borders and
+  backgrounds, while keeping filter controls in a separate section below.
+- When building UIs with both dynamic content (rendered with `h()` in `lift`)
+  and form inputs (requiring `$value` bindings), create separate lifted sections
+  for each concern: one lift for headers/summaries, one for filter badges, one
+  for the main content list. Then compose them with JSX at the recipe level
+  where form inputs are defined, allowing proper `$value` binding to work
+  correctly.
+- Legal/compliance library patterns benefit from prominent summary metrics at
+  the top showing categorical breakdowns (approved/draft/deprecated counts).
+  Using a gradient header with large numbers creates visual impact and helps
+  users understand the overall state distribution at a glance.
+- For status update patterns that modify items by ID, displaying the item ID in
+  monospace font within each card helps users copy the exact value needed for
+  the update form. Clear form fields with `.set("")` after successful updates
+  provides immediate feedback and prepares for the next operation.

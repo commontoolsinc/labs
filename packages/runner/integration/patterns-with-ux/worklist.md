@@ -135,7 +135,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] order-fulfillment-tracker
 - [x] compliance-checklist
 - [x] document-signature-workflow
-- [ ] legal-clause-library
+- [x] legal-clause-library
 - [x] procurement-request
 - [ ] vendor-risk-assessment
 - [ ] org-chart-hierarchy
