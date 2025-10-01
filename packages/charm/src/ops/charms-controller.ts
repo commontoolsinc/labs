@@ -120,11 +120,11 @@ export class CharmsController<T = unknown> {
     };
 
     const runtime = new Runtime({
+      apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
         address: new URL("/api/storage/memory", apiUrl),
       }),
-      blobbyServerUrl: apiUrl.toString(),
     });
 
     const manager = new CharmManager(session, runtime);

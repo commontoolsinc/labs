@@ -20,11 +20,11 @@ console.log("\n=== TEST: Simple object persistence ===");
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
   const provider1: Provider =
     (runtime1.storageManager.open(identity.did()) as any).provider;
@@ -60,11 +60,11 @@ async function test() {
 
   // Second runtime - fetch data
   const runtime2 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
 
   const provider2: Provider =

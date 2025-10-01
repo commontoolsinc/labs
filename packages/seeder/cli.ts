@@ -54,7 +54,7 @@ const runtime = new Runtime({
     address: new URL("/api/storage/memory", apiUrl),
     as: session.as,
   }),
-  blobbyServerUrl: apiUrl,
+  apiUrl: new URL(apiUrl),
 });
 
 const charmManager = new CharmManager(session, runtime);
