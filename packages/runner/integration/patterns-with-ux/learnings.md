@@ -147,6 +147,15 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- For leaderboard/ranking UIs, use emoji badges (🥇🥈🥉) for top positions and
+  `#N` format for others. Compute colors dynamically based on score thresholds
+  to provide instant visual feedback about lead quality or performance levels.
+- When displaying complex breakdowns (like signal contributions in scoring),
+  nest them within each list item rather than creating separate sections. This
+  keeps related information together and makes the UI more scannable.
+- Grid layouts with `grid-template-columns: repeat(auto-fit, minmax(..., 1fr))`
+  work well for metric cards that need to wrap responsively on mobile while
+  maintaining equal widths on desktop.
 - When displaying multiple properties from a complex object (like configuration
   settings), avoid wrapping all the JSX in a single `lift((obj) => ...)`.
   Instead, create individual `lift` calls for each property value (e.g.,
