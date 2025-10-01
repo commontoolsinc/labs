@@ -1427,3 +1427,19 @@ Add short notes after each run so the next agent can build on proven approaches.
 - Task sorting that prioritizes required items over optional ones helps users
   focus on critical work first. Combining this with visual distinction (colored
   borders or badges) creates clear hierarchy in task lists.
+- For support ticket triage patterns with queue aggregation, use color-coded
+  status badges on queue summary cards (green for stable, red for critical) to
+  provide immediate visual feedback about queue health. Display key metrics
+  (open count, unassigned count, nearest SLA deadline) in a grid layout within
+  each queue card for comprehensive at-a-glance status.
+- When building triage UIs with multiple action types (assign, escalate), use a
+  two-column form layout to separate different operations visually while sharing
+  common input fields like ticket ID. This keeps the interface compact while
+  supporting multiple distinct workflows.
+- Priority-based visual hierarchy works well for ticket lists: use colored left
+  borders on ticket cards (red for urgent, orange for high, yellow for medium,
+  gray for low) to create instant visual prioritization without requiring users
+  to read priority labels first.
+- For SLA deadline visualization, use dynamic color coding based on remaining
+  time thresholds (e.g., red for ≤4h) to highlight tickets approaching their
+  deadlines. This helps support teams identify urgent tickets at a glance.
