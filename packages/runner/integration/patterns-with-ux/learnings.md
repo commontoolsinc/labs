@@ -1407,3 +1407,23 @@ Add short notes after each run so the next agent can build on proven approaches.
   child-derived values and bind child-exposed handlers directly in the parent
   UI. This demonstrates how recipe composition allows parent UIs to interact
   with both parent-level and child-level state and actions.
+- For checklist/task management patterns with status tracking, use color-coded
+  status badges that clearly distinguish between different states (green for
+  done, blue for in_progress, red for blocked, gray for pending). Combining
+  these with conditional borders on task cards helps reinforce the visual state
+  at a glance.
+- When displaying collections of items with multiple optional fields (owner,
+  note), use conditional rendering with ternary operators that return `null`
+  when the field is not present. This keeps the UI clean without showing empty
+  placeholder text.
+- Progress indicators that combine percentage completion with a visual progress
+  bar create strong at-a-glance feedback. Computing the percentage dynamically
+  from derived stats and binding it to the progress bar width with `lift`
+  ensures the visualization stays synchronized with state changes.
+- For patterns with gating logic (e.g., release readiness based on required
+  tasks), display both the blocking items and the overall status prominently in
+  the header. This helps users understand what needs to be completed before
+  proceeding.
+- Task sorting that prioritizes required items over optional ones helps users
+  focus on critical work first. Combining this with visual distinction (colored
+  borders or badges) creates clear hierarchy in task lists.

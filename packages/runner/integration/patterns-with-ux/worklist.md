@@ -117,7 +117,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] support-ticket-triage
 - [x] workflow-state-machine
 - [ ] issue-dependency-graph
-- [ ] release-checklist
+- [x] release-checklist
 - [x] markdown-preview-toggle
 - [ ] form-wizard-stepper
 - [x] shopping-cart-aggregation
