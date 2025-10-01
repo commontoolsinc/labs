@@ -74,7 +74,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] counter-with-reference-equality-assertions
 - [x] crm-pipeline
 - [x] currency-conversion
-- [ ] design-token-switcher
+- [x] design-token-switcher
 - [x] double-counter-shared-increment
 - [x] echo
 - [x] email-inbox-threading
