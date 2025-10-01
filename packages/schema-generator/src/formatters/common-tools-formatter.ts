@@ -6,8 +6,10 @@ import type {
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 
+type WrapperKind = "Cell" | "Stream" | "OpaqueRef";
+
 /**
- * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
+ * Formatter for Common Tools specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
  *
  * TypeScript handles alias resolution automatically and we don't need to
  * manually traverse alias chains.
@@ -33,19 +35,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Then handle Cell/Stream via resolved type (works for direct and aliased)
-    if (type.flags & ts.TypeFlags.Object) {
-      const objectType = type as ts.ObjectType;
-      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-        const typeRef = objectType as ts.TypeReference;
-        const resolvedName = typeRef.target?.symbol?.name;
-        if (resolvedName === "Cell" || resolvedName === "Stream") {
-          return true;
-        }
-      }
-    }
-
-    return false;
+    // Check if this is a wrapper type (Cell/Stream/OpaqueRef)
+    return this.getWrapperTypeInfo(type) !== undefined;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
@@ -61,37 +52,28 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Determine wrapper kind using resolved type for Cell/Stream
-    let resolvedTypename: string | undefined;
-    if (type.flags & ts.TypeFlags.Object) {
-      const objectType = type as ts.ObjectType;
-      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-        const typeRef = objectType as ts.TypeReference;
-        resolvedTypename = typeRef.target?.symbol?.name;
-      }
-    }
-
-    // Handle Cell/Stream using unified wrapper path
-    if (resolvedTypename === "Cell" || resolvedTypename === "Stream") {
-      return this.formatCellOrStream(
-        type as ts.TypeReference,
+    // Get wrapper type information (Cell/Stream/OpaqueRef)
+    const wrapperInfo = this.getWrapperTypeInfo(type);
+    if (wrapperInfo) {
+      return this.formatWrapperType(
+        wrapperInfo.typeRef,
         n,
         context,
-        resolvedTypename === "Stream",
+        wrapperInfo.kind,
       );
     }
 
     const nodeName = this.getTypeRefIdentifierName(n);
     throw new Error(
-      `Unexpected CommonTools type: ${nodeName || resolvedTypename}`,
+      `Unexpected CommonTools type: ${nodeName}`,
     );
   }
 
-  private formatCellOrStream(
+  private formatWrapperType(
     typeRef: ts.TypeReference,
     typeRefNode: ts.TypeNode | undefined,
     context: GenerationContext,
-    asStream: boolean,
+    wrapperKind: WrapperKind,
   ): SchemaDefinition {
     const innerTypeFromType = typeRef.typeArguments?.[0];
     const innerTypeNode = typeRefNode && ts.isTypeReferenceNode(typeRefNode)
@@ -105,7 +87,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
     if (!innerType) {
       throw new Error(
-        `${asStream ? "Stream" : "Cell"}<T> requires type argument`,
+        `${wrapperKind}<T> requires type argument`,
       );
     }
 
@@ -123,26 +105,71 @@ export class CommonToolsFormatter implements TypeFormatter {
     );
 
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
-    if (asStream) {
-      // Do not reflect inner Cell markers at stream level
+    if (wrapperKind === "Stream") {
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
       return { ...(rest as any), asStream: true } as SchemaDefinition;
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
-    if (this.isStreamType(innerType)) {
+    if (wrapperKind === "Cell" && this.isStreamType(innerType)) {
       throw new Error(
         "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
       );
     }
 
+    // Determine the property name to add based on wrapper kind
+    const propertyName = wrapperKind === "Cell" ? "asCell" : "asOpaque";
+
     // Handle case where innerSchema might be boolean (per JSON Schema spec)
     if (typeof innerSchema === "boolean") {
       return innerSchema === false
-        ? { asCell: true, not: true } // false = "no value is valid"
-        : { asCell: true }; // true = "any value is valid"
+        ? { [propertyName]: true, not: true } // false = "no value is valid"
+        : { [propertyName]: true }; // true = "any value is valid"
     }
-    return { ...innerSchema, asCell: true };
+    return { ...innerSchema, [propertyName]: true };
+  }
+
+  /**
+   * Get wrapper type information (Cell/Stream/OpaqueRef)
+   * Handles both direct references and intersection types (e.g., OpaqueRef<"literal">)
+   * Returns the wrapper kind and the TypeReference needed for formatting
+   */
+  private getWrapperTypeInfo(
+    type: ts.Type,
+  ): { kind: WrapperKind; typeRef: ts.TypeReference } | undefined {
+    // Check direct object type reference
+    if (type.flags & ts.TypeFlags.Object) {
+      const objectType = type as ts.ObjectType;
+      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+        const typeRef = objectType as ts.TypeReference;
+        const name = typeRef.target?.symbol?.name;
+        if (name === "Cell" || name === "Stream" || name === "OpaqueRef") {
+          return { kind: name, typeRef };
+        }
+      }
+    }
+
+    // OpaqueRef with literal type arguments becomes an intersection
+    // e.g., OpaqueRef<"initial"> expands to: OpaqueRefMethods<"initial"> & "initial"
+    // We need to detect OpaqueRefMethods to handle this case
+    if (type.flags & ts.TypeFlags.Intersection) {
+      const intersectionType = type as ts.IntersectionType;
+      for (const constituent of intersectionType.types) {
+        if (constituent.flags & ts.TypeFlags.Object) {
+          const objectType = constituent as ts.ObjectType;
+          if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+            const typeRef = objectType as ts.TypeReference;
+            const name = typeRef.target?.symbol?.name;
+            // OpaqueRefMethods is the internal type that OpaqueRef expands to
+            if (name === "OpaqueRefMethods") {
+              return { kind: "OpaqueRef", typeRef };
+            }
+          }
+        }
+      }
+    }
+
+    return undefined;
   }
 
   private getTypeRefIdentifierName(
