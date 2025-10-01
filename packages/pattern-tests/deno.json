@@ -3,5 +3,10 @@
   "tasks": {
     "integration": "LOG_LEVEL=warn deno test --trace-leaks -A ./integration/*.test.ts",
     "test": "echo 'No tests defined.'"
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["ban-types"]
+    }
   }
 }
