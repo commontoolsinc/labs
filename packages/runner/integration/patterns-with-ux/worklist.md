@@ -143,5 +143,5 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] counter-fallback-defaults
 - [x] counter-nested-computed-percentages
 - [x] counter-nested-computed-totals
-- [ ] counter-persistence-initial-arguments
+- [x] counter-persistence-initial-arguments
 - [x] counter-scenario-argument-overrides

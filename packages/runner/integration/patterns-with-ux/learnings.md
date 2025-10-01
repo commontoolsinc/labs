@@ -147,6 +147,11 @@ Add short notes after each run so the next agent can build on proven approaches.
   only, and avoid conditional rendering with boolean expressions like
   `{condition && <Component />}` as the false value renders as text. Use ternary
   operators with `null` instead: `{condition ? <Component /> : null}`.
+- When rendering arrays with `.map()` inside JSX, use `derive` instead of
+  `lift`. The `derive` function properly handles array mapping, while `lift`
+  with `.map()` causes "derive is not defined" runtime errors. Pattern:
+  `const display = derive(arrayCell, (arr) => arr.map(item => <div>...</div>))`
+  then render with `{display}` in the JSX.
 - Using `lift` functions with side effects (like calling `.set()` on cells to
   update version counters) may not work as expected in all scenarios due to
   reactive caching behavior. The framework may optimize away repeated lift
