@@ -96,7 +96,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [ ] mood-diary
 - [x] nested-counters
 - [x] notification-preference
-- [ ] patient-vitals-dashboard
+- [x] patient-vitals-dashboard
 - [x] quote-configuration
 - [x] recipe-ingredient-scaler
 - [x] research-citation-manager

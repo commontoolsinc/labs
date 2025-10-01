@@ -1495,3 +1495,20 @@ Add short notes after each run so the next agent can build on proven approaches.
 - For rewrite/edit operations on array entries, clear form input fields after
   successful operations with `.set("")` to provide immediate feedback that the
   action completed and prepare for the next operation.
+- For healthcare monitoring patterns with threshold-based alerts, use dynamic
+  header backgrounds that change color based on alert state (green gradient for
+  normal, red gradient for critical alerts). This provides immediate visual
+  feedback about patient status without requiring users to scroll or read
+  details.
+- When building complex UIs with multiple sections (header, latest reading,
+  alerts, history, forms), separate the dynamic content into individual `lift`
+  functions for each section, then compose them with JSX at the top level. This
+  keeps the code maintainable and allows ct-input elements to bind correctly
+  with `$value`.
+- Multi-vital monitoring UIs benefit from color-coded vital cards with distinct
+  color schemes per vital type (blue for heart rate, yellow for blood pressure,
+  pink for temperature, green for oxygen). This creates immediate visual
+  distinction and helps medical professionals quickly scan values.
+- Alert displays with left-border accents (red for warnings) and emoji
+  indicators (⚠) create clear visual hierarchy and draw attention to critical
+  issues without overwhelming the interface.
