@@ -92,7 +92,7 @@ Check off each pattern after the agent delivers UI, screenshots, and tests.
 - [x] logistics-routing
 - [x] medication-adherence
 - [x] meeting-scheduler
-- [ ] menu-planner
+- [x] menu-planner
 - [ ] mood-diary
 - [x] nested-counters
 - [x] notification-preference
