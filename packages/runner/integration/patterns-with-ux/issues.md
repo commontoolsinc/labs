@@ -1,5 +1,33 @@
 # Known Issues
 
+## Invoice Generator (formatCurrency called on proxy values inside lift)
+
+**invoice-generator**
+
+- Pattern has complex nested object arrays (InvoiceLineSummary[]) that need to
+  be displayed
+- When trying to call formatCurrency() on line item properties inside a lift's
+  map function, getting "TypeError: Cannot read properties of undefined (reading
+  'toFixed')"
+- The issue appears to be that even though values look like they should be
+  numbers, they're actually Proxy objects or undefined when accessed inside the
+  map
+- Attempted approaches:
+  1. Direct access to properties like `line.lineTotal` inside map →
+     formatCurrency fails
+  2. Pre-extracting values with typeof checks before calling formatCurrency →
+     Still fails
+  3. Simplifying to just show concatenated strings of line items → Still gets
+     toFixed errors
+- The problem is that within a lift that maps over an array of objects with
+  nested numeric properties, those properties don't resolve to actual numbers
+- Framework limitation: Complex object arrays with nested properties cannot be
+  reliably iterated over inside lift functions for display
+- Simpler patterns that just show pre-formatted string summaries work, but
+  detailed line-item rendering does not
+- Pattern deferred until framework supports reliable property access on complex
+  objects inside lifts
+
 ## Expense Reimbursement (Handler invocation with dynamic parameters inside lift)
 
 **expense-reimbursement**
