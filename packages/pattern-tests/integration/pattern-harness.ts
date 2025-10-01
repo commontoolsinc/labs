@@ -3,9 +3,9 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { fromFileUrl } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { Cell } from "../src/cell.ts";
+import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
+import { Runtime } from "@commontools/runner";
+import type { Cell } from "@commontools/runner";
 
 export interface EventSpec {
   stream: string;
