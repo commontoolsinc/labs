@@ -85,6 +85,19 @@ Add short notes after each run so the next agent can build on proven approaches.
   to compute dynamic styles (borders, backgrounds, text colors) based on
   validation state, then interpolate those lifted style strings into inline
   styles. This creates clear visual feedback that updates reactively.
+- **Critical:** Never create new handlers inside a `lift` function. All handlers
+  must be defined at the recipe's top level using the `handler` factory, then
+  passed down into the UI. Creating handlers inside `lift` causes "invalid
+  handler, no schema provided" errors because the CTS schema generation cannot
+  see them.
+- For dynamic lists with user interaction, follow the pattern from
+  `list-manager`: use `cell` fields to hold indices/params, create handlers that
+  read from these fields via `.get()`, and render static display values inside
+  the `lift`. This avoids creating handlers inside mapped JSX.
+- When displaying nested hierarchies (like groups containing items), compute all
+  display data in a single `lift` that returns static values, then build JSX
+  elements in a loop without any handlers. Handlers should only be at the top
+  level, using index-based targeting via cell fields.
 
 ## Guidelines for UI code
 
