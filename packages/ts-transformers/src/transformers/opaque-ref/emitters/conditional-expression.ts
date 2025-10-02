@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 import type { Emitter, OpaqueRefHelperName } from "../types.ts";
-import { createIfElseCall } from "../builtins.ts";
+import { createIfElseCall } from "../../builtins/ifelse.ts";
 import { selectDataFlowsWithin } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
@@ -15,6 +15,8 @@ export const emitConditionalExpression: Emitter = ({
   dataFlows,
   analysis,
   context,
+  analyze,
+  rewriteChildren,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
@@ -38,9 +40,8 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedPredicate !== expression.condition) {
+    if (derivedPredicate && derivedPredicate !== expression.condition) {
       predicate = derivedPredicate;
-      helpers.add("derive");
     }
   }
 
@@ -51,7 +52,7 @@ export const emitConditionalExpression: Emitter = ({
   );
 
   // Check if the whenTrue branch actually requires rewriting
-  const whenTrueAnalysis = context.analyze(expression.whenTrue);
+  const whenTrueAnalysis = analyze(expression.whenTrue);
 
   if (whenTrueDataFlows.length > 0 && whenTrueAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenTrueDataFlows);
@@ -60,15 +61,14 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedWhenTrue !== expression.whenTrue) {
+    if (derivedWhenTrue && derivedWhenTrue !== expression.whenTrue) {
       whenTrue = derivedWhenTrue;
-      helpers.add("derive");
     } else {
-      const rewritten = context.rewriteChildren(expression.whenTrue);
+      const rewritten = rewriteChildren(expression.whenTrue);
       if (rewritten !== expression.whenTrue) whenTrue = rewritten;
     }
   } else {
-    const rewritten = context.rewriteChildren(expression.whenTrue);
+    const rewritten = rewriteChildren(expression.whenTrue);
     if (rewritten !== expression.whenTrue) whenTrue = rewritten;
   }
 
@@ -79,7 +79,7 @@ export const emitConditionalExpression: Emitter = ({
   );
 
   // Check if the whenFalse branch actually requires rewriting
-  const whenFalseAnalysis = context.analyze(expression.whenFalse);
+  const whenFalseAnalysis = analyze(expression.whenFalse);
 
   if (whenFalseDataFlows.length > 0 && whenFalseAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenFalseDataFlows);
@@ -88,31 +88,26 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedWhenFalse !== expression.whenFalse) {
+    if (derivedWhenFalse && derivedWhenFalse !== expression.whenFalse) {
       whenFalse = derivedWhenFalse;
       helpers.add("derive");
     } else {
-      const rewritten = context.rewriteChildren(expression.whenFalse);
+      const rewritten = rewriteChildren(expression.whenFalse);
       if (rewritten !== expression.whenFalse) whenFalse = rewritten;
     }
   } else {
-    const rewritten = context.rewriteChildren(expression.whenFalse);
+    const rewritten = rewriteChildren(expression.whenFalse);
     if (rewritten !== expression.whenFalse) whenFalse = rewritten;
   }
 
-  const rewritten = createIfElseCall(
+  return createIfElseCall({
     expression,
-    context.factory,
-    context.sourceFile,
-    {
+    factory: context.factory,
+    imports: context.imports,
+    overrides: {
       predicate,
       whenTrue,
       whenFalse,
     },
-  );
-
-  return {
-    expression: rewritten,
-    helpers,
-  };
+  });
 };

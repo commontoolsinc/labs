@@ -35,6 +35,14 @@ export class ImportRequirements {
     reqs.forbidden.add(request.name);
   }
 
+  getIdentifier(
+    factory: ts.NodeFactory,
+    request: ImportRequest,
+  ): ts.Identifier {
+    this.require(request);
+    return factory.createIdentifier(`${request.name}`);
+  }
+
   // Returns the requirements scoped by the request,
   // lazily creating and storing as needed.
   #get(request: ImportRequest): ModuleRequirements {

@@ -1,18 +1,18 @@
 import ts from "typescript";
 
-import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import type { EmitterContext, OpaqueRefHelperName } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 
-export const emitElementAccessExpression: Emitter = ({
+export const emitElementAccessExpression = ({
   expression,
   dataFlows,
   analysis,
   context,
-}) => {
+}: EmitterContext) => {
   if (!ts.isElementAccessExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
 
@@ -37,11 +37,5 @@ export const emitElementAccessExpression: Emitter = ({
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  const rewritten = createDeriveCallForExpression(expression, plan, context);
-  if (rewritten === expression) return undefined;
-
-  return {
-    expression: rewritten,
-    helpers: new Set<OpaqueRefHelperName>(["derive"]),
-  };
+  return createDeriveCallForExpression(expression, plan, context);
 };

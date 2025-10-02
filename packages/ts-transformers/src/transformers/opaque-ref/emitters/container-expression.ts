@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter } from "../types.ts";
+import type { EmitterContext } from "../types.ts";
 
 const isContainerExpression = (expression: ts.Expression): boolean => {
   return ts.isObjectLiteralExpression(expression) ||
@@ -11,15 +11,10 @@ const isContainerExpression = (expression: ts.Expression): boolean => {
     ts.isNonNullExpression(expression);
 };
 
-export const emitContainerExpression: Emitter = ({
+export const emitContainerExpression = ({
   expression,
-  context,
-}) => {
+  rewriteChildren,
+}: EmitterContext) => {
   if (!isContainerExpression(expression)) return undefined;
-  const rewritten = context.rewriteChildren(expression);
-  if (rewritten === expression) return undefined;
-  return {
-    expression: rewritten,
-    helpers: new Set(),
-  };
+  return rewriteChildren(expression);
 };

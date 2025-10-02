@@ -1,15 +1,14 @@
 import ts from "typescript";
 
-import { createDeriveCall } from "./builtins.ts";
+import { createDeriveCall } from "../builtins/derive.ts";
 import {
   type DataFlowAnalysis,
   detectCallKind,
   type NormalizedDataFlow,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
-import type { RewriteContext } from "./types.ts";
-import { getHelperIdentifier } from "./import-resolver.ts";
 import { isFunctionParameter } from "../../ast/mod.ts";
+import { TransformationContext } from "../../core/mod.ts";
 
 function originatesFromIgnoredParameter(
   expression: ts.Expression,
@@ -145,7 +144,7 @@ function resolvesToBuilderParameter(
 export function filterRelevantDataFlows(
   dataFlows: readonly NormalizedDataFlow[],
   analysis: DataFlowAnalysis,
-  context: RewriteContext,
+  context: TransformationContext,
 ): NormalizedDataFlow[] {
   const isParameterExpression = (expression: ts.Expression): boolean => {
     let current: ts.Expression = expression;
@@ -204,22 +203,22 @@ export function filterRelevantDataFlows(
 export function createDeriveCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
-  context: RewriteContext,
-): ts.Expression {
-  if (plan.entries.length === 0) return expression;
+  context: TransformationContext,
+): ts.Expression | undefined {
+  if (plan.entries.length === 0) return undefined;
 
   // Don't wrap expressions that are already derive calls
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
     if (callKind?.kind === "derive") {
-      return expression;
+      return undefined;
     }
   }
 
   if (!plan.usesObjectBinding && plan.entries.length === 1) {
     const [entry] = plan.entries;
     if (entry && entry.dataFlow.expression === expression) {
-      return expression;
+      return undefined;
     }
   }
 
@@ -285,8 +284,9 @@ export function createDeriveCallForExpression(
   const deriveCall = createDeriveCall(expression, refs, {
     factory: context.factory,
     sourceFile: context.sourceFile,
-    context: context.transformation,
+    tsContext: context.tsContext,
+    imports: context.imports,
   });
 
-  return deriveCall ?? expression;
+  return deriveCall;
 }
