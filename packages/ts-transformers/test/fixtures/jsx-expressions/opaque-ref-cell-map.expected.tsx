@@ -93,17 +93,20 @@ export default recipe("Charms Launcher", () => {
         isInitialized: cell(false),
         storedCellRef: cell(),
     });
+    // Type assertion to help TypeScript understand cellRef is a Cell<any[]>
+    // Without this, TypeScript infers `any` and the closure transformer won't detect it
+    const typedCellRef = cellRef as Cell<any[]>;
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(!cellRef?.length, <div>No charms created yet</div>, <ul>
-            {cellRef.map((charm: any, index: number) => (<li>
-                <ct-button onClick={goToCharm({ charm })}>
+        {ifElse(derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+            {typedCellRef.map(recipe(({ elem, index, params: { goToCharm } }) => (<li>
+                <ct-button onClick={goToCharm({ elem })}>
                   Go to Charm {derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {derive(index, index => index + 1)}: {derive(charm, charm => charm[NAME] || "Unnamed")}</span>
-              </li>))}
+                <span>Charm {derive(index, index => index + 1)}: {elem[NAME] || "Unnamed"}</span>
+              </li>)), { goToCharm: goToCharm })}
           </ul>)}
 
         <ct-button onClick={createSimpleRecipe({ cellRef })}>
