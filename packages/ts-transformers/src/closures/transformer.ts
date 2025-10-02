@@ -187,6 +187,11 @@ function hasArrayTypeArgument(
 /**
  * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
  * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
+ *
+ * Also handles method chains like state.items.filter(...).map(...) where:
+ * - The filter returns OpaqueRef<T>[] (array of OpaqueRefs)
+ * - But the origin is OpaqueRef<T[]> (OpaqueRef of array)
+ * - We transform it because JSX transformer will wrap intermediate calls in derive
  */
 function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
@@ -199,15 +204,29 @@ function isOpaqueRefArrayMapCall(
   // Get the type of the target (what we're calling .map on)
   const targetType = checker.getTypeAtLocation(node.expression.expression);
 
-  // Check if it's an OpaqueRef or Cell type using the robust type-checking method
-  // This handles type aliases, unions, intersections, and verifies import source
-  if (!isOpaqueRefType(targetType, checker)) {
-    return false;
+  // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
+  if (isOpaqueRefType(targetType, checker) && hasArrayTypeArgument(targetType, checker)) {
+    return true;
   }
 
-  // Now verify it's an array type by checking the type argument
-  // This also handles unions and intersections, just like isOpaqueRefType
-  return hasArrayTypeArgument(targetType, checker);
+  // Check method chain case: x.filter(...).map(...) where x is OpaqueRef<T[]>
+  // Array methods that return arrays and might appear before .map()
+  const arrayMethods = ['filter', 'slice', 'concat', 'reverse', 'sort', 'flat', 'flatMap'];
+
+  let current: ts.Expression = node.expression.expression;
+
+  // Walk back through call chain to find the origin
+  while (
+    ts.isCallExpression(current) &&
+    ts.isPropertyAccessExpression(current.expression) &&
+    arrayMethods.includes(current.expression.name.text)
+  ) {
+    current = current.expression.expression;
+  }
+
+  // Check if origin is OpaqueRef<T[]> or Cell<T[]>
+  const originType = checker.getTypeAtLocation(current);
+  return isOpaqueRefType(originType, checker) && hasArrayTypeArgument(originType, checker);
 }
 
 /**
