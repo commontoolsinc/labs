@@ -18,6 +18,7 @@
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",
+    "./packages/pattern-tests",
     "./packages/runner",
     "./packages/seeder",
     "./packages/shell",
