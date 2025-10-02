@@ -397,5 +397,6 @@ This works because we know JSX transformer will wrap intermediate calls in deriv
 - `flat(depth?)` → returns flattened array
 - `flatMap(fn)` → returns mapped+flattened array
 
-TODO: Implement this pattern detection walker.
+**Implementation (COMPLETE):**
+The pattern detection walker is implemented in `isOpaqueRefArrayMapCall()` in `src/closures/transformer.ts`. It walks back through the call chain, detecting any array methods before `.map()`, and checks if the ultimate origin is `OpaqueRef<T[]>` or `Cell<T[]>`.
 
