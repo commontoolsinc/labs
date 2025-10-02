@@ -340,11 +340,45 @@ function transformMapCallback(
   const elemName = elemParam?.name;
   let transformedBody = callback.body;
 
+  // Collect destructured property names if the param is a destructured binding pattern
+  const destructuredProps = new Set<string>();
+  if (elemName && ts.isObjectBindingPattern(elemName)) {
+    for (const element of elemName.elements) {
+      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
+        destructuredProps.add(element.name.text);
+      }
+    }
+  }
+
   // Replace references to the original param with elem
   if (elemName && ts.isIdentifier(elemName) && elemName.text !== "elem") {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && node.text === elemName.text) {
         return factory.createIdentifier("elem");
+      }
+      return ts.visitEachChild(node, visitor, undefined);
+    };
+    transformedBody = ts.visitNode(
+      transformedBody,
+      visitor,
+    ) as typeof transformedBody;
+  }
+
+  // If param was destructured, replace destructured property references with elem.prop
+  if (destructuredProps.size > 0) {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
+        // Check if this identifier is not part of a property access already
+        // (e.g., don't transform the 'x' in 'something.x')
+        if (
+          !node.parent ||
+          !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+        ) {
+          return factory.createPropertyAccessExpression(
+            factory.createIdentifier("elem"),
+            factory.createIdentifier(node.text),
+          );
+        }
       }
       return ts.visitEachChild(node, visitor, undefined);
     };
