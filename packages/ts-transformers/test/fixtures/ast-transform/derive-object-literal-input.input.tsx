@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell, derive, lift } from "commontools";
 
 const stage = cell<string>("initial");

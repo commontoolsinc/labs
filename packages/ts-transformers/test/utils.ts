@@ -1,12 +1,7 @@
 import ts from "typescript";
 import { join } from "@std/path";
 import { StaticCache } from "@commontools/static";
-import {
-  createOpaqueRefJSXTransformer,
-  createSchemaGeneratorTransformer,
-  createSchemaInjectionTransformer,
-} from "../src/transformers/mod.ts";
-import { TypeRegistry } from "../src/core/mod.ts";
+import { CommonToolsTransformerPipeline } from "../src/mod.ts";
 import { assert } from "@std/assert";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
@@ -18,33 +13,33 @@ export interface TransformOptions {
   mode?: "transform" | "error";
   types?: Record<string, string>;
   logger?: (message: string) => void;
-  applySchemaInjectionTransformer?: boolean;
-  applyOpaqueRefJSXTransformer?: boolean;
-  applySchemaGeneratorTransformer?: boolean;
-  before?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
-  after?: Array<(program: ts.Program) => ts.TransformerFactory<ts.SourceFile>>;
 }
 
 export async function transformSource(
   source: string,
   options: TransformOptions = {},
 ): Promise<string> {
+  const fileName = "/test.tsx";
+  const output = await transformFiles({ [fileName]: source }, options);
+  if (!output[fileName]) {
+    throw new Error("Could not generate output.");
+  }
+  return output[fileName];
+}
+
+export async function transformFiles(
+  files: Record<string, string>,
+  options: TransformOptions = {},
+): Promise<Record<string, string>> {
   const {
     mode = "transform",
     types = {},
     logger,
-    applySchemaInjectionTransformer = true,
-    applyOpaqueRefJSXTransformer = true,
-    applySchemaGeneratorTransformer = false,
-    before = [],
-    after = [],
   } = options;
-
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
 
-  const fileName = "/test.tsx";
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,
     module: ts.ModuleKind.CommonJS,
@@ -60,8 +55,13 @@ export async function transformSource(
 
   const host: ts.CompilerHost = {
     getSourceFile: (name) => {
-      if (name === fileName) {
-        return ts.createSourceFile(name, source, compilerOptions.target!, true);
+      if (files[name] !== undefined) {
+        return ts.createSourceFile(
+          name,
+          files[name],
+          compilerOptions.target!,
+          true,
+        );
       }
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return ts.createSourceFile(
@@ -94,7 +94,7 @@ export async function transformSource(
     getCurrentDirectory: () => "/",
     getDirectories: () => [],
     fileExists: (name) => {
-      if (name === fileName) return true;
+      if (files[name] !== undefined) return true;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
       if (allTypes[name]) return true;
       const baseName = baseNameFromPath(name);
@@ -102,7 +102,7 @@ export async function transformSource(
       return false;
     },
     readFile: (name) => {
-      if (name === fileName) return source;
+      if (files[name]) return files[name];
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return allTypes.es2023;
       }
@@ -151,7 +151,7 @@ export async function transformSource(
       }),
   };
 
-  const program = ts.createProgram([fileName], compilerOptions, host);
+  const program = ts.createProgram(Object.keys(files), compilerOptions, host);
 
   if (logger) {
     const diagnostics = ts.getPreEmitDiagnostics(program);
@@ -168,55 +168,37 @@ export async function transformSource(
     }
   }
 
-  const beforeTransformers = before.map((factory) => factory(program));
-  const afterTransformers = after.map((factory) => factory(program));
+  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
 
-  // Create a TypeRegistry shared between OpaqueRef and Schema transformers
-  const typeRegistry = new WeakMap<ts.Node, ts.Type>();
-
-  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [
-    ...beforeTransformers,
-  ];
-  if (applySchemaInjectionTransformer) {
-    transformers.push(
-      createSchemaInjectionTransformer(program, { mode, typeRegistry }),
+  const out: Record<string, string> = {};
+  for (const fileName of Object.keys(files)) {
+    const sourceFile = program.getSourceFile(fileName);
+    assert(
+      sourceFile,
+      "Expected virtual source file to be present in program",
     );
-  }
-  if (applyOpaqueRefJSXTransformer) {
-    transformers.push(
-      createOpaqueRefJSXTransformer(program, { mode, typeRegistry }),
+    const result = ts.transform(sourceFile, pipeline.toFactories(program));
+    const printer = ts.createPrinter({
+      newLine: ts.NewLineKind.LineFeed,
+      removeComments: false,
+    });
+    const transformedFile = result.transformed[0];
+    assert(
+      transformedFile,
+      "Expected transformer pipeline to return a source file",
     );
-  }
-  if (applySchemaGeneratorTransformer) {
-    transformers.push(
-      createSchemaGeneratorTransformer(program, { typeRegistry }),
-    );
-  }
-  transformers.push(...afterTransformers);
+    const output = printer.printFile(transformedFile);
+    result.dispose?.();
 
-  const sourceFile = program.getSourceFile(fileName);
-  assert(
-    sourceFile,
-    "Expected virtual source file to be present in program",
-  );
-  const result = ts.transform(sourceFile, transformers);
-  const printer = ts.createPrinter({
-    newLine: ts.NewLineKind.LineFeed,
-    removeComments: false,
-  });
-  const transformedFile = result.transformed[0];
-  assert(
-    transformedFile,
-    "Expected transformer pipeline to return a source file",
-  );
-  const output = printer.printFile(transformedFile);
-  result.dispose?.();
+    if (logger) {
+      logger(
+        `\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`,
+      );
+    }
 
-  if (logger) {
-    logger(`\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`);
+    out[fileName] = output;
   }
-
-  return output;
+  return out;
 }
 
 export async function checkWouldTransform(
@@ -245,8 +227,8 @@ export async function transformFixture(
   options?: TransformOptions,
 ): Promise<string> {
   const source = await loadFixture(fixturePath);
-  const output = await transformSource(source, options);
-  return output.trim();
+  const out = await transformSource(source, options);
+  return out.trim();
 }
 
 export async function compareFixtureTransformation(

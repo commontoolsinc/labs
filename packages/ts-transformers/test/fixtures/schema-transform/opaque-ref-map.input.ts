@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { OpaqueRef, recipe } from "commontools";
 
 interface TodoItem {

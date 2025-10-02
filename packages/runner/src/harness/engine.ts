@@ -17,7 +17,7 @@ import {
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
 } from "@commontools/js-runtime";
-import { commonTypeScriptTransformer } from "@commontools/ts-transformers";
+import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
@@ -163,7 +163,8 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,
-      beforeTransformers: commonTypeScriptTransformer,
+      beforeTransformers: (program) =>
+        new CommonToolsTransformerPipeline().toFactories(program),
     });
 
     if (!options.noRun) {

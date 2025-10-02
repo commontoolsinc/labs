@@ -7,5 +7,11 @@ export type {
   TransformationOptions,
   TransformMode,
 } from "./core/mod.ts";
+export { Pipeline, Transformer } from "./core/mod.ts";
 
-export { commonTypeScriptTransformer } from "./transform.ts";
+export {
+  OpaqueRefJSXTransformer,
+  SchemaGeneratorTransformer,
+  SchemaInjectionTransformer,
+} from "./transformers/mod.ts";
+export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
