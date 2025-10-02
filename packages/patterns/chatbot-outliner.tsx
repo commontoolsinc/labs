@@ -140,7 +140,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const chat = Chat({ messages, tools });
+    const chat = Chat({ messages, tools, mentionable: allCharms });
     const { addMessage, cancelGeneration, pending } = chat;
 
     return {
