@@ -12,7 +12,7 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { Runtime } from "@commontools/runner";
+import { NormalizedLink, parseLink } from "@commontools/runner";
 import { ALL_CHARMS_ID } from "@commontools/charm";
 
 import {
@@ -27,15 +27,8 @@ import {
   DecorationSet,
   ViewPlugin,
   ViewUpdate,
-  WidgetType,
 } from "@codemirror/view";
-import {
-  type Cell,
-  getEntityId,
-  type JSONSchema,
-  NAME,
-  type Schema,
-} from "@commontools/runner";
+import { type Cell, NAME } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import {
@@ -43,8 +36,6 @@ import {
   MentionableArray,
   mentionableArraySchema,
 } from "../../core/mentionable.ts";
-import { consume } from "@lit/context";
-import { MemorySpace } from "@commontools/runner";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -228,10 +219,9 @@ export class CTCodeEditor extends BaseElement {
 
       // Build options from existing mentionable items
       const options: Completion[] = mentionable.map((charm) => {
-        const charmIdObj = getEntityId(charm);
-        const charmId = charmIdObj?.["/"] || "";
-        const charmName = charm.key(NAME).get() || "";
-        const insertText = `${charmName} (${charmId})`;
+        const { id, item } = charm;
+        const charmName = item[NAME];
+        const insertText = `${charmName} (${id})`;
         return {
           label: charmName,
           apply: afterCursor === "]]" ? insertText : insertText + "]]",
@@ -279,31 +269,36 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query
    */
-  private getFilteredMentionable(query: string): Cell<Mentionable>[] {
+  private getFilteredMentionable(
+    query: string,
+  ): { id: string; item: Mentionable }[] {
     if (!this.mentionable) {
       return [];
     }
 
     const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
-    const mentionableData = mentionableArray.get();
+    const mentionableData = mentionableArray.getRaw();
 
     if (!mentionableData || mentionableData.length === 0) {
       return [];
     }
 
     const queryLower = query.toLowerCase();
-    const matches: Cell<Mentionable>[] = [];
+    const matches: { id: string; item: Mentionable }[] = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
+      // This link could be to the cell being mentioned, but it could also
+      // just be a link to an element in the array.
+      // There's a little but of oddness here -- if item 1 in the array is a
+      // link to item 0 in the array, we won't match item 0's id.
+      // More generally, if this item links to another item, that then links
+      // to the item we're interested in, we will return the id pointed to by
+      // the first link.
       const mentionable = mentionableArray.key(i);
-      const mention = mentionable.get();
-      if (
-        mention &&
-        mentionable.key(NAME).get()
-          ?.toLowerCase()
-          ?.includes(queryLower)
-      ) {
-        matches.push(mentionable);
+      const id = parseLink(mentionable.getRaw())?.id;
+      const mentionableName = mentionable.key(NAME).get()?.toLowerCase();
+      if (id !== undefined && mentionableName?.includes(queryLower)) {
+        matches.push({ id: id, item: mentionable.get() });
       }
     }
 
@@ -395,9 +390,13 @@ export class CTCodeEditor extends BaseElement {
 
       // parse + start the recipe + link the inputs
       const pattern = JSON.parse(this.pattern.get());
-      const allCharms = rt.getCellFromEntityId(spaceName, {
-        "/": ALL_CHARMS_ID,
-      });
+      const link: NormalizedLink = {
+        space: spaceName,
+        id: `of:${ALL_CHARMS_ID}`,
+        type: "application/json",
+        path: [],
+      };
+      const allCharms = rt.getCellFromLink(link);
       rt.run(tx, pattern, {
         title: backlinkText,
         content: "",
@@ -407,11 +406,11 @@ export class CTCodeEditor extends BaseElement {
       // let the pattern know about the new backlink
       tx.commit();
 
-      const charmId = getEntityId(result);
+      const charmId = result.sourceURI.slice(3);
 
       // Insert the ID into the text if we have an editor
       if (this._editorView && charmId) {
-        this._insertBacklinkId(backlinkText, charmId["/"], navigate);
+        this._insertBacklinkId(backlinkText, charmId, navigate);
       }
 
       this.emit("backlink-create", {
@@ -480,21 +479,18 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentionable) return null;
 
     const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
-    const mentionableData = mentionableArray.get();
+
+    // There's no point running through this data if we don't have it yet
+    const mentionableData = mentionableArray.getRaw();
     if (!mentionableData) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const charm = mentionableArray.key(i);
-      if (charm) {
-        // this is VERY specific
-        // if you do `getEntityId(mentionableArray.key(i))` you'll get a different answer (the ID of the array itself)
-        const charmIdObjA = getEntityId(mentionableArray.get()[i]);
-        const charmIdObjB = getEntityId(mentionableArray.key(i));
-        const charmIdA = charmIdObjA?.["/"] || "";
-        const charmIdB = charmIdObjB?.["/"] || "";
-        if (charmIdA === id || charmIdB === id) {
-          return charm;
-        }
+      // This link could be to the cell being mentioned, but it could also
+      // just be a link to an element in the array.
+      // There's a little but of oddness here -- if item 1 in the array is a
+      // link to item 0 in the array, we won't match item 0's id.
+      if (parseLink(mentionableArray.key(i).getRaw())?.id === `of:${id}`) {
+        return mentionableArray.key(i);
       }
     }
 
@@ -937,37 +933,32 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentioned) return;
 
     const content = this.getValue() || "";
-    const newMentioned = this._extractMentionedCharms(content);
+    const newMentionedCells = this._extractMentionedCharms(content);
 
     // Compare by id set to avoid unnecessary writes
-    const current = this.mentioned.asSchema(mentionableArraySchema).get() || [];
-    const curIds = new Set(
-      current.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
+    const currentRaw = this.mentioned.asSchema(mentionableArraySchema).getRaw();
+    const curURIs = new Set(
+      currentRaw?.map((item) => parseLink(item)?.id).filter(Boolean),
     );
-    const newIds = new Set(
-      newMentioned.map((c) => getEntityId(c)?.["/"]).filter(Boolean),
+    const newURIs = new Set(
+      newMentionedCells.map((c) => c.id).filter(Boolean),
     );
 
-    if (curIds.size === newIds.size) {
-      let same = true;
-      for (const id of newIds) {
-        if (!curIds.has(id)) {
-          same = false;
-          break;
-        }
-      }
-      if (same) return; // No change
+    if (curURIs.symmetricDifference(newURIs).size === 0) {
+      return; // no change
     }
 
     const tx = this.mentioned.runtime.edit();
-    this.mentioned.withTx(tx).set(newMentioned);
+    this.mentioned.withTx(tx).set(newMentionedCells.map((c) => c.item));
     tx.commit();
   }
 
   /**
    * Parse content to a list of unique Charms referenced by [[...]] links.
    */
-  private _extractMentionedCharms(content: string): Mentionable[] {
+  private _extractMentionedCharms(
+    content: string,
+  ): { id: string; item: Mentionable }[] {
     if (!content || !this.mentionable) return [];
 
     const ids: string[] = [];
@@ -980,12 +971,12 @@ export class CTCodeEditor extends BaseElement {
 
     // Resolve unique ids to charms using mentionable list
     const seen = new Set<string>();
-    const result: Mentionable[] = [];
+    const result: { id: string; item: Mentionable }[] = [];
     for (const id of ids) {
       if (seen.has(id)) continue;
-      const charm = this.findCharmById(id);
+      const charm: Cell<Mentionable> | null = this.findCharmById(id);
       if (charm) {
-        result.push(charm.get());
+        result.push({ id: id, item: charm.get() });
         seen.add(id);
       }
     }
