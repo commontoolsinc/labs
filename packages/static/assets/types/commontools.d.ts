@@ -305,6 +305,19 @@ export type CreateCellFunction = {
     <S extends JSONSchema = JSONSchema>(schema: S, name?: string, value?: Schema<S>): Cell<Schema<S>>;
 };
 export type Default<T, V extends T = T> = T;
+/**
+ * Wish<T, Q>
+ *
+ * Interim alias to represent an injectable value identified by a tag.
+ * Compiles down to a Default with a special default value shape that the
+ * runtime recognizes and resolves to a link or cell.
+ *
+ * Example: Wish<Charm[], "allCharms"> → default: { $wish: "allCharms" }
+ */
+// @ts-expect-error This is intentional to get the first pass working
+export type Wish<T, Q extends string> = Default<T, {
+    $wish: Q;
+}>;
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;

@@ -13,6 +13,7 @@ import {
   recipe,
   toSchema,
   UI,
+  Wish,
 } from "commontools";
 import { type BacklinksMap } from "./backlinks-index.tsx";
 
@@ -77,7 +78,8 @@ const handleNewBacklink = handler<
     };
   },
   {
-    mentionable: Cell<MentionableCharm[]>;
+    // @ts-ignore sorry :D
+    allCharms: Default<MentionableCharm[], { $wish: "#/allCharms" }>;
   }
 >(({ detail }, { mentionable }) => {
   console.log("new charm", detail.text, detail.charmId);
@@ -85,7 +87,7 @@ const handleNewBacklink = handler<
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
-    mentionable.push(detail.charm as unknown as MentionableCharm);
+    allCharms.push(detail.charm as unknown as MentionableCharm);
   }
 });
 

@@ -16,6 +16,9 @@ import {
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
 import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { createSigilLinkFromParsedLink } from "./link-utils.ts";
+import { toURI } from "./uri-utils.ts";
+import { ALL_CHARMS_ID } from "../../charm/src/well-known.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -114,6 +117,56 @@ function processDefaultValue(
   if (!schema) return defaultValue;
 
   const resolvedSchema = resolveSchema(schema, rootSchema, true);
+
+  // Handle Wish-defaults: { $wish: string }
+  // Interim MVP: map known tags to entity IDs and inject link or cell.
+  const isWishDefault = (v: unknown): v is { $wish: string } =>
+    isRecord(v) && typeof (v as any).$wish === "string";
+
+  const resolveWishTag = (tag: string): string | undefined => {
+    const normalized = typeof tag === "string" ? tag.replace(/^#\//, "") : tag;
+    // Hard-coded mapping for MVP; to be centralized later.
+    if (normalized === "allCharms") {
+      return ALL_CHARMS_ID;
+    }
+    return undefined;
+  };
+
+  if (isWishDefault(defaultValue)) {
+    const tag = defaultValue.$wish;
+    logger.debug(() => [
+      "Wish default encountered",
+      { path: link.path, tag },
+    ]);
+    const entityId = resolveWishTag(tag);
+    if (entityId) {
+      // If schema indicates a cell, return a live cell reference to the target.
+      if (isObject(schema) && schema.asCell) {
+        logger.debug(() => [
+          "Resolving Wish to asCell",
+          { id: entityId },
+        ]);
+        return runtime.getCellFromEntityId(link.space, entityId);
+      }
+      // Otherwise, inject a sigil link literal to the target value.
+      logger.debug(() => [
+        "Resolving Wish to sigil link",
+        { id: entityId },
+      ]);
+      const sigil = createSigilLinkFromParsedLink({
+        id: toURI(entityId),
+        path: [],
+        space: link.space,
+        type: "application/json",
+      });
+      return sigil;
+    }
+    // Unknown tag: fall through to normal default handling
+    logger.warn(() => [
+      "Unknown Wish tag; skipping",
+      { tag },
+    ]);
+  }
 
   // If schema indicates this should be a cell
   if (isObject(schema) && schema.asCell) {
