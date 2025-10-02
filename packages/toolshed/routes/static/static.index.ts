@@ -43,7 +43,7 @@ router.get("/static/*", async (c) => {
   // Simple caching: always validate with ETag
   const cacheHeaders = createCacheHeaders(etag);
 
-  return new Response(buffer, {
+  return new Response(buffer as BodyInit, {
     status: 200,
     headers: {
       "Content-Type": mimeType,

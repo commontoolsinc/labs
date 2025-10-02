@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
-DENO_VERSION_REQUIRED="2.4.5"
+DENO_VERSIONS_ALLOWED=("2.5.2" "2.4.5")
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
-if [ "$DENO_VERSION" != "$DENO_VERSION_REQUIRED" ]; then
-  echo "ERROR: Deno version is $DENO_VERSION, expected $DENO_VERSION_REQUIRED."
+if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
+  echo "ERROR: Deno version is $DENO_VERSION, expected one of: ${DENO_VERSIONS_ALLOWED[*]}."
   exit 1
 fi
 

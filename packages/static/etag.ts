@@ -8,7 +8,7 @@
  * Returns a base64-encoded hash in quotes.
  */
 export async function generateETag(content: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", content);
+  const hash = await crypto.subtle.digest("SHA-256", content as BufferSource);
   const base64 = btoa(String.fromCharCode(...new Uint8Array(hash)))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
