@@ -354,31 +354,25 @@ function transformMapCallback(
     ) as typeof transformedBody;
   }
 
+  // Helper to recursively compare expressions for structural equality
+  function expressionsMatch(a: ts.Expression, b: ts.Expression): boolean {
+    if (ts.isPropertyAccessExpression(a) && ts.isPropertyAccessExpression(b)) {
+      // Property names must match
+      if (a.name.text !== b.name.text) return false;
+      // Recursively compare the object expressions
+      return expressionsMatch(a.expression, b.expression);
+    } else if (ts.isIdentifier(a) && ts.isIdentifier(b)) {
+      return a.text === b.text;
+    }
+    return false;
+  }
+
   // Replace captured expressions with their parameter names
   for (const [varName, capturedExpr] of captures) {
     const visitor: ts.Visitor = (node) => {
       // Check if this node matches the captured expression
-      if (
-        ts.isPropertyAccessExpression(node) &&
-        ts.isPropertyAccessExpression(capturedExpr)
-      ) {
-        // Compare property access expressions structurally
-        if (node.name.text === capturedExpr.name.text) {
-          // Check if the object part matches
-          const nodeObj = node.expression;
-          const capturedObj = capturedExpr.expression;
-          if (ts.isIdentifier(nodeObj) && ts.isIdentifier(capturedObj)) {
-            if (nodeObj.text === capturedObj.text) {
-              // This matches the captured expression, replace with just the param name
-              return factory.createIdentifier(varName);
-            }
-          }
-        }
-      } else if (ts.isIdentifier(node) && ts.isIdentifier(capturedExpr)) {
-        // For simple identifier captures
-        if (node.text === capturedExpr.text) {
-          return factory.createIdentifier(varName);
-        }
+      if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
+        return factory.createIdentifier(varName);
       }
       return ts.visitEachChild(node, visitor, undefined);
     };
