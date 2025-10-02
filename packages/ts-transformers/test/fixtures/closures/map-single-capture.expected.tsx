@@ -29,7 +29,7 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map({ op: recipe(({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), params: { discount: state.discount } })}
+        {state.items.map(recipe(({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), { discount: state.discount })}
       </div>),
     };
 });
