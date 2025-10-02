@@ -60,7 +60,7 @@ export abstract class Transformer {
       const context = new TransformationContext({
         program,
         sourceFile,
-        transformation,
+        tsContext: transformation,
         options: this.#options,
       });
 

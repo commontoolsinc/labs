@@ -1,37 +1,21 @@
 import ts from "typescript";
 
 import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
+import { TransformationContext } from "../../core/mod.ts";
 
 export type OpaqueRefHelperName = "derive" | "ifElse" | "toSchema";
-
-export interface RewriteContext {
-  readonly factory: ts.NodeFactory;
-  readonly checker: ts.TypeChecker;
-  readonly sourceFile: ts.SourceFile;
-  readonly transformation: ts.TransformationContext;
-  readonly analyze: (expression: ts.Expression) => DataFlowAnalysis;
-}
-
-export interface EmitterContext extends RewriteContext {
-  rewriteChildren(node: ts.Expression): ts.Expression;
-}
+export type AnalyzeFn = (expression: ts.Expression) => DataFlowAnalysis;
 
 export interface RewriteParams {
   readonly expression: ts.Expression;
   readonly analysis: DataFlowAnalysis;
-  readonly context: RewriteContext;
+  readonly context: TransformationContext;
+  readonly analyze: AnalyzeFn;
 }
 
-export interface EmitterParams {
-  readonly expression: ts.Expression;
+export interface EmitterContext extends RewriteParams {
   readonly dataFlows: NormalizedDataFlowSet;
-  readonly analysis: DataFlowAnalysis;
-  readonly context: EmitterContext;
+  rewriteChildren(node: ts.Expression): ts.Expression;
 }
 
-export interface EmitterResult {
-  readonly expression: ts.Expression;
-  readonly helpers: ReadonlySet<OpaqueRefHelperName>;
-}
-
-export type Emitter = (params: EmitterParams) => EmitterResult | undefined;
+export type Emitter = (params: EmitterContext) => ts.Expression | undefined;

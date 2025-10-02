@@ -15,10 +15,8 @@ export class SchemaGeneratorTransformer extends Transformer {
 
   transform(context: TransformationContext): ts.SourceFile {
     if (!generateSchema) generateSchema = createSchemaTransformerV2();
-    const { sourceFile, transformation, checker } = context;
+    const { sourceFile, tsContext: transformation, checker } = context;
     const { logger, typeRegistry } = context.options;
-
-    let needsJSONSchemaImport = false;
 
     const visit: ts.Visitor = (node) => {
       if (
@@ -75,15 +73,17 @@ export class SchemaGeneratorTransformer extends Transformer {
           ),
         );
 
+        const jsonSchemaIdentifier = context.imports.getIdentifier(
+          context,
+          { module: "commontools", name: "JSONSchema" },
+        );
         const satisfiesExpression = context.factory.createSatisfiesExpression(
           constAssertion,
           context.factory.createTypeReferenceNode(
-            context.factory.createIdentifier("JSONSchema"),
+            jsonSchemaIdentifier,
             undefined,
           ),
         );
-
-        needsJSONSchemaImport = true;
 
         return satisfiesExpression;
       }
@@ -92,13 +92,6 @@ export class SchemaGeneratorTransformer extends Transformer {
     };
 
     const result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
-
-    if (needsJSONSchemaImport) {
-      context.imports.require({
-        module: "commontools",
-        name: "JSONSchema",
-      });
-    }
 
     context.imports.forbid({
       module: "commontools",

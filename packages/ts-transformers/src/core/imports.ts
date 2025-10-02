@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { TransformationContext } from "./mod.ts";
 
 export interface ImportRequest {
   readonly name: string;
@@ -33,6 +34,23 @@ export class ImportRequirements {
     const reqs = this.#get(request);
     reqs.required.delete(request.name);
     reqs.forbidden.add(request.name);
+  }
+
+  getIdentifier(
+    context: Pick<TransformationContext, "sourceFile" | "factory">,
+    request: ImportRequest,
+  ): ts.Identifier {
+    this.require(request);
+    const identifier = findImportedIdentifier(
+      context.sourceFile,
+      request.module,
+      request.name,
+    );
+    if (identifier) return identifier;
+    // This will create a raw identifier that is not bound
+    // to an import, and most likely will fail when compiling
+    // to JS.
+    return context.factory.createIdentifier(`${request.name}`);
   }
 
   // Returns the requirements scoped by the request,
@@ -206,4 +224,31 @@ function insertImport(
   }
   statements.splice(insertIndex, 0, declaration);
   return factory.updateSourceFile(sourceFile, statements);
+}
+
+function findImportedIdentifier(
+  sourceFile: ts.SourceFile,
+  moduleName: string,
+  importName: string,
+): ts.Identifier | undefined {
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === moduleName
+      ) {
+        const namedBindings = statement.importClause?.namedBindings;
+        if (namedBindings && ts.isNamedImports(namedBindings)) {
+          for (const element of namedBindings.elements) {
+            const name = element.propertyName?.text || element.name.text;
+            if (name === importName) {
+              return element.name; // This is the local identifier
+            }
+          }
+        }
+      }
+    }
+  }
+  return undefined;
 }
