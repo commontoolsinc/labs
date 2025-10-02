@@ -268,6 +268,7 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Get filtered mentionable items based on query
+   * The id is the uri without the 'of:' prefix.
    */
   private getFilteredMentionable(
     query: string,
@@ -295,10 +296,10 @@ export class CTCodeEditor extends BaseElement {
       // to the item we're interested in, we will return the id pointed to by
       // the first link.
       const mentionable = mentionableArray.key(i);
-      const id = parseLink(mentionable.getRaw())?.id;
+      const uri = parseLink(mentionable.getRaw())?.id;
       const mentionableName = mentionable.key(NAME).get()?.toLowerCase();
-      if (id !== undefined && mentionableName?.includes(queryLower)) {
-        matches.push({ id: id, item: mentionable.get() });
+      if (uri !== undefined && mentionableName?.includes(queryLower)) {
+        matches.push({ id: uri.slice(3), item: mentionable.get() });
       }
     }
 
@@ -474,6 +475,7 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Find a charm by ID in the mentionable list
+   * The id is the uri without the 'of:' prefix.
    */
   private findCharmById(id: string): Cell<Mentionable> | null {
     if (!this.mentionable) return null;
@@ -484,12 +486,13 @@ export class CTCodeEditor extends BaseElement {
     const mentionableData = mentionableArray.getRaw();
     if (!mentionableData) return null;
 
+    const uri = `of:${id}`;
     for (let i = 0; i < mentionableData.length; i++) {
       // This link could be to the cell being mentioned, but it could also
       // just be a link to an element in the array.
       // There's a little but of oddness here -- if item 1 in the array is a
       // link to item 0 in the array, we won't match item 0's id.
-      if (parseLink(mentionableArray.key(i).getRaw())?.id === `of:${id}`) {
+      if (parseLink(mentionableArray.key(i).getRaw())?.id === uri) {
         return mentionableArray.key(i);
       }
     }
@@ -933,7 +936,7 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentioned) return;
 
     const content = this.getValue() || "";
-    const newMentionedCells = this._extractMentionedCharms(content);
+    const newMentioned = this._extractMentionedCharms(content);
 
     // Compare by id set to avoid unnecessary writes
     const currentRaw = this.mentioned.asSchema(mentionableArraySchema).getRaw();
@@ -941,7 +944,7 @@ export class CTCodeEditor extends BaseElement {
       currentRaw?.map((item) => parseLink(item)?.id).filter(Boolean),
     );
     const newURIs = new Set(
-      newMentionedCells.map((c) => c.id).filter(Boolean),
+      newMentioned.map((c) => `of:${c.id}`),
     );
 
     if (curURIs.symmetricDifference(newURIs).size === 0) {
@@ -949,7 +952,7 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const tx = this.mentioned.runtime.edit();
-    this.mentioned.withTx(tx).set(newMentionedCells.map((c) => c.item));
+    this.mentioned.withTx(tx).set(newMentioned.map((c) => c.item));
     tx.commit();
   }
 
