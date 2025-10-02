@@ -27,6 +27,7 @@ import {
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
+import { type BacklinksMap } from "./backlinks-index.tsx";
 import Tools, {
   addListItem,
   calculator,
@@ -69,6 +70,7 @@ type ChatbotNoteInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   content: Default<string, "">;
   allCharms: Cell<MentionableCharm[]>;
+  index: { backlinks: BacklinksMap; mentionable: Cell<MentionableCharm[]> };
 };
 
 type ChatbotNoteResult = {
@@ -89,14 +91,14 @@ const newNote = handler<
     /** A cell to store the result message indicating success or error */
     result: Cell<string>;
   },
-  { allCharms: Cell<MentionableCharm[]> }
+  { allCharms: Cell<MentionableCharm[]>; index: any }
 >(
   (args, state) => {
     try {
       const n = Note({
         title: args.title,
         content: args.content || "",
-        allCharms: state.allCharms,
+        index: state.index,
       });
 
       args.result.set(
@@ -241,7 +243,7 @@ const navigateToNote = handler<
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages, content, allCharms }) => {
+  ({ title, messages, content, allCharms, index }) => {
     const list = cell<ListItem[]>([]);
 
     const tools = {
@@ -367,12 +369,13 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         } as JSONSchema,
         handler: newNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+          index: index as unknown as OpaqueRef<any>,
         }),
       },
     };
 
     const chat = Chat({ messages, tools });
-    const note = Note({ title, content, allCharms });
+    const note = Note({ title, content, index });
 
     return {
       [NAME]: title,
