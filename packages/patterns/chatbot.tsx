@@ -20,6 +20,7 @@ import {
   Stream,
   UI,
 } from "commontools";
+import { MentionableCharm } from "./chatbot-list-view.tsx";
 
 const sendMessage = handler<
   { detail: { message: string } },
@@ -50,6 +51,7 @@ type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
   theme?: any;
+  mentionable: Cell<MentionableCharm[]>;
 };
 
 type ChatOutput = {
@@ -100,7 +102,7 @@ export const TitleGenerator = recipe<
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools, theme }) => {
+  ({ messages, tools, theme, mentionable }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
@@ -148,6 +150,7 @@ export default recipe<ChatInput, ChatOutput>(
             <ct-prompt-input
               placeholder="Ask the LLM a question..."
               pending={pending}
+              $mentionable={mentionable}
               onct-send={sendMessage({ addMessage })}
               onct-stop={cancelGeneration}
             />

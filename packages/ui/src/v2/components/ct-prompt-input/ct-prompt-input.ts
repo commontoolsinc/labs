@@ -1,7 +1,9 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
+import { ref } from "lit/directives/ref.js";
 import { consume } from "@lit/context";
+import { type Cell, NAME } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,
@@ -9,10 +11,27 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import {
+  type Mentionable,
+  type MentionableArray,
+} from "../../core/mentionable.ts";
+import { MentionController } from "../../core/mention-controller.ts";
+import { applyMenuPosition } from "../../core/menu-position.ts";
 import "../ct-button/ct-button.ts";
 
 /**
- * CTPromptInput - Enhanced textarea input component with send button for prompts/chat interfaces
+ * Attachment data structure
+ */
+export interface PromptAttachment {
+  id: string; // UUID for reference
+  name: string; // Display name
+  type: "file" | "clipboard" | "mention";
+  data?: File | Blob | string;
+  charm?: Mentionable; // For mention-type attachments
+}
+
+/**
+ * CTPromptInput - Enhanced textarea input component with @-mentions and attachments support
  * Based on ct-message-input but with multiline support and prompt-specific features
  *
  * @element ct-prompt-input
@@ -25,8 +44,9 @@ import "../ct-button/ct-button.ts";
  * @attr {boolean} autoResize - Whether textarea auto-resizes to fit content (default: true)
  * @attr {number} rows - Initial number of rows for the textarea (default: 1)
  * @attr {number} maxRows - Maximum number of rows for auto-resize (default: 10)
+ * @attr {Cell<MentionableArray>} mentionable - Array of mentionable items for @-mention autocomplete
  *
- * @fires ct-send - Fired when send button is clicked or Enter is pressed (without Shift). detail: { message: string }
+ * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: Mentionable[] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
  * @fires ct-input - Fired when textarea value changes. detail: { value: string }
  *
@@ -34,7 +54,8 @@ import "../ct-button/ct-button.ts";
  * <ct-prompt-input
  *   placeholder="Ask me anything..."
  *   button-text="Send"
- *   @ct-send="${(e) => console.log(e.detail.message)}"
+ *   .mentionable=${mentionableCell}
+ *   @ct-send="${(e) => console.log(e.detail.text, e.detail.mentions)}"
  * ></ct-prompt-input>
  */
 export class CTPromptInput extends BaseElement {
@@ -97,12 +118,8 @@ export class CTPromptInput extends BaseElement {
             position: relative;
           }
 
-          ct-textarea {
+          textarea {
             width: 100%;
-          }
-
-          /* Override ct-textarea styles to integrate seamlessly */
-          ct-textarea::part(textarea) {
             border: none;
             background: transparent;
             padding: 0;
@@ -113,12 +130,15 @@ export class CTPromptInput extends BaseElement {
             font-size: 0.875rem;
             line-height: 1.25rem;
             color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+            overflow-y: auto;
           }
 
-          ct-textarea::part(textarea):focus {
+          textarea:focus {
             outline: none;
-            border: none;
-            box-shadow: none;
+          }
+
+          textarea::placeholder {
+            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-400, #9ca3af));
           }
 
           .actions {
@@ -136,7 +156,7 @@ export class CTPromptInput extends BaseElement {
           }
 
           /* Pending state - blocks editing but allows stop */
-          :host([pending]) ct-textarea::part(textarea) {
+          :host([pending]) textarea {
             opacity: 0.7;
             pointer-events: none;
           }
@@ -175,6 +195,45 @@ export class CTPromptInput extends BaseElement {
               var(--ct-spacing-1, 0.25rem)
             );
           }
+
+          /* Mentions dropdown styles */
+          .mentions-dropdown {
+            position: fixed;
+            background: var(--ct-prompt-input-background);
+            border: 1px solid var(--ct-prompt-input-border);
+            border-radius: var(--ct-prompt-input-border-radius);
+            box-shadow:
+              0 10px 15px -3px rgba(0, 0, 0, 0.1),
+              0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            min-width: 200px;
+          }
+
+          .mention-item {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            border-bottom: 1px solid var(--ct-prompt-input-border);
+            transition: background-color 0.1s;
+          }
+
+          .mention-item:last-child {
+            border-bottom: none;
+          }
+
+          .mention-item:hover,
+          .mention-item.selected {
+            background-color: var(
+              --ct-theme-surface,
+              var(--ct-color-gray-100, #f3f4f6)
+            );
+          }
+
+          .mention-name {
+            font-weight: 500;
+            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          }
         `,
       ];
 
@@ -190,6 +249,7 @@ export class CTPromptInput extends BaseElement {
         size: { type: String, reflect: true },
         variant: { type: String, reflect: true },
         theme: { type: Object, attribute: false },
+        mentionable: { type: Object, attribute: false },
       };
 
       declare placeholder: string;
@@ -202,12 +262,23 @@ export class CTPromptInput extends BaseElement {
       declare maxRows: number;
       declare size: string;
       declare variant: string;
+      declare mentionable: Cell<MentionableArray> | null;
 
       @consume({ context: themeContext, subscribe: true })
       @property({ attribute: false })
       declare theme?: CTTheme;
 
       private _textareaElement?: HTMLElement;
+
+      // Attachment management
+      private attachments: Map<string, PromptAttachment> = new Map();
+
+      // Mention controller
+      private mentionController = new MentionController(this, {
+        onInsert: (mention, markdown) => this._insertMentionAtCursor(markdown),
+        getCursorPosition: () => this._getCursorPosition(),
+        getContent: () => this.value,
+      });
 
       constructor() {
         super();
@@ -221,6 +292,7 @@ export class CTPromptInput extends BaseElement {
         this.maxRows = 10;
         this.size = "";
         this.variant = "";
+        this.mentionable = null;
       }
 
       override firstUpdated(
@@ -228,8 +300,8 @@ export class CTPromptInput extends BaseElement {
       ) {
         super.firstUpdated(changedProperties);
         this._textareaElement = this.shadowRoot?.querySelector(
-          "ct-textarea",
-        ) as HTMLElement;
+          "textarea",
+        ) as HTMLTextAreaElement;
         this._updateThemeProperties();
       }
 
@@ -239,6 +311,9 @@ export class CTPromptInput extends BaseElement {
         super.updated(changedProperties);
         if (changedProperties.has("theme")) {
           this._updateThemeProperties();
+        }
+        if (changedProperties.has("mentionable")) {
+          this.mentionController.setMentionable(this.mentionable);
         }
       }
 
@@ -255,14 +330,27 @@ export class CTPromptInput extends BaseElement {
         const textarea = this._textareaElement as any;
         if (!textarea || !textarea.value?.trim()) return;
 
-        const message = textarea.value;
+        const text = textarea.value;
 
-        // Clear the textarea
+        // Extract mentions from the text
+        const mentions = this.mentionController.extractMentionsFromText(text);
+
+        // Get all attachments
+        const attachments = Array.from(this.attachments.values());
+
+        // Clear the textarea and attachments
         textarea.value = "";
         this.value = "";
+        this.attachments.clear();
 
-        // Emit the send event
-        this.emit("ct-send", { message });
+        // Emit the send event with new structure
+        this.emit("ct-send", {
+          text,
+          attachments,
+          mentions,
+          // Backward compatibility
+          message: text,
+        });
       }
 
       private _handleStop(event?: Event) {
@@ -277,6 +365,11 @@ export class CTPromptInput extends BaseElement {
       private _handleKeyDown(event: KeyboardEvent) {
         // Don't handle shortcuts if disabled or pending
         if (this.disabled || this.pending) return;
+
+        // Let mention controller handle keyboard events first
+        if (this.mentionController.handleKeyDown(event)) {
+          return;
+        }
 
         // Enter without Shift sends the message
         if (event.key === "Enter" && !event.shiftKey) {
@@ -294,65 +387,176 @@ export class CTPromptInput extends BaseElement {
         }
       }
 
-      private _handleInput(event: CustomEvent) {
-        this.value = event.detail.value;
+      private _handleInput(event: Event) {
+        const textarea = event.target as HTMLTextAreaElement;
+        this.value = textarea.value;
+
+        // Auto-resize textarea if enabled
+        if (this.autoResize) {
+          textarea.style.height = "auto";
+          textarea.style.height = `${
+            Math.min(
+              textarea.scrollHeight,
+              parseFloat(
+                getComputedStyle(this).getPropertyValue(
+                  "--ct-prompt-input-max-height",
+                ) || "12rem",
+              ) * 16,
+            )
+          }px`;
+        }
+
+        // Let mention controller handle input changes
+        this.mentionController.handleInput(event);
 
         // Emit input event for external listeners
         this.emit("ct-input", { value: this.value });
       }
 
+      /**
+       * Get current cursor position in the textarea
+       */
+      private _getCursorPosition(): number {
+        const textarea = this._textareaElement as HTMLTextAreaElement;
+        return textarea?.selectionStart ?? 0;
+      }
+
+      /**
+       * Insert mention markdown at cursor position
+       */
+      private _insertMentionAtCursor(markdown: string): void {
+        const textarea = this._textareaElement as HTMLTextAreaElement;
+        if (!textarea) return;
+
+        const cursorPos = textarea.selectionStart;
+        const textBeforeCursor = this.value.substring(0, cursorPos);
+        const lastAtIndex = textBeforeCursor.lastIndexOf("@");
+
+        if (lastAtIndex === -1) return;
+
+        const beforeMention = this.value.substring(0, lastAtIndex);
+        const afterMention = this.value.substring(cursorPos);
+
+        this.value = beforeMention + markdown + afterMention;
+        textarea.value = this.value;
+
+        // Set cursor after the inserted mention
+        const newCursorPos = beforeMention.length + markdown.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+        textarea.focus();
+
+        this.requestUpdate();
+      }
+
       override render() {
         return html`
-          <div class="container">
-            <div class="textarea-wrapper">
-              <ct-textarea
-                .placeholder="${this.placeholder}"
-                .value="${this.value}"
-                .rows="${this.rows}"
-                ?disabled="${this.disabled}"
-                ?auto-resize="${this.autoResize}"
-                spellcheck="true"
-                @ct-input="${this._handleInput}"
-                @keydown="${this._handleKeyDown}"
-                part="textarea"
-              ></ct-textarea>
-            </div>
+          <div style="position: relative;">
+            <div class="container">
+              <div class="textarea-wrapper">
+                <textarea
+                  placeholder="${this.placeholder}"
+                  .value="${this.value}"
+                  rows="${this.rows}"
+                  ?disabled="${this.disabled}"
+                  spellcheck="true"
+                  @input="${this._handleInput}"
+                  @keydown="${this._handleKeyDown}"
+                  part="textarea"
+                ></textarea>
+                ${this.mentionController.isShowing
+                  ? this._renderMentionsDropdown()
+                  : ""}
+              </div>
 
-            <div class="actions">
-              ${this.pending
-                ? html`
-                  <ct-button
-                    id="ct-prompt-input-stop-button"
-                    variant="secondary"
-                    size="${this.size === "sm"
-                      ? "sm"
-                      : this.size === "lg"
-                      ? "lg"
-                      : "md"}"
-                    ?disabled="${this.disabled}"
-                    @click="${this._handleStop}"
-                    part="stop-button"
-                  >
-                    Stop
-                  </ct-button>
-                `
-                : html`
-                  <ct-button
-                    id="ct-prompt-input-send-button"
-                    variant="primary"
-                    size="${this.size === "sm"
-                      ? "sm"
-                      : this.size === "lg"
-                      ? "lg"
-                      : "md"}"
-                    ?disabled="${this.disabled || !this.value?.trim()}"
-                    @click="${this._handleSend}"
-                    part="send-button"
-                  >
-                    ${this.buttonText}
-                  </ct-button>
-                `}
+              <div class="actions">
+                ${this.pending
+                  ? html`
+                    <ct-button
+                      id="ct-prompt-input-stop-button"
+                      variant="secondary"
+                      size="${this.size === "sm"
+                        ? "sm"
+                        : this.size === "lg"
+                        ? "lg"
+                        : "md"}"
+                      ?disabled="${this.disabled}"
+                      @click="${this._handleStop}"
+                      part="stop-button"
+                    >
+                      Stop
+                    </ct-button>
+                  `
+                  : html`
+                    <ct-button
+                      id="ct-prompt-input-send-button"
+                      variant="primary"
+                      size="${this.size === "sm"
+                        ? "sm"
+                        : this.size === "lg"
+                        ? "lg"
+                        : "md"}"
+                      ?disabled="${this.disabled || !this.value?.trim()}"
+                      @click="${this._handleSend}"
+                      part="send-button"
+                    >
+                      ${this.buttonText}
+                    </ct-button>
+                  `}
+              </div>
             </div>
+          </div>
+        `;
+      }
+
+      /**
+       * Position the mentions dropdown
+       */
+      private _positionMentionsDropdown() {
+        return ref((el?: Element) => {
+          if (!el || !(el instanceof HTMLElement)) return;
+
+          const textarea = this._textareaElement as HTMLTextAreaElement;
+          if (!textarea) return;
+
+          const anchorRect = textarea.getBoundingClientRect();
+          applyMenuPosition(anchorRect, el, {
+            gap: 2,
+            preferredVertical: "below",
+          });
+        });
+      }
+
+      /**
+       * Render the mentions dropdown
+       */
+      private _renderMentionsDropdown() {
+        const filteredMentions = this.mentionController.getFilteredMentions();
+
+        if (filteredMentions.length === 0) {
+          return "";
+        }
+
+        return html`
+          <div
+            class="mentions-dropdown"
+            ${this._positionMentionsDropdown()}
+          >
+            ${filteredMentions.map((mention, index) =>
+              html`
+                <div
+                  class="mention-item ${index ===
+                      this.mentionController.state.selectedIndex
+                    ? "selected"
+                    : ""}"
+                  @click="${() =>
+                    this.mentionController.insertMention(mention)}"
+                  @mouseenter="${() =>
+                    this.mentionController.selectMention(index)}"
+                >
+                  <div class="mention-name">${mention[NAME]}</div>
+                </div>
+              `
+            )}
           </div>
         `;
       }
