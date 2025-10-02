@@ -27,6 +27,7 @@ import {
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
+import BacklinksIndex from "./backlinks-index.tsx";
 import Tools, {
   addListItem,
   calculator,
@@ -89,14 +90,14 @@ const newNote = handler<
     /** A cell to store the result message indicating success or error */
     result: Cell<string>;
   },
-  { allCharms: Cell<MentionableCharm[]> }
+  { allCharms: Cell<MentionableCharm[]>; index: any }
 >(
   (args, state) => {
     try {
       const n = Note({
         title: args.title,
         content: args.content || "",
-        allCharms: state.allCharms,
+        index: state.index,
       });
 
       args.result.set(
@@ -243,6 +244,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages, content, allCharms }) => {
     const list = cell<ListItem[]>([]);
+    const index = BacklinksIndex({ allCharms });
 
     const tools = {
       searchWeb: {
@@ -299,12 +301,13 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         description: "Create a new note instance",
         handler: newNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+          index: index as unknown as OpaqueRef<any>,
         }),
       },
     };
 
     const chat = Chat({ messages, tools, mentionable: allCharms });
-    const note = Note({ title, content, allCharms });
+    const note = Note({ title, content, index });
 
     return {
       [NAME]: title,
