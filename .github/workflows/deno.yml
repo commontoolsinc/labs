@@ -118,6 +118,13 @@ jobs:
           API_URL=http://localhost:8000/ \
           deno task integration
 
+      - name: 🧪 Run pattern-tests integration tests
+        working-directory: packages/pattern-tests
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
   cli-integration-test:
     name: "CLI Integration Tests"
     runs-on: ubuntu-latest
