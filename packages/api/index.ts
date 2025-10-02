@@ -49,21 +49,32 @@ export type Opaque<T> =
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
 
+export type OpaqueOrCells<T> =
+  | OpaqueRef<T>
+  | Cell<T>
+  | Stream<T>
+  | OpaqueRef<Cell<T>>
+  | OpaqueRef<Stream<T>>
+  | (T extends Array<infer U> ? Array<OpaqueOrCells<U>>
+    : T extends object ? { [K in keyof T]: OpaqueOrCells<T[K]> }
+    : T);
+
 // OpaqueRefMethods type with only public methods
 export interface OpaqueRefMethods<T> {
   get(): T;
-  set(value: Opaque<T> | T): void;
+  set(value: OpaqueOrCells<T> | T): void;
+  send(value: OpaqueOrCells<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-  setDefault(value: Opaque<T> | T): void;
+  setDefault(value: OpaqueOrCells<T> | T): void;
   setName(name: string): void;
   setSchema(schema: JSONSchema): void;
   map<S>(
     fn: (
-      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
+      element: T extends Array<infer U> ? OpaqueOrCells<U> : OpaqueOrCells<T>,
       index: Opaque<number>,
       array: T,
     ) => Opaque<S>,
-  ): Opaque<S[]>;
+  ): OpaqueRef<S[]>;
 }
 
 // Factory types
@@ -84,26 +95,26 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<StripCell<T>>) => OpaqueRef<R>;
+  with: (inputs: OpaqueOrCells<StripCell<T>>) => OpaqueRef<R>;
 };
 
 export type NodeFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: OpaqueOrCells<T>) => OpaqueRef<R>)
   & (Module | Handler | Recipe)
   & toJSON;
 
 export type RecipeFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: OpaqueOrCells<T>) => OpaqueRef<R>)
   & Recipe
   & toJSON;
 
 export type ModuleFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: OpaqueOrCells<T>) => OpaqueRef<R>)
   & Module
   & toJSON;
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<StripCell<T>>) => OpaqueRef<R>)
+  & ((inputs: OpaqueOrCells<StripCell<T>>) => OpaqueRef<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -236,7 +247,7 @@ export type BuiltInLLMTextPart = {
 
 export type BuiltInLLMImagePart = {
   type: "image";
-  image: string | Uint8Array | ArrayBuffer | URL;
+  image: string;
 };
 
 export type BuiltInLLMToolCallPart = {
@@ -345,16 +356,23 @@ export interface BuiltInCompileAndRunState<T> {
   }>;
 }
 
+// Removes all Cell<> or Stream<> from the type
+export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>
+  : T extends Stream<infer U> ? StripCell<U>
+  : T extends Array<infer U> ? StripCell<U>[]
+  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+  : T;
+
 // Function type definitions
 export type RecipeFunction = {
-  <S extends JSONSchema>(
+  <S extends JSONSchema, R = any>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
-  ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
+    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => OpaqueOrCells<R>,
+  ): RecipeFactory<SchemaWithoutCell<S>, R>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => OpaqueOrCells<R>,
   ): RecipeFactory<SchemaWithoutCell<S>, R>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
@@ -365,20 +383,15 @@ export type RecipeFunction = {
     ) => Opaque<SchemaWithoutCell<RS>>,
   ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
-  <T>(
+  <T, R = any>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => any,
-  ): RecipeFactory<T, ReturnType<typeof fn>>;
-
-  <T, R>(
-    argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>>) => OpaqueOrCells<R>,
   ): RecipeFactory<T, R>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
     resultSchema: JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>>) => OpaqueOrCells<R>,
   ): RecipeFactory<T, R>;
 };
 
@@ -391,21 +404,21 @@ export type LiftFunction = {
 
   <T, R>(
     implementation: (input: T) => R,
-  ): ModuleFactory<T, R>;
+  ): ModuleFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
     implementation: (input: T) => any,
-  ): ModuleFactory<T, ReturnType<typeof implementation>>;
+  ): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
 
-  <T extends (...args: any[]) => any>(
-    implementation: T,
-  ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+  // <T extends (...args: any[]) => any>(
+  //   implementation: T,
+  // ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
 
   <T, R>(
     argumentSchema?: JSONSchema,
     resultSchema?: JSONSchema,
     implementation?: (input: T) => R,
-  ): ModuleFactory<T, R>;
+  ): ModuleFactory<StripCell<T>, StripCell<R>>;
 };
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state
@@ -422,24 +435,24 @@ export type HandlerFunction = {
     eventSchema: E,
     stateSchema: T,
     handler: (event: Schema<E>, props: Schema<T>) => any,
-  ): ModuleFactory<StripCell<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+  ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
 
   // With inferred types
   <E, T>(
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
-  ): ModuleFactory<StripCell<T>, E>;
+  ): ModuleFactory<StripCell<T>, StripCell<E>>;
 
   // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
     options: { proxy: true },
-  ): ModuleFactory<StripCell<T>, E>;
+  ): ModuleFactory<StripCell<T>, StripCell<E>>;
 
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
-  ): ModuleFactory<StripCell<T>, E>;
+  ): ModuleFactory<StripCell<T>, StripCell<E>>;
 };
 
 export type DeriveFunction = {
@@ -502,27 +515,29 @@ export type FetchOptions = {
   redirect?: "follow" | "error" | "manual";
 };
 export type FetchDataFunction = <T>(
-  params: Opaque<{
+  params: OpaqueOrCells<{
     url: string;
     mode?: "json" | "text";
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type StreamDataFunction = <T>(
-  params: Opaque<{
+  params: OpaqueOrCells<{
     url: string;
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
-  params: Opaque<BuiltInCompileAndRunParams<T>>,
+  params: OpaqueOrCells<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
-export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
+export type NavigateToFunction = (
+  cell: OpaqueOrCells<any>,
+) => OpaqueRef<string>;
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
@@ -598,12 +613,6 @@ export const schema = <T extends JSONSchema>(schema: T) => schema;
 export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
   return {} as JSONSchema;
 };
-
-// Helper type to transform Cell<T> to Opaque<T> in handler inputs
-export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
-  : T;
 
 export type Schema<
   T extends JSONSchema,

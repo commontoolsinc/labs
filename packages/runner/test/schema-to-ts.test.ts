@@ -486,7 +486,7 @@ describe("Schema-to-TS Type Conversion", () => {
     expectType<ExpectedOutput, Schema<typeof outputSchema>>();
 
     // Verify that the recipe function parameter matches our expected input type
-    expectType<ExpectedInput, InferredInput>();
+    expectType<InferredInput, ExpectedInput>();
 
     // The expected output is the output schema wrapped in a single OpaqueRef.
     type DeepOpaqueOutput = OpaqueRef<Schema<typeof outputSchema>>;

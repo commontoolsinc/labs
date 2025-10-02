@@ -5,6 +5,7 @@ import type {
   JSONSchema,
   NodeFactory,
   Opaque,
+  OpaqueOrCells,
   OpaqueRef,
   Schema,
 } from "./types.ts";
@@ -22,57 +23,57 @@ export const compileAndRun = createNodeFactory({
   type: "ref",
   implementation: "compileAndRun",
 }) as <T = any, S = any>(
-  params: Opaque<BuiltInCompileAndRunParams<T>>,
+  params: OpaqueOrCells<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
 }) as (
-  params: Opaque<BuiltInLLMParams>,
+  params: OpaqueOrCells<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState>;
 
 export const llmDialog = createNodeFactory({
   type: "ref",
   implementation: "llmDialog",
 }) as (
-  params: Opaque<BuiltInLLMParams>,
+  params: OpaqueOrCells<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMDialogState>;
 
 export const generateObject = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
 }) as <T = any>(
-  params: Opaque<BuiltInGenerateObjectParams>,
+  params: OpaqueOrCells<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
 export const fetchData = createNodeFactory({
   type: "ref",
   implementation: "fetchData",
 }) as <T>(
-  params: Opaque<{
+  params: OpaqueOrCells<{
     url: string;
     mode?: "json" | "text";
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
 export const streamData = createNodeFactory({
   type: "ref",
   implementation: "streamData",
 }) as <T>(
-  params: Opaque<{
+  params: OpaqueOrCells<{
     url: string;
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
 export function ifElse<T = unknown, U = unknown, V = unknown>(
-  condition: Opaque<T>,
-  ifTrue: Opaque<U>,
-  ifFalse: Opaque<V>,
+  condition: OpaqueOrCells<T>,
+  ifTrue: OpaqueOrCells<U>,
+  ifFalse: OpaqueOrCells<V>,
 ): OpaqueRef<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
@@ -86,7 +87,7 @@ let ifElseFactory: NodeFactory<[unknown, unknown, unknown], any> | undefined;
 export const navigateTo = createNodeFactory({
   type: "ref",
   implementation: "navigateTo",
-}) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
+}) as (cell: OpaqueOrCells<unknown>) => OpaqueRef<string>;
 
 // Example:
 // str`Hello, ${name}!`
