@@ -1,7 +1,10 @@
 import ts from "typescript";
-import type { ClosureRule } from "../types.ts";
-import type { TransformationContext } from "../../core/context.ts";
-import { containsOpaqueRef } from "../../opaque-ref/types.ts";
+import { ImportRequirements } from "../core/imports.ts";
+import { isOpaqueRefType } from "../opaque-ref/types.ts";
+
+export interface ClosureTransformerOptions {
+  // Future: options for controlling what gets transformed
+}
 
 /**
  * Detects captured variables in a function using TypeScript's symbol table.
@@ -13,16 +16,33 @@ function collectCaptures(
 ): Set<ts.Expression> {
   const captures = new Set<ts.Expression>();
 
-  function isNodeWithin(node: ts.Node, container: ts.Node): boolean {
-    let current = node;
+  // Helper to check if a declaration is within the callback's scope using node identity
+  function isDeclaredWithinCallback(decl: ts.Declaration): boolean {
+    // Walk up the tree from the declaration
+    let current: ts.Node | undefined = decl;
     while (current) {
-      if (current === container) return true;
+      // Found our callback function
+      if (current === func) {
+        return true;
+      }
+
+      // Stop at function boundaries (don't cross into nested functions)
+      if (current !== decl && ts.isFunctionLike(current)) {
+        return false;
+      }
+
       current = current.parent;
     }
+
     return false;
   }
 
   function visit(node: ts.Node) {
+    // Don't visit inside nested functions - their scope is separate
+    if (node !== func && ts.isFunctionLike(node)) {
+      return;
+    }
+
     // For property access like state.discount, capture the whole expression
     if (ts.isPropertyAccessExpression(node)) {
       // Get the root object (e.g., 'state' in 'state.discount')
@@ -38,12 +58,12 @@ function collectCaptures(
         const declarations = symbol.getDeclarations();
         if (!declarations || declarations.length === 0) return;
 
-        // Check if declared outside the function
-        const isDeclaredOutside = declarations.some(
-          (decl) => !isNodeWithin(decl, func),
+        // Check if ANY declaration is outside the callback
+        const hasExternalDeclaration = declarations.some((decl) =>
+          !isDeclaredWithinCallback(decl)
         );
 
-        if (isDeclaredOutside) {
+        if (hasExternalDeclaration) {
           // Capture the whole property access expression
           captures.add(node);
           // Don't visit children of this property access
@@ -54,6 +74,11 @@ function collectCaptures(
 
     // For plain identifiers
     if (ts.isIdentifier(node)) {
+      // Skip if node doesn't have a parent (can happen with synthetic nodes)
+      if (!node.parent) {
+        return;
+      }
+
       // Skip if this is part of a property access (handled above)
       if (
         ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
@@ -61,20 +86,53 @@ function collectCaptures(
         return;
       }
 
+      // Skip JSX element tag names (e.g., <li>, <div>)
+      if (
+        ts.isJsxOpeningElement(node.parent) ||
+        ts.isJsxClosingElement(node.parent) ||
+        ts.isJsxSelfClosingElement(node.parent)
+      ) {
+        return;
+      }
+
       const symbol = checker.getSymbolAtLocation(node);
-      if (!symbol) return;
+      if (!symbol) {
+        return;
+      }
 
       const declarations = symbol.getDeclarations();
-      if (!declarations || declarations.length === 0) return;
+      if (!declarations || declarations.length === 0) {
+        return;
+      }
 
-      // Check if declared outside the function
-      const isDeclaredOutside = declarations.some(
-        (decl) => !isNodeWithin(decl, func),
+      // Check if ALL declarations are within the callback
+      const allDeclaredInside = declarations.every((decl) =>
+        isDeclaredWithinCallback(decl)
       );
 
-      if (isDeclaredOutside) {
-        captures.add(node);
+      if (allDeclaredInside) {
+        return;
       }
+
+      // Check if it's a JSX attribute (should not be captured)
+      const isJsxAttr = declarations.some((decl) => ts.isJsxAttribute(decl));
+      if (isJsxAttr) {
+        return;
+      }
+
+      // Skip imports - they're module-scoped and don't need to be captured
+      const isImport = declarations.some((decl) =>
+        ts.isImportSpecifier(decl) ||
+        ts.isImportClause(decl) ||
+        ts.isNamespaceImport(decl)
+      );
+      if (isImport) {
+        return;
+      }
+
+      // If we got here, at least one declaration is outside the callback
+      // So it's a captured variable
+      captures.add(node);
     }
 
     ts.forEachChild(node, visit);
@@ -88,9 +146,49 @@ function collectCaptures(
 }
 
 /**
- * Checks if this is a map call on an OpaqueRef array.
+ * Helper to check if a type's type argument is an array.
+ * Handles unions and intersections recursively, similar to isOpaqueRefType.
  */
-function isOpaqueRefMapCall(
+function hasArrayTypeArgument(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  // Handle unions - check if any member has an array type argument
+  if (type.flags & ts.TypeFlags.Union) {
+    return (type as ts.UnionType).types.some((t) =>
+      hasArrayTypeArgument(t, checker)
+    );
+  }
+
+  // Handle intersections - check if any member has an array type argument
+  if (type.flags & ts.TypeFlags.Intersection) {
+    return (type as ts.IntersectionType).types.some((t) =>
+      hasArrayTypeArgument(t, checker)
+    );
+  }
+
+  // Handle object types with type references (e.g., OpaqueRef<T[]>)
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const typeRef = objectType as ts.TypeReference;
+      if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+        const innerType = typeRef.typeArguments[0];
+        if (!innerType) return false;
+        // Check if inner type is an array or tuple
+        return checker.isArrayType(innerType) || checker.isTupleType(innerType);
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
+ * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
+ */
+function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
   checker: ts.TypeChecker,
 ): boolean {
@@ -98,9 +196,18 @@ function isOpaqueRefMapCall(
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
   if (node.expression.name.text !== "map") return false;
 
-  // Check if the object being mapped has OpaqueRef type
-  const objectType = checker.getTypeAtLocation(node.expression.expression);
-  return containsOpaqueRef(node.expression.expression, checker);
+  // Get the type of the target (what we're calling .map on)
+  const targetType = checker.getTypeAtLocation(node.expression.expression);
+
+  // Check if it's an OpaqueRef or Cell type using the robust type-checking method
+  // This handles type aliases, unions, intersections, and verifies import source
+  if (!isOpaqueRefType(targetType, checker)) {
+    return false;
+  }
+
+  // Now verify it's an array type by checking the type argument
+  // This also handles unions and intersections, just like isOpaqueRefType
+  return hasArrayTypeArgument(targetType, checker);
 }
 
 /**
@@ -125,12 +232,9 @@ function transformMapCallback(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   captures: Map<string, ts.Expression>,
-  context: TransformationContext,
-  transformation: ts.TransformationContext,
+  factory: ts.NodeFactory,
+  imports: ImportRequirements,
 ): ts.CallExpression {
-  const factory = transformation.factory;
-  const imports = context.imports;
-
   // Build the params object from captures
   const paramProperties: ts.PropertyAssignment[] = [];
   const capturedVarNames = new Set<string>();
@@ -151,11 +255,8 @@ function transformMapCallback(
     return mapCall;
   }
 
-  // Import recipe
-  imports.require({
-    name: "recipe",
-    module: "commontools",
-  });
+  // Require recipe import
+  imports.require({ module: "commontools", name: "recipe" });
 
   // Transform the callback parameters
   // Original: (item, index?) => ...
@@ -226,7 +327,7 @@ function transformMapCallback(
       if (ts.isIdentifier(node) && node.text === elemName.text) {
         return factory.createIdentifier("elem");
       }
-      return ts.visitEachChild(node, visitor, transformation);
+      return ts.visitEachChild(node, visitor, undefined);
     };
     transformedBody = ts.visitNode(
       transformedBody,
@@ -235,7 +336,6 @@ function transformMapCallback(
   }
 
   // Replace captured expressions with their parameter names
-  // We need to match against the original captured expressions
   for (const [varName, capturedExpr] of captures) {
     const visitor: ts.Visitor = (node) => {
       // Check if this node matches the captured expression
@@ -258,22 +358,10 @@ function transformMapCallback(
       } else if (ts.isIdentifier(node) && ts.isIdentifier(capturedExpr)) {
         // For simple identifier captures
         if (node.text === capturedExpr.text) {
-          // Verify it's actually the captured variable (not a local binding)
-          const symbol = context.checker.getSymbolAtLocation(node);
-          if (symbol) {
-            const declarations = symbol.getDeclarations();
-            if (declarations && declarations.length > 0) {
-              const isDeclaredOutside = declarations.some(
-                (decl) => !isNodeWithin(decl, callback),
-              );
-              if (isDeclaredOutside) {
-                return factory.createIdentifier(varName);
-              }
-            }
-          }
+          return factory.createIdentifier(varName);
         }
       }
-      return ts.visitEachChild(node, visitor, transformation);
+      return ts.visitEachChild(node, visitor, undefined);
     };
     transformedBody = ts.visitNode(
       transformedBody,
@@ -300,87 +388,72 @@ function transformMapCallback(
     [newCallback],
   );
 
-  // Create the object with op and params
-  const mapObject = factory.createObjectLiteralExpression([
-    factory.createPropertyAssignment(
-      factory.createIdentifier("op"),
-      recipeCall,
-    ),
-    factory.createPropertyAssignment(
-      factory.createIdentifier("params"),
-      factory.createObjectLiteralExpression(paramProperties),
-    ),
-  ]);
+  // Create the params object
+  const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
-  // Return the transformed map call
+  // Return the transformed map call with recipe as first arg, params as second arg
   return factory.createCallExpression(
     mapCall.expression,
     mapCall.typeArguments,
-    [mapObject],
+    [recipeCall, paramsObject],
   );
 }
 
-function isNodeWithin(node: ts.Node, container: ts.Node): boolean {
-  let current = node;
-  while (current) {
-    if (current === container) return true;
-    current = current.parent;
-  }
-  return false;
-}
+export function createClosureTransformer(
+  program: ts.Program,
+  _options: ClosureTransformerOptions = {},
+): ts.TransformerFactory<ts.SourceFile> {
+  const checker = program.getTypeChecker();
 
-export function createClosureTransformRule(): ClosureRule {
-  return {
-    name: "closure-transform",
-    transform(
-      sourceFile: ts.SourceFile,
-      context: TransformationContext,
-      transformation: ts.TransformationContext,
-    ): ts.SourceFile {
-      const checker = context.checker;
-      const factory = transformation.factory;
+  return (transformation) => (sourceFile) => {
+    const factory = transformation.factory;
+    const imports = new ImportRequirements();
 
-      function visit(node: ts.Node): ts.Node {
-        // Check for map calls with callbacks
-        if (ts.isCallExpression(node) && isOpaqueRefMapCall(node, checker)) {
-          const callback = node.arguments[0];
+    function visit(node: ts.Node): ts.Node {
+      // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
+      if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
+        const callback = node.arguments[0];
 
-          // Check if the callback is an arrow function or function expression
-          if (
-            callback &&
-            (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-          ) {
-            // Collect captures
-            const captureExpressions = collectCaptures(callback, checker);
+        // Check if the callback is an arrow function or function expression
+        if (
+          callback &&
+          (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+        ) {
+          // Collect captures
+          const captureExpressions = collectCaptures(callback, checker);
 
-            if (captureExpressions.size > 0) {
-              // Build map of capture name -> expression
-              // For property access like state.discount, we use "discount" as the name
-              const capturesByName = new Map<string, ts.Expression>();
-              for (const expr of captureExpressions) {
-                const name = getCaptureName(expr);
-                if (name && !capturesByName.has(name)) {
-                  capturesByName.set(name, expr);
-                }
+          if (captureExpressions.size > 0) {
+            // Build map of capture name -> expression
+            // For property access like state.discount, we use "discount" as the name
+            const capturesByName = new Map<string, ts.Expression>();
+            for (const expr of captureExpressions) {
+              const name = getCaptureName(expr);
+              if (name && !capturesByName.has(name)) {
+                capturesByName.set(name, expr);
               }
-
-              // Transform the map call
-              return transformMapCallback(
-                node,
-                callback,
-                capturesByName,
-                context,
-                transformation,
-              );
             }
+
+            // Transform the map call
+            const transformed = transformMapCallback(
+              node,
+              callback,
+              capturesByName,
+              factory,
+              imports,
+            );
+
+            return transformed;
           }
         }
-
-        // Continue visiting children
-        return ts.visitEachChild(node, visit, transformation);
       }
 
-      return ts.visitNode(sourceFile, visit) as ts.SourceFile;
-    },
+      // Continue visiting children
+      return ts.visitEachChild(node, visit, transformation);
+    }
+
+    const result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
+
+    // Apply import requirements
+    return imports.apply(result, factory);
   };
 }

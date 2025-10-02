@@ -185,10 +185,40 @@ export function createDataFlowAnalyzer(
       // Inherit properties from children
       if (childAnalyses.length > 0) {
         const merged = mergeAnalyses(...childAnalyses);
+
+        // For synthetic CallExpressions, detect call kind and set rewriteHint
+        if (ts.isCallExpression(expression)) {
+          const callKind = detectCallKind(expression, checker);
+          const rewriteHint: RewriteHint | undefined = (() => {
+            if (callKind?.kind === "builder") {
+              return { kind: "skip-call-rewrite", reason: "builder" };
+            }
+            if (callKind?.kind === "array-map") {
+              return { kind: "skip-call-rewrite", reason: "array-map" };
+            }
+            if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
+              const predicate = expression.arguments[0];
+              if (predicate) {
+                return { kind: "call-if-else", predicate };
+              }
+            }
+            return undefined;
+          })();
+
+          return {
+            ...merged,
+            rewriteHint,
+          };
+        }
+
+        // Preserve requiresRewrite from children for property access expressions
+        if (ts.isPropertyAccessExpression(expression)) {
+          return merged;
+        }
+
         return {
           ...merged,
-          // Synthetic nodes themselves never require rewrite
-          // (they're already transformed)
+          // Other synthetic nodes don't require rewrite
           requiresRewrite: false,
         };
       }
@@ -639,6 +669,19 @@ export function createDataFlowAnalyzer(
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
+          dataFlows: combined.dataFlows,
+          localNodes: combined.localNodes,
+          rewriteHint,
+        };
+      }
+
+      if (callKind?.kind === "array-map") {
+        // For array-map, we don't rewrite the map call itself,
+        // but we DO need to preserve requiresRewrite from the target (callee)
+        // to handle cases like state.items.filter(...).map(...)
+        return {
+          containsOpaqueRef: combined.containsOpaqueRef,
+          requiresRewrite: callee.requiresRewrite,
           dataFlows: combined.dataFlows,
           localNodes: combined.localNodes,
           rewriteHint,
