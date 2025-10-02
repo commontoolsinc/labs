@@ -4,7 +4,7 @@ import {
   DiagnosticInput,
   TransformationDiagnostic,
   TransformationOptions,
-} from "./types.ts";
+} from "./transformers.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",

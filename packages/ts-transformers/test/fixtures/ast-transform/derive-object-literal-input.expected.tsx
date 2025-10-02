@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell, derive, lift, JSONSchema } from "commontools";
 const stage = cell<string>("initial");
 const attemptCount = cell<number>(0);

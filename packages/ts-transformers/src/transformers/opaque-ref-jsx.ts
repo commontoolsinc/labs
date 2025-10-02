@@ -1,7 +1,8 @@
 import ts from "typescript";
 import {
+  hasCtsEnableDirective,
   TransformationContext,
-  type TransformationOptions,
+  Transformer,
 } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
@@ -10,39 +11,20 @@ import {
 } from "../ast/mod.ts";
 import { OpaqueRefHelperName, rewriteExpression } from "./opaque-ref/mod.ts";
 
-export function createOpaqueRefJSXTransformer(
-  program: ts.Program,
-  options: TransformationOptions = {},
-): ts.TransformerFactory<ts.SourceFile> {
-  return (transformation) => (sourceFile) => {
-    const context = new TransformationContext({
-      program,
-      sourceFile,
-      transformation,
-      options,
-    });
+export class OpaqueRefJSXTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return hasCtsEnableDirective(context.sourceFile);
+  }
 
-    let out = transform(context);
-    out = context.imports.apply(
+  transform(context: TransformationContext): ts.SourceFile {
+    const { transformation } = context;
+
+    const out = transform(context);
+    return context.imports.apply(
       out,
       transformation.factory,
     );
-    (context as { sourceFile: ts.SourceFile }).sourceFile = out;
-
-    if (
-      context.options.mode === "error" &&
-      context.diagnostics.length > 0
-    ) {
-      const message = context.diagnostics
-        .map((diagnostic) =>
-          `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column} - ${diagnostic.message}`
-        )
-        .join("\n");
-      throw new Error(`OpaqueRef transformation errors:\n${message}`);
-    }
-
-    return out;
-  };
+  }
 }
 
 function isInsideDeriveCallback(

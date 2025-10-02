@@ -10,7 +10,6 @@ import { loadFixture, transformFixture } from "./utils.ts";
 interface FixtureConfig {
   directory: string;
   describe: string;
-  transformerOptions?: Record<string, unknown>;
   groups?: Array<{ pattern: RegExp; name: string }>;
   formatTestName?: (fileName: string) => string;
 }
@@ -19,21 +18,16 @@ const configs: FixtureConfig[] = [
   {
     directory: "ast-transform",
     describe: "AST Transformation",
-    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
   {
     directory: "handler-schema",
     describe: "Handler Schema Transformation",
-    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
   {
     directory: "jsx-expressions",
     describe: "JSX Expression Transformer",
-    transformerOptions: {
-      applySchemaGeneratorTransformer: true,
-    },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
       if (name.includes("no-transform")) {
@@ -45,7 +39,6 @@ const configs: FixtureConfig[] = [
   {
     directory: "schema-transform",
     describe: "Schema Transformer",
-    transformerOptions: { applySchemaGeneratorTransformer: true },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
       if (name === "with-opaque-ref") return "works with OpaqueRef transformer";
@@ -72,7 +65,6 @@ for (const config of configs) {
         `${config.directory}/${fixture.relativeInputPath}`,
         {
           types: { "commontools.d.ts": commontools },
-          ...config.transformerOptions,
         },
       );
     },

@@ -1,28 +1,22 @@
 import ts from "typescript";
 import {
+  hasCtsEnableDirective,
   TransformationContext,
-  type TransformationOptions,
-  type TypeRegistry,
+  Transformer,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 
-export function createSchemaGeneratorTransformer(
-  program: ts.Program,
-  options: TransformationOptions = {},
-): ts.TransformerFactory<ts.SourceFile> {
-  const checker = program.getTypeChecker();
-  const logger = options.logger;
-  const typeRegistry = options.typeRegistry;
-  const generateSchema = createSchemaTransformerV2();
+let generateSchema: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
-  return (transformation: ts.TransformationContext) =>
-  (sourceFile: ts.SourceFile) => {
-    const context = new TransformationContext({
-      program,
-      sourceFile,
-      transformation,
-      options,
-    });
+export class SchemaGeneratorTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return hasCtsEnableDirective(context.sourceFile);
+  }
+
+  transform(context: TransformationContext): ts.SourceFile {
+    if (!generateSchema) generateSchema = createSchemaTransformerV2();
+    const { sourceFile, transformation, checker } = context;
+    const { logger, typeRegistry } = context.options;
 
     let needsJSONSchemaImport = false;
 
@@ -65,7 +59,7 @@ export function createSchemaGeneratorTransformer(
           optionsObj = evaluateObjectLiteral(arg0, checker);
         }
 
-        const schema = generateSchema(type, checker, typeArg);
+        const schema = generateSchema!(type, checker, typeArg);
 
         // Handle boolean schemas (true/false) - can't spread them
         const finalSchema = typeof schema === "boolean"
@@ -115,7 +109,7 @@ export function createSchemaGeneratorTransformer(
       result,
       transformation.factory,
     );
-  };
+  }
 }
 
 function createSchemaAst(

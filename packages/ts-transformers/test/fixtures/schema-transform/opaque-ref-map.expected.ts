@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { OpaqueRef, recipe, JSONSchema } from "commontools";
 interface TodoItem {
     title: string;

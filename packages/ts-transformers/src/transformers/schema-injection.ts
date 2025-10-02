@@ -8,8 +8,9 @@ import {
   typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 import {
+  hasCtsEnableDirective,
   TransformationContext,
-  type TransformationOptions,
+  Transformer,
   type TypeRegistry,
 } from "../core/mod.ts";
 
@@ -143,20 +144,13 @@ function prependSchemaArguments(
   );
 }
 
-export function createSchemaInjectionTransformer(
-  program: ts.Program,
-  options: TransformationOptions = {},
-): ts.TransformerFactory<ts.SourceFile> {
-  const typeRegistry = options.typeRegistry;
-
-  return (transformation: ts.TransformationContext) =>
-  (sourceFile: ts.SourceFile) => {
-    const context = new TransformationContext({
-      program,
-      sourceFile,
-      transformation,
-      options,
-    });
+export class SchemaInjectionTransformer extends Transformer {
+  override filter(context: TransformationContext): boolean {
+    return hasCtsEnableDirective(context.sourceFile);
+  }
+  transform(context: TransformationContext): ts.SourceFile {
+    const { sourceFile, transformation, checker } = context;
+    const typeRegistry = context.options.typeRegistry;
 
     let requestedToSchema = false;
     const ensureToSchemaImport = (): void => {
@@ -173,7 +167,7 @@ export function createSchemaInjectionTransformer(
         return ts.visitEachChild(node, visit, transformation);
       }
 
-      const callKind = detectCallKind(node, context.checker);
+      const callKind = detectCallKind(node, checker);
 
       if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
         const typeArgs = node.typeArguments;
@@ -303,7 +297,7 @@ export function createSchemaInjectionTransformer(
             resultType,
             resultTypeValue,
             typeRegistry,
-            context.checker,
+            checker,
           );
           // Don't visit children - we've already transformed this node
           return updated;
@@ -330,12 +324,12 @@ export function createSchemaInjectionTransformer(
           const callback = node.arguments[1] as
             | ts.ArrowFunction
             | ts.FunctionExpression;
-          const argumentType = context.checker.getTypeAtLocation(
+          const argumentType = checker.getTypeAtLocation(
             node.arguments[0]!,
           );
           const inferred = collectFunctionSchemaTypeNodes(
             callback,
-            context.checker,
+            checker,
             argumentType,
           );
 
@@ -372,7 +366,7 @@ export function createSchemaInjectionTransformer(
             resultType,
             resultTypeValue,
             typeRegistry,
-            context.checker,
+            checker,
           );
           // Don't visit children - we've already transformed this node
           return updated;
@@ -401,7 +395,7 @@ export function createSchemaInjectionTransformer(
             | ts.FunctionExpression;
           const inferred = collectFunctionSchemaTypeNodes(
             callback,
-            context.checker,
+            checker,
           );
 
           // Transform if we got at least one type, filling in unknown for the other
@@ -424,5 +418,5 @@ export function createSchemaInjectionTransformer(
     };
 
     return ts.visitEachChild(sourceFile, visit, transformation);
-  };
+  }
 }

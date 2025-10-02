@@ -6,6 +6,7 @@ export type {
   TransformationOptions,
   TransformMode,
   TypeRegistry,
-} from "./types.ts";
+} from "./transformers.ts";
+export { Pipeline, Transformer } from "./transformers.ts";
 export * from "./common-tools-symbols.ts";
 export { hasCtsEnableDirective } from "./cts-directive.ts";
