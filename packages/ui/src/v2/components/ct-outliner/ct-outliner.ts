@@ -170,7 +170,7 @@ export class CTOutliner extends BaseElement
 
   // Mention controller
   private mentionController = new MentionController(this, {
-    onInsert: (mention, markdown) => this._insertMentionInEditor(markdown),
+    onInsert: (markdown, mention) => this._insertMentionInEditor(markdown),
     getCursorPosition: () => this._getEditorCursorPosition(),
     getContent: () => this.editingContent,
   });
@@ -1554,7 +1554,6 @@ export class CTOutliner extends BaseElement
     textarea.focus();
   }
 
-
   /**
    * Handle click on charm links
    */
@@ -1937,7 +1936,7 @@ export class CTOutliner extends BaseElement
           html`
             <div
               class="mention-item ${index ===
-              this.mentionController.state.selectedIndex
+                  this.mentionController.state.selectedIndex
                 ? "selected"
                 : ""}"
               @click="${() => this.mentionController.insertMention(mention)}"
