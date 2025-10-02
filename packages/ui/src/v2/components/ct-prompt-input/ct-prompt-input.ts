@@ -94,7 +94,7 @@ export class CTPromptInput extends BaseElement {
       .container {
         position: relative;
         display: flex;
-        align-items: flex-end;
+        flex-direction: column;
         gap: var(--ct-prompt-input-gap);
         padding: var(--ct-prompt-input-padding);
         background: var(--ct-prompt-input-background);
@@ -111,6 +111,12 @@ export class CTPromptInput extends BaseElement {
           );
           box-shadow: 0 0 0 0.5px
             var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
+          }
+
+          .input-row {
+            display: flex;
+            align-items: flex-end;
+            gap: var(--ct-prompt-input-gap);
           }
 
           .textarea-wrapper {
@@ -234,6 +240,128 @@ export class CTPromptInput extends BaseElement {
             font-weight: 500;
             color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
           }
+
+          /* Pills list styles */
+          .pills-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+          }
+
+          .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+            padding: 0.25rem 0.5rem;
+            background: var(
+              --ct-theme-surface,
+              var(--ct-color-gray-100, #f3f4f6)
+            );
+            border: 1px solid var(--ct-prompt-input-border);
+            border-radius: var(
+              --ct-theme-border-radius,
+              var(--ct-radius-full, 9999px)
+            );
+            font-size: 0.8125rem;
+            line-height: 1;
+            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+            cursor: default;
+            user-select: none;
+          }
+
+          .pill-icon {
+            display: flex;
+            align-items: center;
+            font-size: 0.875rem;
+          }
+
+          .pill-name {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .pill-remove {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background-color 0.1s;
+            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+          }
+
+          .pill-remove:hover {
+            background: var(
+              --ct-theme-color-border,
+              var(--ct-color-gray-300, #d1d5db)
+            );
+            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          }
+
+          .pill[data-type="mention"] {
+            background: var(
+              --ct-theme-color-primary-surface,
+              var(--ct-color-blue-50, #eff6ff)
+            );
+            border-color: var(
+              --ct-theme-color-primary,
+              var(--ct-color-blue-200, #bfdbfe)
+            );
+            color: var(
+              --ct-theme-color-primary,
+              var(--ct-color-blue-700, #1d4ed8)
+            );
+          }
+
+          .pill[data-type="file"] {
+            background: var(
+              --ct-theme-surface,
+              var(--ct-color-gray-100, #f3f4f6)
+            );
+          }
+
+          .pill[data-type="clipboard"] {
+            background: var(
+              --ct-theme-color-accent-surface,
+              var(--ct-color-purple-50, #faf5ff)
+            );
+            border-color: var(
+              --ct-theme-color-accent,
+              var(--ct-color-purple-200, #e9d5ff)
+            );
+          }
+
+          /* File upload styles */
+          .upload-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 2rem;
+            height: 2rem;
+            border-radius: var(
+              --ct-theme-border-radius,
+              var(--ct-radius-md, 0.375rem)
+            );
+            cursor: pointer;
+            transition: background-color 0.15s;
+            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+          }
+
+          .upload-button:hover {
+            background: var(
+              --ct-theme-surface,
+              var(--ct-color-gray-100, #f3f4f6)
+            );
+            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          }
+
+          input[type="file"] {
+            display: none;
+          }
         `,
       ];
 
@@ -275,7 +403,8 @@ export class CTPromptInput extends BaseElement {
 
       // Mention controller
       private mentionController = new MentionController(this, {
-        onInsert: (mention, markdown) => this._insertMentionAtCursor(markdown),
+        onInsert: (markdown, mention) =>
+          this._insertMentionAtCursor(markdown, mention),
         getCursorPosition: () => this._getCursorPosition(),
         getContent: () => this.value,
       });
@@ -414,6 +543,66 @@ export class CTPromptInput extends BaseElement {
       }
 
       /**
+       * Handle paste event for large content detection
+       */
+      private _handlePaste(event: ClipboardEvent) {
+        const clipboardData = event.clipboardData;
+        if (!clipboardData) return;
+
+        // Check for files in clipboard
+        const files = Array.from(clipboardData.files);
+        if (files.length > 0) {
+          event.preventDefault();
+
+          for (const file of files) {
+            const id = this._generateAttachmentId();
+            const attachment: PromptAttachment = {
+              id,
+              name: file.name || "Pasted file",
+              type: "clipboard",
+              data: file,
+            };
+
+            this.addAttachment(attachment);
+          }
+
+          return;
+        }
+
+        // Check for large text content (>1000 chars)
+        const text = clipboardData.getData("text");
+        if (text && text.length > 1000) {
+          event.preventDefault();
+
+          const id = this._generateAttachmentId();
+          const attachment: PromptAttachment = {
+            id,
+            name: `Pasted content (${text.length} chars)`,
+            type: "clipboard",
+            data: text,
+          };
+
+          this.addAttachment(attachment);
+
+          // Insert reference to the attachment in the text
+          const textarea = this._textareaElement as HTMLTextAreaElement;
+          const cursorPos = textarea.selectionStart;
+          const beforeCursor = this.value.substring(0, cursorPos);
+          const afterCursor = this.value.substring(textarea.selectionEnd);
+
+          const reference = `[${attachment.name}](#${id})`;
+          this.value = beforeCursor + reference + afterCursor;
+          textarea.value = this.value;
+
+          // Set cursor after the reference
+          const newCursorPos = beforeCursor.length + reference.length;
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+
+          this.requestUpdate();
+        }
+      }
+
+      /**
        * Get current cursor position in the textarea
        */
       private _getCursorPosition(): number {
@@ -422,9 +611,12 @@ export class CTPromptInput extends BaseElement {
       }
 
       /**
-       * Insert mention markdown at cursor position
+       * Insert mention at cursor position
        */
-      private _insertMentionAtCursor(markdown: string): void {
+      private _insertMentionAtCursor(
+        markdown: string,
+        mention: Mentionable,
+      ): void {
         const textarea = this._textareaElement as HTMLTextAreaElement;
         if (!textarea) return;
 
@@ -437,11 +629,26 @@ export class CTPromptInput extends BaseElement {
         const beforeMention = this.value.substring(0, lastAtIndex);
         const afterMention = this.value.substring(cursorPos);
 
-        this.value = beforeMention + markdown + afterMention;
+        // Format the name: add brackets if it contains spaces
+        const name = mention[NAME] || "Unknown";
+        const formattedName = name.includes(" ") ? `[${name}]` : name;
+
+        this.value = beforeMention + formattedName + afterMention;
         textarea.value = this.value;
 
+        // Create an attachment pill for the mention
+        const attachmentId = this._generateAttachmentId();
+        const attachment: PromptAttachment = {
+          id: attachmentId,
+          name,
+          type: "mention",
+          charm: mention,
+        };
+
+        this.addAttachment(attachment);
+
         // Set cursor after the inserted mention
-        const newCursorPos = beforeMention.length + markdown.length;
+        const newCursorPos = beforeMention.length + formattedName.length;
         textarea.setSelectionRange(newCursorPos, newCursorPos);
         textarea.focus();
 
@@ -452,60 +659,195 @@ export class CTPromptInput extends BaseElement {
         return html`
           <div style="position: relative;">
             <div class="container">
-              <div class="textarea-wrapper">
-                <textarea
-                  placeholder="${this.placeholder}"
-                  .value="${this.value}"
-                  rows="${this.rows}"
-                  ?disabled="${this.disabled}"
-                  spellcheck="true"
-                  @input="${this._handleInput}"
-                  @keydown="${this._handleKeyDown}"
-                  part="textarea"
-                ></textarea>
-                ${this.mentionController.isShowing
-                  ? this._renderMentionsDropdown()
-                  : ""}
-              </div>
+              ${this._renderPillsList()}
 
-              <div class="actions">
-                ${this.pending
-                  ? html`
-                    <ct-button
-                      id="ct-prompt-input-stop-button"
-                      variant="secondary"
-                      size="${this.size === "sm"
-                        ? "sm"
-                        : this.size === "lg"
-                        ? "lg"
-                        : "md"}"
-                      ?disabled="${this.disabled}"
-                      @click="${this._handleStop}"
-                      part="stop-button"
-                    >
-                      Stop
-                    </ct-button>
-                  `
-                  : html`
-                    <ct-button
-                      id="ct-prompt-input-send-button"
-                      variant="primary"
-                      size="${this.size === "sm"
-                        ? "sm"
-                        : this.size === "lg"
-                        ? "lg"
-                        : "md"}"
-                      ?disabled="${this.disabled || !this.value?.trim()}"
-                      @click="${this._handleSend}"
-                      part="send-button"
-                    >
-                      ${this.buttonText}
-                    </ct-button>
-                  `}
+              <div class="input-row">
+                <div class="textarea-wrapper">
+                  <textarea
+                    placeholder="${this.placeholder}"
+                    .value="${this.value}"
+                    rows="${this.rows}"
+                    ?disabled="${this.disabled}"
+                    spellcheck="true"
+                    @input="${this._handleInput}"
+                    @keydown="${this._handleKeyDown}"
+                    @paste="${this._handlePaste}"
+                    part="textarea"
+                  ></textarea>
+                  ${this.mentionController.isShowing
+                    ? this._renderMentionsDropdown()
+                    : ""}
+                </div>
+
+                <div class="actions">
+                  <!-- Hidden file input -->
+                  <input
+                    type="file"
+                    multiple
+                    @change="${this._handleFileSelect}"
+                  />
+
+                  <!-- Upload button -->
+                  ${!this.pending
+                    ? html`
+                      <div
+                        class="upload-button"
+                        @click="${this._handleUploadClick}"
+                        role="button"
+                        aria-label="Upload file"
+                        title="Upload file"
+                      >
+                        📎
+                      </div>
+                    `
+                    : ""} ${this.pending
+                    ? html`
+                      <ct-button
+                        id="ct-prompt-input-stop-button"
+                        variant="secondary"
+                        size="${this.size === "sm"
+                          ? "sm"
+                          : this.size === "lg"
+                          ? "lg"
+                          : "md"}"
+                        ?disabled="${this.disabled}"
+                        @click="${this._handleStop}"
+                        part="stop-button"
+                      >
+                        Stop
+                      </ct-button>
+                    `
+                    : html`
+                      <ct-button
+                        id="ct-prompt-input-send-button"
+                        variant="primary"
+                        size="${this.size === "sm"
+                          ? "sm"
+                          : this.size === "lg"
+                          ? "lg"
+                          : "md"}"
+                        ?disabled="${this.disabled || !this.value?.trim()}"
+                        @click="${this._handleSend}"
+                        part="send-button"
+                      >
+                        ${this.buttonText}
+                      </ct-button>
+                    `}
+                </div>
               </div>
             </div>
           </div>
         `;
+      }
+
+      /**
+       * Generate a unique ID for attachments
+       */
+      private _generateAttachmentId(): string {
+        return `attachment-${Date.now()}-${
+          Math.random().toString(36).substring(2, 9)
+        }`;
+      }
+
+      /**
+       * Add an attachment
+       */
+      addAttachment(attachment: PromptAttachment): void {
+        this.attachments.set(attachment.id, attachment);
+        this.requestUpdate();
+      }
+
+      /**
+       * Remove an attachment by ID
+       */
+      removeAttachment(id: string): void {
+        this.attachments.delete(id);
+        this.requestUpdate();
+      }
+
+      /**
+       * Get icon for attachment type
+       */
+      private _getAttachmentIcon(type: PromptAttachment["type"]): string {
+        switch (type) {
+          case "mention":
+            return "@";
+          case "file":
+            return "📎";
+          case "clipboard":
+            return "📋";
+          default:
+            return "📄";
+        }
+      }
+
+      /**
+       * Render pills list for attachments
+       */
+      private _renderPillsList() {
+        if (this.attachments.size === 0) {
+          return "";
+        }
+
+        const attachmentsArray = Array.from(this.attachments.values());
+
+        return html`
+          <div class="pills-list">
+            ${attachmentsArray.map((attachment) =>
+              html`
+                <div class="pill" data-type="${attachment.type}">
+                  <span class="pill-icon">${this._getAttachmentIcon(
+                    attachment.type,
+                  )}</span>
+                  <span class="pill-name">${attachment.name}</span>
+                  <span
+                    class="pill-remove"
+                    @click="${() => this.removeAttachment(attachment.id)}"
+                    role="button"
+                    aria-label="Remove ${attachment.name}"
+                  >
+                    ×
+                  </span>
+                </div>
+              `
+            )}
+          </div>
+        `;
+      }
+
+      /**
+       * Handle file upload button click
+       */
+      private _handleUploadClick() {
+        const fileInput = this.shadowRoot?.querySelector(
+          'input[type="file"]',
+        ) as HTMLInputElement;
+        fileInput?.click();
+      }
+
+      /**
+       * Handle file selection
+       */
+      private _handleFileSelect(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const files = input.files;
+
+        if (!files || files.length === 0) return;
+
+        for (const file of Array.from(files)) {
+          const id = this._generateAttachmentId();
+          const attachment: PromptAttachment = {
+            id,
+            name: file.name,
+            type: "file",
+            data: file,
+          };
+
+          this.addAttachment(attachment);
+        }
+
+        // Reset the input so the same file can be selected again
+        input.value = "";
       }
 
       /**

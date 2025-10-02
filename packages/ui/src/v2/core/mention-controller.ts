@@ -18,7 +18,7 @@ export interface MentionControllerConfig {
   /**
    * Callback when a mention is inserted
    */
-  onInsert?: (mention: Mentionable, markdown: string) => void;
+  onInsert?: (markdown: string, mention: Mentionable) => void;
 
   /**
    * Callback to get current cursor position in the input element
@@ -244,7 +244,7 @@ export class MentionController implements ReactiveController {
    */
   insertMention(mention: Mentionable): void {
     const markdown = this.encodeCharmAsMarkdown(mention);
-    this.config.onInsert(mention, markdown);
+    this.config.onInsert(markdown, mention);
     this.hide();
   }
 
