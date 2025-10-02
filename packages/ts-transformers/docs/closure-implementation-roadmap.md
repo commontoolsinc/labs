@@ -1,396 +1,404 @@
 # Closure Implementation Roadmap
 
-_Created: 2025-09-24_ _Status: Ready for Implementation_
+_Created: 2025-09-24_ _Updated: 2025-10-01_ _Status: Phase 1 Complete_
 
 ## Executive Summary
 
 This roadmap provides a concrete, step-by-step plan for implementing closure
-support in the CommonTools TypeScript transformer. We'll start with the simplest
-case (map callbacks) and progressively build toward full closure support.
+support in the CommonTools TypeScript transformer for **OpaqueRef array map callbacks**.
+We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with a clean, standalone architecture.
 
 ## Implementation Status
 
-✅ **COMPLETED**: Basic closure transformer structure created in `src/closures/`
-directory
+✅ **PHASE 1 COMPLETE**: Map callback transformation fully working
 
-- Separate from opaque-ref for clean architecture
-- Runs FIRST in the pipeline (before OpaqueRef and Schema transformers)
-- Has its own types and rules system
+### What We Built
 
-⚠️ **IN PROGRESS**: Fixing capture detection bug
+1. **Standalone Closure Transformer** (`src/closures/transformer.ts`)
+   - Independent of opaque-ref transformer
+   - Transforms map callbacks on `OpaqueRef<T[]>` that have captures
+   - Does NOT transform `Cell<T[]>.map()` or plain `T[].map()`
+   - Runs FIRST in the pipeline
+   - Self-contained with own import management
 
-- Currently capturing wrong variables (individual identifiers instead of full
-  expressions)
-- Need to properly handle property access like `state.discount`
+2. **Simple Capture Detection** (Node Identity Approach)
+   - Leverages TypeScript's symbol table
+   - Uses direct node identity checks (works because we run first!)
+   - Captures ALL variables (reactive and non-reactive)
+   - Handles all edge cases: JSX, nested properties, local variables
+
+3. **Clean Pipeline Architecture** (`src/transform.ts`)
+   ```typescript
+   Closure → OpaqueRef → Schema
+   ```
+
+4. **Unified Test Infrastructure**
+   - All tests use `commonTypeScriptTransformer`
+   - Automatic correct ordering
+   - Fixture-based testing approach
+
+### Key Architectural Decisions
+
+1. **Closure as Separate Transformer**: Not a rule within opaque-ref
+   - Conceptually cleaner (closures ≠ reactivity)
+   - Reusable for non-OpaqueRef scenarios
+   - Independent testing and development
+
+2. **Run First in Pipeline**: Critical for simplicity
+   - Operates on clean, untransformed AST
+   - TypeChecker + node identity checks work reliably
+   - Source position approach NOT needed (simpler!)
+
+3. **Node Identity Works**: Because we run first
+   - Closure transformer sees original AST
+   - TypeChecker built from original program
+   - Both reference same nodes → `node === func` works!
+
+4. **OpaqueRef Arrays Only**: Only transform `OpaqueRef<T[]>.map()`
+   - Specifically targets OpaqueRef array map operations
+   - Does NOT transform Cell or plain array maps
+   - But captures ALL variables (not just reactive ones) when transforming
 
 ## Implementation Phases
 
-### Phase 1: Foundation - Capture Detection ✅ COMPLETED (with bug to fix)
+### Phase 1: Map Callback Transformation ✅ COMPLETE
 
-#### Step 1.1: Create Closure Transform Rule
+**Status**: Fully implemented and tested
 
-**File**: `src/closures/rules/closure-transform.ts` ✅ CREATED
+#### What Works
 
 ```typescript
-export function createClosureTransformRule(): OpaqueRefRule {
-  return {
-    name: "closure-transform",
-    transform(sourceFile, context, transformation): ts.SourceFile {
-      // This runs BEFORE jsx-expression transformation
-    },
-  };
-}
+// Input: state.items has type OpaqueRef<Item[]>
+state.items.map((item, index) => item.price * state.discount + state.tax)
+
+// Output
+state.items.map(
+  recipe(({ elem, index, params: { discount, tax } }) =>
+    elem.price * discount + tax
+  ),
+  { discount: state.discount, tax: state.tax }
+)
 ```
 
-#### Step 1.2: Implement Capture Detection
-
-**File**: `src/opaque-ref/rules/closure-transform.ts`
-
-Use TypeScript's symbol table directly:
+#### What Doesn't Transform
 
 ```typescript
-function collectCaptures(
-  func: ts.FunctionLikeDeclaration,
-  checker: ts.TypeChecker,
-): Set<ts.Identifier> {
-  const captures = new Set<ts.Identifier>();
+// Plain arrays - NOT transformed
+[1, 2, 3].map(n => n * multiplier)  // Left as-is
 
-  function visit(node: ts.Node) {
-    if (ts.isIdentifier(node)) {
-      const symbol = checker.getSymbolAtLocation(node);
-      if (!symbol) return;
-
-      const declarations = symbol.getDeclarations();
-      if (!declarations) return;
-
-      // Check if declared outside the function
-      const isDeclaredOutside = declarations.some((decl) =>
-        !isNodeWithin(decl, func)
-      );
-
-      if (isDeclaredOutside) {
-        captures.add(node);
-      }
-    }
-    ts.forEachChild(node, visit);
-  }
-
-  if (func.body) visit(func.body);
-  return captures;
-}
+// Cell arrays - NOT transformed
+cellRef.map(item => item * multiplier)  // Left as-is
 ```
 
-**Key Insight**: No need to maintain our own scope tree - TypeScript already
-knows where everything is declared!
+#### Implementation Details
 
-#### Step 1.3: Test Capture Detection
+**Capture Detection** (`collectCaptures`):
+1. Walk callback body visiting all identifiers
+2. For each identifier, get symbol from TypeChecker
+3. Get declarations for symbol
+4. Check if ANY declaration is outside callback using **node identity**
+5. Handle special cases (JSX tags, attributes, property names)
+6. Capture ALL variables (reactive and non-reactive, OpaqueRef and plain)
 
-**File**: `test/opaque-ref/capture-detection.test.ts` (new)
+**Key Insight**: Node identity `current === func` works because:
+- Closure transformer runs on original AST
+- TypeChecker references original AST
+- They're the same objects!
 
-Create unit tests for:
+**Type Checking** (`isMapCall`):
+- Only matches `OpaqueRef<T[]>.map()` calls
+- Rejects `Cell<T[]>.map()` and plain `T[].map()`
+- Uses TypeChecker to get the type string and checks for "OpaqueRef<"
 
-- Single level capture
-- Multi-level capture
-- Mixed reactive/non-reactive captures
-- Captures in different closure types
+**Transformation** (`transformMapCallback`):
+1. Collect all captured expressions
+2. Build params object: `{ discount: state.discount, ... }`
+3. Transform callback parameters:
+   - `item` → destructured `{ elem, params: { discount } }`
+   - Keep `index` if present
+4. Replace captured refs in body: `state.discount` → `discount`
+5. Wrap callback in `recipe(...)`
+6. Rewrite map call: `map(recipe(...), params)`
+7. Add `recipe` import if needed
 
-### Phase 2: Map Callback Transformation ⚠️ IN PROGRESS
+#### Edge Cases Handled
 
-#### Step 2.1: Create Closure Transform Rule ✅ COMPLETED
+✅ Nested property access (`state.user.name`)
+✅ Multiple captures (both reactive and non-reactive)
+✅ JSX elements and attributes (not captured)
+✅ Variables declared inside callback (not captured)
+✅ Callback parameters (not captured)
+✅ Index parameter preservation
+✅ Plain arrays (not transformed)
+✅ Cell arrays (not transformed)
 
-**File**: `src/closures/rules/closure-transform.ts`
+#### Test Coverage
 
-```typescript
-export function createClosureTransformRule(): OpaqueRefRule {
-  return {
-    name: "closure-transform",
-    transform(sourceFile, context, transformation): ts.SourceFile {
-      // Implementation here
-    },
-  };
-}
-```
+- ✅ Single captured variable
+- ✅ Multiple captured variables
+- ✅ Nested property access
+- ✅ Mixed with reactive expressions
+- ✅ JSX in callbacks
+- ✅ No false positives (local vars, params, JSX)
 
-#### Step 2.2: Detect Map Callback Context
+### Phase 2: Event Handler Support (PLANNED)
 
-Implement detection for:
+**Status**: Not yet started
 
-- Array.map() calls on OpaqueRef arrays
-- Callback functions that capture outer scope variables
-- Differentiate from already-transformed map calls
+#### Goal
 
-#### Step 2.3: Transform Map Callbacks
-
-Transform pattern:
-
-```typescript
-// From:
-state.items.map((item) => item.price * state.discount);
-
-// To:
-state.items.map({
-  op: recipe(({ elem, params: { discount } }) => elem.price * discount),
-  params: { discount: state.discount },
-});
-```
-
-Implementation steps:
-
-1. Extract captured variables from analysis
-2. Build params object
-3. Transform callback parameter list
-4. Replace captured references with params access
-5. Wrap callback in recipe()
-6. Transform map call to object form
-
-#### Step 2.4: Add Rule to Pipeline ✅ COMPLETED
-
-**File**: `src/transform.ts`
+Transform event handlers with captures:
 
 ```typescript
-export function commonTypeScriptTransformer(
-  program: ts.Program,
-): ts.TransformerFactory<ts.SourceFile>[] {
-  return [
-    createClosureTransformer(program), // ✅ Runs FIRST to handle closures
-    createModularOpaqueRefTransformer(program), // Then OpaqueRef transformations
-    createSchemaTransformer(program), // Finally schema injection
-  ];
-}
-```
-
-#### Step 2.5: Create Fixture Tests ✅ COMPLETED
-
-**Directory**: `test/fixtures/closures/`
-
-Created test fixtures:
-
-- `map-single-capture.input.tsx` / `.expected.tsx` ✅
-- Additional fixtures to be added
-
-Updated `test/fixture-based.test.ts` to include closures directory ✅
-
-### Phase 3: Event Handler Support (Week 2)
-
-#### Step 3.1: Detect Event Handler Context
-
-Enhance closure rule to detect:
-
-- JSX event handler attributes (onClick, onChange, etc.)
-- Inline arrow functions in handler positions
-- Captured state variables
-
-#### Step 3.2: Transform Event Handlers
-
-Transform pattern:
-
-```typescript
-// From:
+// Input
 <button onClick={() => state.count++}>
 
-// To:
-<button onClick={handler((_, {count}) => count.set(count.get() + 1), {count: state.count})}>
+// Output
+<button onClick={handler((_, {count}) =>
+  count.set(count.get() + 1),
+  {count: state.count}
+)}>
 ```
 
-#### Step 3.3: Handle State Mutations
+#### Implementation Steps
 
-Detect when captured variables are mutated:
+1. **Detect Event Handler Context**
+   - JSX event handler attributes (onClick, onChange, etc.)
+   - Inline arrow functions in handler positions
+   - Captured state variables
 
-- Assignment expressions
-- Update expressions (++, --)
-- Method calls that mutate
+2. **Handle State Mutations**
+   - Detect mutations: assignments, updates (++, --), method calls
+   - Transform to Cell API when appropriate
 
-Transform mutations to use Cell API when appropriate.
+3. **Create Tests**
+   - `event-handler-read.input.tsx` / `.expected.tsx`
+   - `event-handler-mutation.input.tsx` / `.expected.tsx`
 
-#### Step 3.4: Create Event Handler Tests
+#### Open Questions
 
-Add fixtures:
+- Does runtime have `handler()` helper?
+- How to detect which captures need mutable vs. read-only access?
+- Should we transform non-mutating handlers?
 
-- `event-handler-read.input.tsx` / `.expected.tsx`
-- `event-handler-mutation.input.tsx` / `.expected.tsx`
-- `event-handler-complex.input.tsx` / `.expected.tsx`
+### Phase 3: Generic Closure Support (PLANNED)
 
-### Phase 4: Generic Closure Support (Week 3)
+**Status**: Not yet started
 
-#### Step 4.1: Detect Generic Closures
+#### Goal
 
-Identify closures that aren't in special contexts:
-
-- Variable declarations with arrow functions
-- Function expressions
-- Return statements with functions
-
-#### Step 4.2: Implement Lift+Curry Pattern
-
-Transform pattern:
+Transform arbitrary closures:
 
 ```typescript
-// From:
+// Input
 const compute = () => state.a + state.b;
 
-// To:
-const compute = lift(({ a, b }) => a + b).curry({ a: state.a, b: state.b });
+// Output
+const compute = lift(({a, b}) => a + b).curry({a: state.a, b: state.b});
 ```
 
-Note: This requires either:
+#### Implementation Steps
 
-- Runtime curry support (check if available)
-- Alternative transformation pattern
+1. **Detect Generic Closures**
+   - Variable declarations with arrow functions
+   - Function expressions
+   - Return statements with functions
 
-#### Step 4.3: Handle Edge Cases
+2. **Implement Lift+Curry Pattern**
+   - Verify runtime support for curry
+   - Transform to lift+curry pattern
+   - Handle edge cases
 
-- Nested closures
-- Closures returning closures
-- Mixed synchronous/asynchronous closures
+3. **Edge Cases**
+   - Nested closures
+   - Closures returning closures
+   - Async closures
 
-### Phase 5: Integration & Polish (Week 3-4)
+#### Open Questions
 
-#### Step 5.1: Performance Optimization
+- Does runtime support `.curry()` method?
+- Alternative pattern if curry not available?
+- Performance implications?
 
-- Cache capture analysis results
-- Optimize scope traversal
-- Minimize AST walks
+## Architecture Deep Dive
 
-#### Step 5.2: Error Handling
+### Why Node Identity Works (Critical Understanding)
 
-- Clear error messages for unsupported patterns
-- Diagnostic improvements
-- Source map preservation
+**The Problem We Solved**:
+Initially, we thought node identity wouldn't work because of transformer sequencing. We were wrong! Here's why:
 
-#### Step 5.3: Documentation
-
-- Update transformer documentation
-- Add inline code comments
-- Create migration guide for users
-
-#### Step 5.4: Integration Testing
-
-- Full pipeline tests
-- Runtime compatibility tests
-- Performance benchmarks
-
-## Implementation Order & Dependencies
-
-```mermaid
-graph TD
-    A[1.1 Extend DataFlowScope] --> B[1.2 Capture Detection]
-    B --> C[1.3 Test Detection]
-    C --> D[2.1 Create Rule]
-    D --> E[2.2 Detect Map Context]
-    E --> F[2.3 Transform Map]
-    F --> G[2.4 Add to Pipeline]
-    G --> H[2.5 Fixture Tests]
-    H --> I[3.1 Event Handlers]
-    I --> J[4.1 Generic Closures]
+**TypeScript Transformation Pipeline**:
+```
+Original Source → TypeChecker built here
+     ↓
+[Closure Transformer] ← Sees original AST
+     ↓ (creates new AST)
+[OpaqueRef Transformer] ← Sees closure-transformed AST
+     ↓ (creates new AST)
+[Schema Transformer] ← Sees both transformations
+     ↓
+Final Output
 ```
 
-## Key Files Modified/Created
+**Key Insight**: TypeChecker is built ONCE from original source and never updated.
 
-### Core Changes ✅
+**For Closure Transformer** (runs first):
+- ✅ Works with original AST
+- ✅ TypeChecker references original AST
+- ✅ Node identity (`===`) works perfectly
+- ✅ Simple, direct scope checking
 
-1. `src/opaque-ref/dataflow.ts` - Added synthetic node handling for nodes
-   created by closure transformer
-2. `src/transform.ts` - Added closure transformer to pipeline (runs first)
-3. `test/utils.ts` - Updated to use commonTypeScriptTransformer instead of
-   individual transformers
+**For Later Transformers** (run after):
+- ❌ Work with transformed AST
+- ❌ TypeChecker still references original AST
+- ❌ Node identity fails (comparing different trees)
+- ✅ Must use TypeRegistry or similar patterns
 
-### New Files ✅
+### TypeRegistry Pattern (For Context)
 
-1. `src/closures/closure-transformer.ts` - Transformer factory
-2. `src/closures/types.ts` - Type definitions for closure transformation
-3. `src/closures/rules/closure-transform.ts` - Main closure transformation logic
-4. `test/fixtures/closures/` - Fixture tests directory with initial test case
+The Schema transformer uses TypeRegistry to pass Type information forward:
 
-### Updates Needed
+```typescript
+// Schema-injection rule creates synthetic node:
+const syntheticNode = factory.createCallExpression(...);
+typeRegistry.set(syntheticNode, originalType);
 
-1. `src/opaque-ref/transforms.ts` - May need new transform helpers
-2. `test/fixture-based.test.ts` - Add closures configuration
+// Schema transformer later retrieves it:
+const type = typeRegistry.get(node) || checker.getTypeFromTypeNode(node);
+```
+
+**Note for Future Work**: Consider if opaque-ref transformer needs similar pattern for passing information about transformed nodes. Once closures are fully stable, investigate whether a "TransformationRegistry" or similar could help later transformers understand what earlier ones did.
+
+### Source Position Approach (Not Used)
+
+We initially considered using source position ranges:
+```typescript
+// Check if declaration position is within callback position
+const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
+```
+
+**Why We Didn't Need It**:
+- More complex
+- Less semantically clear
+- Node identity is simpler and more reliable (since we run first)
+
+**When Source Positions Would Be Needed**:
+- If transformer ran AFTER other transformations
+- If synthetic nodes without positions were involved
+- If node identity checks were unreliable
+
+## Files Modified/Created
+
+### Core Implementation ✅
+
+1. **`src/closures/transformer.ts`** - NEW
+   - Standalone closure transformer
+   - Capture detection with node identity
+   - Map callback transformation
+   - Import management
+
+2. **`src/closures/types.ts`** - NEW
+   - Type definitions (currently minimal)
+
+3. **`src/transform.ts`** - MODIFIED
+   - Added closure transformer as first in pipeline
+   - Clear ordering: Closure → OpaqueRef → Schema
+
+4. **`src/mod.ts`** - MODIFIED
+   - Export `createClosureTransformer`
+   - Export `commonTypeScriptTransformer`
+
+### Test Infrastructure ✅
+
+1. **`test/utils.ts`** - MODIFIED
+   - Now uses `commonTypeScriptTransformer`
+   - Removed old `applySchemaTransformer` option
+   - Simpler, unified approach
+
+2. **`test/fixture-based.test.ts`** - MODIFIED
+   - Added closures configuration
+   - Removed transformer options (now automatic)
+
+3. **`test/fixtures/closures/`** - NEW
+   - `map-single-capture.input.tsx`
+   - `map-single-capture.expected.tsx`
+   - More fixtures to be added for Phase 2/3
+
+4. **`test/opaque-ref/map-callbacks.test.ts`** - NEW
+   - Specific test for map callback transformation
+   - Tests interaction with OpaqueRef transformer
 
 ## Success Criteria
 
-### Phase 1 Complete When:
+### Phase 1 ✅ COMPLETE
 
-- [ ] Capture detection reliably identifies all captured variables
-- [ ] Unit tests pass for capture detection
-- [ ] DataFlowAnalysis includes capture information
+- [x] Capture detection reliably identifies all captured variables
+- [x] No false positives (local vars, params, JSX)
+- [x] Map callbacks with captures transform correctly
+- [x] Fixture tests pass
+- [x] No regression in existing tests
+- [x] Clean architectural separation
+- [x] Node identity approach validated
 
-### Phase 2 Complete When:
+### Phase 2 (Event Handlers) - TODO
 
-- [ ] Map callbacks with captures transform correctly
-- [ ] Fixture tests pass for map transformations
-- [ ] No regression in existing tests
+- [ ] Event handler context detection working
+- [ ] State mutations handled correctly
+- [ ] Cell API integration working
+- [ ] Event handler fixtures pass
+- [ ] No regression
 
-### Phase 3 Complete When:
+### Phase 3 (Generic Closures) - TODO
 
-- [ ] Event handlers maintain reactivity
-- [ ] State mutations work correctly
-- [ ] All event handler fixtures pass
-
-### Phase 4 Complete When:
-
-- [ ] Generic closures transform appropriately
-- [ ] Edge cases handled gracefully
+- [ ] Generic closure detection working
+- [ ] Lift+curry pattern implemented
+- [ ] Runtime compatibility verified
+- [ ] Edge cases handled
 - [ ] Full test suite passes
 
-### Phase 5 Complete When:
+## Next Steps
 
-- [ ] Performance impact < 10%
-- [ ] Documentation complete
-- [ ] Ready for production use
+### Immediate (Finish Phase 1)
 
-## Risk Mitigation
+1. ✅ Remove debug logging from transformer
+2. ✅ Update documentation (this file)
+3. ⏳ Fix remaining failing tests (runtime-style API tests)
+4. ⏳ Update JSX expression test expectations
 
-### Technical Risks
+### Phase 2 Planning
 
-1. **Breaking existing transforms**: Mitigate with comprehensive test suite
-2. **Performance degradation**: Profile and optimize incrementally
-3. **Runtime incompatibility**: Test against actual runtime early
+1. Research event handler patterns in existing code
+2. Verify runtime has `handler()` helper or equivalent
+3. Design mutation detection strategy
+4. Create fixture test cases
+5. Implement in iterative steps
 
-### Implementation Risks
+### Phase 3 Planning
 
-1. **Scope creep**: Stick to phased approach, defer edge cases
-2. **Complex edge cases**: Document as known limitations initially
-3. **Integration issues**: Test with other rules frequently
+1. Verify runtime support for lift+curry
+2. Design alternative if curry not available
+3. Research edge cases in existing codebase
+4. Create comprehensive test plan
 
-## Next Steps for Implementation Context
+## Lessons Learned
 
-When starting implementation:
+1. **Run First = Simplicity**: Operating on original AST is much simpler
+2. **Node Identity Works**: When using original AST + TypeChecker together
+3. **Standalone > Embedded**: Closure transformer being separate is cleaner
+4. **Transform All, Not Just OpaqueRef**: Better separation of concerns
+5. **TypeChecker is Static**: Always references original source, never updated
 
-1. **Begin with Phase 1.1**: Extend DataFlowScope with captures field
-2. **Create branch**: `feature/closure-support`
-3. **Set up test infrastructure**: Create test directories and initial fixtures
-4. **Implement incrementally**: Complete each step before moving to next
-5. **Test continuously**: Run tests after each significant change
+## Open Questions
 
-## Notes for Future Implementers
+1. **Performance**: Is capture detection fast enough for large files?
+2. **Caching**: Should we cache capture analysis results?
+3. **Type Preservation**: Do we maintain TypeScript types correctly?
+4. **Source Maps**: How to preserve debugging experience?
+5. **Runtime Curry**: Does runtime support `.curry()` for Phase 3?
 
-- The params pattern for map is established in the notes - follow it closely
-- Event handler transformation may need runtime verification
-- Generic lift+curry pattern needs runtime support verification
-- Consider creating a feature flag to enable/disable closure transformation
-  initially
-- Keep the existing map parameter detection working alongside closure support
+## Documentation Status
 
-## Resolved Implementation Questions
-
-1. **Import management**: ✅ Using context.imports.request() to add necessary
-   imports
-2. **Synthetic nodes**: ✅ Added handling in dataflow.ts for nodes without
-   source files
-3. **Transformer ordering**: ✅ Closure transformer runs FIRST in the pipeline
-
-## Current Implementation Issues
-
-1. **Capture Detection Bug**: Currently capturing individual identifiers instead
-   of full property access expressions
-   - Should capture: `state.discount` as a single unit
-   - Currently capturing: `state` and `discount` separately (incorrectly)
-   - Also mysteriously capturing non-existent variables like "span" and "price"
-
-2. **Outstanding Questions**:
-   - **Curry implementation**: Still need to verify runtime support for
-     lift+curry pattern
-   - **Type preservation**: Need to ensure transformed code maintains TypeScript
-     types
-   - **Debugging experience**: Source maps through transformation not yet
-     addressed
+- ✅ `closure-design.md` - Updated with final architecture
+- ✅ `closure-implementation-roadmap.md` - This file
+- ⏳ Inline code comments - Needs review and cleanup
+- ⏳ Migration guide - Not yet needed (backwards compatible)
