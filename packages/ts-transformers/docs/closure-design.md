@@ -57,8 +57,8 @@ Final Output
 
 1. **Closure Transformer** (`src/closures/transformer.ts`)
    - Standalone transformer independent of opaque-ref
-   - Transforms map callbacks on `OpaqueRef<T[]>` that have captures
-   - Does NOT transform `Cell<T[]>.map()` or plain `T[].map()`
+   - Transforms map callbacks on `OpaqueRef<T[]>` and `Cell<T[]>` that have captures
+   - Does NOT transform plain `T[].map()`
    - Runs FIRST in the pipeline
    - Self-contained: manages own import injection
 
