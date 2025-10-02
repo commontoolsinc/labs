@@ -18,6 +18,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import BacklinksIndex from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
@@ -124,10 +125,11 @@ const populateChatList = lift(
     charmsList: CharmEntry[];
     allCharms: Cell<any[]>;
     selectedCharm: Cell<{ charm: any }>;
+    index: any;
   }>(),
   undefined,
   (
-    { charmsList, allCharms, selectedCharm },
+    { charmsList, allCharms, selectedCharm, index },
   ) => {
     if (charmsList.length === 0) {
       const isInitialized = cell(false);
@@ -137,6 +139,7 @@ const populateChatList = lift(
           messages: [],
           content: "",
           allCharms,
+          index,
         }),
         selectedCharm,
         charmsList,
@@ -155,9 +158,10 @@ const createChatRecipe = handler<
     selectedCharm: Cell<{ charm: any }>;
     charmsList: Cell<CharmEntry[]>;
     allCharms: Cell<any[]>;
+    index: any;
   }
 >(
-  (_, { selectedCharm, charmsList, allCharms }) => {
+  (_, { selectedCharm, charmsList, allCharms, index }) => {
     const isInitialized = cell(false);
 
     const charm = Chat({
@@ -165,6 +169,7 @@ const createChatRecipe = handler<
       messages: [],
       content: "",
       allCharms,
+      index,
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
@@ -237,17 +242,21 @@ export default recipe<Input, Output>(
   ({ selectedCharm, charmsList, allCharms, theme }) => {
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
+    const combined = combineLists({
+      allCharms: allCharms as unknown as MentionableCharm[],
+      charmsList,
+    });
+    const index = BacklinksIndex({
+      allCharms: combined as unknown as OpaqueRef<Cell<MentionableCharm[]>>,
+    });
+
     populateChatList({
       selectedCharm: selectedCharm as unknown as Cell<
         Pick<CharmEntry, "charm">
       >,
       charmsList,
       allCharms,
-    });
-
-    const combined = combineLists({
-      allCharms: allCharms as unknown as any[],
-      charmsList,
+      index,
     });
 
     const selected = getSelectedCharm({ entry: selectedCharm });
@@ -272,6 +281,7 @@ export default recipe<Input, Output>(
                       selectedCharm,
                       charmsList,
                       allCharms: combined as unknown as any,
+                      index,
                     })}
                   >
                     Create New Chat
@@ -289,6 +299,7 @@ export default recipe<Input, Output>(
                   selectedCharm,
                   charmsList,
                   allCharms: combined as unknown as any,
+                  index,
                 })}
               />
             </div>
