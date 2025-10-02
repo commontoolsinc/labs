@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  lift,
-  NAME,
-  OpaqueRef,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, Default, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -35,7 +27,10 @@ type Output = {
 const BacklinksIndex = recipe<Input, Output>(
   "BacklinksIndex",
   ({ allCharms }) => {
-    const computeIndex = lift<{ allCharms: Cell<MentionableCharm[]> }, BacklinksMap>(
+    const computeIndex = lift<
+      { allCharms: Cell<MentionableCharm[]> },
+      BacklinksMap
+    >(
       ({ allCharms }) => {
         const cs = allCharms.get() ?? [];
         const index: BacklinksMap = {};
@@ -43,7 +38,7 @@ const BacklinksIndex = recipe<Input, Output>(
         for (const c of cs) {
           const mentions = c.mentioned ?? [];
           for (const m of mentions) {
-            const key = m?.content ?? m?.[NAME];
+            const key = m?.content || m?.[NAME];
             if (!key) continue;
             if (!index[key]) index[key] = [];
             index[key].push(c);
@@ -66,4 +61,3 @@ const BacklinksIndex = recipe<Input, Output>(
 );
 
 export default BacklinksIndex;
-

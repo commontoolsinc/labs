@@ -27,7 +27,7 @@ import {
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
-import BacklinksIndex from "./backlinks-index.tsx";
+import { type BacklinksMap } from "./backlinks-index.tsx";
 import Tools, {
   addListItem,
   calculator,
@@ -70,6 +70,7 @@ type ChatbotNoteInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   content: Default<string, "">;
   allCharms: Cell<MentionableCharm[]>;
+  index: { backlinks: BacklinksMap; mentionable: Cell<MentionableCharm[]> };
 };
 
 type ChatbotNoteResult = {
@@ -242,9 +243,8 @@ const navigateToNote = handler<
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages, content, allCharms }) => {
+  ({ title, messages, content, allCharms, index }) => {
     const list = cell<ListItem[]>([]);
-    const index = BacklinksIndex({ allCharms });
 
     const tools = {
       searchWeb: {
