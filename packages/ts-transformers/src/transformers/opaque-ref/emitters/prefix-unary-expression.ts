@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import type { Emitter } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
@@ -13,6 +13,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
   dataFlows,
   context,
   analysis,
+  analyze,
 }) => {
   if (!ts.isPrefixUnaryExpression(expression)) return undefined;
   if (expression.operator !== ts.SyntaxKind.ExclamationToken) {
@@ -27,7 +28,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
   );
 
   if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
-    const fallbackAnalysis = context.analyze(expression.operand);
+    const fallbackAnalysis = analyze(expression.operand);
     const fallbackDataFlows = normalizeDataFlows(
       fallbackAnalysis.graph,
       fallbackAnalysis.dataFlows,
@@ -44,11 +45,5 @@ export const emitPrefixUnaryExpression: Emitter = ({
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  const rewritten = createDeriveCallForExpression(expression, plan, context);
-  if (rewritten === expression) return undefined;
-
-  return {
-    expression: rewritten,
-    helpers: new Set<OpaqueRefHelperName>(["derive"]),
-  };
+  return createDeriveCallForExpression(expression, plan, context);
 };

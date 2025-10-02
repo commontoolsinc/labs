@@ -17,7 +17,7 @@ export class OpaqueRefJSXTransformer extends Transformer {
   }
 
   transform(context: TransformationContext): ts.SourceFile {
-    const { transformation } = context;
+    const { tsContext: transformation } = context;
 
     const out = transform(context);
     return context.imports.apply(
@@ -61,25 +61,24 @@ function isInsideDeriveCallback(
 function transform(context: TransformationContext): ts.SourceFile {
   const checker = context.checker;
   const analyze = createDataFlowAnalyzer(context.checker);
-  const helpers = new Set<OpaqueRefHelperName>();
 
   const visit: ts.Visitor = (node) => {
     if (ts.isJsxExpression(node) && node.expression) {
       if (isEventHandlerJsxAttribute(node)) {
-        return ts.visitEachChild(node, visit, context.transformation);
+        return ts.visitEachChild(node, visit, context.tsContext);
       }
 
       // Skip if inside a derive callback
       const insideDeriveCallback = isInsideDeriveCallback(node, checker);
       if (insideDeriveCallback) {
-        return ts.visitEachChild(node, visit, context.transformation);
+        return ts.visitEachChild(node, visit, context.tsContext);
       }
 
       const analysis = analyze(node.expression);
 
       // Skip if doesn't require rewriting
       if (!analysis.requiresRewrite) {
-        return ts.visitEachChild(node, visit, context.transformation);
+        return ts.visitEachChild(node, visit, context.tsContext);
       }
 
       if (context.options.mode === "error") {
@@ -92,44 +91,27 @@ function transform(context: TransformationContext): ts.SourceFile {
         return node;
       }
 
-      const rewriteResult = rewriteExpression({
+      const result = rewriteExpression({
         expression: node.expression,
         analysis,
-        context: {
-          factory: context.factory,
-          checker,
-          sourceFile: context.sourceFile,
-          transformation: context.transformation,
-          analyze,
-        },
+        context,
+        analyze,
       });
 
-      if (rewriteResult) {
-        for (const helper of rewriteResult.helpers) {
-          helpers.add(helper);
-        }
+      if (result) {
         return context.factory.createJsxExpression(
           node.dotDotDotToken,
-          rewriteResult.expression,
+          result,
         );
       }
     }
 
-    return ts.visitEachChild(node, visit, context.transformation);
+    return ts.visitEachChild(node, visit, context.tsContext);
   };
 
-  const updated = ts.visitEachChild(
+  return ts.visitEachChild(
     context.sourceFile,
     visit,
-    context.transformation,
+    context.tsContext,
   );
-
-  for (const helper of helpers) {
-    context.imports.require({
-      module: "commontools",
-      name: helper,
-    });
-  }
-
-  return updated;
 }

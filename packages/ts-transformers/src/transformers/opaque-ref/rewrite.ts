@@ -2,10 +2,9 @@ import ts from "typescript";
 
 import { normalizeDataFlows } from "../../ast/mod.ts";
 import type {
+  AnalyzeFn,
   Emitter,
   EmitterContext,
-  EmitterResult,
-  OpaqueRefHelperName,
   RewriteParams,
 } from "./types.ts";
 import {
@@ -33,61 +32,55 @@ const EMITTERS: readonly Emitter[] = [
 function rewriteChildExpressions(
   node: ts.Expression,
   context: RewriteParams["context"],
-  helpers: Set<OpaqueRefHelperName>,
+  analyze: AnalyzeFn,
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
-      const analysis = context.analyze(child);
+      const analysis = analyze(child);
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
         const result = rewriteExpression({
           expression: child,
           analysis,
           context,
+          analyze,
         });
         if (result) {
-          for (const helper of result.helpers) helpers.add(helper);
-          return result.expression;
+          return result;
         }
       }
     }
-    return ts.visitEachChild(child, visitor, context.transformation);
+    return ts.visitEachChild(child, visitor, context.tsContext);
   };
 
   return ts.visitEachChild(
     node,
     visitor,
-    context.transformation,
+    context.tsContext,
   ) as ts.Expression;
 }
 
 export function rewriteExpression(
   params: RewriteParams,
-): EmitterResult | undefined {
-  const dataFlows = normalizeDataFlows(
-    params.analysis.graph,
-    params.analysis.dataFlows,
-  );
-
-  const helperSet = new Set<OpaqueRefHelperName>();
+): ts.Expression | undefined {
   const emitterContext: EmitterContext = {
-    ...params.context,
     rewriteChildren(node: ts.Expression): ts.Expression {
-      return rewriteChildExpressions(node, params.context, helperSet);
+      return rewriteChildExpressions(
+        node,
+        params.context,
+        params.analyze,
+      );
     },
+    ...params,
+    dataFlows: normalizeDataFlows(
+      params.analysis.graph,
+      params.analysis.dataFlows,
+    ),
   };
+
   for (const emitter of EMITTERS) {
-    const result = emitter({
-      expression: params.expression,
-      dataFlows,
-      analysis: params.analysis,
-      context: emitterContext,
-    });
+    const result = emitter(emitterContext);
     if (result) {
-      for (const helper of result.helpers) helperSet.add(helper);
-      return {
-        expression: result.expression,
-        helpers: new Set(helperSet),
-      };
+      return result;
     }
   }
   return undefined;

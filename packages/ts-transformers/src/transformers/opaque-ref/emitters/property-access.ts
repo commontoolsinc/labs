@@ -1,10 +1,6 @@
 import ts from "typescript";
 
-import type {
-  EmitterParams,
-  EmitterResult,
-  OpaqueRefHelperName,
-} from "../types.ts";
+import type { EmitterContext } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
@@ -13,8 +9,8 @@ import {
 import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
 
 export function emitPropertyAccess(
-  params: EmitterParams,
-): EmitterResult | undefined {
+  params: EmitterContext,
+): ts.Expression | undefined {
   const { expression, dataFlows, context } = params;
   if (!ts.isPropertyAccessExpression(expression)) return undefined;
 
@@ -37,11 +33,5 @@ export function emitPropertyAccess(
   }
 
   const plan = createBindingPlan(relevantDataFlows);
-  const rewritten = createDeriveCallForExpression(expression, plan, context);
-  if (rewritten === expression) return undefined;
-
-  return {
-    expression: rewritten,
-    helpers: new Set<OpaqueRefHelperName>(["derive"]),
-  };
+  return createDeriveCallForExpression(expression, plan, context);
 }

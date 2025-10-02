@@ -9,6 +9,7 @@ import {
 } from "../ast/mod.ts";
 import {
   hasCtsEnableDirective,
+  ImportRequirements,
   TransformationContext,
   Transformer,
   type TypeRegistry,
@@ -104,11 +105,15 @@ function collectFunctionSchemaTypeNodes(
 }
 
 function createToSchemaCall(
-  factory: ts.NodeFactory,
+  { imports, factory }: Pick<TransformationContext, "imports" | "factory">,
   typeNode: ts.TypeNode,
 ): ts.CallExpression {
+  const identifier = imports.getIdentifier(factory, {
+    module: "commontools",
+    name: "toSchema",
+  });
   return factory.createCallExpression(
-    factory.createIdentifier("toSchema"),
+    identifier,
     [typeNode],
     [],
   );
@@ -116,6 +121,7 @@ function createToSchemaCall(
 
 function prependSchemaArguments(
   factory: ts.NodeFactory,
+  imports: ImportRequirements,
   node: ts.CallExpression,
   argumentTypeNode: ts.TypeNode,
   argumentType: ts.Type | undefined,
@@ -124,8 +130,14 @@ function prependSchemaArguments(
   typeRegistry?: TypeRegistry,
   checker?: ts.TypeChecker,
 ): ts.CallExpression {
-  const argSchemaCall = createToSchemaCall(factory, argumentTypeNode);
-  const resSchemaCall = createToSchemaCall(factory, resultTypeNode);
+  const argSchemaCall = createToSchemaCall(
+    { factory, imports },
+    argumentTypeNode,
+  );
+  const resSchemaCall = createToSchemaCall(
+    { factory, imports },
+    resultTypeNode,
+  );
 
   // Register Types if they were inferred (not from original source)
   if (typeRegistry && checker) {
@@ -149,18 +161,8 @@ export class SchemaInjectionTransformer extends Transformer {
     return hasCtsEnableDirective(context.sourceFile);
   }
   transform(context: TransformationContext): ts.SourceFile {
-    const { sourceFile, transformation, checker } = context;
+    const { sourceFile, tsContext: transformation, checker, imports } = context;
     const typeRegistry = context.options.typeRegistry;
-
-    let requestedToSchema = false;
-    const ensureToSchemaImport = (): void => {
-      if (requestedToSchema) return;
-      requestedToSchema = true;
-      context.imports.require({
-        module: "commontools",
-        name: "toSchema",
-      });
-    };
 
     const visit = (node: ts.Node): ts.Node => {
       if (!ts.isCallExpression(node)) {
@@ -175,13 +177,7 @@ export class SchemaInjectionTransformer extends Transformer {
           const factory = transformation.factory;
           const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
             typeArg,
-          ) =>
-            factory.createCallExpression(
-              factory.createIdentifier("toSchema"),
-              [typeArg],
-              [],
-            )
-          );
+          ) => createToSchemaCall(context, typeArg));
 
           const argsArray = Array.from(node.arguments);
           let remainingArgs = argsArray;
@@ -191,8 +187,6 @@ export class SchemaInjectionTransformer extends Transformer {
           ) {
             remainingArgs = argsArray.slice(1);
           }
-
-          ensureToSchemaImport();
 
           const updated = factory.createCallExpression(
             node.expression,
@@ -215,18 +209,8 @@ export class SchemaInjectionTransformer extends Transformer {
           if (!eventType || !stateType) {
             return ts.visitEachChild(node, visit, transformation);
           }
-          const toSchemaEvent = factory.createCallExpression(
-            factory.createIdentifier("toSchema"),
-            [eventType],
-            [],
-          );
-          const toSchemaState = factory.createCallExpression(
-            factory.createIdentifier("toSchema"),
-            [stateType],
-            [],
-          );
-
-          ensureToSchemaImport();
+          const toSchemaEvent = createToSchemaCall(context, eventType);
+          const toSchemaState = createToSchemaCall(context, stateType);
 
           const updated = factory.createCallExpression(
             node.expression,
@@ -254,18 +238,8 @@ export class SchemaInjectionTransformer extends Transformer {
                 factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
               if (eventParam || stateParam) {
-                const toSchemaEvent = factory.createCallExpression(
-                  factory.createIdentifier("toSchema"),
-                  [eventType],
-                  [],
-                );
-                const toSchemaState = factory.createCallExpression(
-                  factory.createIdentifier("toSchema"),
-                  [stateType],
-                  [],
-                );
-
-                ensureToSchemaImport();
+                const toSchemaEvent = createToSchemaCall(context, eventType);
+                const toSchemaState = createToSchemaCall(context, stateType);
 
                 const updated = factory.createCallExpression(
                   node.expression,
@@ -288,9 +262,9 @@ export class SchemaInjectionTransformer extends Transformer {
           resultType: ts.TypeNode,
           resultTypeValue: ts.Type | undefined,
         ): ts.Node => {
-          ensureToSchemaImport();
           const updated = prependSchemaArguments(
             factory,
+            imports,
             node,
             argumentType,
             argumentTypeValue,
@@ -357,9 +331,9 @@ export class SchemaInjectionTransformer extends Transformer {
           resultType: ts.TypeNode,
           resultTypeValue: ts.Type | undefined,
         ): ts.Node => {
-          ensureToSchemaImport();
           const updated = prependSchemaArguments(
             factory,
+            imports,
             node,
             argumentType,
             argumentTypeValue,
