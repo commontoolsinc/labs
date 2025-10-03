@@ -13,16 +13,79 @@ import { type JSONSchema } from "./builder/types.ts";
 const logger = getLogger("link-resolution");
 
 /**
- * Create an allOf schema from multiple schemas, skipping trivial cases.
- * Returns undefined if no non-trivial schemas, a single schema if only one,
- * or an allOf if multiple non-trivial schemas.
+ * Create an allOf schema from multiple schemas, implementing JSON Schema
+ * intersection semantics.
  *
- * When creating allOf, extracts defaults (last wins) and asCell/asStream (first wins)
- * as siblings to the allOf array.
+ * This function combines multiple schemas into a single allOf schema, with
+ * intelligent handling of special properties:
+ *
+ * **Extraction Rules:**
+ * - `default`: Last non-undefined value wins (allows later schemas to override
+ *   defaults)
+ * - `asCell`/`asStream`: First non-undefined value wins (reactivity flag from
+ *   earliest schema)
+ * - Both flags are extracted as siblings to the allOf array, not inside
+ *   branches
+ *
+ * **Trivial Schema Filtering:** Filters out schemas that add no meaningful
+ * constraints:
+ * - `undefined` - no schema
+ * - `true` - allows anything
+ * - Schemas with only internal keys (e.g., `{ asCell: true }` with no other
+ *   properties)
+ *
+ * Note: Flags like `asCell` are extracted BEFORE filtering, so a schema like `{
+ * asCell: true }` will contribute its flag even though it's considered trivial.
+ *
+ * **Return Values:**
+ * - `undefined` - if no non-trivial schemas (but may return `{ asCell: true }`
+ *   if flag was extracted)
+ * - Single schema - if only one non-trivial schema (with extracted flags merged
+ *   in)
+ * - `{ allOf: [...], default?, asCell?, asStream? }` - if multiple non-trivial
+ *   schemas
+ *
+ * @param schemas - Array of schemas to combine (may include undefined, true, or
+ * trivial schemas)
+ * @returns Combined schema, or undefined if no meaningful schemas provided
+ *
+ * @example
+ * ```typescript
+ * // Simple case - combines two schemas
+ * createAllOf([
+ *   { type: "string" },
+ *   { minLength: 5 }
+ * ])
+ * // => { allOf: [{ type: "string" }, { minLength: 5 }] }
+ *
+ * // Extracts default (last wins)
+ * createAllOf([
+ *   { type: "number", default: 1 },
+ *   { type: "number", default: 2 }
+ * ])
+ * // => { allOf: [{ type: "number" }, { type: "number" }], default: 2 }
+ *
+ * // Extracts asCell (first wins)
+ * createAllOf([
+ *   { type: "string", asCell: true },
+ *   { type: "string", asCell: false }
+ * ])
+ * // => { allOf: [{ type: "string" }, { type: "string" }], asCell: true }
+ *
+ * // Filters trivial schemas
+ * createAllOf([
+ *   undefined,
+ *   { type: "string" },
+ *   true
+ * ])
+ * // => { type: "string" }
+ * ```
  */
 export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
-  // Extract asCell/asStream from first schema that has either BEFORE filtering
-  // (important: a schema like { asCell: true } is considered "trivial" but we need the flag)
+  // Extract asCell/asStream from first schema that has either BEFORE filtering.
+  // This is intentional: a schema like { asCell: true } is considered "trivial"
+  // (adds no type constraints), but we still need to extract and preserve the
+  // flag.
   let hasAsCell = false;
   let hasAsStream = false;
   for (const schema of schemas) {
