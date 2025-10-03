@@ -482,7 +482,9 @@ export function validateAndTransform(
     if (branches.length === 0) return undefined;
 
     // Use extracted defaults/asCell/asStream from parent schema (already extracted by createAllOf)
-    const parentDefault = "default" in finalSchema ? finalSchema.default : undefined;
+    const parentDefault = "default" in finalSchema
+      ? finalSchema.default
+      : undefined;
     const parentAsCell = finalSchema.asCell;
     const parentAsStream = finalSchema.asStream;
 
@@ -492,9 +494,10 @@ export function validateAndTransform(
       if (isObject(branch) && branch.properties) {
         for (const [key, propSchema] of Object.entries(branch.properties)) {
           // Ensure schema has type:"object" if it has properties
-          const normalizedPropSchema = isObject(propSchema) && propSchema.properties && !propSchema.type
-            ? { ...propSchema, type: "object" as const }
-            : propSchema;
+          const normalizedPropSchema =
+            isObject(propSchema) && propSchema.properties && !propSchema.type
+              ? { ...propSchema, type: "object" as const }
+              : propSchema;
 
           if (!allProperties[key]) {
             allProperties[key] = normalizedPropSchema;
@@ -510,20 +513,20 @@ export function validateAndTransform(
     // Create merged schema with all collected properties and preserved parent values
     const mergedSchema: JSONSchema = Object.keys(allProperties).length > 0
       ? {
-          type: "object" as const,
-          properties: allProperties,
-          additionalProperties: true,
-          ...(parentDefault !== undefined ? { default: parentDefault } : {}),
-          ...(parentAsCell ? { asCell: true } : {}),
-          ...(parentAsStream ? { asStream: true } : {}),
-        }
+        type: "object" as const,
+        properties: allProperties,
+        additionalProperties: true,
+        ...(parentDefault !== undefined ? { default: parentDefault } : {}),
+        ...(parentAsCell ? { asCell: true } : {}),
+        ...(parentAsStream ? { asStream: true } : {}),
+      }
       : {
-          // No properties to merge - keep the allOf with branches to preserve type/enum/etc
-          allOf: branches,
-          ...(parentDefault !== undefined ? { default: parentDefault } : {}),
-          ...(parentAsCell ? { asCell: true } : {}),
-          ...(parentAsStream ? { asStream: true } : {}),
-        };
+        // No properties to merge - keep the allOf with branches to preserve type/enum/etc
+        allOf: branches,
+        ...(parentDefault !== undefined ? { default: parentDefault } : {}),
+        ...(parentAsCell ? { asCell: true } : {}),
+        ...(parentAsStream ? { asStream: true } : {}),
+      };
 
     // Update finalSchema to the merged schema and continue processing below
     finalSchema = mergedSchema;
@@ -719,16 +722,23 @@ export function validateAndTransform(
           continue;
         }
         const keyExistsInValue = keys.includes(key);
-        const schemaHasAsCell = isObject(childSchema) && (childSchema.asCell || childSchema.asStream);
-        const schemaHasDirectDefault = isObject(childSchema) && childSchema.default !== undefined;
-        const schemaIsObject = isObject(childSchema) && (childSchema.type === "object" || childSchema.properties || childSchema.allOf);
+        const schemaHasAsCell = isObject(childSchema) &&
+          (childSchema.asCell || childSchema.asStream);
+        const schemaHasDirectDefault = isObject(childSchema) &&
+          childSchema.default !== undefined;
+        const schemaIsObject = isObject(childSchema) &&
+          (childSchema.type === "object" || childSchema.properties ||
+            childSchema.allOf);
 
         // Process the property if:
         // 1. Key exists in value, OR
         // 2. Schema has asCell/asStream (needs to be reactive), OR
         // 3. Schema has a direct default, OR
         // 4. Schema is an object schema (might have nested defaults)
-        if (keyExistsInValue || schemaHasAsCell || schemaHasDirectDefault || (schemaIsObject && !keyExistsInValue)) {
+        if (
+          keyExistsInValue || schemaHasAsCell || schemaHasDirectDefault ||
+          (schemaIsObject && !keyExistsInValue)
+        ) {
           const transformed = validateAndTransform(
             runtime,
             tx,
