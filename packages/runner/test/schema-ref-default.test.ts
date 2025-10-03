@@ -66,8 +66,8 @@ describe("$ref with default support", () => {
         default: "outermost",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
-      // resolveSchema only resolves one level, so we still have a $ref
+      const resolved = resolveSchema(schema, schema, false, true);
+      // With noFollowNestedRefs=true, resolveSchema only resolves one level, so we still have a $ref
       expect(resolved).toHaveProperty("default", "outermost");
       expect(resolved).toHaveProperty("$ref");
     });
@@ -315,6 +315,37 @@ describe("$ref with default support", () => {
         asCell: true,
         asStream: true,
       });
+    });
+
+    it("should filter asCell when circular $ref is detected with filterAsCell=true", () => {
+      const rootSchema: JSONSchema = {
+        $defs: {
+          Circular: { $ref: "#/$defs/Circular", asCell: true },
+        },
+        $ref: "#/$defs/Circular",
+        asCell: true,
+      };
+
+      const resolved = resolveSchema(rootSchema, rootSchema, true);
+
+      // Even with circular ref, asCell should be filtered when filterAsCell=true
+      expect(resolved).not.toHaveProperty("asCell");
+    });
+
+    it("should preserve asCell when circular $ref is detected with filterAsCell=false", () => {
+      const rootSchema: JSONSchema = {
+        $defs: {
+          Circular: { $ref: "#/$defs/Circular", asCell: true },
+        },
+        $ref: "#/$defs/Circular",
+        asCell: true,
+      };
+
+      const resolved = resolveSchema(rootSchema, rootSchema, false);
+
+      // With filterAsCell=false, asCell should remain even with circular ref
+      expect(resolved).toHaveProperty("asCell", true);
+      expect(resolved).toHaveProperty("$ref");
     });
   });
 });
