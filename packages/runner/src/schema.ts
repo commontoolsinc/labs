@@ -5,7 +5,7 @@ import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { createAllOf, readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -21,71 +21,6 @@ const logger = getLogger("validateAndTransform", {
   enabled: true,
   level: "debug",
 });
-
-/**
- * Create an allOf schema from multiple schemas, extracting defaults (last wins)
- * and asCell/asStream (first wins) as siblings to the allOf array.
- */
-function createAllOfSchema(schemas: JSONSchema[]): JSONSchema | undefined {
-  const nonTrivial = schemas.filter((s) =>
-    s !== undefined &&
-    s !== true &&
-    !ContextualFlowControl.isTrueSchema(s)
-  );
-
-  if (nonTrivial.length === 0) return undefined;
-  if (nonTrivial.length === 1) return nonTrivial[0];
-
-  // Extract defaults from last schema that has them (last wins)
-  let extractedDefault: any = undefined;
-  let hasDefault = false;
-  for (let i = nonTrivial.length - 1; i >= 0; i--) {
-    const schema = nonTrivial[i];
-    if (isObject(schema) && "default" in schema) {
-      extractedDefault = schema.default;
-      hasDefault = true;
-      break;
-    }
-  }
-
-  // Extract asCell/asStream from first schema that has them (first wins)
-  let hasAsCell = false;
-  let hasAsStream = false;
-  for (const schema of nonTrivial) {
-    if (isObject(schema)) {
-      if (schema.asCell && !hasAsCell) {
-        hasAsCell = true;
-      }
-      if (schema.asStream && !hasAsStream) {
-        hasAsStream = true;
-      }
-      if (hasAsCell && hasAsStream) break;
-    }
-  }
-
-  // Remove extracted properties from branches to avoid duplication
-  const cleanedBranches = nonTrivial.map((schema) => {
-    if (!isObject(schema)) return schema;
-    const cleaned = { ...schema };
-    if (hasDefault && "default" in cleaned) {
-      delete (cleaned as any).default;
-    }
-    if (hasAsCell && cleaned.asCell) {
-      delete (cleaned as any).asCell;
-    }
-    if (hasAsStream && cleaned.asStream) {
-      delete (cleaned as any).asStream;
-    }
-    return cleaned;
-  });
-
-  return {
-    allOf: cleanedBranches,
-    ...(hasDefault ? { default: extractedDefault } : {}),
-    ...(hasAsCell ? { asCell: true } : {}),
-    ...(hasAsStream ? { asStream: true } : {}),
-  };
-}
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -566,8 +501,7 @@ export function validateAndTransform(
           } else {
             // Property appears in multiple branches, create nested allOf with extracted defaults
             const existing = allProperties[key];
-            const mergedProp = createAllOfSchema([existing, normalizedPropSchema]);
-            allProperties[key] = mergedProp ?? { allOf: [existing, normalizedPropSchema] };
+            allProperties[key] = createAllOf([existing, normalizedPropSchema])!;
           }
         }
       }
