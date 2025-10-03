@@ -41,7 +41,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.map(recipe(({ elem, params: { scale } }) => (<div>
+        {state.points.map_with_pattern(recipe(({ elem, params: { scale } }) => (<div>
             Point: ({elem.x * scale}, {elem.y * scale})
           </div>)), { scale: state.scale })}
       </div>),
