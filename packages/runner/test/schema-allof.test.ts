@@ -734,6 +734,33 @@ describe("allOf schema composition", () => {
   });
 
   describe("Edge cases", () => {
+    it("preserves type constraints when allOf has no properties", () => {
+      const cell = runtime.getCell(space, "test-string-enum", undefined, tx);
+      cell.set("valid");
+
+      const schema: JSONSchema = {
+        allOf: [
+          { type: "string" },
+          { enum: ["valid", "also-valid"] },
+        ],
+      };
+
+      const result = validateAndTransform(
+        runtime,
+        tx,
+        {
+          id: toURI(cell.entityId),
+          space,
+          type: "application/json",
+          path: [],
+          schema,
+        },
+      );
+
+      // Should preserve type/enum constraints even without object properties
+      expect(result).toBe("valid");
+    });
+
     it("handles empty allOf", () => {
       const cell = runtime.getCell(space, "test-{ value: 42 }", undefined, tx);
       cell.set({ value: 42 });

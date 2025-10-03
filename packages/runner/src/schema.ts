@@ -508,16 +508,22 @@ export function validateAndTransform(
     }
 
     // Create merged schema with all collected properties and preserved parent values
-    const mergedSchema: JSONSchema = {
-      ...(Object.keys(allProperties).length > 0
-        ? { type: "object" as const, properties: allProperties, additionalProperties: true }
-        : {}),
-      ...(parentDefault !== undefined
-        ? { default: parentDefault }
-        : {}),
-      ...(parentAsCell ? { asCell: true } : {}),
-      ...(parentAsStream ? { asStream: true } : {}),
-    };
+    const mergedSchema: JSONSchema = Object.keys(allProperties).length > 0
+      ? {
+          type: "object" as const,
+          properties: allProperties,
+          additionalProperties: true,
+          ...(parentDefault !== undefined ? { default: parentDefault } : {}),
+          ...(parentAsCell ? { asCell: true } : {}),
+          ...(parentAsStream ? { asStream: true } : {}),
+        }
+      : {
+          // No properties to merge - keep the allOf with branches to preserve type/enum/etc
+          allOf: branches,
+          ...(parentDefault !== undefined ? { default: parentDefault } : {}),
+          ...(parentAsCell ? { asCell: true } : {}),
+          ...(parentAsStream ? { asStream: true } : {}),
+        };
 
     // Update finalSchema to the merged schema and continue processing below
     finalSchema = mergedSchema;
