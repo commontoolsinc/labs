@@ -45,7 +45,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.map_with_pattern(recipe(({ elem, params: { prefix, suffix } }) => (<div>{`${prefix} ${elem.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
+        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { prefix, suffix } }) => (<div>{`${prefix} ${elem.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
       </div>),
     };
 });
