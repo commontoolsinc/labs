@@ -577,6 +577,36 @@ state.items.map_with_pattern(
 | Params argument | No params                   | Accepts params object       |
 | Use case        | Normal mapping              | Closure-transformed mapping |
 
+### Dataflow Analyzer Integration
+
+The JSX expression transformer's dataflow analyzer needed updating to recognize
+`map_with_pattern` as a method that returns `OpaqueRef`, so it's excluded from
+derive wrappers:
+
+**File**: `src/ast/call-kind.ts`
+
+```typescript
+// Detect map_with_pattern calls as "array-map" kind
+if (
+  ts.isPropertyAccessExpression(target) &&
+  (target.name.text === "map" || target.name.text === "map_with_pattern")
+) {
+  return { kind: "array-map" };
+}
+```
+
+This ensures that in method chains like
+`state.items.filter(...).map_with_pattern(...)`, the `map_with_pattern` call is
+placed **outside** the derive wrapper:
+
+```typescript
+// Correct: map_with_pattern called on derive result
+derive(state.items, _v1 => _v1.filter(...)).map_with_pattern(recipe(...), params)
+
+// Wrong: map_with_pattern inside derive callback (would fail - plain arrays don't have this method)
+derive(state.items, _v1 => _v1.filter(...).map_with_pattern(recipe(...), params))
+```
+
 ## Future Extensions
 
 ### Phase 2: Event Handler Support

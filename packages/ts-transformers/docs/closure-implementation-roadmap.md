@@ -394,45 +394,55 @@ const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
 6. ✅ Fix all test expectations
 7. ✅ All 70 fixture tests passing
 
-### Phase 1.5: Runtime Integration with map_with_pattern (IN PROGRESS)
+### Phase 1.5: Runtime Integration with map_with_pattern ✅ COMPLETE
 
-**Status**: Implementing now
+**Status**: Fully implemented and tested
 
 **Motivation**: Provide compile-time errors for incorrect transformations by
 using a distinct `map_with_pattern` method instead of overloading `map`.
 
 **Implementation Steps**:
 
-1. **Create map_with_pattern builtin**
+1. ✅ **Create map_with_pattern builtin**
    (`packages/runner/src/builtins/map_with_pattern.ts`)
    - Copy from `map.ts` as starting point
    - Update schema to include `params: { type: "object" }`
    - Change runtime.runner.run call to pass `{ elem, index, params }` instead of
      `{ element, index, array }`
    - Remove recipe wrapping (op is already a recipe)
+   - Register in `packages/runner/src/builtins/index.ts`
 
-2. **Add map_with_pattern method to OpaqueRef/Cell**
+2. ✅ **Add map_with_pattern method to OpaqueRef/Cell**
    (`packages/runner/src/builder/opaque-ref.ts`)
    - Create `mapWithPatternFactory` at module scope
    - Add `map_with_pattern<S>(op: Recipe, params: Record<string, any>)` method
    - Call factory with `{ list, op, params }` (no recipe wrapping)
 
-3. **Update transformer**
+3. ✅ **Update transformer**
    (`packages/ts-transformers/src/closures/transformer.ts`)
    - Change emitted method name from `map` to `map_with_pattern`
-   - Ensure proper import of `recipe` from commontools
+   - Create proper PropertyAccessExpression for new method name
 
-4. **Update all test expectations**
-   - Change `.map(recipe(...), params)` to
-     `.map_with_pattern(recipe(...), params)` in all expected files
+4. ✅ **Update dataflow analyzer**
+   (`packages/ts-transformers/src/ast/call-kind.ts`)
+   - Recognize `map_with_pattern` as "array-map" kind
+   - Ensures it's excluded from derive wrappers in method chains
+   - Updated in 3 places: property access check, symbol name check, and
+     OpaqueRef declaration check
+
+5. ✅ **Update all test expectations**
+   - Changed `.map(recipe(...), params)` to
+     `.map_with_pattern(recipe(...), params)` in 15 expected files
+   - Fixed method chain tests where map_with_pattern must be outside derive
 
 **Success Criteria**:
 
-- [ ] map_with_pattern builtin created and registered
-- [ ] OpaqueRef/Cell has map_with_pattern method
-- [ ] Transformer emits map_with_pattern calls
-- [ ] All 70+ tests pass with new method name
-- [ ] Incorrect transformations cause compile-time errors (not runtime)
+- ✅ map_with_pattern builtin created and registered
+- ✅ OpaqueRef/Cell has map_with_pattern method
+- ✅ Transformer emits map_with_pattern calls
+- ✅ Dataflow analyzer correctly handles map_with_pattern in method chains
+- ✅ All 70 tests pass with new method name
+- ✅ Incorrect transformations cause compile-time errors (not runtime)
 
 ### Phase 2 Planning
 
