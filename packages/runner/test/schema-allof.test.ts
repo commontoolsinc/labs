@@ -47,14 +47,14 @@ describe("createAllOf unit tests", () => {
 
     it("handles nested property defaults", () => {
       const result = createAllOf([
-        { properties: { x: { default: 1 } } },
-        { properties: { x: { default: 2 } } },
+        { type: "object", properties: { x: { default: 1 } } },
+        { type: "object", properties: { x: { default: 2 } } },
       ]);
 
       expect(result).toEqual({
         allOf: [
-          { properties: { x: { default: 1 } } }, // property-level defaults not extracted
-          { properties: { x: { default: 2 } } },
+          { type: "object", properties: { x: { default: 1 } } }, // property-level defaults not extracted
+          { type: "object", properties: { x: { default: 2 } } },
         ],
       });
     });
@@ -404,8 +404,10 @@ describe("allOf schema composition", () => {
       const schema: JSONSchema = {
         allOf: [
           {
+            type: "object",
             properties: {
               user: {
+                type: "object",
                 properties: {
                   name: { default: "Alice" },
                 },
@@ -413,8 +415,10 @@ describe("allOf schema composition", () => {
             },
           },
           {
+            type: "object",
             properties: {
               settings: {
+                type: "object",
                 properties: {
                   theme: { default: "dark" },
                 },
@@ -588,10 +592,13 @@ describe("allOf schema composition", () => {
       const schema: JSONSchema = {
         allOf: [
           {
+            type: "object",
             properties: {
               level1: {
+                type: "object",
                 properties: {
                   level2: {
+                    type: "object",
                     properties: {
                       level3: { default: "deep" },
                     },
@@ -601,8 +608,10 @@ describe("allOf schema composition", () => {
             },
           },
           {
+            type: "object",
             properties: {
               level1: {
+                type: "object",
                 properties: {
                   other: { default: "value" },
                 },

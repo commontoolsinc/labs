@@ -490,21 +490,52 @@ export function validateAndTransform(
 
     // Merge all properties from branches for the schema
     const allProperties: Record<string, JSONSchema> = {};
-    for (const branch of branches) {
-      if (isObject(branch) && branch.properties) {
-        for (const [key, propSchema] of Object.entries(branch.properties)) {
-          // Ensure schema has type:"object" if it has properties
-          const normalizedPropSchema =
-            isObject(propSchema) && propSchema.properties && !propSchema.type
-              ? { ...propSchema, type: "object" as const }
-              : propSchema;
+    const allRequired = new Set<string>();
+    let mergedAdditionalProperties: boolean | JSONSchema | undefined =
+      undefined;
+    let hasAdditionalPropertiesConstraint = false;
 
-          if (!allProperties[key]) {
-            allProperties[key] = normalizedPropSchema;
-          } else {
-            // Property appears in multiple branches, create nested allOf with extracted defaults
-            const existing = allProperties[key];
-            allProperties[key] = createAllOf([existing, normalizedPropSchema])!;
+    for (const branch of branches) {
+      if (isObject(branch)) {
+        // Merge properties
+        if (branch.properties) {
+          for (const [key, propSchema] of Object.entries(branch.properties)) {
+            if (!allProperties[key]) {
+              allProperties[key] = propSchema;
+            } else {
+              // Property appears in multiple branches, create nested allOf
+              const existing = allProperties[key];
+              // Flatten nested allOf arrays to prevent deep nesting
+              const existingSchemas = isObject(existing) &&
+                  Array.isArray(existing.allOf)
+                ? existing.allOf
+                : [existing];
+              allProperties[key] = createAllOf([
+                ...existingSchemas,
+                propSchema,
+              ])!;
+            }
+          }
+        }
+
+        // Merge required fields (union - must satisfy all)
+        if (Array.isArray(branch.required)) {
+          branch.required.forEach((r) => allRequired.add(r));
+        }
+
+        // Merge additionalProperties (intersection - false wins over true)
+        if ("additionalProperties" in branch) {
+          hasAdditionalPropertiesConstraint = true;
+          const branchAdditional = branch.additionalProperties;
+          if (branchAdditional === false) {
+            mergedAdditionalProperties = false;
+          } else if (
+            mergedAdditionalProperties !== false &&
+            branchAdditional !== undefined
+          ) {
+            // If current is not false and branch has a value, use it
+            // (true or a schema object)
+            mergedAdditionalProperties = branchAdditional;
           }
         }
       }
@@ -515,7 +546,10 @@ export function validateAndTransform(
       ? {
         type: "object" as const,
         properties: allProperties,
-        additionalProperties: true,
+        ...(allRequired.size > 0 ? { required: Array.from(allRequired) } : {}),
+        ...(hasAdditionalPropertiesConstraint
+          ? { additionalProperties: mergedAdditionalProperties ?? true }
+          : {}),
         ...(parentDefault !== undefined ? { default: parentDefault } : {}),
         ...(parentAsCell ? { asCell: true } : {}),
         ...(parentAsStream ? { asStream: true } : {}),
