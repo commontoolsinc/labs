@@ -48,7 +48,7 @@ describe("OpaqueRef map callbacks", () => {
     // Map callback should be transformed to recipe with params for captured defaultName
     assertStringIncludes(
       output,
-      "recipe(({ elem, index, params: { defaultName } }) =>",
+      'recipe("map with pattern including captures", ({ elem, index, params: { defaultName } }) =>',
     );
     assertStringIncludes(
       output,
