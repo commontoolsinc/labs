@@ -46,7 +46,7 @@ export default recipe({
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe(({ elem, params: { discount, taxRate, multiplier } }) => (<span>
+        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { discount, taxRate, multiplier } }) => (<span>
             Total: {elem.price * elem.quantity * discount * taxRate * multiplier + shippingCost}
           </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier })}
       </div>),
