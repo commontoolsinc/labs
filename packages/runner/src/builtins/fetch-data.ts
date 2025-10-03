@@ -23,12 +23,15 @@ const internalSchema = {
  * Computes a hash of the fetch inputs for comparison.
  */
 function computeInputHash(
-  url: string | undefined,
-  mode: "text" | "json" | undefined,
-  options:
-    | { body?: any; method?: string; headers?: Record<string, string> }
-    | undefined,
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
 ): string {
+  const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
+
   return refer({
     url: url ?? "",
     mode: mode ?? "json",
@@ -49,16 +52,40 @@ function computeInputHash(
  */
 async function tryClaimMutex(
   runtime: IRuntime,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
-  inputHash: string,
-): Promise<boolean> {
+): Promise<
+  {
+    claimed: boolean;
+    url: string;
+    mode: "text" | "json" | undefined;
+    options:
+      | { body?: any; method?: string; headers?: Record<string, string> }
+      | undefined;
+    inputHash: string;
+  }
+> {
   let claimed = false;
+  let inputHash = "";
+  let url = "";
+  let mode: "text" | "json" | undefined;
+  let options:
+    | { body?: any; method?: string; headers?: Record<string, string> }
+    | undefined;
+
   await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
+
+    ({ url, mode, options } = inputsCell.getAsQueryResult([], tx));
+    inputHash = computeInputHash(tx, inputsCell);
 
     // Can claim if:
     // 1. Nothing is pending, OR
@@ -76,9 +103,12 @@ async function tryClaimMutex(
         inputHash,
       });
       claimed = true;
+    } else {
+      // If we got called again after the above failed, set it back to false.
+      claimed = false;
     }
   });
-  return claimed;
+  return { claimed, url, mode, options, inputHash };
 }
 
 /**
@@ -106,8 +136,7 @@ async function tryWriteResult(
   let success = false;
   await runtime.editWithRetry((tx) => {
     // Recompute the hash from current inputs within the transaction
-    const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
-    const currentHash = computeInputHash(url, mode, options);
+    const currentHash = computeInputHash(tx, inputsCell);
 
     // Only write if inputs haven't changed since we started the request
     if (currentHash === expectedHash) {
@@ -233,8 +262,8 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(url, mode, options);
+    const { url } = inputsCell.getAsQueryResult([], tx);
+    const inputHash = computeInputHash(tx, inputsCell);
 
     if (url === undefined) {
       pending.withTx(tx).set(false);
@@ -253,15 +282,16 @@ export function fetchData(
     // Try to start a new request
     if (!myRequestId) {
       const newRequestId = crypto.randomUUID();
-      abortController = new AbortController();
 
       // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(runtime, pending, internal, newRequestId, inputHash).then(
-        (claimed) => {
+      tryClaimMutex(runtime, inputsCell, pending, internal, newRequestId).then(
+        ({ claimed, url, mode, options, inputHash }) => {
           if (!claimed) {
             // Another tab is handling this, we're done
             return;
           }
+
+          abortController = new AbortController();
 
           // We claimed the mutex, start the fetch
           myRequestId = newRequestId;
@@ -276,7 +306,7 @@ export function fetchData(
             result,
             error,
             internal,
-            abortController!.signal,
+            abortController.signal,
           );
         },
       );
