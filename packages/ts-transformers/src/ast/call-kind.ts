@@ -228,7 +228,10 @@ function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
 
 function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (declaration.name.text !== "map" && declaration.name.text !== "map_with_pattern") return false;
+  if (
+    declaration.name.text !== "map" &&
+    declaration.name.text !== "map_with_pattern"
+  ) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;
