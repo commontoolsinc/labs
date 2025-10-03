@@ -80,9 +80,9 @@ export function resolveSchema(
       !noFollowNestedRefs && typeof resolvedSchema.$ref === "string" &&
       rootSchema !== undefined
     ) {
-      // Detect cycles - if we've seen this $ref before, return current schema with the repeating $ref
+      // Detect cycles - if we've seen this $ref before, stop resolving
       if (seenRefs.has(resolvedSchema.$ref)) {
-        return resolvedSchema;
+        break;
       }
       seenRefs.add(resolvedSchema.$ref);
 

@@ -316,5 +316,36 @@ describe("$ref with default support", () => {
         asStream: true,
       });
     });
+
+    it("should filter asCell when circular $ref is detected with filterAsCell=true", () => {
+      const rootSchema: JSONSchema = {
+        $defs: {
+          Circular: { $ref: "#/$defs/Circular", asCell: true },
+        },
+        $ref: "#/$defs/Circular",
+        asCell: true,
+      };
+
+      const resolved = resolveSchema(rootSchema, rootSchema, true);
+
+      // Even with circular ref, asCell should be filtered when filterAsCell=true
+      expect(resolved).not.toHaveProperty("asCell");
+    });
+
+    it("should preserve asCell when circular $ref is detected with filterAsCell=false", () => {
+      const rootSchema: JSONSchema = {
+        $defs: {
+          Circular: { $ref: "#/$defs/Circular", asCell: true },
+        },
+        $ref: "#/$defs/Circular",
+        asCell: true,
+      };
+
+      const resolved = resolveSchema(rootSchema, rootSchema, false);
+
+      // With filterAsCell=false, asCell should remain even with circular ref
+      expect(resolved).toHaveProperty("asCell", true);
+      expect(resolved).toHaveProperty("$ref");
+    });
   });
 });
