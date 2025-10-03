@@ -48,7 +48,7 @@ describe("OpaqueRef map callbacks", () => {
     // Map callback should be transformed to recipe with params for captured defaultName
     assertStringIncludes(
       output,
-      'recipe(({ elem, index, params: { defaultName } }) =>',
+      "recipe(({ elem, index, params: { defaultName } }) =>",
     );
     assertStringIncludes(
       output,
@@ -62,7 +62,7 @@ describe("OpaqueRef map callbacks", () => {
     // elem[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
       output,
-      'elem[NAME] || defaultName',
+      "elem[NAME] || defaultName",
     );
     // ifElse still gets derive for the negation
     assertStringIncludes(

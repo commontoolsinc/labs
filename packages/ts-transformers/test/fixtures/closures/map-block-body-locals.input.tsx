@@ -15,13 +15,17 @@ export default recipe<State>("BlockBodyLocals", (state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((item) => {
+        {state.items.map((item, index) => {
           // Local variable declared inside callback
           const subtotal = item.price * item.quantity;
           const localTax = subtotal * 0.1;
 
           // Should only capture state.taxRate, not subtotal or localTax
-          return <div>Subtotal: {subtotal}, Tax: {localTax + state.taxRate}</div>;
+          return (
+            <div key={index}>
+              Subtotal: {subtotal}, Tax: {localTax + state.taxRate}
+            </div>
+          );
         })}
       </div>
     ),

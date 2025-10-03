@@ -196,7 +196,9 @@ export function createDataFlowAnalyzer(
             if (callKind?.kind === "array-map") {
               return { kind: "skip-call-rewrite", reason: "array-map" };
             }
-            if (callKind?.kind === "ifElse" && expression.arguments.length > 0) {
+            if (
+              callKind?.kind === "ifElse" && expression.arguments.length > 0
+            ) {
               const predicate = expression.arguments[0];
               if (predicate) {
                 return { kind: "call-if-else", predicate };
