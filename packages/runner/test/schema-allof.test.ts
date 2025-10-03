@@ -528,8 +528,9 @@ describe("allOf schema composition", () => {
         },
       );
 
-      // TODO: Strict JSON Schema intersection would be empty (no properties allowed by all branches)
-      // Current implementation unions properties from all branches
+      // TODO(seefeld): Strict JSON Schema intersection would be empty (no
+      // properties allowed by all branches) Current implementation unions
+      // properties from all branches
       expect(result).toEqualIgnoringSymbols({ a: 1, b: 2, c: 3 });
     });
 
@@ -669,8 +670,8 @@ describe("allOf schema composition", () => {
         },
       );
 
-      // TODO: Strict JSON Schema intersection would be empty
-      // Current implementation unions properties from all branches
+      // TODO(seefeld): Strict JSON Schema intersection would be empty Current
+      // implementation unions properties from all branches
       expect(result).toEqualIgnoringSymbols({ a: 1, b: 2, c: 3 });
     });
 
@@ -710,8 +711,8 @@ describe("allOf schema composition", () => {
         },
       );
 
-      // TODO: Strict intersection would only allow 'a' (common to both branches)
-      // Current implementation unions properties from all branches
+      // TODO(seefeld): Strict intersection would only allow 'a' (common to both
+      // branches) Current implementation unions properties from all branches
       expect(result).toEqualIgnoringSymbols({ a: 1, b: 2 });
     });
 
