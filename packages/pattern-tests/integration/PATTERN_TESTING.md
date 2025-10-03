@@ -1,10 +1,12 @@
 # Pattern Testing Guide
 
-This guide explains how to create integration tests for patterns in `packages/runner/integration/patterns-with-ux`.
+This guide explains how to create integration tests for patterns in
+`packages/pattern_tests/integration/patterns-with-ux`.
 
 ## Overview
 
 Integration tests for patterns-with-ux verify both:
+
 1. **UI interactions** - Testing that users can interact with the pattern's UI
 2. **State management** - Testing that the charm's state is correctly updated
 
@@ -74,7 +76,7 @@ To make patterns testable, add `id` attributes to interactive elements:
   onClick={handler}
 >
   Button Text
-</ct-button>
+</ct-button>;
 ```
 
 ### Inputs
@@ -84,12 +86,13 @@ To make patterns testable, add `id` attributes to interactive elements:
   id="my-input-id"
   $value={fieldCell}
   placeholder="Enter value"
-/>
+/>;
 ```
 
 ### Naming Convention
 
 Use descriptive kebab-case IDs:
+
 - `add-counter-button`, `adjust-counter-button`
 - `category-select`, `amount-input`
 - `balance-targets-button`, `reset-all-button`
@@ -192,11 +195,11 @@ Tests require a running server. Use the `API_URL` environment variable:
 
 ```bash
 # Run a single test
-cd packages/runner
+cd packages/pattern_tests
 API_URL=http://localhost:8000 deno test -A --no-check integration/pattern-name.test.ts
 
-# Run all runner integration tests
-cd packages/runner
+# Run all integration tests
+cd packages/pattern_tests
 API_URL=http://localhost:8000 deno test -A --no-check integration/
 ```
 
@@ -300,13 +303,19 @@ it("should adjust counter value via UI form", async () => {
 
 ## Best Practices
 
-1. **Minimal Changes**: Only add IDs to interactive elements, don't restructure code
+1. **Minimal Changes**: Only add IDs to interactive elements, don't restructure
+   code
 2. **Use Descriptive IDs**: IDs should clearly describe the element's purpose
-3. **Test Both UI and State**: Verify UI interactions work AND state is updated correctly
-4. **Wait for State Changes**: Always use `waitFor` when expecting async state updates
-5. **Test Direct Operations**: Include tests that bypass the UI to test charm logic directly
-6. **Handle Shadow DOM**: Remember that `ct-input` and other web components use shadow DOM
-7. **Add Default Export**: Patterns must export a default export for FileSystemProgramResolver
+3. **Test Both UI and State**: Verify UI interactions work AND state is updated
+   correctly
+4. **Wait for State Changes**: Always use `waitFor` when expecting async state
+   updates
+5. **Test Direct Operations**: Include tests that bypass the UI to test charm
+   logic directly
+6. **Handle Shadow DOM**: Remember that `ct-input` and other web components use
+   shadow DOM
+7. **Add Default Export**: Patterns must export a default export for
+   FileSystemProgramResolver
 
 ## Common Patterns
 
@@ -374,9 +383,13 @@ it("should load pattern and verify initial state", async () => {
 
 ## Transaction Conflicts (Normal Behavior)
 
-When running tests that interact with the UI (clicking buttons, typing in inputs), you **will** see `ConflictError` warnings in the console. **This is normal and expected** - the system automatically recovers from these conflicts within milliseconds.
+When running tests that interact with the UI (clicking buttons, typing in
+inputs), you **will** see `ConflictError` warnings in the console. **This is
+normal and expected** - the system automatically recovers from these conflicts
+within milliseconds.
 
 **What you'll see:**
+
 ```
 [WARN][storage.cache::...] Transaction failed {
   name: "ConflictError",
@@ -386,14 +399,18 @@ When running tests that interact with the UI (clicking buttons, typing in inputs
 ```
 
 **Why this happens:**
+
 - Both the test code and the UI are updating charm state concurrently
 - The system uses optimistic concurrency control
 - Conflicts are detected and automatically retried
 - Tests continue successfully after auto-recovery
 
-**Important:** Don't be alarmed by conflict warnings - they're part of normal operation and are handled automatically. Your tests should pass despite these warnings.
+**Important:** Don't be alarmed by conflict warnings - they're part of normal
+operation and are handled automatically. Your tests should pass despite these
+warnings.
 
 **Working test example with UI interactions:**
+
 ```typescript
 it("should add item via button click", async () => {
   const page = shell.page();
@@ -433,12 +450,13 @@ it("should add item via button click", async () => {
 ```
 
 **Key points:**
+
 - Use `waitFor` to poll state until the expected condition is true
 - Don't await `charm.result.get()` - it's synchronous
 - Give conflicts time to resolve (usually <1 second)
 - Tests will pass despite conflict warnings in the console
-```
 
+```
 ## Troubleshooting
 
 ### Element Not Found
@@ -467,3 +485,4 @@ it("should add item via button click", async () => {
 - The first `waitForSelector("h1")` might find a different h1 than expected
 - Use `page.$$("h1")` to get all h1 elements and search for the one containing your text
 - Always wait for the specific content to appear using `waitFor` instead of just waiting for the element
+```
