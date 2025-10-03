@@ -261,8 +261,9 @@ const computeInvoiceTotals = (
   };
 };
 
-const formatCurrency = (value: number): string => {
-  return `$${value.toFixed(2)}`;
+const formatCurrency = (value: number | undefined): string => {
+  const safeValue = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return `$${safeValue.toFixed(2)}`;
 };
 
 const formatPercent = (value: number): string => {
@@ -509,6 +510,9 @@ export const invoiceGeneratorUx = recipe<InvoiceGeneratorArgs>(
       ),
       items,
       normalizedItems,
+      sanitizedItems: normalizedItems,
+      sanitizedTaxRate: normalizedTaxRate,
+      sanitizedInvoiceDiscountRate: normalizedInvoiceDiscountRate,
       lineSummaries,
       totals,
       totalDue,
@@ -516,3 +520,5 @@ export const invoiceGeneratorUx = recipe<InvoiceGeneratorArgs>(
     };
   },
 );
+
+export default invoiceGeneratorUx;

@@ -8,6 +8,7 @@ import {
   derive,
   h,
   handler,
+  ifElse,
   lift,
   NAME,
   recipe,
@@ -1035,6 +1036,7 @@ export const budgetPlannerUx = recipe<BudgetPlannerArgs>(
                   </ct-input>
                 </div>
                 <ct-button
+                  id="allocate-button"
                   onClick={applyAllocation}
                   aria-label="Apply allocation"
                 >
@@ -1048,6 +1050,7 @@ export const budgetPlannerUx = recipe<BudgetPlannerArgs>(
                   flex-wrap: wrap;
                 ">
                 <ct-button
+                  id="balance-targets-button"
                   variant="secondary"
                   onClick={applyRebalanceTargets}
                   aria-label="Distribute budget by target proportions"
@@ -1055,6 +1058,7 @@ export const budgetPlannerUx = recipe<BudgetPlannerArgs>(
                   Balance by Targets
                 </ct-button>
                 <ct-button
+                  id="balance-evenly-button"
                   variant="secondary"
                   onClick={applyRebalanceEven}
                   aria-label="Distribute budget evenly"
@@ -1062,6 +1066,7 @@ export const budgetPlannerUx = recipe<BudgetPlannerArgs>(
                   Balance Evenly
                 </ct-button>
                 <ct-button
+                  id="reset-all-button"
                   variant="secondary"
                   onClick={applyReset}
                   aria-label="Reset all allocations"

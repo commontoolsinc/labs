@@ -360,6 +360,7 @@ export const counterAggregatorUx = recipe<AggregatorArgs>(
             Add Counter
           </h3>
           <ct-button
+            id="add-counter-button"
             onClick={addBound}
             style={{
               width: "100%",
@@ -409,6 +410,7 @@ export const counterAggregatorUx = recipe<AggregatorArgs>(
                 Counter Index
               </label>
               <ct-input
+                id="counter-index-input"
                 $value={indexField}
                 placeholder="e.g., 0, 1, 2"
                 style={{
@@ -433,6 +435,7 @@ export const counterAggregatorUx = recipe<AggregatorArgs>(
                 Amount to Add
               </label>
               <ct-input
+                id="counter-amount-input"
                 $value={amountField}
                 placeholder="e.g., 5 or -3"
                 style={{
@@ -445,6 +448,7 @@ export const counterAggregatorUx = recipe<AggregatorArgs>(
               />
             </div>
             <ct-button
+              id="adjust-counter-button"
               onClick={adjustBound}
               style={{
                 width: "100%",
@@ -476,3 +480,5 @@ export const counterAggregatorUx = recipe<AggregatorArgs>(
     };
   },
 );
+
+export default counterAggregatorUx;
