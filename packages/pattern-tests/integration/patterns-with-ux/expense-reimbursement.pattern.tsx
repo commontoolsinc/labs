@@ -657,6 +657,7 @@ export const expenseReimbursementUx = recipe<ExpenseReimbursementArgs>(
                   gap: 0.75rem;
                 ">
                 <ct-button
+                  id="approve-claim-button"
                   variant="primary"
                   onClick={approveClaim}
                   aria-label="Approve selected claim"
@@ -664,6 +665,7 @@ export const expenseReimbursementUx = recipe<ExpenseReimbursementArgs>(
                   ✓ Approve
                 </ct-button>
                 <ct-button
+                  id="reject-claim-button"
                   variant="secondary"
                   onClick={rejectClaim}
                   aria-label="Reject selected claim"
@@ -671,6 +673,7 @@ export const expenseReimbursementUx = recipe<ExpenseReimbursementArgs>(
                   ✗ Reject
                 </ct-button>
                 <ct-button
+                  id="record-payment-button"
                   variant="secondary"
                   onClick={recordPayment}
                   aria-label="Record payment for selected claim"

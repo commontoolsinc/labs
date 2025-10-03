@@ -629,6 +629,7 @@ export const goalProgressTrackerUx = recipe<GoalProgressArgs>(
                 ID
               </label>
               <ct-input
+                id="milestone-id-input"
                 $value={milestoneIdField}
                 placeholder="e.g., kickoff"
                 style={{
@@ -653,6 +654,7 @@ export const goalProgressTrackerUx = recipe<GoalProgressArgs>(
                 Label
               </label>
               <ct-input
+                id="milestone-label-input"
                 $value={labelField}
                 placeholder="e.g., Kickoff review"
                 style={{
@@ -677,6 +679,7 @@ export const goalProgressTrackerUx = recipe<GoalProgressArgs>(
                 Weight
               </label>
               <ct-input
+                id="milestone-weight-input"
                 $value={weightField}
                 placeholder="e.g., 30"
                 style={{
@@ -689,6 +692,7 @@ export const goalProgressTrackerUx = recipe<GoalProgressArgs>(
               />
             </div>
             <ct-button
+              id="add-milestone-button"
               onClick={addMilestone}
               style={{
                 width: "100%",
@@ -818,6 +822,8 @@ export const goalProgressTrackerUx = recipe<GoalProgressArgs>(
     return {
       [NAME]: name,
       [UI]: ui,
+      // Export writeable cell for direct manipulation
+      milestonesInput: milestones,
       milestones: sanitized,
       milestoneList,
       totalWeight,

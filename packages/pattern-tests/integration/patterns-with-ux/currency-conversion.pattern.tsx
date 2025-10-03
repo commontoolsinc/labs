@@ -324,12 +324,14 @@ export const currencyConversionUx = recipe<CurrencyConversionArgs>(
               </ct-text>
               <ct-stack style="gap: 0.5rem;">
                 <ct-input
+                  id="amount-input"
                   $value={amountField}
                   type="number"
                   placeholder="Enter amount"
                   style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"
                 />
                 <ct-button
+                  id="update-amount-button"
                   onClick={updateAmount({ amount, amountField })}
                   style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;"
                 >
@@ -396,17 +398,20 @@ export const currencyConversionUx = recipe<CurrencyConversionArgs>(
               </ct-text>
               <ct-stack style="gap: 0.5rem;">
                 <ct-input
+                  id="currency-code-input"
                   $value={currencyField}
                   placeholder="Currency code (e.g., JPY)"
                   style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"
                 />
                 <ct-input
+                  id="exchange-rate-input"
                   $value={rateField}
                   type="number"
                   placeholder="Rate from base currency"
                   style="padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px;"
                 />
                 <ct-button
+                  id="update-rate-button"
                   onClick={updateRate({
                     rates,
                     targets,
