@@ -265,7 +265,7 @@ export function fetchData(
     const { url } = inputsCell.getAsQueryResult([], tx);
     const inputHash = computeInputHash(tx, inputsCell);
 
-    if (url === undefined) {
+    if (!url) {
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(undefined);
@@ -288,6 +288,23 @@ export function fetchData(
         ({ claimed, url, mode, options, inputHash }) => {
           if (!claimed) {
             // Another tab is handling this, we're done
+            return;
+          }
+
+          // Check if URL became empty while waiting for mutex
+          if (!url) {
+            // Release the lock and clear state
+            myRequestId = undefined;
+            runtime.editWithRetry((tx) => {
+              pending.withTx(tx).set(false);
+              result.withTx(tx).set(undefined);
+              error.withTx(tx).set(undefined);
+              internal.withTx(tx).set({
+                requestId: "",
+                lastActivity: 0,
+                inputHash: "",
+              });
+            });
             return;
           }
 

@@ -322,4 +322,44 @@ describe("fetch-data mutex mechanism", () => {
     expect(data.error).toBeDefined();
     expect(data.pending).toBe(false);
   });
+
+  it("should abort and clear state if URL becomes empty while waiting for mutex", async () => {
+    const fetchData = byRef("fetchData");
+    const testRecipe = recipe<{ url: string }>(
+      "Empty URL Test",
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const urlCell = runtime.getCell<string>(
+      space,
+      "url-empty-test",
+      undefined,
+      tx,
+    );
+    urlCell.set("/api/test");
+
+    const resultCell = runtime.getCell(space, "empty-url-test", undefined, tx);
+    runtime.run(tx, testRecipe, { url: urlCell }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    // Change URL to empty
+    urlCell.withTx(tx).send("");
+    tx.commit();
+
+    // Wait for async work
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
+
+    const data = resultCell.get() as {
+      error?: unknown;
+      result?: unknown;
+      pending?: boolean;
+    };
+
+    // Should have cleared state
+    expect(data.result).toBeUndefined();
+    expect(data.error).toBeUndefined();
+    expect(data.pending).toBe(false);
+  });
 });
