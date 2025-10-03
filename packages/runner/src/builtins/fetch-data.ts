@@ -4,6 +4,150 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { JSONSchema, Schema } from "../builder/types.ts";
+
+const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
+
+const internalSchema = {
+  type: "object",
+  properties: {
+    requestId: { type: "string", default: "" },
+    lastActivity: { type: "number", default: 0 },
+    inputHash: { type: "string", default: "" },
+  },
+  default: {},
+  required: ["requestId", "lastActivity", "inputHash"],
+} as const satisfies JSONSchema;
+
+/**
+ * Computes a hash of the fetch inputs for comparison.
+ */
+function computeInputHash(
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
+): string {
+  const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
+
+  return refer({
+    url: url ?? "",
+    mode: mode ?? "json",
+    options: options ?? {},
+  }).toString();
+}
+
+/**
+ * Attempts to claim the mutex for a fetch request. Only claims if no other
+ * request is active or if the previous request has timed out.
+ *
+ * @param runtime - The runtime instance
+ * @param pending - Cell containing the pending state
+ * @param internal - Cell containing the internal state
+ * @param requestId - The request ID to claim with
+ * @param inputHash - Hash of the current inputs
+ * @returns true if mutex was claimed, false otherwise
+ */
+async function tryClaimMutex(
+  runtime: IRuntime,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
+  pending: Cell<boolean>,
+  internal: Cell<Schema<typeof internalSchema>>,
+  requestId: string,
+): Promise<
+  {
+    claimed: boolean;
+    url: string;
+    mode: "text" | "json" | undefined;
+    options:
+      | { body?: any; method?: string; headers?: Record<string, string> }
+      | undefined;
+    inputHash: string;
+  }
+> {
+  let claimed = false;
+  let inputHash = "";
+  let url = "";
+  let mode: "text" | "json" | undefined;
+  let options:
+    | { body?: any; method?: string; headers?: Record<string, string> }
+    | undefined;
+
+  await runtime.editWithRetry((tx) => {
+    const currentInternal = internal.withTx(tx).get();
+    const isPending = pending.withTx(tx).get();
+    const now = Date.now();
+
+    ({ url, mode, options } = inputsCell.getAsQueryResult([], tx));
+    inputHash = computeInputHash(tx, inputsCell);
+
+    // Can claim if:
+    // 1. Nothing is pending, OR
+    // 2. Previous request timed out, OR
+    // 3. Inputs changed (different hash)
+    const canClaim = !isPending ||
+      (currentInternal.lastActivity < now - REQUEST_TIMEOUT) ||
+      (currentInternal.inputHash !== inputHash);
+
+    if (canClaim) {
+      pending.withTx(tx).set(true);
+      internal.withTx(tx).set({
+        requestId,
+        lastActivity: now,
+        inputHash,
+      });
+      claimed = true;
+    } else {
+      // If we got called again after the above failed, set it back to false.
+      claimed = false;
+    }
+  });
+  return { claimed, url, mode, options, inputHash };
+}
+
+/**
+ * Performs a mutation if the inputs haven't changed. This allows any tab
+ * to write the result as long as the inputs are still the same.
+ *
+ * @param runtime - The runtime instance
+ * @param internal - Cell containing the internal state
+ * @param inputsCell - Cell containing the input values
+ * @param expectedHash - Hash of the inputs when request started
+ * @param action - The mutation action to perform
+ * @returns true if the action was performed, false otherwise
+ */
+async function tryWriteResult(
+  runtime: IRuntime,
+  internal: Cell<Schema<typeof internalSchema>>,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
+  expectedHash: string,
+  action: (tx: IExtendedStorageTransaction) => void,
+): Promise<boolean> {
+  let success = false;
+  await runtime.editWithRetry((tx) => {
+    // Recompute the hash from current inputs within the transaction
+    const currentHash = computeInputHash(tx, inputsCell);
+
+    // Only write if inputs haven't changed since we started the request
+    if (currentHash === expectedHash) {
+      action(tx);
+      // Also update the internal state to reflect this hash
+      internal.withTx(tx).update({ inputHash: currentHash });
+      success = true;
+    }
+  });
+  return success;
+}
 
 /**
  * Fetch data from a URL.
@@ -28,13 +172,40 @@ export function fetchData(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  let currentRun = 0;
-  let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
-  let requestHash: Cell<string | undefined>;
+  let internal: Cell<Schema<typeof internalSchema>>;
+  let myRequestId: string | undefined = undefined;
+  let abortController: AbortController | undefined = undefined;
+
+  // This is called when the recipe containing this node is being stopped.
+  addCancel(() => {
+    // Abort the request if it's still pending.
+    abortController?.abort("Recipe stopped");
+
+    // Only try to update state if cells were initialized
+    if (!cellsInitialized) return;
+
+    const tx = runtime.edit();
+
+    try {
+      // If the pending request is ours, set pending to false and clear the requestId.
+      const currentRequestId = internal.withTx(tx).key("requestId").get();
+      if (currentRequestId === myRequestId) {
+        pending.withTx(tx).set(false);
+        internal.withTx(tx).key("requestId").set("");
+      }
+
+      // Since we're aborting, don't retry. If the above fails, it's because the
+      // requestId was already changing under us.
+      tx.commit();
+    } catch (e) {
+      // Ignore errors during cleanup - the runtime might be shutting down
+      tx.abort();
+    }
+  });
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -44,7 +215,6 @@ export function fetchData(
         undefined,
         tx,
       );
-      pending.send(false);
 
       result = runtime.getCell<any | undefined>(
         parentCell.space,
@@ -64,109 +234,162 @@ export function fetchData(
         tx,
       );
 
-      requestHash = runtime.getCell<string | undefined>(
+      internal = runtime.getCell(
         parentCell.space,
-        {
-          fetchData: { requestHash: cause },
-        },
-        undefined,
+        { fetchData: { internal: cause } },
+        internalSchema,
         tx,
       );
 
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      requestHash.setSourceCell(parentCell);
+      internal.setSourceCell(parentCell);
 
       // Kick off sync in the background
       pending.sync();
       result.sync();
       error.sync();
-      requestHash.sync();
+      internal.sync();
 
-      sendResult(tx, {
-        pending,
-        result,
-        error,
-        requestHash,
-      });
       cellsInitialized = true;
     }
-    const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const errorWithLog = error.withTx(tx);
-    const requestHashWithLog = requestHash.withTx(tx);
 
-    const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
+    // Set results to links to our cells. We have to do this outside of
+    // isInitialized since the write could conflict, and then this code will run
+    // again, but isInitialized will be true already. The framework will notice
+    // that this write is a no-op after the first successful write, so this
+    // should be fine.
+    sendResult(tx, { pending, result, error });
 
-    const hash = refer({
-      url: url ?? "",
-      mode: mode ?? "json",
-      options: options ?? {},
-    }).toString();
+    const { url } = inputsCell.getAsQueryResult([], tx);
+    const inputHash = computeInputHash(tx, inputsCell);
 
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
-    previousCallHash = hash;
-
-    const processResponse = (mode || "json") === "json"
-      ? (r: Response) => r.json()
-      : (r: Response) => r.text();
-
-    if (url === undefined) {
-      pendingWithLog.set(false);
-      resultWithLog.set(undefined);
-      errorWithLog.set(undefined);
-      ++currentRun;
+    if (!url) {
+      pending.withTx(tx).set(false);
+      result.withTx(tx).set(undefined);
+      error.withTx(tx).set(undefined);
       return;
     }
 
-    pendingWithLog.set(true);
-    resultWithLog.set(undefined);
-    errorWithLog.set(undefined);
-
-    const thisRun = ++currentRun;
-    const abort = new AbortController();
-
-    const fetchOptions = { ...options };
-    if (
-      fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
-    ) {
-      fetchOptions.body = JSON.stringify(fetchOptions.body);
+    // Check if inputs changed - if so, abort any in-flight request
+    const currentInternal = internal.withTx(tx).get();
+    if (myRequestId && currentInternal?.inputHash !== inputHash) {
+      abortController?.abort("Inputs changed");
+      myRequestId = undefined;
     }
 
-    fetch(new URL(url, getRecipeEnvironment().apiUrl), {
-      signal: abort.signal,
-      ...fetchOptions,
-    })
-      .then(processResponse)
-      .then(async (data) => {
-        await runtime.idle();
+    // Try to start a new request
+    if (!myRequestId) {
+      const newRequestId = crypto.randomUUID();
 
-        await runtime.editWithRetry((tx) => {
-          if (thisRun !== currentRun) return;
+      // Try to claim mutex - returns immediately if another tab is processing
+      tryClaimMutex(runtime, inputsCell, pending, internal, newRequestId).then(
+        ({ claimed, url, mode, options, inputHash }) => {
+          if (!claimed) {
+            // Another tab is handling this, we're done
+            return;
+          }
 
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(data);
-          requestHash.withTx(tx).set(hash);
-        });
-      })
-      .catch(async (err) => {
-        await runtime.idle();
+          // Check if URL became empty while waiting for mutex
+          if (!url) {
+            // Release the lock and clear state
+            myRequestId = undefined;
+            runtime.editWithRetry((tx) => {
+              pending.withTx(tx).set(false);
+              result.withTx(tx).set(undefined);
+              error.withTx(tx).set(undefined);
+              internal.withTx(tx).set({
+                requestId: "",
+                lastActivity: 0,
+                inputHash: "",
+              });
+            });
+            return;
+          }
 
-        await runtime.editWithRetry((tx) => {
-          if (thisRun !== currentRun) return;
+          abortController = new AbortController();
 
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(undefined);
-          error.withTx(tx).set(err);
-        });
-
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
-      });
-
-    // Add our cancel to the cancel group
-    addCancel(() => abort.abort());
+          // We claimed the mutex, start the fetch
+          myRequestId = newRequestId;
+          startFetch(
+            runtime,
+            inputsCell,
+            url,
+            mode,
+            options,
+            inputHash,
+            pending,
+            result,
+            error,
+            internal,
+            abortController.signal,
+          );
+        },
+      );
+    }
   };
+}
+
+async function startFetch(
+  runtime: IRuntime,
+  inputsCell: Cell<{
+    url: string;
+    mode?: "text" | "json";
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
+  }>,
+  url: string,
+  mode: "text" | "json" | undefined,
+  options:
+    | { body?: any; method?: string; headers?: Record<string, string> }
+    | undefined,
+  inputHash: string,
+  pending: Cell<boolean>,
+  result: Cell<any | undefined>,
+  error: Cell<any | undefined>,
+  internal: Cell<Schema<typeof internalSchema>>,
+  abortSignal: AbortSignal,
+) {
+  const processResponse = (mode || "json") === "json"
+    ? (r: Response) => r.json()
+    : (r: Response) => r.text();
+
+  const fetchOptions = { ...options };
+  if (
+    fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
+  ) {
+    fetchOptions.body = JSON.stringify(fetchOptions.body);
+  }
+
+  try {
+    const response = await fetch(
+      new URL(url, getRecipeEnvironment().apiUrl),
+      {
+        signal: abortSignal,
+        ...fetchOptions,
+      },
+    );
+
+    const data = await processResponse(response);
+    await runtime.idle();
+
+    // Try to write result - any tab can write if inputs match
+    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
+      pending.withTx(tx).set(false);
+      result.withTx(tx).set(data);
+      error.withTx(tx).set(undefined);
+    });
+  } catch (err) {
+    // Don't write errors if request was aborted
+    if (abortSignal.aborted) return;
+
+    await runtime.idle();
+
+    // Try to write error - any tab can write if inputs match
+    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
+      pending.withTx(tx).set(false);
+      result.withTx(tx).set(undefined);
+      error.withTx(tx).set(err);
+    });
+  }
 }
