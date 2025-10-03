@@ -62,12 +62,12 @@ export default recipe({
         
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map(item => (<li key={item.id}>
-              <span>{item.name}</span>
-              <span> - Original: ${item.price}</span>
-              <span> - Discounted: ${derive({ item_price: item.price, state_discount: state.discount }, ({ item_price: _v1, state_discount: _v2 }) => (_v1 * (1 - _v2)).toFixed(2))}</span>
-              <span> - With tax: ${derive({ item_price: item.price, state_discount: state.discount, state_taxRate: state.taxRate }, ({ item_price: _v1, state_discount: _v2, state_taxRate: _v3 }) => (_v1 * (1 - _v2) * (1 + _v3)).toFixed(2))}</span>
-            </li>))}
+          {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
+              <span>{elem.name}</span>
+              <span> - Original: ${elem.price}</span>
+              <span> - Discounted: ${(elem.price * (1 - discount)).toFixed(2)}</span>
+              <span> - With tax: ${(elem.price * (1 - discount) * (1 + taxRate)).toFixed(2)}</span>
+            </li>)), { discount: state.discount, taxRate: state.taxRate })}
         </ul>
         
         <h3>Array Methods</h3>

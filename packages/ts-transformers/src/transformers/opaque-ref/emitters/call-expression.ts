@@ -21,13 +21,31 @@ export const emitCallExpression: Emitter = ({
 
   if (hint?.kind === "skip-call-rewrite") {
     if (hint.reason === "array-map") {
-      const rewritten = context.rewriteChildren(expression);
-      if (rewritten !== expression) {
+      // For array-map calls (e.g., state.items.filter(...).map(...)),
+      // we don't wrap the map call itself, but we DO need to rewrite
+      // the call chain before .map to wrap reactive expressions
+      const helpers = new Set<OpaqueRefHelperName>();
+
+      // If the callee is a property access (e.g., ...filter(...).map),
+      // recursively rewrite the entire callee to handle wrapped expressions
+      const rewrittenCallee = context.rewriteChildren(expression.expression);
+
+      if (rewrittenCallee !== expression.expression) {
+        // The callee was rewritten, update the map call
+        const updated = context.factory.updateCallExpression(
+          expression,
+          rewrittenCallee as ts.LeftHandSideExpression,
+          expression.typeArguments,
+          expression.arguments,
+        );
+
         return {
-          expression: rewritten,
-          helpers: new Set(),
+          expression: updated,
+          helpers,
         };
       }
+
+      // No changes needed
       return undefined;
     }
     return undefined;

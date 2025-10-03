@@ -170,6 +170,71 @@ export function createDataFlowAnalyzer(
     scope: DataFlowScopeInternal,
     context: AnalyzerContext,
   ): InternalAnalysis => {
+    // Handle synthetic nodes (created by previous transformers)
+    // We can't analyze them directly, but we need to visit children
+    if (!expression.getSourceFile()) {
+      // Collect analyses from all children
+      const childAnalyses: InternalAnalysis[] = [];
+
+      ts.forEachChild(expression, (child) => {
+        if (ts.isExpression(child)) {
+          childAnalyses.push(analyzeExpression(child, scope, context));
+        }
+      });
+
+      // Inherit properties from children
+      if (childAnalyses.length > 0) {
+        const merged = mergeAnalyses(...childAnalyses);
+
+        // For synthetic CallExpressions, detect call kind and set rewriteHint
+        if (ts.isCallExpression(expression)) {
+          const callKind = detectCallKind(expression, checker);
+          const rewriteHint: RewriteHint | undefined = (() => {
+            if (callKind?.kind === "builder") {
+              return { kind: "skip-call-rewrite", reason: "builder" };
+            }
+            if (callKind?.kind === "array-map") {
+              return { kind: "skip-call-rewrite", reason: "array-map" };
+            }
+            if (
+              callKind?.kind === "ifElse" && expression.arguments.length > 0
+            ) {
+              const predicate = expression.arguments[0];
+              if (predicate) {
+                return { kind: "call-if-else", predicate };
+              }
+            }
+            return undefined;
+          })();
+
+          return {
+            ...merged,
+            rewriteHint,
+          };
+        }
+
+        // Preserve requiresRewrite from children for property access expressions
+        if (ts.isPropertyAccessExpression(expression)) {
+          return merged;
+        }
+
+        return {
+          ...merged,
+          // Other synthetic nodes don't require rewrite
+          requiresRewrite: false,
+        };
+      }
+
+      // No children with analysis
+      return {
+        containsOpaqueRef: false,
+        requiresRewrite: false,
+        dataFlows: [],
+        localNodes: [],
+        rewriteHint: undefined,
+      };
+    }
+
     const isSymbolIgnored = (symbol: ts.Symbol | undefined): boolean => {
       if (!symbol) return false;
       if (scope.aggregated.has(symbol) && isRootOpaqueParameter(symbol)) {
@@ -606,6 +671,19 @@ export function createDataFlowAnalyzer(
         return {
           containsOpaqueRef: combined.containsOpaqueRef,
           requiresRewrite: false,
+          dataFlows: combined.dataFlows,
+          localNodes: combined.localNodes,
+          rewriteHint,
+        };
+      }
+
+      if (callKind?.kind === "array-map") {
+        // For array-map, we don't rewrite the map call itself,
+        // but we DO need to preserve requiresRewrite from the target (callee)
+        // to handle cases like state.items.filter(...).map(...)
+        return {
+          containsOpaqueRef: combined.containsOpaqueRef,
+          requiresRewrite: callee.requiresRewrite,
           dataFlows: combined.dataFlows,
           localNodes: combined.localNodes,
           rewriteHint,

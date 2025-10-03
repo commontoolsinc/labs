@@ -48,6 +48,16 @@ const configs: FixtureConfig[] = [
       { pattern: /with-opaque-ref/, name: "OpaqueRef integration" },
     ],
   },
+  {
+    directory: "closures",
+    describe: "Closure Transformation",
+    formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
+    groups: [
+      { pattern: /^map-/, name: "Map callbacks" },
+      { pattern: /^event-/, name: "Event handlers" },
+      { pattern: /^lift-/, name: "Generic closures" },
+    ],
+  },
 ];
 
 const staticCache = new StaticCache();
