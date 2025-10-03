@@ -1,10 +1,10 @@
 /// <cts-enable />
 import { h, recipe, UI } from "commontools";
 
-// Module-level constant
+// Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 
-// Imported utility function (simulated)
+// Module-level function - should NOT be captured
 function formatPrice(price: number): string {
   return `$${price.toFixed(2)}`;
 }
@@ -18,11 +18,11 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("ImportReference", (state) => {
+export default recipe<State>("ModuleScopedReference", (state) => {
   return {
     [UI]: (
       <div>
-        {/* Captures module-level constant and function */}
+        {/* Should NOT capture module-level constant or function */}
         {state.items.map((item) => (
           <div>
             Item: {formatPrice(item.price * (1 + TAX_RATE))}

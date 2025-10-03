@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
-// Module-level constant
+import { h, recipe, UI, derive, JSONSchema } from "commontools";
+// Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
-// Imported utility function (simulated)
+// Module-level function - should NOT be captured
 function formatPrice(price: number): string {
     return `$${price.toFixed(2)}`;
 }
@@ -42,10 +42,10 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {/* Captures module-level constant and function */}
-        {state.items.map(recipe(({ elem, params: { formatPrice, TAX_RATE } }) => (<div>
-            Item: {formatPrice(elem.price * (1 + TAX_RATE))}
-          </div>)), { formatPrice: formatPrice, TAX_RATE: TAX_RATE })}
+        {/* Should NOT capture module-level constant or function */}
+        {state.items.map((item) => (<div>
+            Item: {derive(item.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
+          </div>))}
       </div>),
     };
 });
