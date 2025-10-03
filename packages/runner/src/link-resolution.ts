@@ -42,33 +42,44 @@ export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
     }
   }
 
-  // Extract asCell/asStream from first schema that has them (first wins)
+  // Extract asCell/asStream from first schema that has either (only one can be extracted)
   let hasAsCell = false;
   let hasAsStream = false;
   for (const schema of nonTrivial) {
     if (isObject(schema)) {
-      if (schema.asCell && !hasAsCell) {
+      // Only extract the first flag we encounter
+      if (schema.asCell && !hasAsCell && !hasAsStream) {
         hasAsCell = true;
+        break;
       }
-      if (schema.asStream && !hasAsStream) {
+      if (schema.asStream && !hasAsStream && !hasAsCell) {
         hasAsStream = true;
+        break;
       }
-      if (hasAsCell && hasAsStream) break;
     }
   }
 
   // Remove extracted properties from branches to avoid duplication
+  // Also remove any competing flags (e.g., remove asStream if asCell was extracted)
   const cleanedBranches = nonTrivial.map((schema) => {
     if (!isObject(schema)) return schema;
     const cleaned = { ...schema };
     if (hasDefault && "default" in cleaned) {
       delete (cleaned as any).default;
     }
+    // Remove the extracted flag
     if (hasAsCell && cleaned.asCell) {
       delete (cleaned as any).asCell;
     }
     if (hasAsStream && cleaned.asStream) {
       delete (cleaned as any).asStream;
+    }
+    // Remove competing flags (override behavior)
+    if (hasAsCell && cleaned.asStream) {
+      delete (cleaned as any).asStream;
+    }
+    if (hasAsStream && cleaned.asCell) {
+      delete (cleaned as any).asCell;
     }
     return cleaned;
   });

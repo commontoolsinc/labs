@@ -93,7 +93,7 @@ describe("createAllOf unit tests", () => {
       });
     });
 
-    it("extracts both asCell and asStream independently", () => {
+    it("extracts only first flag when both asCell and asStream present", () => {
       const result = createAllOf([
         { type: "string", asCell: true },
         { type: "string", asStream: true },
@@ -102,10 +102,24 @@ describe("createAllOf unit tests", () => {
       expect(result).toEqual({
         allOf: [
           { type: "string" }, // asCell removed
-          { type: "string" }, // asStream removed
+          { type: "string" }, // asStream removed (overridden by asCell)
         ],
-        asCell: true, // from first
-        asStream: true, // from first that has it
+        asCell: true, // first flag extracted
+      });
+    });
+
+    it("extracts asStream when it appears first", () => {
+      const result = createAllOf([
+        { type: "string", asStream: true },
+        { type: "string", asCell: true },
+      ]);
+
+      expect(result).toEqual({
+        allOf: [
+          { type: "string" }, // asStream removed
+          { type: "string" }, // asCell removed (overridden by asStream)
+        ],
+        asStream: true, // first flag extracted
       });
     });
   });
