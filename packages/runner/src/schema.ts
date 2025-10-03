@@ -76,7 +76,10 @@ export function resolveSchema(
     // unless noFollowNestedRefs is true (for backwards compatibility)
     // Track seen refs to detect cycles - if we hit a cycle, return the schema with the repeating $ref
     const seenRefs = new Set<string>();
-    while (!noFollowNestedRefs && typeof resolvedSchema.$ref === "string" && rootSchema !== undefined) {
+    while (
+      !noFollowNestedRefs && typeof resolvedSchema.$ref === "string" &&
+      rootSchema !== undefined
+    ) {
       // Detect cycles - if we've seen this $ref before, return current schema with the repeating $ref
       if (seenRefs.has(resolvedSchema.$ref)) {
         return resolvedSchema;
@@ -687,7 +690,8 @@ export function validateAndTransform(
             (isObject(childSchema) &&
               (childSchema.asCell || childSchema.asStream))) &&
           (isRecord(value) ||
-            (isObject(resolvedChildSchema) && resolvedChildSchema.default !== undefined))
+            (isObject(resolvedChildSchema) &&
+              resolvedChildSchema.default !== undefined))
         ) {
           result[key] = validateAndTransform(
             runtime,
@@ -696,7 +700,10 @@ export function validateAndTransform(
             synced,
             seen,
           );
-        } else if (isObject(resolvedChildSchema) && resolvedChildSchema.default !== undefined) {
+        } else if (
+          isObject(resolvedChildSchema) &&
+          resolvedChildSchema.default !== undefined
+        ) {
           // Process default value for missing properties that have defaults
           result[key] = processDefaultValue(
             runtime,
