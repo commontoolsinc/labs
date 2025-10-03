@@ -48,7 +48,7 @@ export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
-  fullyResolve = false,
+  noFollowNestedRefs = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
   if (
@@ -72,8 +72,17 @@ export function resolveSchema(
     }
     resolvedSchema = resolved;
 
-    // If fullyResolve is true, keep resolving $refs until we have a schema without a $ref
-    while (fullyResolve && typeof resolvedSchema.$ref === "string" && rootSchema !== undefined) {
+    // By default, keep resolving $refs until we have a schema without a $ref
+    // unless noFollowNestedRefs is true (for backwards compatibility)
+    // Track seen refs to detect cycles - if we hit a cycle, return the schema with the repeating $ref
+    const seenRefs = new Set<string>();
+    while (!noFollowNestedRefs && typeof resolvedSchema.$ref === "string" && rootSchema !== undefined) {
+      // Detect cycles - if we've seen this $ref before, return current schema with the repeating $ref
+      if (seenRefs.has(resolvedSchema.$ref)) {
+        return resolvedSchema;
+      }
+      seenRefs.add(resolvedSchema.$ref);
+
       const resolved = ContextualFlowControl.resolveSchemaRef(
         rootSchema,
         resolvedSchema.$ref,
@@ -128,7 +137,7 @@ function processDefaultValue(
   const rootSchema = link.rootSchema ?? schema;
   if (!schema) return defaultValue;
 
-  const resolvedSchema = resolveSchema(schema, rootSchema, true, true);
+  const resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // If schema indicates this should be a cell
   if (isObject(schema) && schema.asCell) {
@@ -672,7 +681,7 @@ export function validateAndTransform(
           continue;
         }
         // Resolve childSchema to check for default (may have chained $refs)
-        const resolvedChildSchema = resolveSchema(childSchema, rootSchema, false, true);
+        const resolvedChildSchema = resolveSchema(childSchema, rootSchema);
         if (
           (keys.includes(key) ||
             (isObject(childSchema) &&

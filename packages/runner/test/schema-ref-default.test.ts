@@ -66,8 +66,8 @@ describe("$ref with default support", () => {
         default: "outermost",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
-      // resolveSchema only resolves one level, so we still have a $ref
+      const resolved = resolveSchema(schema, schema, false, true);
+      // With noFollowNestedRefs=true, resolveSchema only resolves one level, so we still have a $ref
       expect(resolved).toHaveProperty("default", "outermost");
       expect(resolved).toHaveProperty("$ref");
     });
