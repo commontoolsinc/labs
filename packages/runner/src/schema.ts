@@ -48,6 +48,7 @@ export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
+  fullyResolve = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
   if (
@@ -58,11 +59,11 @@ export function resolveSchema(
   }
 
   let resolvedSchema = schema;
-  if (typeof schema.$ref === "string" && rootSchema !== undefined) {
+  if (typeof resolvedSchema.$ref === "string" && rootSchema !== undefined) {
     const resolved = ContextualFlowControl.resolveSchemaRef(
       rootSchema,
-      schema.$ref,
-      schema,
+      resolvedSchema.$ref,
+      resolvedSchema,
     );
     if (!isObject(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
@@ -70,6 +71,19 @@ export function resolveSchema(
       return undefined;
     }
     resolvedSchema = resolved;
+
+    // If fullyResolve is true, keep resolving $refs until we have a schema without a $ref
+    while (fullyResolve && typeof resolvedSchema.$ref === "string" && rootSchema !== undefined) {
+      const resolved = ContextualFlowControl.resolveSchemaRef(
+        rootSchema,
+        resolvedSchema.$ref,
+        resolvedSchema,
+      );
+      if (!isObject(resolved)) {
+        return undefined;
+      }
+      resolvedSchema = resolved;
+    }
   }
 
   // Remove asCell flag from schema, so it's describing the destination
@@ -114,7 +128,7 @@ function processDefaultValue(
   const rootSchema = link.rootSchema ?? schema;
   if (!schema) return defaultValue;
 
-  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+  const resolvedSchema = resolveSchema(schema, rootSchema, true, true);
 
   // If schema indicates this should be a cell
   if (isObject(schema) && schema.asCell) {
@@ -657,12 +671,14 @@ export function validateAndTransform(
         if (childSchema === undefined) {
           continue;
         }
+        // Resolve childSchema to check for default (may have chained $refs)
+        const resolvedChildSchema = resolveSchema(childSchema, rootSchema, false, true);
         if (
           (keys.includes(key) ||
             (isObject(childSchema) &&
               (childSchema.asCell || childSchema.asStream))) &&
           (isRecord(value) ||
-            (isObject(childSchema) && childSchema.default !== undefined))
+            (isObject(resolvedChildSchema) && resolvedChildSchema.default !== undefined))
         ) {
           result[key] = validateAndTransform(
             runtime,
@@ -671,13 +687,13 @@ export function validateAndTransform(
             synced,
             seen,
           );
-        } else if (isObject(childSchema) && childSchema.default !== undefined) {
+        } else if (isObject(resolvedChildSchema) && resolvedChildSchema.default !== undefined) {
           // Process default value for missing properties that have defaults
           result[key] = processDefaultValue(
             runtime,
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
-            childSchema.default,
+            resolvedChildSchema.default,
           );
         }
       }

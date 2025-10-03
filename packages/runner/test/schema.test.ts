@@ -1630,7 +1630,7 @@ describe("Schema Support", () => {
 
       expect(value.config).toEqualIgnoringSymbols({
         enabled: false,
-        label: "from property",
+        label: "from default",
       });
     });
 
