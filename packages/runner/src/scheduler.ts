@@ -254,11 +254,9 @@ export class Scheduler implements IScheduler {
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
-                // IMPORTANT: Don't overwrite dependencies - just reschedule.
-                // The action already has correct dependencies from line 274.
-                // Overwriting with empty deps breaks topological sorting.
-                this.queueExecution();
-                this.pending.add(action);
+                // (Empty dependencies are fine, since it's already being
+                // scheduled for execution.)
+                this.subscribe(action, { reads: [], writes: [] }, true);
               }
             } else {
               // Clear retries after successful commit.
