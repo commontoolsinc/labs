@@ -153,6 +153,30 @@ describe("createAllOf unit tests", () => {
       expect(result).toEqual({ type: "string" });
     });
 
+    it("extracts asCell from trivial schema (only has asCell)", () => {
+      const result = createAllOf([
+        { asCell: true },
+        { type: "string" },
+      ]);
+
+      expect(result).toEqual({
+        type: "string",
+        asCell: true, // extracted from first (trivial) schema
+      });
+    });
+
+    it("returns asCell when all schemas are trivial except asCell", () => {
+      const result = createAllOf([
+        { asCell: true },
+        true,
+        undefined as any,
+      ]);
+
+      expect(result).toEqual({
+        asCell: true,
+      });
+    });
+
     it("filters out undefined and true schemas", () => {
       const result = createAllOf([
         undefined as any,

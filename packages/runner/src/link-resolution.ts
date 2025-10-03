@@ -21,31 +21,12 @@ const logger = getLogger("link-resolution");
  * as siblings to the allOf array.
  */
 export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
-  const nonTrivial = schemas.filter((s) =>
-    s !== undefined &&
-    s !== true &&
-    !ContextualFlowControl.isTrueSchema(s)
-  );
-
-  if (nonTrivial.length === 0) return undefined;
-  if (nonTrivial.length === 1) return nonTrivial[0];
-
-  // Extract defaults from last schema that has them (last wins)
-  let extractedDefault: any = undefined;
-  let hasDefault = false;
-  for (let i = nonTrivial.length - 1; i >= 0; i--) {
-    const schema = nonTrivial[i];
-    if (isObject(schema) && "default" in schema) {
-      extractedDefault = schema.default;
-      hasDefault = true;
-      break;
-    }
-  }
-
-  // Extract asCell/asStream from first schema that has either (only one can be extracted)
+  // Extract asCell/asStream from first schema that has either BEFORE filtering
+  // (important: a schema like { asCell: true } is considered "trivial" but we need the flag)
   let hasAsCell = false;
   let hasAsStream = false;
-  for (const schema of nonTrivial) {
+  for (const schema of schemas) {
+    if (schema === undefined || schema === true) continue;
     if (isObject(schema)) {
       // Only extract the first flag we encounter
       if (schema.asCell && !hasAsCell && !hasAsStream) {
@@ -56,6 +37,48 @@ export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
         hasAsStream = true;
         break;
       }
+    }
+  }
+
+  // Filter out trivial schemas (undefined, true, or schemas with only internal keys)
+  const nonTrivial = schemas.filter((s) =>
+    s !== undefined &&
+    s !== true &&
+    !ContextualFlowControl.isTrueSchema(s)
+  );
+
+  if (nonTrivial.length === 0) {
+    // No non-trivial schemas, but we might have extracted asCell/asStream
+    if (hasAsCell || hasAsStream) {
+      return {
+        ...(hasAsCell ? { asCell: true } : {}),
+        ...(hasAsStream ? { asStream: true } : {}),
+      };
+    }
+    return undefined;
+  }
+  if (nonTrivial.length === 1) {
+    // Single non-trivial schema: add extracted flags to it
+    const schema = nonTrivial[0];
+    if (hasAsCell || hasAsStream) {
+      return {
+        ...ContextualFlowControl.toSchemaObj(schema),
+        ...(hasAsCell ? { asCell: true } : {}),
+        ...(hasAsStream ? { asStream: true } : {}),
+      };
+    }
+    return schema;
+  }
+
+  // Extract defaults from last schema that has them (last wins)
+  let extractedDefault: any = undefined;
+  let hasDefault = false;
+  for (let i = nonTrivial.length - 1; i >= 0; i--) {
+    const schema = nonTrivial[i];
+    if (isObject(schema) && "default" in schema) {
+      extractedDefault = schema.default;
+      hasDefault = true;
+      break;
     }
   }
 
