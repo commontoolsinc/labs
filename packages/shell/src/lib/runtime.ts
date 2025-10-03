@@ -155,7 +155,7 @@ export class RuntimeInternals extends EventTarget {
         runtime.storageManager.synced().then(async () => {
           // Check if the charm is already in the list
           const charms = charmManager.getCharms();
-          const existingCharm = charms.get().find((charm) =>
+          const existingCharm = charms.get()?.find((charm) =>
             charmId(charm) === id
           );
 

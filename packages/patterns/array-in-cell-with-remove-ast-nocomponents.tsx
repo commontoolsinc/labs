@@ -38,9 +38,11 @@ const addItem = handler<InputEventType, ListState>(
 
 const removeItem = handler<unknown, ListState & { index: number }>(
   (_, { items, index }) => {
-    const next = items.get().slice();
-    if (index >= 0 && index < next.length) next.splice(index, 1);
-    items.set(next);
+    const itemsCopy = items.get()?.slice();
+    if (itemsCopy && index >= 0 && index < itemsCopy.length) {
+      itemsCopy.splice(index, 1);
+      items.set(itemsCopy);
+    }
   },
 );
 

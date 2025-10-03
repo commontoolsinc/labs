@@ -297,7 +297,7 @@ describe("link-resolution", () => {
       tx.commit();
       tx = runtime.edit();
 
-      const link = parseLink(sourceCell.get().link, sourceCell)!;
+      const link = parseLink(sourceCell.get()!.link, sourceCell)!;
       const resolved = resolveLink(tx, link);
       expect(resolved.rootSchema).toEqual(rootSchema);
     });
@@ -801,7 +801,7 @@ describe("link-resolution", () => {
       cellB.set(cellA);
 
       // Test 1: A.get() should work
-      const result = cellA.get();
+      const result = cellA.get()!;
       expect(result.bar).toBe("baz");
       // When we get(), cells are automatically dereferenced, so result.foo
       // is the actual value (not a cell)
@@ -809,7 +809,7 @@ describe("link-resolution", () => {
       expect(result.foo.foo.foo).toEqual(result.foo.foo);
 
       // Test 2: A.key("foo").get() should work and return the value of cellB (which is cellA)
-      const fooResult = cellA.key("foo").get();
+      const fooResult = cellA.key("foo").get()!;
       expect(fooResult.bar).toBe("baz");
 
       // Test 3: A.key("foo").key("bar").get() should work and return "baz"

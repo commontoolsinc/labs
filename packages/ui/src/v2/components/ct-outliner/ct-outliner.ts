@@ -19,6 +19,8 @@ async function mutateCell<T>(
   cell: Cell<T>,
   mutator: (cell: Cell<T>) => void,
 ): Promise<void> {
+  // sync the cell, so we can call get()! in the mutator with relative safety
+  await cell.sync();
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
   await tx.commit();
@@ -431,7 +433,7 @@ export class CTOutliner extends BaseElement
     const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, node);
     if (nodeChildrenCell) {
       await mutateCell(nodeChildrenCell, (cell) => {
-        const currentChildren = cell.get();
+        const currentChildren = cell.get()!;
         const newChildren = [newNode, ...currentChildren];
         cell.set(newChildren);
       });
@@ -586,7 +588,7 @@ export class CTOutliner extends BaseElement
     const nodeBodyCell = getNodeBodyCellByPath(this.value, path);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => {
-        const currentBody = cell.get();
+        const currentBody = cell.get()!;
 
         // Set checkbox to the specified state
         let newBody: string;
@@ -1235,7 +1237,7 @@ export class CTOutliner extends BaseElement
         );
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
-            const currentChildren = cell.get();
+            const currentChildren = cell.get()!;
             const newChildren = [...currentChildren];
 
             // Insert all new nodes at once using immutable operations
@@ -1431,7 +1433,7 @@ export class CTOutliner extends BaseElement
     );
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
-        const currentChildren = cell.get();
+        const currentChildren = cell.get()!;
 
         // Build new children array with the new node inserted
         const newChildren = [
@@ -1586,7 +1588,9 @@ export class CTOutliner extends BaseElement
       }
     }
 
-    return matches.map((i) => mentionableArray.key(i).get());
+    return matches.map((i) => mentionableArray.key(i).get()).filter((item) =>
+      item !== undefined
+    );
   }
 
   private insertMention(mention: Mentionable) {
@@ -1799,7 +1803,7 @@ export class CTOutliner extends BaseElement
         );
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
-            const currentChildren = cell.get();
+            const currentChildren = cell.get()!;
             const beforeInsert = currentChildren.slice(0, nodeIndex + 1);
             const afterInsert = currentChildren.slice(nodeIndex + 1);
             const newChildren = [
@@ -1838,7 +1842,7 @@ export class CTOutliner extends BaseElement
           OutlineTreeNode[]
         >;
         mutateCell(rootChildrenCell, (cell) => {
-          const currentChildren = cell.get();
+          const currentChildren = cell.get()!;
           const newChildren = [...currentChildren, ...parsedTree.root.children];
           cell.set(newChildren);
         });

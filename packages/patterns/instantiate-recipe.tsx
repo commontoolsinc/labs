@@ -17,11 +17,17 @@ interface RecipeState {
 }
 
 const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
-  state.value.set(state.value.get() + 1);
+  const current = state.value.get();
+  if (current !== undefined) {
+    state.value.set(current + 1);
+  }
 });
 
 const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
+  const current = state.value.get();
+  if (current !== undefined) {
+    state.value.set(current - 1);
+  }
 });
 
 function previous(value: number) {

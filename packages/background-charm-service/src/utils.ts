@@ -82,7 +82,7 @@ export async function setBGCharm({
 
   const existingCharmIndex = charms.findIndex(
     (charm: Cell<BGCharmEntry>) =>
-      charm.get().space === space && charm.get().charmId === charmId,
+      charm.get()!.space === space && charm.get()!.charmId === charmId,
   );
 
   if (existingCharmIndex === -1) {

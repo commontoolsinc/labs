@@ -51,8 +51,10 @@ const addItem = handler<InputEventType, ListState>(
   (event: InputEventType, state: ListState) => {
     // Add node to linked list
     const currentList = state.items_list.get();
-    const newList = addNodeToList(currentList, event.detail.message);
-    state.items_list.set(newList);
+    if (currentList) {
+      const newList = addNodeToList(currentList, event.detail.message);
+      state.items_list.set(newList);
+    }
   },
 );
 

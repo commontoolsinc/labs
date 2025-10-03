@@ -67,7 +67,7 @@ export const addListItem = handler<
   (args, state) => {
     try {
       state.list.push({ title: args.item });
-      args.result.set(`${state.list.get().length} items`);
+      args.result.set(`${state.list.get()!.length} items`);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }

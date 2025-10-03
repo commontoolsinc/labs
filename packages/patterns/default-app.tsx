@@ -51,7 +51,7 @@ const removeCharm = handler<
   }
 >((_, state) => {
   const charmName = state.charm[NAME];
-  const allCharmsValue = state.allCharms.get();
+  const allCharmsValue = state.allCharms.get() ?? [];
   const index = allCharmsValue.findIndex((c: any) => c[NAME] === charmName);
 
   if (index !== -1) {

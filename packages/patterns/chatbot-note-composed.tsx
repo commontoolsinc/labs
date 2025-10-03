@@ -199,7 +199,7 @@ const editNoteByIndex = handler<
   (args, state) => {
     try {
       const charms = state.allCharms.get();
-      if (args.index < 0 || args.index >= charms.length) {
+      if (!charms || args.index < 0 || args.index >= charms.length) {
         args.result.set(`Error: Invalid index ${args.index}`);
         return;
       }
@@ -223,8 +223,8 @@ const navigateToNote = handler<
 >(
   (args, state) => {
     try {
-      const charms = state.allCharms.get();
-      if (args.index < 0 || args.index >= charms.length) {
+      const charms = state.allCharms.get()!;
+      if (!charms || args.index < 0 || args.index >= charms.length) {
         args.result.set(`Error: Invalid index ${args.index}`);
         return;
       }

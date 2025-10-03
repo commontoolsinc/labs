@@ -97,7 +97,7 @@ const goToStoredCharm = handler<unknown, { cellRef: Cell<{ charm: any }> }>(
   (_, { cellRef }) => {
     console.log("goToStoredCharm clicked");
     const cellValue = cellRef.get();
-    if (!cellValue.charm) {
+    if (!cellValue?.charm) {
       console.error("No charm found in cell!");
       return;
     }

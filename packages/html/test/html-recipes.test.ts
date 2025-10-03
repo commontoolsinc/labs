@@ -124,7 +124,7 @@ describe("recipes with HTML", () => {
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(root, cell.get(), renderOptions);
+    render(root, cell.get()!, renderOptions);
 
     // Keys are "[object Object]" due to mapping an `Opaque<number>` in handler.
     // Maybe unintentional(?)
@@ -192,7 +192,7 @@ describe("recipes with HTML", () => {
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(root, cell.get(), renderOptions);
+    render(root, cell.get()!, renderOptions);
 
     assert.equal(root.innerHTML, "<div>Hello, world!</div>");
   });
@@ -238,7 +238,7 @@ describe("recipes with HTML", () => {
 
     const root = document.getElementById("root")!;
     const cell = result.key(UI);
-    render(root, cell.get(), renderOptions);
+    render(root, cell.get()!, renderOptions);
 
     assert.equal(
       root.innerHTML,

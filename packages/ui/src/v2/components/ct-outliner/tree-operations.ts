@@ -17,6 +17,8 @@ async function mutateCell<T>(
   cell: Cell<T>,
   mutator: (cell: Cell<T>) => void,
 ): Promise<void> {
+  // sync the cell, so we can call get()! in the mutator with relative safety
+  await cell.sync();
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
   await tx.commit();
@@ -306,7 +308,7 @@ export const TreeOperations = {
 
     // V-DOM style: swap positions directly
     await mutateCell(parentChildrenCell, (cell) => {
-      const currentChildren = cell.get();
+      const currentChildren = cell.get()!;
       const newChildren = [...currentChildren];
 
       // Swap the node with the previous one
@@ -348,7 +350,7 @@ export const TreeOperations = {
 
     // V-DOM style: swap positions directly
     await mutateCell(parentChildrenCell, (cell) => {
-      const currentChildren = cell.get();
+      const currentChildren = cell.get()!;
       const newChildren = [...currentChildren];
 
       // Swap the node with the next one
@@ -437,8 +439,9 @@ export const TreeOperations = {
     const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
     const childrenToPromote = nodeChildrenCell.getAsQueryResult();
 
+    await parentChildrenCell.sync();
     await mutateCell(parentChildrenCell, (cell) => {
-      const currentChildren = cell.get();
+      const currentChildren = cell.get()!;
 
       // Build new children array without the deleted node
       const newChildren: Node[] = [];

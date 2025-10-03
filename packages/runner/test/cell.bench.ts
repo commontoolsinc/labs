@@ -631,7 +631,7 @@ Deno.bench("Cell get - complex object with asCell schema (1000x)", async () => {
 
   // Measure get with schema that creates cell references
   for (let i = 0; i < 1000; i++) {
-    const value = cell.get();
+    const value = cell.get()!;
     value.name;
     value.age;
     value.nested.get(); // nested is a Cell due to asCell: true
@@ -728,7 +728,7 @@ Deno.bench("Cell array - map operation with schema (1000x)", async () => {
 
   // Measure get operation with schema validation
   for (let i = 0; i < 1000; i++) {
-    const value = cell.get();
+    const value = cell.get()!;
     value.items.map((x: number) => x * 2);
   }
 
@@ -900,7 +900,7 @@ Deno.bench("Cell complex - schema with asCell references (1000x)", async () => {
 
   // Measure access with asCell references
   for (let i = 0; i < 1000; i++) {
-    const value = cell.get();
+    const value = cell.get()!;
     value.id;
     value.metadata.get();
     value.tags;

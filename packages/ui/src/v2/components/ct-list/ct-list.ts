@@ -24,7 +24,7 @@ type ListItem = {
  * @returns The index of the item, or -1 if not found
  */
 function findCellIndex<T>(listCell: Cell<T[]>, itemCell: Cell<T>): number {
-  const length = listCell.get().length;
+  const length = listCell.get()?.length ?? 0;
   for (let i = 0; i < length; i++) {
     if (itemCell.equals(listCell.key(i))) {
       return i;
@@ -38,10 +38,15 @@ function findCellIndex<T>(listCell: Cell<T[]>, itemCell: Cell<T>): number {
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
-function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
+async function mutateCell<T>(
+  cell: Cell<T>,
+  mutator: (cell: Cell<T>) => void,
+): Promise<void> {
+  // sync the cell, so we can call get()! in the mutator with relative safety
+  await cell.sync();
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
-  tx.commit();
+  await tx.commit();
 }
 
 /**
@@ -407,31 +412,32 @@ export class CTList extends BaseElement {
     }
   }
 
-  private addItem(title: string): void {
+  private async addItem(title: string): Promise<void> {
     if (!this.value) {
       console.warn("Cannot add item to an empty list");
       return;
     }
 
     const newItem = { title, [ID]: crypto.randomUUID() } as ListItem;
-    mutateCell(this.value, (cell) => cell.push(newItem));
+    await mutateCell(this.value, (cell) => {
+      cell.push(newItem);
+    });
     this.requestUpdate();
   }
 
-  private removeItem(itemToRemove: Cell<any>): void {
+  private async removeItem(itemToRemove: Cell<any>): Promise<void> {
     if (!this.value) {
       console.warn("Cannot remove item from an empty list");
       return;
     }
 
     // Use filter with .equals() to remove the item
-    mutateCell(this.value, (cell) => {
-      const filtered = cell.get().filter((_, i) =>
+    await mutateCell(this.value, (cell) => {
+      const filtered = cell.get()!.filter((_, i) =>
         !cell.key(i).equals(itemToRemove)
       );
       cell.set(filtered);
     });
-
     this.requestUpdate();
   }
 
@@ -511,7 +517,7 @@ export class CTList extends BaseElement {
       `;
     }
     const cell = this.value;
-    const items = this.value.get();
+    const items = this.value.get() ?? [];
 
     return html`
       <div class="list-container">
@@ -554,7 +560,7 @@ export class CTList extends BaseElement {
             <input
               type="text"
               class="edit-input"
-              .value="${item.get().title}"
+              .value="${item.get()?.title}"
               @input="${(e: Event) => {
                 this._editing = item;
               }}"
@@ -593,7 +599,7 @@ export class CTList extends BaseElement {
             : ""}"
           @dblclick="${() => this.startEditing(item)}"
         >
-          ${item.get().title}
+          ${item.get()?.title}
         </div>
         ${this.editable && !this.readonly
           ? html`

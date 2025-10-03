@@ -65,7 +65,7 @@ export class SpaceManager {
     const charmId = b.charmId;
     const enabled = !b.disabledAt;
     const currentlyScheduled = this.enabledCharms.has(charmId) ||
-      this.activeCharm?.get().charmId === charmId;
+      this.activeCharm?.get()?.charmId === charmId;
 
     if (enabled) {
       // if we aren't already scheduling this charm, add it to the list
@@ -93,6 +93,9 @@ export class SpaceManager {
 
     for (const entry of entries) {
       const raw = entry.get();
+      if (raw === undefined) { // we may not have loaded yet
+        continue;
+      }
       addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
 
       if (!raw.disabledAt) {
@@ -169,6 +172,10 @@ export class SpaceManager {
 
   private async processCharm(charmId: string, entry: Cell<BGCharmEntry>) {
     const raw = entry.get();
+    if (raw === undefined) {
+      console.log(`${this.did} Charm ${charmId} is undefined, skipping`);
+      return;
+    }
 
     if (raw.disabledAt) {
       console.log(`${this.did} Charm ${charmId} is disabled, skipping`);

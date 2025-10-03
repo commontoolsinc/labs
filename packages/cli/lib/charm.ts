@@ -94,7 +94,8 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
         runtime.storageManager.synced().then(async () => {
           try {
             const mgr = charmManagerRef.current!;
-            const list = mgr.getCharms().get();
+            // we've synced, so throw if we don't have our charms
+            const list = mgr.getCharms().get()!;
             const exists = list.some((c) => charmId(c) === id);
             if (!exists) {
               await mgr.add([target]);

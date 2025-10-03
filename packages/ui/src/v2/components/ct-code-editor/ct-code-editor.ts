@@ -394,7 +394,7 @@ export class CTCodeEditor extends BaseElement {
       );
 
       // parse + start the recipe + link the inputs
-      const pattern = JSON.parse(this.pattern.get());
+      const pattern = JSON.parse(this.pattern.get()!);
       const allCharms = rt.getCellFromEntityId(spaceName, {
         "/": ALL_CHARMS_ID,
       });
@@ -488,7 +488,7 @@ export class CTCodeEditor extends BaseElement {
       if (charm) {
         // this is VERY specific
         // if you do `getEntityId(mentionableArray.key(i))` you'll get a different answer (the ID of the array itself)
-        const charmIdObjA = getEntityId(mentionableArray.get()[i]);
+        const charmIdObjA = getEntityId(mentionableData[i]);
         const charmIdObjB = getEntityId(mentionableArray.key(i));
         const charmIdA = charmIdObjA?.["/"] || "";
         const charmIdB = charmIdObjB?.["/"] || "";
@@ -985,8 +985,11 @@ export class CTCodeEditor extends BaseElement {
       if (seen.has(id)) continue;
       const charm = this.findCharmById(id);
       if (charm) {
-        result.push(charm.get());
-        seen.add(id);
+        const charmContents = charm.get();
+        if (charmContents !== undefined) {
+          result.push(charmContents);
+          seen.add(id);
+        }
       }
     }
     return result;

@@ -84,7 +84,9 @@ export function getCharmNameAsCamelCase(
   cell: Cell<unknown>,
   usedKeys: Record<string, unknown>,
 ): string {
-  const charmName = toCamelCase(cell.asSchema(nameSchema).key(NAME).get());
+  const charmName = toCamelCase(
+    cell.asSchema(nameSchema).key(NAME).get() ?? "",
+  );
 
   let name = charmName;
   let num = 0;

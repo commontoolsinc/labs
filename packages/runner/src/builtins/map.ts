@@ -57,12 +57,15 @@ export function map(
         undefined,
         tx,
       );
+      // In the case of a conflict, these will be rolled back, but result will
+      // still be set. In that case, we should have applied the appropriate
+      // set from the client that successfully committed.
       result.send([]);
       result.setSourceCell(parentCell);
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
-    const { list, op } = inputsCell.asSchema(
+    const inputsCellContents = inputsCell.asSchema(
       {
         type: "object",
         properties: {
@@ -73,6 +76,20 @@ export function map(
         additionalProperties: false,
       } as const satisfies JSONSchema,
     ).withTx(tx).get();
+    // If the inputsCell or its list are undefined it means the input isn't
+    // available yet. Correspondingly, the result should be [].
+    // TODO: Maybe it's important to distinguish empty inputs from undefined
+    // inputs?
+    if (
+      inputsCellContents === undefined || inputsCellContents.list === undefined
+    ) {
+      resultWithLog.set([]);
+      // Reset progress so that once the list becomes defined again we
+      // recompute from the beginning.
+      initializedUpTo = 0;
+      return;
+    }
+    const { list, op } = inputsCellContents;
 
     // .getRaw() because we want the recipe itself and avoid following the
     // aliases in the recipe
@@ -82,22 +99,13 @@ export function map(
     if (resultWithLog.get() === undefined) {
       resultWithLog.set([]);
     }
-    // If the list is undefined it means the input isn't available yet.
-    // Correspondingly, the result should be []. TODO: Maybe it's important to
-    // distinguish empty inputs from undefined inputs?
-    if (list === undefined) {
-      resultWithLog.set([]);
-      // Reset progress so that once the list becomes defined again we
-      // recompute from the beginning.
-      initializedUpTo = 0;
-      return;
-    }
+    const resultContents = resultWithLog.get()!;
 
     if (!Array.isArray(list)) {
       throw new Error("map currently only supports arrays");
     }
 
-    const newArrayValue = resultWithLog.get().slice(0, initializedUpTo);
+    const newArrayValue = resultWithLog.get()!.slice(0, initializedUpTo);
     // If we rollback a change to result cell, and that causes it to be
     // shorter, we need to re-initialize some cells.
     if (initializedUpTo > newArrayValue.length) {
@@ -133,10 +141,10 @@ export function map(
     }
 
     // Shorten the result if the list got shorter
-    if (resultWithLog.get().length > list.length) {
-      resultWithLog.set(resultWithLog.get().slice(0, list.length));
+    if (resultContents.length > list.length) {
+      resultWithLog.set(resultContents.slice(0, list.length));
       initializedUpTo = list.length;
-    } else if (resultWithLog.get().length < list.length) {
+    } else if (resultContents.length < list.length) {
       resultWithLog.set(newArrayValue);
     }
 

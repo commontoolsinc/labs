@@ -20,12 +20,18 @@ interface RecipeState {
 // In this case we do not have to type our event parameter because it is not used in the body.
 // By requesting a Cell<number> we get a mutable handle when our handler is invoked.
 const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
-  state.value.set(state.value.get() + 1);
+  const current = state.value.get();
+  if (current !== undefined) {
+    state.value.set(current + 1);
+  }
 });
 
 // This can also be done with inline types + inference
 const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
+  const current = state.value.get();
+  if (current !== undefined) {
+    state.value.set(current - 1);
+  }
 });
 
 function previous(value: number) {

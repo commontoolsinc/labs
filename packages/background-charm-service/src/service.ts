@@ -81,8 +81,10 @@ export class BackgroundCharmService {
 
     // Charms that hit an e.g. Authorization Error are empty, and space
     // is undefined -- filter out any of these charms before creating
-    // a worker
-    const charmContents = charms.map((c) => c.get()).filter(Boolean);
+    // a worker Any charms that haven't synced yetwill also be undefined.
+    const charmContents: BGCharmEntry[] = charms.map((c) => c.get()).filter((
+      item,
+    ) => item !== undefined);
     const enabledCharms = charmContents.filter((c) => !c.disabledAt);
     const dids = new Set(enabledCharms.map((c) => c.space));
     console.log(`monitoring ${dids.size} spaces`);
@@ -105,7 +107,7 @@ export class BackgroundCharmService {
       }
 
       // we are only filtering charms because until the FIXME above is fixed
-      const didCharms = charms.filter((c) => c.get().space === did);
+      const didCharms = charms.filter((c) => c.get()?.space === did);
       addCancel(scheduler.watch(didCharms));
     }
 

@@ -108,8 +108,9 @@ export class WorkerController extends EventTarget {
     if (this.state !== WorkerState.Ready) {
       throw new Error("Worker not ready.");
     }
+    await bg.sync();
     return await this.exec(WorkerIPCMessageType.Run, {
-      charmId: bg.get().charmId,
+      charmId: bg.get()!.charmId,
     });
   }
 

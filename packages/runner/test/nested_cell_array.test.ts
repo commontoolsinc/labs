@@ -79,8 +79,8 @@ describe("Nested Cell Array", () => {
     cellArray.push(testData as any);
 
     // Compare behavior
-    const normalItems = normalArray.get();
-    const cellItems = cellArray.get();
+    const normalItems = normalArray.get()!;
+    const cellItems = cellArray.get()!;
 
     // Both are arrays
     expect(Array.isArray(normalItems)).toBe(true);
@@ -127,7 +127,7 @@ describe("Nested Cell Array", () => {
       value: 2,
     } as any);
 
-    const items = arrayCell.get();
+    const items = arrayCell.get()!;
     expect(isCell(items[0])).toBe(true);
     expect(isCell(items[0].get())).toBe(false);
 

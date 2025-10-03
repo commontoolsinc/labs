@@ -189,7 +189,7 @@ describe("data-updating", () => {
       );
       expect(success).toBeTruthy();
       expect(testCell.get()).toHaveProperty("a");
-      expect(testCell.get().a).toHaveLength(3);
+      expect(testCell.get()?.a).toHaveLength(3);
       expect(testCell.getAsQueryResult().a).toEqual([1, 2, 3]);
     });
   });
@@ -1027,7 +1027,7 @@ describe("data-updating", () => {
       applyChangeSet(tx, changes);
 
       const value = targetCell.get();
-      expect(value.result).toEqual({
+      expect(value?.result).toEqual({
         title: "Data with Link",
         reference: { name: "Referenced Cell", value: 100 },
         metadata: { description: "Contains a nested link" },
@@ -1092,7 +1092,7 @@ describe("data-updating", () => {
     applyChangeSet(tx, changes);
 
     const value = targetCell.get();
-    expect(value.result).toBe(100);
+    expect(value?.result).toBe(100);
   });
 
   describe("addCommonIDfromObjectID", () => {

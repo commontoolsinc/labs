@@ -67,7 +67,7 @@ describe("scheduler", () => {
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
@@ -110,7 +110,7 @@ describe("scheduler", () => {
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     runtime.scheduler.subscribe(adder, {
@@ -158,7 +158,7 @@ describe("scheduler", () => {
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
@@ -210,7 +210,7 @@ describe("scheduler", () => {
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     const cancel = runtime.scheduler.subscribe(adder, {
@@ -279,13 +279,13 @@ describe("scheduler", () => {
     const adder1: Action = (tx) => {
       runs.push("adder1");
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     const adder2: Action = (tx) => {
       runs.push("adder2");
       e.withTx(tx).send(
-        c.withTx(tx).get() + d.withTx(tx).get(),
+        c.withTx(tx).get()! + d.withTx(tx).get()!,
       );
     };
     runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
@@ -354,18 +354,18 @@ describe("scheduler", () => {
     tx = runtime.edit();
     const adder1: Action = (tx) => {
       c.withTx(tx).send(
-        a.withTx(tx).get() + b.withTx(tx).get(),
+        a.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
     const adder2: Action = (tx) => {
       e.withTx(tx).send(
-        c.withTx(tx).get() + d.withTx(tx).get(),
+        c.withTx(tx).get()! + d.withTx(tx).get()!,
       );
     };
     const adder3: Action = (tx) => {
       if (--maxRuns <= 0) return;
       c.withTx(tx).send(
-        e.withTx(tx).get() + b.withTx(tx).get(),
+        e.withTx(tx).get()! + b.withTx(tx).get()!,
       );
     };
 
@@ -408,7 +408,7 @@ describe("scheduler", () => {
     const inc: Action = (tx) =>
       counter
         .withTx(tx)
-        .send(counter.withTx(tx).get() + by.withTx(tx).get());
+        .send(counter.withTx(tx).get()! + by.withTx(tx).get()!);
 
     const stopper = {
       stop: () => {},
@@ -698,7 +698,7 @@ describe("event handling", () => {
 
     const action = (tx: IExtendedStorageTransaction) => {
       actionCount++;
-      lastEventSeen = eventResultCell.withTx(tx).get();
+      lastEventSeen = eventResultCell.withTx(tx).get()!;
     };
     runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
     await runtime.idle();

@@ -158,7 +158,7 @@ import { ContextualFlowControl } from "./cfc.ts";
  */
 declare module "@commontools/api" {
   interface Cell<T> {
-    get(): Readonly<T>;
+    get(): Readonly<T> | undefined;
     set(value: Cellify<T> | T): void;
     send(value: Cellify<T> | T): void;
     update<V extends Cellify<Partial<T> | Partial<T>>>(

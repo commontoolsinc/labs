@@ -90,7 +90,7 @@ export class CharmController<T = unknown> {
   }
 
   name(): string | undefined {
-    return this.#cell.asSchema(nameSchema).get()[NAME];
+    return this.#cell.asSchema(nameSchema).get()?.[NAME];
   }
 
   getCell(): Cell<T> {
@@ -104,7 +104,7 @@ export class CharmController<T = unknown> {
   }
 
   async getRecipe(): Promise<Recipe> {
-    const recipeId = getRecipeIdFromCharm(this.#cell);
+    const recipeId = getRecipeIdFromCharm(this.#cell)!;
     const runtime = this.#manager.runtime;
     const recipe = await runtime.recipeManager.loadRecipe(
       recipeId,
@@ -115,7 +115,7 @@ export class CharmController<T = unknown> {
 
   getRecipeMeta(): Promise<RecipeMeta> {
     return this.#manager.runtime.recipeManager.loadRecipeMeta(
-      getRecipeIdFromCharm(this.#cell),
+      getRecipeIdFromCharm(this.#cell)!,
       this.#manager.getSpace(),
     );
   }
@@ -175,7 +175,9 @@ async function execute(
   await manager.synced();
 }
 
-export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
+export const getRecipeIdFromCharm = (
+  charm: Cell<unknown>,
+): string | undefined => {
   const sourceCell = charm.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE];

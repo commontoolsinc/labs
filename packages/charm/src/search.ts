@@ -25,8 +25,9 @@ export async function searchCharms(
   try {
     const charms = charmManager.getCharms();
     await charmManager.sync(charms);
+    const charmsList = charms.get() ?? [];
     const results = await Promise.all(
-      charms.get().map(async (charm) => {
+      charmsList.map(async (charm) => {
         try {
           const data = charm.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";

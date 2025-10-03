@@ -145,7 +145,7 @@ export class XQuickJumpView extends BaseView {
     );
     // Initialize name subscriptions with current list
     try {
-      const list = charmsCell.get();
+      const list = charmsCell.get() ?? [];
       this.resetNameSubscriptions(list);
     } catch {
       // ignore

@@ -145,8 +145,9 @@ async function runTest() {
   console.log("Storage synced");
 
   // Now we should have all elements
-  const actualNumbersElements = charm.get().my_numbers_array.length;
-  const actualObjectsElements = charm.get().my_objects_array.length;
+  const charmValue = charm.get()!;
+  const actualNumbersElements = charmValue.my_numbers_array.length;
+  const actualObjectsElements = charmValue.my_objects_array.length;
   if (
     actualNumbersElements === TOTAL_COUNT &&
     actualObjectsElements === TOTAL_COUNT
@@ -156,33 +157,29 @@ async function runTest() {
     console.error(
       `Test failed - expected ${TOTAL_COUNT} but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
-    console.log("Array contents (numbers):", charm.get().my_numbers_array);
-    console.log("Array contents (objects):", charm.get().my_objects_array);
+    console.log("Array contents (numbers):", charmValue.my_numbers_array);
+    console.log("Array contents (objects):", charmValue.my_objects_array);
     throw new Error(
       `Expected ${TOTAL_COUNT} numbers and ${TOTAL_COUNT} objects but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
   }
 
-  if (
-    JSON.stringify(charm.get().my_numbers_array) ===
-      JSON.stringify(expectedNumbers)
-  ) {
+  const numbersSnapshot = charm.get()!.my_numbers_array;
+  if (JSON.stringify(numbersSnapshot) === JSON.stringify(expectedNumbers)) {
     console.log("Numbers array is as expected");
   } else {
     console.log("Numbers array is not as expected");
     console.log("Expected:", expectedNumbers);
-    console.log("Actual:", charm.get().my_numbers_array);
+    console.log("Actual:", numbersSnapshot);
     throw new Error("Numbers array is not as expected");
   }
-  if (
-    JSON.stringify(charm.get().my_objects_array) ===
-      JSON.stringify(expectedObjects)
-  ) {
+  const objectsSnapshot = charm.get()!.my_objects_array;
+  if (JSON.stringify(objectsSnapshot) === JSON.stringify(expectedObjects)) {
     console.log("Objects array is as expected");
   } else {
     console.log("Objects array is not as expected");
     console.log("Expected:", expectedObjects);
-    console.log("Actual:", charm.get().my_objects_array);
+    console.log("Actual:", objectsSnapshot);
     throw new Error("Objects array is not as expected");
   }
 

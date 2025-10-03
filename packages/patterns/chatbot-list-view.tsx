@@ -60,6 +60,7 @@ const removeChat = handler<
     { charmsList, id, selectedCharm },
   ) => {
     const list = charmsList.get();
+    if (list === undefined) return; // may not be ready
     const index = list.findIndex((entry) => entry.local_id === id);
     if (index === -1) return;
 

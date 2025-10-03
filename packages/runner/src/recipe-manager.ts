@@ -87,7 +87,7 @@ export class RecipeManager implements IRecipeManager {
   ): Promise<RecipeMeta> {
     const cell = this.getRecipeMetaCell({ recipeId, space });
     await cell.sync();
-    return cell.get();
+    return cell.get()!;
   }
 
   getRecipeMeta(
@@ -105,7 +105,13 @@ export class RecipeManager implements IRecipeManager {
     if (!recipeId) throw new Error("Recipe is not registered");
 
     const cell = this.recipeMetaCellById.get(recipeId);
-    if (cell) return cell.get();
+    if (cell) {
+      const cellContents = cell.get();
+      if (!cellContents) {
+        throw new Error("Recipe meta not available");
+      }
+      return cellContents;
+    }
 
     // If we don't have a stored cell yet, return whatever pending/meta we have
     const pending = this.pendingMetaById.get(recipeId) ?? {};
@@ -248,7 +254,7 @@ export class RecipeManager implements IRecipeManager {
   ): Promise<Recipe> {
     const metaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     await metaCell.sync();
-    const recipeMeta = metaCell.get();
+    const recipeMeta = metaCell.get()!;
 
     if (!recipeMeta.src && !recipeMeta.program) {
       throw new Error(`Recipe ${recipeId} has no stored source`);

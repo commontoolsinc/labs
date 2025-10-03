@@ -293,7 +293,7 @@ describe("CTOutliner Link Resolution Tests", () => {
       // Simulate the WRONG approach (what would happen with .get())
       // This would corrupt the data by storing Cell references
       const simulateWrongMove = () => {
-        const children = parentCell.key("children").get(); // WRONG!
+        const children = parentCell.key("children").get()!; // WRONG!
         // children[1] is a Cell, not a Node
         // If we rearrange and set this back, we corrupt the data
         return [children[2], children[0], children[1]]; // Would store Cell ref!

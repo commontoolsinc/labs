@@ -49,12 +49,17 @@ const resetList = handler((_, state: { items: Cell<Item[]> }) => {
 });
 
 const deleteFirstItem = handler((_, state: { items: Cell<Item[]> }) => {
-  state.items.set(state.items.get().slice(1));
+  const currentItems = state.items.get();
+  if (currentItems) {
+    state.items.set(currentItems.slice(1));
+  }
 });
 
 const deleteLastItem = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set(currentItems.slice(0, -1));
+  if (currentItems) {
+    state.items.set(currentItems.slice(0, -1));
+  }
 });
 
 const deleteAllItems = handler((_, state: { items: Cell<Item[]> }) => {
@@ -63,21 +68,30 @@ const deleteAllItems = handler((_, state: { items: Cell<Item[]> }) => {
 
 const insertItemAtStart = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set([
-    { [ID]: Math.random(), title: "New Start" },
-    ...currentItems,
-  ]);
+  if (currentItems) {
+    state.items.set([
+      { [ID]: Math.random(), title: "New Start" },
+      ...currentItems,
+    ]);
+  }
 });
 
 const insertItemAtEnd = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set([...currentItems, { [ID]: Math.random(), title: "New End" }]);
+  if (currentItems) {
+    state.items.set([...currentItems, {
+      [ID]: Math.random(),
+      title: "New End",
+    }]);
+  }
 });
 
 const shuffleItems = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  const shuffled = [...currentItems].sort(() => Math.random() - 0.5);
-  state.items.set(shuffled);
+  if (currentItems) {
+    const shuffled = [...currentItems].sort(() => Math.random() - 0.5);
+    state.items.set(shuffled);
+  }
 });
 
 const show = lift((items: Item[]) => {

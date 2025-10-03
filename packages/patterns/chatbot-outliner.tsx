@@ -112,7 +112,7 @@ const appendOutlinerNode = handler<
       });
 
       args.result.set(
-        `${state.outline.key("root").key("children").get().length} nodes`,
+        `${state.outline.key("root").key("children").get()!.length} nodes`,
       );
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);

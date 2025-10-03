@@ -124,7 +124,7 @@ export function compileAndRun(
       },
       required: ["files", "main"],
       additionalProperties: false,
-    }).withTx(tx).get();
+    }).withTx(tx).get()!;
     const input = inputsCell.withTx(tx).key("input");
 
     const hash = refer(program ?? { files: [], main: "" }).toString();

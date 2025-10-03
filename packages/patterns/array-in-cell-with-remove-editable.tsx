@@ -38,9 +38,11 @@ const addItem = handler<InputEventType, ListState>(
 
 const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
   (_, { items, index }) => {
-    const itemsCopy = items.get().slice();
-    if (index >= 0 && index < itemsCopy.length) itemsCopy.splice(index, 1);
-    items.set(itemsCopy);
+    const itemsCopy = items.get()?.slice();
+    if (itemsCopy && index >= 0 && index < itemsCopy.length) {
+      itemsCopy.splice(index, 1);
+      items.set(itemsCopy);
+    }
   },
 );
 
@@ -48,8 +50,8 @@ const updateItem = handler<
   { detail: { value: string } },
   { items: Cell<Item[]>; index: number }
 >(({ detail: { value } }, { items, index }) => {
-  const itemsCopy = items.get().slice();
-  if (index >= 0 && index < itemsCopy.length) {
+  const itemsCopy = items.get()?.slice();
+  if (itemsCopy && index >= 0 && index < itemsCopy.length) {
     itemsCopy[index] = { text: value };
     items.set(itemsCopy);
   }

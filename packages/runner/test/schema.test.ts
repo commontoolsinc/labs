@@ -169,7 +169,7 @@ describe("Schema Support", () => {
 
       // .get() the currently selected cell
       cell.key("current")
-        .get()
+        .get()!
         .sink((value) => {
           currentByGetValues.push(value.label);
         });
@@ -177,7 +177,7 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and update it
-      const first = cell.key("current").get();
+      const first = cell.key("current").get()!;
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       first.withTx(tx).set({ label: "first - update" });
@@ -345,7 +345,7 @@ describe("Schema Support", () => {
       // the currently selected cell changes!
       root
         .key("current")
-        .get()
+        .get()!
         .sink((value: { label: string }) => {
           currentByGetValues.push(value.label);
         });
@@ -353,7 +353,7 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and read it
-      const first = root.key("current").withTx(tx).get();
+      const first = root.key("current").withTx(tx).get()!;
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -542,7 +542,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.str).toBe("hello");
       expect(value.num).toBe(42);
@@ -591,7 +591,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.user.name).toBe("John");
       expect(isCell(value.user.settings)).toBe(true);
@@ -621,7 +621,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.items).toEqualIgnoringSymbols([1, 2, 3]);
     });
@@ -661,7 +661,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.id).toBe(1);
       expect(isCell(value.metadata)).toBe(true);
@@ -698,12 +698,13 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(isCell(value)).toBe(true);
-      expect(value.get().id).toBe(1);
-      expect(isCell(value.get().nested)).toBe(true);
-      expect(value.get().nested.get().id).toBe(2);
+      const valueContent = value.get()!;
+      expect(valueContent.id).toBe(1);
+      expect(isCell(valueContent.nested)).toBe(true);
+      expect(valueContent.nested.get()!.id).toBe(2);
     });
   });
 
@@ -739,7 +740,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("root");
       expect(value.children[0].name).toBe("child1");
@@ -971,12 +972,13 @@ describe("Schema Support", () => {
       const cell = c.asSchema(schema);
       cell.set({ value: 1, next: { value: 2, next: { value: 3 } } });
 
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(isCell(value)).toBe(true);
-      expect(value.get().value).toBe(1);
-      expect(value.get().next.value).toBe(2);
-      expect(value.get().next.next.value).toBe(3);
+      const valueContent = value.get()!;
+      expect(valueContent.value).toBe(1);
+      expect(valueContent.next.value).toBe(2);
+      expect(valueContent.next.next.value).toBe(3);
     });
   });
 
@@ -1031,7 +1033,7 @@ describe("Schema Support", () => {
       const cell = c.asSchema(schema);
       const userCell = cell.key("user");
       const profileCell = userCell.key("profile");
-      const value = profileCell.get();
+      const value = profileCell.get()!;
 
       expect(value.name).toBe("John");
       expect(isCell(value.metadata)).toBe(true);
@@ -1057,7 +1059,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect(result.value).toBe(42);
     });
 
@@ -1079,7 +1081,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect(result.value).toBe("hello");
     });
 
@@ -1113,7 +1115,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect((result.item as { a: number }).a).toBe(100);
       expect((result.item as { b: string }).b).toBe("merged");
     });
@@ -1136,7 +1138,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect(result.value).toBeUndefined();
     });
 
@@ -1158,7 +1160,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect(result.value).toBeUndefined();
     });
 
@@ -1184,7 +1186,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const result = cell.get();
+      const result = cell.get()!;
       expect(result.arr[0]).toBe(42);
       expect(result.arr[1]).toBe(space);
       expect(result.arr[2]).toBeUndefined();
@@ -1218,7 +1220,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cellObject = cObject.asSchema(schemaObject);
-      const resultObject = cellObject.get();
+      const resultObject = cellObject.get()!;
       // Since the input is an object, the object candidate is selected.
       // TS doesn't infer `foo as string` when mixing objects and arrays, so have to cast.
       expect((resultObject.mixed as { foo: string }).foo).toBe("bar");
@@ -1245,7 +1247,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cellArray = cArray.asSchema(schemaArray);
-      const resultArray = cellArray.get();
+      const resultArray = cellArray.get()!;
       // Verify that the array candidate is chosen and returns the intended array.
       expect(resultArray).toEqualIgnoringSymbols({
         mixed: ["bar", "baz"],
@@ -1276,7 +1278,7 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema;
 
         const cell = c.asSchema(schema);
-        const result = cell.get();
+        const result = cell.get()!;
         expect(result.data).toEqualIgnoringSymbols([1, 2, 3]);
       });
 
@@ -1301,7 +1303,7 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema;
 
         const cell = c.asSchema(schema);
-        const result = cell.get();
+        const result = cell.get()!;
         // Should keep string and number values, drop boolean
         expect(result.data).toEqualIgnoringSymbols([
           "hello",
@@ -1353,7 +1355,7 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema;
 
         const cell = c.asSchema(schema);
-        const result = cell.get();
+        const result = cell.get()!;
         expect(result.data).toEqualIgnoringSymbols([
           { type: "text", value: "hello" },
           { type: "number", value: 42 },
@@ -1381,7 +1383,7 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema;
 
         const cell = c.asSchema(schema);
-        const result = cell.get();
+        const result = cell.get()!;
         expect(result.data).toBeUndefined();
       });
 
@@ -1493,28 +1495,28 @@ describe("Schema Support", () => {
 
         for (const doc of [plain, withLinks]) {
           const cell = doc.asSchema(vdomSchema);
-          const result = cell.get();
+          const result = cell.get()!;
           expect(result.type).toBe("vnode");
           expect(result.name).toBe("div");
           expect(isCell(result.props)).toBe(false);
           expect(isCell(result.props.style)).toBe(true);
-          expect(result.props.style.get().color).toBe("red");
+          expect(result.props.style.get()?.color).toBe("red");
           expect(isCell(result.children)).toBe(true);
-          const children = result.children.get();
+          const children = result.children.get()!;
           expect(children.length).toBe(3);
           expect(isCell(children[0])).toBe(true);
-          expect((children[0] as Cell<any>).get().value).toBe("single");
+          expect((children[0] as Cell<any>).get()!.value).toBe("single");
           expect(isCell(children[1])).toBe(false);
           expect(Array.isArray(children[1])).toBe(true);
           const child1 = children[1] as unknown as Cell<any>[];
           expect(isCell(child1[0])).toBe(true);
-          expect(child1[0].get().value).toBe("hello");
+          expect(child1[0].get()?.value).toBe("hello");
           expect(
             isCell(child1[1]),
           ).toBe(true);
-          expect(child1[1].get().value).toBe("world");
+          expect(child1[1].get()!.value).toBe("world");
           expect(isCell(children[2])).toBe(true);
-          expect((children[2] as Cell<any>).get()).toBe("or just text");
+          expect((children[2] as Cell<any>).get()!).toBe("or just text");
         }
       });
     });
@@ -1545,7 +1547,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("John");
       expect(value.age).toBe(30);
@@ -1583,7 +1585,7 @@ describe("Schema Support", () => {
       c.set({});
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.config).toEqualIgnoringSymbols({
         enabled: false,
@@ -1624,7 +1626,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("John");
       expect(isCell(value.profile)).toBe(true);
@@ -1671,7 +1673,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("John");
       expect(isCell(value.tags)).toBe(true);
@@ -1743,12 +1745,12 @@ describe("Schema Support", () => {
       });
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.user.name).toBe("John");
       expect(isCell(value.user.settings)).toBe(true);
 
-      const settings = value.user.settings.get();
+      const settings = value.user.settings.get()!;
       expect(settings.notifications).toBe(true);
       expect(isCell(settings.theme)).toBe(true);
       expect(isCell(settings.theme.get())).toBe(false);
@@ -1778,12 +1780,12 @@ describe("Schema Support", () => {
       });
 
       const cell2 = c2.asSchema(schema);
-      const value2 = cell2.get();
+      const value2 = cell2.get()!;
 
       expect(value2.user.name).toBe("John");
       expect(isCell(value2.user.settings)).toBe(true);
 
-      const settings2 = value2.user.settings.get();
+      const settings2 = value2.user.settings.get()!;
       expect(settings2.notifications).toBe(false);
       expect(isCell(settings2.theme)).toBe(true);
       expect(settings2.theme.get()).toEqualIgnoringSymbols({
@@ -1844,7 +1846,7 @@ describe("Schema Support", () => {
         ],
       });
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.items?.[0].title).toBe("First Item");
       expect(value.items?.[1].title).toBe("Default Title");
@@ -1860,7 +1862,7 @@ describe("Schema Support", () => {
       );
       c2.set(undefined);
       const cell2 = c2.asSchema(schema);
-      const value2 = cell2.get();
+      const value2 = cell2.get()!;
 
       expect(value2.items?.length).toBe(2);
       expect(value2.items?.[0].title).toBe("First Item");
@@ -1917,7 +1919,7 @@ describe("Schema Support", () => {
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.config.knownProp).toBe("default");
 
@@ -1963,7 +1965,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const value = source.asSchema(schema).get();
+      const value = source.asSchema(schema).get()!;
 
       expect(value.config.allowed).toBe("ok");
       expect(
@@ -2012,7 +2014,7 @@ describe("Schema Support", () => {
           },
         });
 
-        const value = source.asSchema(schema).get();
+        const value = source.asSchema(schema).get()!;
 
         expect(value.config.knownProp).toBe("in schema");
         expect(isCell(value.config.featureFlag)).toBe(true);
@@ -2057,7 +2059,7 @@ describe("Schema Support", () => {
       expect(isCell(cell)).toBe(true);
       const cellValue = cell.get();
       expect(isCell(cellValue)).toBe(true);
-      const value = cellValue.get();
+      const value = cellValue!.get();
       expect(value).toEqualIgnoringSymbols({
         name: "Default User",
         settings: { theme: "light" },
@@ -2070,7 +2072,7 @@ describe("Schema Support", () => {
           settings: { theme: "dark" },
         }),
       );
-      expect(cell.get().get()).toEqualIgnoringSymbols({
+      expect(cell.get()?.get()).toEqualIgnoringSymbols({
         name: "Updated User",
         settings: { theme: "dark" },
       });
@@ -2094,7 +2096,7 @@ describe("Schema Support", () => {
       c.set(undefined);
       const cell = c.asSchema(schema);
       const value = cell.get();
-      expect(isCell(value.name)).toBe(true);
+      expect(isCell(value?.name)).toBe(true);
       expect(value?.name?.get()).toBe("Default Name");
 
       cell.set(
@@ -2122,7 +2124,7 @@ describe("Schema Support", () => {
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
       expect(isCell(value.name)).toBe(true);
       expect(value.name.get()).toBe("First default name");
 
@@ -2161,7 +2163,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("Test Doc");
       expect(isStream(value.events)).toBe(true);
@@ -2215,7 +2217,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value?.user?.profile?.name).toBe("John");
       expect(isStream(value?.user?.profile?.notifications)).toBe(true);
@@ -2248,7 +2250,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(value.name).toBe("Test Doc");
       expect(isStream(value.events)).toBe(false);
@@ -2284,7 +2286,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get();
+      const value = cell.get()!;
 
       expect(isCell(value.cellData)).toBe(true);
       expect(value?.cellData?.get()?.value).toBe(42);
@@ -2381,7 +2383,7 @@ describe("Schema Support", () => {
       });
 
       // Get the array result
-      const result = listCell.get();
+      const result = listCell.get()!;
 
       // Convert items back to cells and check their links
       const itemCells = result.items.map((item: any) => item[toCell]());
@@ -2433,7 +2435,7 @@ describe("Schema Support", () => {
       });
 
       // Get the array result
-      const result = listCell.get();
+      const result = listCell.get()!;
 
       // Convert items back to cells and check their links
       const itemCells = result.items.map((item: any) => item[toCell]());
@@ -2485,7 +2487,7 @@ describe("Schema Support", () => {
       });
 
       // Get initial state and verify nested documents
-      const initialData = todoCell.get();
+      const initialData = todoCell.get()!;
       const initialCells = initialData.todos.map((item: any) => item[toCell]());
       const initialLinks = initialCells.map((cell) =>
         cell.getAsNormalizedFullLink()
@@ -2501,7 +2503,7 @@ describe("Schema Support", () => {
       const id3 = initialLinks[2].id;
 
       // Simulate the pattern from todo-list.tsx - using spread to copy array
-      const data = [...todoCell.get().todos];
+      const data = [...todoCell.get()!.todos];
       const idx = data.findIndex((item) => item.title === "Task 2");
       expect(idx).toBe(1);
 
@@ -2509,7 +2511,7 @@ describe("Schema Support", () => {
       todoCell.set({ todos: data });
 
       // Verify the item was removed
-      const updated = todoCell.get();
+      const updated = todoCell.get()!;
       expect(updated.todos).toHaveLength(2);
 
       // Verify the remaining items still point to their original documents
@@ -2563,7 +2565,7 @@ describe("Schema Support", () => {
         ],
       });
 
-      const result = mixedCell.get();
+      const result = mixedCell.get()!;
       const cells = result.items.map((item: any) => item[toCell]());
       const links = cells.map((cell) => cell.getAsNormalizedFullLink());
 
@@ -2618,7 +2620,7 @@ describe("Schema Support", () => {
       });
 
       // Get references before reordering
-      const beforeReorder = listCell.get();
+      const beforeReorder = listCell.get()!;
       const beforeCells = beforeReorder.items.map((item: any) =>
         item[toCell]()
       );
@@ -2637,13 +2639,13 @@ describe("Schema Support", () => {
       const idC = beforeLinks[2].id;
 
       // Reorder the array - move first item to end
-      const items = [...listCell.get().items];
+      const items = [...listCell.get()!.items];
       const [removed] = items.splice(0, 1);
       items.push(removed);
       listCell.set({ items });
 
       // Get state after reordering
-      const afterReorder = listCell.get();
+      const afterReorder = listCell.get()!;
       const afterCells = afterReorder.items.map((item: any) => item[toCell]());
       const afterLinks = afterCells.map((cell) =>
         cell.getAsNormalizedFullLink()
@@ -2679,7 +2681,7 @@ describe("Schema Support", () => {
       });
 
       // Get the array result
-      const result = listCell.get();
+      const result = listCell.get()!;
 
       // Convert items back to cells and check their links
       const itemCells = result.items.map((item: any) => item[toCell]());
@@ -2697,7 +2699,7 @@ describe("Schema Support", () => {
       data.splice(0, 1); // Remove first item
       listCell.set({ items: data });
 
-      const updated = listCell.get();
+      const updated = listCell.get()!;
       expect(updated.items).toHaveLength(1);
 
       // Verify the remaining item still points to its original document

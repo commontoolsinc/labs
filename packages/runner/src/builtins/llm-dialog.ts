@@ -308,16 +308,17 @@ export function llmDialog(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
         result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
-          if (
-            pending.withTx(tx).get() && (
-              internal.withTx(tx).key("lastActivity").get() >
-                Date.now() - REQUEST_TIMEOUT
-            )
-          ) {
-            // For now, let's drop messages added while request is pending for
-            // less than five minutes. Add message UI should either be disabled
-            // or change the send button to be a stop button.
-            return;
+          if (pending.withTx(tx).get()) {
+            const lastActivity = internal.withTx(tx).key("lastActivity").get();
+            if (
+              lastActivity === undefined ||
+              lastActivity > Date.now() - REQUEST_TIMEOUT
+            ) {
+              // For now, let's drop messages added while request is pending for
+              // less than five minutes. Add message UI should either be disabled
+              // or change the send button to be a stop button.
+              return;
+            }
           }
 
           // Before starting request, set pending and append the new message.
@@ -405,7 +406,12 @@ function startRequest(
   requestId: string,
   abortSignal: AbortSignal,
 ) {
-  const { system, maxTokens, model } = inputs.get();
+  const inputsContent = inputs.get();
+  if (inputsContent === undefined) {
+    logger.error("Called startRequest while inputs is still undefined");
+    return undefined;
+  }
+  const { system, maxTokens, model } = inputsContent;
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");

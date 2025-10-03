@@ -374,7 +374,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
         // Access state properties, including the cell
         const currentCount = state.count;
-        const _notifyOnChange = state.preferences.get().notifyOnChange;
+        const _notifyOnChange = state.preferences.get()?.notifyOnChange;
 
         // Add to history if it exists
         const history = state.history || [];
@@ -552,7 +552,7 @@ describe("Schema-to-TS Type Conversion", () => {
       schema,
       tx,
     );
-    const user = userCell.get();
+    const user = userCell.get()!;
 
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);

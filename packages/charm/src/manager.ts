@@ -110,9 +110,13 @@ function filterOutEntity(
   target: Cell<unknown> | string | EntityId,
 ): Cell<unknown>[] {
   const targetId = getEntityId(target);
-  if (!targetId) return list.get() as Cell<unknown>[];
+  const listContents = list.get();
+  if (listContents === undefined) {
+    return [];
+  }
+  if (!targetId) return listContents as Cell<unknown>[];
 
-  return list.get().filter((charm) => !isSameEntity(charm, targetId));
+  return listContents.filter((charm) => !isSameEntity(charm, targetId));
 }
 
 export class CharmManager {
@@ -189,7 +193,7 @@ export class CharmManager {
     return (!await this.runtime.editWithRetry((tx) => {
       const pinnedCharms = this.pinnedCharms.withTx(tx);
       const newPinnedCharms = filterOutEntity(pinnedCharms, charmId);
-      if (newPinnedCharms.length !== pinnedCharms.get().length) {
+      if (newPinnedCharms.length !== pinnedCharms.get()!.length) {
         this.pinnedCharms.withTx(tx).set(newPinnedCharms);
         changed = true;
       } else {
@@ -226,7 +230,7 @@ export class CharmManager {
       if (!id) return false;
 
       // Find the charm in trash
-      const trashedCharm = trashedCharms.get().find((charm) =>
+      const trashedCharm = trashedCharms.get()!.find((charm) =>
         isSameEntity(charm, id)
       );
 
@@ -268,9 +272,12 @@ export class CharmManager {
     tx: IExtendedStorageTransaction,
   ) {
     const charms = this.charms.withTx(tx);
-
+    const charmsData = charms.get();
+    if (charmsData === undefined) {
+      return;
+    }
     newCharms.forEach((charm) => {
-      if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
+      if (!charmsData.some((otherCharm) => otherCharm.equals(charm))) {
         charms.push(charm);
       }
     });
@@ -412,7 +419,7 @@ export class CharmManager {
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
 
-    if (!charm) return result;
+    if (allCharms === undefined || !charm) return result;
 
     try {
       // Get the argument data - this is where references to other charms are stored
@@ -603,7 +610,7 @@ export class CharmManager {
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
 
-    if (!charm) return result;
+    if (allCharms === undefined || !charm) return result;
 
     const charmId = getEntityId(charm);
     if (!charmId) return result;
@@ -841,18 +848,19 @@ export class CharmManager {
       const trashedCharms = this.trashedCharms.withTx(tx);
 
       // Find the charm in the main list
-      const charm = charms.get().find((c) => isSameEntity(c, id));
+      // we've already awaited it above, so we can call get()!
+      const charm = charms.get()!.find((c) => isSameEntity(c, id));
       if (!charm) {
         success = false;
       } else {
         // Move to trash if not already there
-        if (!trashedCharms.get().some((c) => isSameEntity(c, id))) {
+        if (!trashedCharms.get()!.some((c) => isSameEntity(c, id))) {
           trashedCharms.push(charm);
         }
 
         // Remove from main list
         const newCharms = filterOutEntity(charms, id);
-        if (newCharms.length !== charms.get().length) {
+        if (newCharms.length !== charms.get()!.length) {
           charms.set(newCharms);
         }
 
@@ -874,7 +882,7 @@ export class CharmManager {
       // Remove from trash if present
       const trashedCharms = this.trashedCharms.withTx(tx);
       const newTrashedCharms = filterOutEntity(trashedCharms, id);
-      if (newTrashedCharms.length !== trashedCharms.get().length) {
+      if (newTrashedCharms.length !== trashedCharms.get()!.length) {
         trashedCharms.set(newTrashedCharms);
         success = true;
       } else {
@@ -1014,8 +1022,8 @@ export class CharmManager {
   // Returns the charm from one of our active charm lists if it is present,
   // or undefined if it is not
   getActiveCharm(charmId: Cell<unknown> | EntityId | string) {
-    return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
-      this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
+    return this.charms.get()?.find((charm) => isSameEntity(charm, charmId)) ??
+      this.pinnedCharms.get()?.find((charm) => isSameEntity(charm, charmId));
   }
 
   async link(
@@ -1106,7 +1114,9 @@ async function getCellByIdOrCharm(
       const cell = await manager.getCellById({ "/": cellId });
 
       // Check if this cell is actually a charm by looking at the charms list
-      const charms = manager.getCharms().get();
+      const charmsCell = manager.getCharms();
+      await charmsCell.sync();
+      const charms = charmsCell.get()!;
       const isActuallyCharm = charms.some((charm) => {
         const id = charmId(charm);
         // If we can't get the charm ID, it's not a valid charm

@@ -74,7 +74,7 @@ describe("Query", () => {
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testCell1.get() },
+      is: { value: testCell1.get()! },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
@@ -167,7 +167,7 @@ describe("Query", () => {
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testCell1.get() },
+      is: { value: testCell1.get()! },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
@@ -446,7 +446,7 @@ describe("Query", () => {
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testCell1.get() },
+      is: { value: testCell1.get()! },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
@@ -480,7 +480,7 @@ describe("Query", () => {
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testCell2.getRaw() },
+      is: { value: testCell2.getRaw()! },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };

@@ -679,7 +679,7 @@ describe("Recipe Runner", () => {
           { type: "number" },
           ({ context }) =>
             Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + val.get(),
+              (sum: number, val) => sum + val.get()!,
               0,
             ),
         )({ context });
@@ -734,7 +734,7 @@ describe("Recipe Runner", () => {
       },
       ({ amount }, { counter }) => {
         const counterCell = counter as unknown as Cell<number>;
-        counterCell.send(counterCell.get() + amount);
+        counterCell.send(counterCell.get()! + amount);
       },
     );
 
@@ -1112,7 +1112,7 @@ describe("Recipe Runner", () => {
     await runtime.idle();
 
     // Initial state
-    const wrapperCell = result.key("value").get();
+    const wrapperCell = result.key("value").get()!;
     expect(isCell(wrapperCell)).toBe(true);
     expect(wrapperCell.get()).toBe(5);
 
@@ -1292,8 +1292,8 @@ describe("Recipe Runner", () => {
       type: "array",
       items: { type: "object", asCell: true },
     });
-    expect(isCell(listCell.get()[0])).toBe(true);
-    expect(listCell.get()[0].equals(testCell.get())).toBe(true);
+    expect(isCell(listCell.get()![0])).toBe(true);
+    expect(listCell.get()![0].equals(testCell.get())).toBe(true);
   });
 
   it("correctly handles the ifElse values with nested derives", async () => {

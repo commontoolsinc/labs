@@ -65,7 +65,7 @@ export class CharmsController<T = unknown> {
 
   getAllCharms() {
     this.disposeCheck();
-    const charms = this.#manager.getCharms().get();
+    const charms = this.#manager.getCharms().get() ?? [];
     return charms.map((charm) => new CharmController(this.#manager, charm));
   }
 
