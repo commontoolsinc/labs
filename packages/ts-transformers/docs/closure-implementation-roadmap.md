@@ -92,9 +92,6 @@ state.items.map(
 ```typescript
 // Plain arrays - NOT transformed
 [1, 2, 3].map((n) => n * multiplier); // Left as-is
-
-// Cell arrays - NOT transformed
-cellRef.map((item) => item * multiplier); // Left as-is
 ```
 
 #### Implementation Details
