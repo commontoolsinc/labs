@@ -563,7 +563,11 @@ function transformMapCallback(
   );
 
   // Wrap in recipe() using the proper imported identifier
-  const recipeIdentifier = getHelperIdentifier(factory, context.sourceFile, "recipe");
+  const recipeIdentifier = getHelperIdentifier(
+    factory,
+    context.sourceFile,
+    "recipe",
+  );
   const recipeCall = factory.createCallExpression(
     recipeIdentifier,
     undefined,
