@@ -18,7 +18,7 @@ const count: OpaqueRef<number> = {} as any;
 const el = <div>{count + 1}</div>;
 `;
       await expect(
-        transformSource(source, { mode: "error", types, useOnlyOpaqueRefTransformer: true }),
+        transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(
         /JSX expression with OpaqueRef computation should use derive/,
       );
@@ -38,7 +38,7 @@ const el = (
 );
 `;
       await expect(
-        transformSource(source, { mode: "error", types, useOnlyOpaqueRefTransformer: true }),
+        transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(/OpaqueRef transformation errors/);
     });
   });
@@ -55,7 +55,6 @@ const el = <div>{count + 1}</div>;
       await transformSource(source, {
         types,
         logger: (msg: string) => logs.push(msg),
-        useOnlyOpaqueRefTransformer: true,
       });
 
       expect(logs.length).toBeGreaterThan(0);
@@ -72,7 +71,7 @@ import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const el = <div>{count + 1}</div>;
 `;
-      expect(await transformSource.checkWouldTransform(source, types, true)).toBe(
+      expect(await transformSource.checkWouldTransform(source, types)).toBe(
         true,
       );
     });
@@ -82,7 +81,7 @@ const el = <div>{count + 1}</div>;
 const count: number = 5;
 const result = count + 1;
 `;
-      expect(await transformSource.checkWouldTransform(source, types, true)).toBe(
+      expect(await transformSource.checkWouldTransform(source, types)).toBe(
         false,
       );
     });

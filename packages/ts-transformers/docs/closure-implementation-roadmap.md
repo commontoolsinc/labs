@@ -1,12 +1,13 @@
 # Closure Implementation Roadmap
 
-_Created: 2025-09-24_ _Updated: 2025-10-01_ _Status: Phase 1 Complete_
+_Created: 2025-09-24_ _Updated: 2025-10-02_ _Status: Phase 1 Complete_
 
 ## Executive Summary
 
 This roadmap provides a concrete, step-by-step plan for implementing closure
-support in the CommonTools TypeScript transformer for **OpaqueRef array map callbacks**.
-We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with a clean, standalone architecture.
+support in the CommonTools TypeScript transformer for **OpaqueRef array map
+callbacks**. We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with
+a clean, standalone architecture.
 
 ## Implementation Status
 
@@ -16,15 +17,19 @@ We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with a clean, sta
 
 1. **Standalone Closure Transformer** (`src/closures/transformer.ts`)
    - Independent of opaque-ref transformer
-   - Transforms map callbacks on `OpaqueRef<T[]>` that have captures
-   - Does NOT transform `Cell<T[]>.map()` or plain `T[].map()`
+   - Transforms map callbacks on `OpaqueRef<T[]>` and `Cell<T[]>` that have captures
+   - Does NOT transform plain `T[].map()`
    - Runs FIRST in the pipeline
    - Self-contained with own import management
 
-2. **Simple Capture Detection** (Node Identity Approach)
+2. **Selective Capture Detection** (Node Identity Approach)
    - Leverages TypeScript's symbol table
    - Uses direct node identity checks (works because we run first!)
-   - Captures ALL variables (reactive and non-reactive)
+   - Captures variables from outer scopes but EXCLUDES:
+     - Module-scoped declarations (top-level constants/functions)
+     - Function declarations (handlers, lift(), etc.)
+     - Global built-ins
+   - INCLUDES captures from parent callback scope (nested maps)
    - Handles all edge cases: JSX, nested properties, local variables
 
 3. **Clean Pipeline Architecture** (`src/transform.ts`)
@@ -54,10 +59,10 @@ We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with a clean, sta
    - TypeChecker built from original program
    - Both reference same nodes → `node === func` works!
 
-4. **OpaqueRef Arrays Only**: Only transform `OpaqueRef<T[]>.map()`
-   - Specifically targets OpaqueRef array map operations
-   - Does NOT transform Cell or plain array maps
-   - But captures ALL variables (not just reactive ones) when transforming
+4. **Reactive Arrays Only**: Transform `OpaqueRef<T[]>.map()` and `Cell<T[]>.map()`
+   - Targets reactive array map operations
+   - Does NOT transform plain array maps
+   - Selectively captures variables (excludes module-scoped and functions)
 
 ## Implementation Phases
 
@@ -69,48 +74,54 @@ We've successfully completed Phase 1 (OpaqueRef Map Callbacks) with a clean, sta
 
 ```typescript
 // Input: state.items has type OpaqueRef<Item[]>
-state.items.map((item, index) => item.price * state.discount + state.tax)
+state.items.map((item, index) => item.price * state.discount + state.tax);
 
 // Output
 state.items.map(
   recipe(({ elem, index, params: { discount, tax } }) =>
     elem.price * discount + tax
   ),
-  { discount: state.discount, tax: state.tax }
-)
+  { discount: state.discount, tax: state.tax },
+);
 ```
 
 #### What Doesn't Transform
 
 ```typescript
 // Plain arrays - NOT transformed
-[1, 2, 3].map(n => n * multiplier)  // Left as-is
+[1, 2, 3].map((n) => n * multiplier); // Left as-is
 
 // Cell arrays - NOT transformed
-cellRef.map(item => item * multiplier)  // Left as-is
+cellRef.map((item) => item * multiplier); // Left as-is
 ```
 
 #### Implementation Details
 
 **Capture Detection** (`collectCaptures`):
+
 1. Walk callback body visiting all identifiers
 2. For each identifier, get symbol from TypeChecker
 3. Get declarations for symbol
 4. Check if ANY declaration is outside callback using **node identity**
-5. Handle special cases (JSX tags, attributes, property names)
-6. Capture ALL variables (reactive and non-reactive, OpaqueRef and plain)
+5. **Filter out module-scoped declarations** (walk AST to SourceFile parent)
+6. **Filter out function declarations** (including handlers, CallExpressions)
+7. Handle special cases (JSX tags, attributes, property names)
+8. Capture valid variables (from outer/parent scopes, excluding filtered ones)
 
 **Key Insight**: Node identity `current === func` works because:
+
 - Closure transformer runs on original AST
 - TypeChecker references original AST
 - They're the same objects!
 
 **Type Checking** (`isMapCall`):
+
 - Only matches `OpaqueRef<T[]>.map()` calls
 - Rejects `Cell<T[]>.map()` and plain `T[].map()`
 - Uses TypeChecker to get the type string and checks for "OpaqueRef<"
 
 **Transformation** (`transformMapCallback`):
+
 1. Collect all captured expressions
 2. Build params object: `{ discount: state.discount, ... }`
 3. Transform callback parameters:
@@ -124,22 +135,29 @@ cellRef.map(item => item * multiplier)  // Left as-is
 #### Edge Cases Handled
 
 ✅ Nested property access (`state.user.name`)
-✅ Multiple captures (both reactive and non-reactive)
+✅ Multiple captures (selective - excludes module-scoped/functions)
+✅ Module-scoped constants/functions (NOT captured)
+✅ Handler functions (NOT captured)
+✅ Nested callbacks (DOES capture from parent callback scope)
 ✅ JSX elements and attributes (not captured)
 ✅ Variables declared inside callback (not captured)
 ✅ Callback parameters (not captured)
 ✅ Index parameter preservation
 ✅ Plain arrays (not transformed)
-✅ Cell arrays (not transformed)
+✅ Cell arrays (ARE transformed)
 
 #### Test Coverage
 
 - ✅ Single captured variable
-- ✅ Multiple captured variables
+- ✅ Multiple captured variables (selective)
+- ✅ Module-scoped constants (NOT captured)
+- ✅ Module-scoped functions (NOT captured)
+- ✅ Handler references (NOT captured)
+- ✅ Nested callbacks (parent scope capture)
 - ✅ Nested property access
 - ✅ Mixed with reactive expressions
 - ✅ JSX in callbacks
-- ✅ No false positives (local vars, params, JSX)
+- ✅ No false positives (local vars, params, JSX, module-scoped, functions)
 
 ### Phase 2: Event Handler Support (PLANNED)
 
@@ -194,7 +212,7 @@ Transform arbitrary closures:
 const compute = () => state.a + state.b;
 
 // Output
-const compute = lift(({a, b}) => a + b).curry({a: state.a, b: state.b});
+const compute = lift(({ a, b }) => a + b).curry({ a: state.a, b: state.b });
 ```
 
 #### Implementation Steps
@@ -224,10 +242,11 @@ const compute = lift(({a, b}) => a + b).curry({a: state.a, b: state.b});
 
 ### Why Node Identity Works (Critical Understanding)
 
-**The Problem We Solved**:
-Initially, we thought node identity wouldn't work because of transformer sequencing. We were wrong! Here's why:
+**The Problem We Solved**: Initially, we thought node identity wouldn't work
+because of transformer sequencing. We were wrong! Here's why:
 
 **TypeScript Transformation Pipeline**:
+
 ```
 Original Source → TypeChecker built here
      ↓
@@ -240,15 +259,18 @@ Original Source → TypeChecker built here
 Final Output
 ```
 
-**Key Insight**: TypeChecker is built ONCE from original source and never updated.
+**Key Insight**: TypeChecker is built ONCE from original source and never
+updated.
 
 **For Closure Transformer** (runs first):
+
 - ✅ Works with original AST
 - ✅ TypeChecker references original AST
 - ✅ Node identity (`===`) works perfectly
 - ✅ Simple, direct scope checking
 
 **For Later Transformers** (run after):
+
 - ❌ Work with transformed AST
 - ❌ TypeChecker still references original AST
 - ❌ Node identity fails (comparing different trees)
@@ -267,22 +289,28 @@ typeRegistry.set(syntheticNode, originalType);
 const type = typeRegistry.get(node) || checker.getTypeFromTypeNode(node);
 ```
 
-**Note for Future Work**: Consider if opaque-ref transformer needs similar pattern for passing information about transformed nodes. Once closures are fully stable, investigate whether a "TransformationRegistry" or similar could help later transformers understand what earlier ones did.
+**Note for Future Work**: Consider if opaque-ref transformer needs similar
+pattern for passing information about transformed nodes. Once closures are fully
+stable, investigate whether a "TransformationRegistry" or similar could help
+later transformers understand what earlier ones did.
 
 ### Source Position Approach (Not Used)
 
 We initially considered using source position ranges:
+
 ```typescript
 // Check if declaration position is within callback position
 const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
 ```
 
 **Why We Didn't Need It**:
+
 - More complex
 - Less semantically clear
 - Node identity is simpler and more reliable (since we run first)
 
 **When Source Positions Would Be Needed**:
+
 - If transformer ran AFTER other transformations
 - If synthetic nodes without positions were involved
 - If node identity checks were unreliable
@@ -362,8 +390,11 @@ const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
 
 1. ✅ Remove debug logging from transformer
 2. ✅ Update documentation (this file)
-3. ⏳ Fix remaining failing tests (runtime-style API tests)
-4. ⏳ Update JSX expression test expectations
+3. ✅ Implement module-scoped filtering
+4. ✅ Implement function declaration filtering
+5. ✅ Implement nested callback transformation
+6. ✅ Fix all test expectations
+7. ✅ All 70 fixture tests passing
 
 ### Phase 2 Planning
 
@@ -385,8 +416,12 @@ const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
 1. **Run First = Simplicity**: Operating on original AST is much simpler
 2. **Node Identity Works**: When using original AST + TypeChecker together
 3. **Standalone > Embedded**: Closure transformer being separate is cleaner
-4. **Transform All, Not Just OpaqueRef**: Better separation of concerns
+4. **Selective Capture is Critical**: Not everything should be captured
+   - Module-scoped declarations are available everywhere (don't capture)
+   - Functions can't be serialized (don't capture)
+   - Parent callback scope SHOULD be captured (enables nested maps)
 5. **TypeChecker is Static**: Always references original source, never updated
+6. **Transformation Order Matters**: Nested callbacks must transform before parameter replacement
 
 ## Open Questions
 

@@ -46,9 +46,9 @@ export default recipe({
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.items.map(recipe(({ elem, params: { discount, taxRate, multiplier, shippingCost } }) => (<span>
+        {state.items.map(recipe(({ elem, params: { discount, taxRate, multiplier } }) => (<span>
             Total: {elem.price * elem.quantity * discount * taxRate * multiplier + shippingCost}
-          </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier, shippingCost: shippingCost })}
+          </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier })}
       </div>),
     };
 });

@@ -21,13 +21,13 @@ export default recipe<State>("NestedCallback", (state) => {
   return {
     [UI]: (
       <div>
-        {/* Outer map captures state.prefix, inner map has its own scope */}
+        {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
         {state.items.map((item) => (
           <div>
             {state.prefix}: {item.name}
             <ul>
               {item.tags.map((tag) => (
-                <li>{tag.name}</li>
+                <li>{item.name} - {tag.name}</li>
               ))}
             </ul>
           </div>
