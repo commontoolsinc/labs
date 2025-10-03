@@ -79,7 +79,9 @@ describe("fetch-data mutex mechanism", () => {
     );
 
     const resultCell = runtime.getCell(space, "fetch-test", undefined, tx);
-    const result = runtime.run(tx, testRecipe, { url: "http://mock-test-server.local/api/test" }, resultCell);
+    const result = runtime.run(tx, testRecipe, {
+      url: "http://mock-test-server.local/api/test",
+    }, resultCell);
     tx.commit();
 
     await runtime.idle();
@@ -139,8 +141,12 @@ describe("fetch-data mutex mechanism", () => {
     expect(data2.result).toBeDefined();
 
     // Due to mutex, we should have made at most a few fetch calls, not 2x
-    const relevantCalls = fetchCalls.filter((c) => c.url.includes("/api/concurrent"));
-    console.log(`Made ${relevantCalls.length} fetch calls for 2 concurrent requests`);
+    const relevantCalls = fetchCalls.filter((c) =>
+      c.url.includes("/api/concurrent")
+    );
+    console.log(
+      `Made ${relevantCalls.length} fetch calls for 2 concurrent requests`,
+    );
 
     // This is the key test: with mutex, redundant requests should be prevented
     expect(relevantCalls.length).toBeLessThanOrEqual(2);
@@ -167,7 +173,8 @@ describe("fetch-data mutex mechanism", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     await runtime.idle();
 
-    const firstCallCount = fetchCalls.filter((c) => c.url.includes("/api/first")).length;
+    const firstCallCount =
+      fetchCalls.filter((c) => c.url.includes("/api/first")).length;
     expect(firstCallCount).toBeGreaterThan(0);
 
     // Change the URL
@@ -180,7 +187,8 @@ describe("fetch-data mutex mechanism", () => {
     await runtime.idle();
 
     // Should have made a new fetch with the new URL
-    const secondCallCount = fetchCalls.filter((c) => c.url.includes("/api/second")).length;
+    const secondCallCount =
+      fetchCalls.filter((c) => c.url.includes("/api/second")).length;
     expect(secondCallCount).toBeGreaterThan(0);
   });
 
@@ -226,8 +234,15 @@ describe("fetch-data mutex mechanism", () => {
   it("should set pending to true during fetch and false after", async () => {
     // Use a longer delay to observe pending state
     const slowFetch = globalThis.fetch;
-    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    globalThis.fetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
       fetchCalls.push({ url, init });
 
       // Longer delay
@@ -246,7 +261,12 @@ describe("fetch-data mutex mechanism", () => {
     );
 
     const resultCell = runtime.getCell(space, "pending-test", undefined, tx);
-    const result = runtime.run(tx, testRecipe, { url: "/api/pending" }, resultCell);
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { url: "/api/pending" },
+      resultCell,
+    );
     tx.commit();
 
     // Wait a bit for request to start
@@ -283,7 +303,12 @@ describe("fetch-data mutex mechanism", () => {
     );
 
     const resultCell = runtime.getCell(space, "error-test", undefined, tx);
-    const result = runtime.run(tx, testRecipe, { url: "/api/error" }, resultCell);
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { url: "/api/error" },
+      resultCell,
+    );
     tx.commit();
 
     // Wait for async work
