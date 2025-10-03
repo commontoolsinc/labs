@@ -76,11 +76,12 @@ const spawnChatList = handler<
 
 const spawnChatbot = handler<
   Record<string, never>,
-  Record<string, never>
+  { allCharms: Cell<MentionableCharm[]> }
 >((_, state) => {
   return navigateTo(Chatbot({
     messages: [],
     tools: undefined,
+    mentionable: state.allCharms,
   }));
 });
 
@@ -140,7 +141,11 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 📂 Chat List
               </ct-button>
               <ct-button
-                onClick={spawnChatbot({})}
+                onClick={spawnChatbot({
+                  allCharms: allCharms as unknown as OpaqueRef<
+                    MentionableCharm[]
+                  >,
+                })}
               >
                 💬 Chatbot
               </ct-button>

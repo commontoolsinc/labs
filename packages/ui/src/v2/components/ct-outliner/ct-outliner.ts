@@ -9,6 +9,7 @@ import {
   MentionableArray,
   mentionableArraySchema,
 } from "../../core/mentionable.ts";
+import { MentionController } from "../../core/mention-controller.ts";
 
 /**
  * Executes a mutation on a Cell within a transaction
@@ -141,9 +142,6 @@ export class CTOutliner extends BaseElement
     tree: { type: Object, state: true },
     _collapsedNodePaths: { type: Object, state: true },
     focusedNodePath: { type: Array, state: true },
-    showingMentions: { type: Boolean, state: true },
-    mentionQuery: { type: String, state: true },
-    selectedMentionIndex: { type: Number, state: true },
   };
 
   declare value: Cell<Tree> | null;
@@ -169,6 +167,13 @@ export class CTOutliner extends BaseElement
   set collapsedNodePaths(paths: Set<string>) {
     this._collapsedNodePaths = new Set(paths);
   }
+
+  // Mention controller
+  private mentionController = new MentionController(this, {
+    onInsert: (markdown, mention) => this._insertMentionInEditor(markdown),
+    getCursorPosition: () => this._getEditorCursorPosition(),
+    getContent: () => this.editingContent,
+  });
 
   // Compatibility properties for OutlinerOperations interface
   get focusedNode(): OutlineTreeNode | null {
@@ -638,8 +643,6 @@ export class CTOutliner extends BaseElement
 
     this.requestUpdate();
   }
-  declare mentionQuery: string;
-  declare selectedMentionIndex: number;
 
   editingNodePath: number[] | null = null;
   private editingContent: string = "";
@@ -668,16 +671,12 @@ export class CTOutliner extends BaseElement
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
       handleEditorKeyDown: (event: KeyboardEvent) =>
         this.handleEditorKeyDown(event),
-      handleMentionKeyDown: (event: KeyboardEvent) =>
-        this.handleMentionKeyDown(event),
       handleNormalEditorKeyDown: (event: KeyboardEvent) =>
         this.handleNormalEditorKeyDown(event),
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
       handleCharmLinkClick: (event: MouseEvent) =>
         this.handleCharmLinkClick(event),
-      encodeCharmForHref: (charm: Mentionable) =>
-        this.encodeCharmForHref(charm),
-      insertMention: (mention: Mentionable) => this.insertMention(mention),
+      mentionController: this.mentionController,
     };
   }
 
@@ -957,9 +956,6 @@ export class CTOutliner extends BaseElement
     this.readonly = false;
     this._collapsedNodePaths = new Set<string>();
     this.focusedNodePath = null;
-    this.showingMentions = false;
-    this.mentionQuery = "";
-    this.selectedMentionIndex = 0;
     this.value = null;
   }
 
@@ -975,6 +971,11 @@ export class CTOutliner extends BaseElement
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
+
+    // Update mention controller when mentionable changes
+    if (changedProperties.has("mentionable")) {
+      this.mentionController.setMentionable(this.mentionable);
+    }
 
     // Handle value changes
     if (changedProperties.has("value")) {
@@ -1132,38 +1133,8 @@ export class CTOutliner extends BaseElement
     const target = event.target as HTMLTextAreaElement;
     this.editingContent = target.value;
 
-    // Check for @ mentions
-    const cursorPos = target.selectionStart;
-    const textBeforeCursor = this.editingContent.substring(0, cursorPos);
-    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
-
-    if (lastAtIndex !== -1 && lastAtIndex === textBeforeCursor.length - 1) {
-      // Just typed @ - cursor is right after @
-      this.showingMentions = true;
-      this.mentionQuery = "";
-      this.selectedMentionIndex = 0;
-      this.requestUpdate();
-    } else if (lastAtIndex !== -1) {
-      // There's an @ before cursor
-      const query = textBeforeCursor.substring(lastAtIndex + 1);
-      if (!query.includes(" ")) {
-        // Valid query - show mentions with query
-        this.showingMentions = true;
-        this.mentionQuery = query;
-        this.selectedMentionIndex = 0;
-        this.requestUpdate();
-      } else {
-        // Space in query - hide mentions
-        this.showingMentions = false;
-        this.requestUpdate();
-      }
-    } else {
-      // No @ before cursor - hide mentions if showing
-      if (this.showingMentions) {
-        this.showingMentions = false;
-        this.requestUpdate();
-      }
-    }
+    // Let mention controller handle input
+    this.mentionController.handleInput(event);
 
     // Auto-resize textarea
     target.style.height = "auto";
@@ -1173,7 +1144,7 @@ export class CTOutliner extends BaseElement
   private handleEditorBlur() {
     // Use a timeout to allow click events on mentions to fire first
     setTimeout(() => {
-      if (this.editingNodePath && !this.showingMentions) {
+      if (this.editingNodePath && !this.mentionController.isShowing) {
         this.finishEditing();
       }
     }, 200);
@@ -1258,42 +1229,11 @@ export class CTOutliner extends BaseElement
   }
 
   private handleEditorKeyDown(event: KeyboardEvent) {
-    if (this.showingMentions) {
-      this.handleMentionKeyDown(event);
+    // Let mention controller handle keyboard events first
+    if (this.mentionController.handleKeyDown(event)) {
       return;
     }
     this.handleNormalEditorKeyDown(event);
-  }
-
-  private handleMentionKeyDown(event: KeyboardEvent) {
-    const filteredMentions = this.getFilteredMentions();
-
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        this.selectedMentionIndex = Math.min(
-          this.selectedMentionIndex + 1,
-          filteredMentions.length - 1,
-        );
-        this.requestUpdate();
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        this.selectedMentionIndex = Math.max(this.selectedMentionIndex - 1, 0);
-        this.requestUpdate();
-        break;
-      case "Enter":
-        event.preventDefault();
-        if (filteredMentions[this.selectedMentionIndex]) {
-          this.insertMention(filteredMentions[this.selectedMentionIndex]);
-        }
-        break;
-      case "Escape":
-        event.preventDefault();
-        this.showingMentions = false;
-        this.requestUpdate();
-        break;
-    }
   }
 
   private handleNormalEditorKeyDown(event: KeyboardEvent) {
@@ -1562,34 +1502,25 @@ export class CTOutliner extends BaseElement
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private getFilteredMentions(): MentionableArray {
-    if (!this.mentionable) {
-      return [];
-    }
+  /**
+   * Get cursor position in the editor textarea
+   */
+  private _getEditorCursorPosition(): number {
+    if (!this.editingNodePath) return 0;
+    const editingNode = getNodeByPath(this.tree, this.editingNodePath);
+    if (!editingNode) return 0;
 
-    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
-    const mentionableData = mentionableArray.get();
-    if (!mentionableData || mentionableData.length === 0) {
-      return [];
-    }
+    const textarea = this.shadowRoot?.querySelector(
+      `#editor-${this.getNodeIndex(editingNode)}`,
+    ) as HTMLTextAreaElement;
 
-    const query = this.mentionQuery.toLowerCase();
-    const matches = [];
-
-    // Since mentionable contains an array of Cells (which could be LINK references),
-    // we need to resolve each one individually
-    for (let i = 0; i < mentionableData.length; i++) {
-      // Use key(i).getAsQueryResult() to properly resolve LINK references
-      const mention = mentionableArray.key(i).get();
-      if (mention && mention[NAME]?.toLowerCase()?.includes(query)) {
-        matches.push(i);
-      }
-    }
-
-    return matches.map((i) => mentionableArray.key(i).get());
+    return textarea?.selectionStart ?? 0;
   }
 
-  private insertMention(mention: Mentionable) {
+  /**
+   * Insert mention markdown in the editor at cursor position
+   */
+  private _insertMentionInEditor(markdown: string): void {
     if (!this.editingNodePath) return;
 
     const editingNode = getNodeByPath(this.tree, this.editingNodePath);
@@ -1610,54 +1541,17 @@ export class CTOutliner extends BaseElement
     const beforeMention = this.editingContent.substring(0, lastAtIndex);
     const afterMention = this.editingContent.substring(cursorPos);
 
-    // Create markdown link with encoded charm reference
-    const charmHref = this.encodeCharmForHref(mention);
-    const mentionText = `[${mention[NAME]}](${charmHref})`;
-
-    this.editingContent = beforeMention + mentionText + afterMention;
+    this.editingContent = beforeMention + markdown + afterMention;
     textarea.value = this.editingContent;
 
     // Set cursor after the inserted mention
-    const newCursorPos = beforeMention.length + mentionText.length;
+    const newCursorPos = beforeMention.length + markdown.length;
     textarea.setSelectionRange(newCursorPos, newCursorPos);
 
-    this.showingMentions = false;
-    this.mentionQuery = "";
     this.requestUpdate();
 
     // Refocus the editor
     textarea.focus();
-  }
-
-  private encodeCharmForHref(charm: Mentionable): string {
-    // Simply use the entity ID as the href
-    const entityId = getEntityId(charm);
-    return encodeURIComponent(JSON.stringify(entityId)) || "";
-  }
-
-  /**
-   * Decode charm reference from href (entity ID)
-   */
-  private decodeCharmFromHref(href: string | null): Mentionable | null {
-    if (!href || !this.mentionable) return null;
-
-    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
-    const mentionableData = mentionableArray.get() || [];
-
-    for (let i = 0; i < mentionableData.length; i++) {
-      // Properly resolve each LINK reference
-      const mention = mentionableArray.key(i).get();
-      if (mention) {
-        const mentionEntityId = encodeURIComponent(
-          JSON.stringify(getEntityId(mention)),
-        );
-        if (mentionEntityId === href) {
-          return mention;
-        }
-      }
-    }
-
-    return null;
   }
 
   /**
@@ -1680,7 +1574,7 @@ export class CTOutliner extends BaseElement
       return;
     }
 
-    const charm = this.decodeCharmFromHref(href);
+    const charm = this.mentionController.decodeCharmFromHref(href);
     if (!charm) {
       console.warn("Could not decode charm from href:", href);
       return;
@@ -1982,7 +1876,9 @@ export class CTOutliner extends BaseElement
                   @paste="${this.handleEditorPaste}"
                   rows="1"
                 ></textarea>
-                ${this.showingMentions ? this.renderMentionsDropdown() : ""}
+                ${this.mentionController.isShowing
+                  ? this.renderMentionsDropdown()
+                  : ""}
               `
               : this.renderMarkdownContent(
                 instance.body,
@@ -2008,7 +1904,7 @@ export class CTOutliner extends BaseElement
   }
 
   private renderMentionsDropdown(): unknown {
-    const filteredMentions = this.getFilteredMentions();
+    const filteredMentions = this.mentionController.getFilteredMentions();
 
     if (filteredMentions.length === 0) {
       return "";
@@ -2039,13 +1935,13 @@ export class CTOutliner extends BaseElement
         ${filteredMentions.map((mention, index) =>
           html`
             <div
-              class="mention-item ${index === this.selectedMentionIndex
+              class="mention-item ${index ===
+                  this.mentionController.state.selectedIndex
                 ? "selected"
                 : ""}"
-              @click="${() => this.insertMention(mention)}"
+              @click="${() => this.mentionController.insertMention(mention)}"
               @mouseenter="${() => {
-                this.selectedMentionIndex = index;
-                this.requestUpdate();
+                this.mentionController.selectMention(index);
               }}"
             >
               <div class="mention-name">${mention[NAME]}</div>

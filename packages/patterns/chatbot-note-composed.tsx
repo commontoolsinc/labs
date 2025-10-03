@@ -371,7 +371,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
     };
 
-    const chat = Chat({ messages, tools });
+    const chat = Chat({ messages, tools, mentionable: allCharms });
     const note = Note({ title, content, allCharms });
 
     return {
