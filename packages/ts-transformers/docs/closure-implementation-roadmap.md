@@ -398,29 +398,36 @@ const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
 
 **Status**: Implementing now
 
-**Motivation**: Provide compile-time errors for incorrect transformations by using a distinct `map_with_pattern` method instead of overloading `map`.
+**Motivation**: Provide compile-time errors for incorrect transformations by
+using a distinct `map_with_pattern` method instead of overloading `map`.
 
 **Implementation Steps**:
 
-1. **Create map_with_pattern builtin** (`packages/runner/src/builtins/map_with_pattern.ts`)
+1. **Create map_with_pattern builtin**
+   (`packages/runner/src/builtins/map_with_pattern.ts`)
    - Copy from `map.ts` as starting point
    - Update schema to include `params: { type: "object" }`
-   - Change runtime.runner.run call to pass `{ elem, index, params }` instead of `{ element, index, array }`
+   - Change runtime.runner.run call to pass `{ elem, index, params }` instead of
+     `{ element, index, array }`
    - Remove recipe wrapping (op is already a recipe)
 
-2. **Add map_with_pattern method to OpaqueRef/Cell** (`packages/runner/src/builder/opaque-ref.ts`)
+2. **Add map_with_pattern method to OpaqueRef/Cell**
+   (`packages/runner/src/builder/opaque-ref.ts`)
    - Create `mapWithPatternFactory` at module scope
    - Add `map_with_pattern<S>(op: Recipe, params: Record<string, any>)` method
    - Call factory with `{ list, op, params }` (no recipe wrapping)
 
-3. **Update transformer** (`packages/ts-transformers/src/closures/transformer.ts`)
+3. **Update transformer**
+   (`packages/ts-transformers/src/closures/transformer.ts`)
    - Change emitted method name from `map` to `map_with_pattern`
    - Ensure proper import of `recipe` from commontools
 
 4. **Update all test expectations**
-   - Change `.map(recipe(...), params)` to `.map_with_pattern(recipe(...), params)` in all expected files
+   - Change `.map(recipe(...), params)` to
+     `.map_with_pattern(recipe(...), params)` in all expected files
 
 **Success Criteria**:
+
 - [ ] map_with_pattern builtin created and registered
 - [ ] OpaqueRef/Cell has map_with_pattern method
 - [ ] Transformer emits map_with_pattern calls
