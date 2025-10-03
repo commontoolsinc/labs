@@ -62,7 +62,7 @@ export default recipe({
         
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map(recipe(({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
+          {state.items.map_with_pattern(recipe(({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
               <span>{elem.name}</span>
               <span> - Original: ${elem.price}</span>
               <span> - Discounted: ${(elem.price * (1 - discount)).toFixed(2)}</span>

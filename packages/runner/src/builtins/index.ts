@@ -1,5 +1,6 @@
 import { raw } from "../module.ts";
 import { map } from "./map.ts";
+import { map_with_pattern } from "./map_with_pattern.ts";
 import { fetchData } from "./fetch-data.ts";
 import { streamData } from "./stream-data.ts";
 import { generateObject, llm } from "./llm.ts";
@@ -19,6 +20,7 @@ export function registerBuiltins(runtime: IRuntime) {
   const moduleRegistry = runtime.moduleRegistry;
 
   moduleRegistry.addModuleByRef("map", raw(map));
+  moduleRegistry.addModuleByRef("map_with_pattern", raw(map_with_pattern));
   moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm));

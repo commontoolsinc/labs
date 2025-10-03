@@ -507,6 +507,70 @@ adopt a similar pattern for other information that needs to flow through the
 pipeline. This would allow later transformers to access information about
 transformed nodes that TypeChecker can't provide.
 
+## Runtime Integration: map_with_pattern
+
+### Motivation
+
+To provide clear compile-time errors when the transformer emits incorrect transformations, we introduce a new `map_with_pattern` method (patterns = recipes) instead of overloading the existing `map` method. This ensures:
+
+1. **Type safety**: Wrong transformations fail at compile time, not runtime
+2. **Clear distinction**: Explicit separation between regular map and closure-transformed map
+3. **Debugging**: Easy to identify which map variant is being used
+
+### Implementation
+
+**OpaqueRef/Cell method** (`opaque-ref.ts`):
+```typescript
+map_with_pattern: <S>(
+  op: Recipe,  // Already wrapped by transformer
+  params: Record<string, any>,  // Captured variables
+) => {
+  mapWithPatternFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "map_with_pattern",
+  });
+  return mapWithPatternFactory({
+    list: proxy,
+    op: op,  // Don't wrap - already a recipe!
+    params: params,
+  });
+}
+```
+
+**Runtime builtin** (`map_with_pattern.ts`):
+- Similar to `map.ts` but accepts `params` in schema
+- Schema:
+  ```typescript
+  {
+    list: { type: "array", items: { asCell: true } },
+    op: { asCell: true },
+    params: { type: "object" },  // New!
+  }
+  ```
+- Passes to recipe: `{ elem, index, params: inputsCell.key("params") }`
+- No recipe wrapping (already wrapped by transformer)
+
+**Transformer output**:
+```typescript
+// Before (Phase 1 - incorrect):
+state.items.map(recipe(({ elem, params: { discount } }) => ...), { discount: state.discount })
+
+// After (Phase 1.5 - correct):
+state.items.map_with_pattern(
+  recipe(({ elem, params: { discount } }) => ...),
+  { discount: state.discount }
+)
+```
+
+### Key Differences from Regular map
+
+| Aspect | `map()` | `map_with_pattern()` |
+|--------|---------|---------------------|
+| Recipe wrapping | Wraps callback in recipe | Receives pre-wrapped recipe |
+| Parameters | `{ element, index, array }` | `{ elem, index, params }` |
+| Params argument | No params | Accepts params object |
+| Use case | Normal mapping | Closure-transformed mapping |
+
 ## Future Extensions
 
 ### Phase 2: Event Handler Support
