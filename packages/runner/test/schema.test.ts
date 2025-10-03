@@ -1619,7 +1619,7 @@ describe("Schema Support", () => {
         config?: { enabled: boolean; label: string };
       }>(
         space,
-        "should resolve defaults when using $ref in property schemas",
+        "should resolve defaults in $ref when using $ref in property schemas",
         undefined,
         tx,
       );
