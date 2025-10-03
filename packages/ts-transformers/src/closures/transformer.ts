@@ -28,10 +28,9 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
   if (ts.isVariableDeclaration(decl)) {
     // VariableDeclaration -> VariableDeclarationList -> VariableStatement -> SourceFile
     parent = parent?.parent?.parent;
-  } else if (ts.isFunctionDeclaration(decl)) {
-    // FunctionDeclaration -> SourceFile
-    parent = parent;
   }
+  // For function declarations, parent is already SourceFile (if module-scoped)
+  // No need to reassign
 
   return parent ? ts.isSourceFile(parent) : false;
 }
@@ -203,7 +202,9 @@ function collectCaptures(
       }
 
       // Skip function declarations (can't serialize functions)
-      const isFunction = declarations.some((decl) => isFunctionDeclaration(decl));
+      const isFunction = declarations.some((decl) =>
+        isFunctionDeclaration(decl)
+      );
       if (isFunction) {
         return;
       }
@@ -438,7 +439,8 @@ function transformMapCallback(
       const nestedCallback = node.arguments[0];
       if (
         nestedCallback &&
-        (ts.isArrowFunction(nestedCallback) || ts.isFunctionExpression(nestedCallback))
+        (ts.isArrowFunction(nestedCallback) ||
+          ts.isFunctionExpression(nestedCallback))
       ) {
         const nestedCaptures = collectCaptures(nestedCallback, checker);
         if (nestedCaptures.size > 0) {
@@ -450,14 +452,22 @@ function transformMapCallback(
             }
           }
           // Recursively transform the nested callback
-          return transformMapCallback(node, nestedCallback, capturesByName, context);
+          return transformMapCallback(
+            node,
+            nestedCallback,
+            capturesByName,
+            context,
+          );
         }
       }
     }
     return ts.visitEachChild(node, nestedVisitor, context.transformation);
   };
 
-  transformedBody = ts.visitNode(transformedBody, nestedVisitor) as typeof transformedBody;
+  transformedBody = ts.visitNode(
+    transformedBody,
+    nestedVisitor,
+  ) as typeof transformedBody;
 
   // Now transform the callback body to use elem instead of the original param name
   const elemName = elemParam?.name;
