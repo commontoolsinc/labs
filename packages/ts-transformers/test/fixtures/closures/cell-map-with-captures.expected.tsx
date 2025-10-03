@@ -23,7 +23,7 @@ export default recipe({
     const typedValues: Cell<number[]> = cell(state.values);
     return {
         [UI]: (<div>
-        {typedValues.map(recipe(({ elem, params: { multiplier } }) => (<span>{elem * multiplier}</span>)), { multiplier: state.multiplier })}
+        {typedValues.map_with_pattern(recipe(({ elem, params: { multiplier } }) => (<span>{elem * multiplier}</span>)), { multiplier: state.multiplier })}
       </div>),
     };
 });
