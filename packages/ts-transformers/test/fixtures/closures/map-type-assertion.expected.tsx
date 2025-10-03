@@ -23,7 +23,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.map_with_pattern(recipe(({ elem, params: { prefix } }) => (<div>
+        {typedItems.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { prefix } }) => (<div>
             {prefix}: {elem.name}
           </div>)), { prefix: state.prefix })}
       </div>),
