@@ -1591,7 +1591,7 @@ describe("Schema Support", () => {
       });
     });
 
-    it("should resolve defaults when using $ref in property schemas", () => {
+    it("should resolve defaults in $ref when using $ref in property schemas", () => {
       const schema = {
         $defs: {
           Settings: {
