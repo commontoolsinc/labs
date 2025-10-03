@@ -318,7 +318,7 @@ describe("link-resolution", () => {
       const schema2 = {
         type: "object",
         properties: {
-          data: { type: "number" },
+          data: true,
         },
       };
 
@@ -608,7 +608,7 @@ describe("link-resolution", () => {
         type: "object",
         properties: {
           name: { type: "string" },
-          ref: { type: "object" }, // Will be a link
+          ref: true, // Will be a link
         },
       } as const;
 

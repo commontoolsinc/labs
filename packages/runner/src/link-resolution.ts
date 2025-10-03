@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
@@ -8,8 +8,78 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { type JSONSchema } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
+
+/**
+ * Create an allOf schema from multiple schemas, skipping trivial cases.
+ * Returns undefined if no non-trivial schemas, a single schema if only one,
+ * or an allOf if multiple non-trivial schemas.
+ *
+ * When creating allOf, extracts defaults (last wins) and asCell/asStream (first wins)
+ * as siblings to the allOf array.
+ */
+export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
+  const nonTrivial = schemas.filter((s) =>
+    s !== undefined &&
+    s !== true &&
+    !ContextualFlowControl.isTrueSchema(s)
+  );
+
+  if (nonTrivial.length === 0) return undefined;
+  if (nonTrivial.length === 1) return nonTrivial[0];
+
+  // Extract defaults from last schema that has them (last wins)
+  let extractedDefault: any = undefined;
+  let hasDefault = false;
+  for (let i = nonTrivial.length - 1; i >= 0; i--) {
+    const schema = nonTrivial[i];
+    if (isObject(schema) && "default" in schema) {
+      extractedDefault = schema.default;
+      hasDefault = true;
+      break;
+    }
+  }
+
+  // Extract asCell/asStream from first schema that has them (first wins)
+  let hasAsCell = false;
+  let hasAsStream = false;
+  for (const schema of nonTrivial) {
+    if (isObject(schema)) {
+      if (schema.asCell && !hasAsCell) {
+        hasAsCell = true;
+      }
+      if (schema.asStream && !hasAsStream) {
+        hasAsStream = true;
+      }
+      if (hasAsCell && hasAsStream) break;
+    }
+  }
+
+  // Remove extracted properties from branches to avoid duplication
+  const cleanedBranches = nonTrivial.map((schema) => {
+    if (!isObject(schema)) return schema;
+    const cleaned = { ...schema };
+    if (hasDefault && "default" in cleaned) {
+      delete (cleaned as any).default;
+    }
+    if (hasAsCell && cleaned.asCell) {
+      delete (cleaned as any).asCell;
+    }
+    if (hasAsStream && cleaned.asStream) {
+      delete (cleaned as any).asStream;
+    }
+    return cleaned;
+  });
+
+  return {
+    allOf: cleanedBranches,
+    ...(hasDefault ? { default: extractedDefault } : {}),
+    ...(hasAsCell ? { asCell: true } : {}),
+    ...(hasAsStream ? { asStream: true } : {}),
+  };
+}
 
 export type LastNode = "value" | "writeRedirect" | "top";
 
@@ -67,6 +137,10 @@ export function resolveLink(
   const seen = new Set<string>();
 
   let iteration = 0;
+
+  // Accumulate schemas from the link chain (but not the initial link's schema,
+  // as that's our starting point, not something we're combining with)
+  const schemasFromChain: JSONSchema[] = [];
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
@@ -165,6 +239,23 @@ export function resolveLink(
     }
 
     if (nextLink !== undefined) {
+      // Accumulate schemas when we actually follow a link to a new location
+      // Only combine if the schemas are different (to avoid combining a schema with itself)
+      const schemasAreDifferent = nextLink.schema && link.schema &&
+        JSON.stringify(nextLink.schema) !== JSON.stringify(link.schema);
+
+      if (schemasAreDifferent) {
+        // Both current and next have schemas and they're different - need to combine them
+        if (schemasFromChain.length === 0) {
+          // First time we're combining - add the current link's schema
+          schemasFromChain.push(link.schema!);
+        }
+        schemasFromChain.push(nextLink.schema!);
+      } else if (nextLink.schema && !link.schema) {
+        // Only next has schema - this becomes our new schema (might combine later)
+        schemasFromChain.push(nextLink.schema);
+      }
+
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
           ...nextLink,
@@ -180,6 +271,16 @@ export function resolveLink(
   }
 
   const result = { ...link } satisfies NormalizedFullLink;
+
+  // Combine all schemas from the chain into an allOf (only if more than one)
+  if (schemasFromChain.length > 1) {
+    const combinedSchema = createAllOf(schemasFromChain);
+    if (combinedSchema) {
+      result.schema = combinedSchema;
+      // Keep the rootSchema from the last link, or use the combined schema
+      result.rootSchema = result.rootSchema ?? combinedSchema;
+    }
+  }
 
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
