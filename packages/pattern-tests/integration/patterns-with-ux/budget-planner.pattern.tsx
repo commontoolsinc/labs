@@ -865,6 +865,11 @@ export const budgetPlannerUx = recipe<BudgetPlannerArgs>(
 
     return {
       [NAME]: name,
+      // Export input cells for direct manipulation
+      total,
+      categories,
+      // Export the overrides cell for direct allocation manipulation
+      allocationOverrides: overrides,
       [UI]: (
         <div style="
             display: flex;

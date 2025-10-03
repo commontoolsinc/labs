@@ -1,6 +1,6 @@
-# Pattern Testing Guide
+# Pattern UX Testing Guide
 
-This guide explains how to create integration tests for patterns in
+This guide explains how to create integration tests for patterns with UX in
 `packages/pattern_tests/integration/patterns-with-ux`.
 
 ## Overview
@@ -179,14 +179,161 @@ Also test direct charm operations without UI:
 it("should update via direct operation", async () => {
   await charm.result.set(newValue, ["fieldName"]);
 
-  await waitFor(async () => {
-    const value = await charm.result.get(["fieldName"]);
-    return value === newValue;
-  });
+  // Allow time for reactive updates to propagate
+  await new Promise(resolve => setTimeout(resolve, 5000));
 
-  const value = await charm.result.get(["fieldName"]);
+  const value = charm.result.get(["fieldName"]);
   assertEquals(value, newValue, "Field should be updated");
 });
+```
+
+**Important:** When testing direct operations, you may need longer delays (5-10 seconds) to allow reactive updates to fully propagate through the system.
+
+## Exporting Cells for Testing
+
+**TL;DR:** Patterns must export **writeable input cells** (recipe parameters and `cell()` values), not just derived values, to enable direct state manipulation in tests. You cannot `charm.result.set()` on derived/computed values.
+
+### The Problem: Derived Values Are Read-Only
+
+A common testing issue occurs when patterns only export **derived values** instead of **writeable cells**. Derived values are computed from other cells and **cannot be directly set** in tests.
+
+**Example of problematic pattern export:**
+
+```tsx
+// ❌ WRONG - Exports only derived/computed values
+export const myPattern = recipe<Args>(
+  "My Pattern",
+  ({ inputParam }) => {
+    const sanitized = lift((val) => sanitizeValue(val))(inputParam);
+    const overrides = cell<Record<string, number> | null>(null);
+
+    const computed = lift(({ base, overrides }) => {
+      const active = overrides ?? base;
+      return calculateSomething(active);
+    })({ base: sanitized, overrides });
+
+    const derivedValue = derive(computed, (state) => state.result);
+
+    return {
+      [NAME]: "My Pattern",
+      [UI]: (/* ... */),
+      // ❌ Only exporting derived value - cannot be set directly!
+      result: derivedValue,
+    };
+  }
+);
+```
+
+**The test will fail:**
+
+```typescript
+// ❌ This will NOT trigger reactive updates!
+await charm.result.set(newValue, ["result"]);
+// derivedValue stays the same because it's read-only
+```
+
+### The Solution: Export Input Cells
+
+To enable direct state manipulation in tests, patterns must export the **writeable input cells** that drive the reactive system:
+
+```tsx
+// ✅ CORRECT - Exports writeable cells
+export const myPattern = recipe<Args>(
+  "My Pattern",
+  ({ inputParam }) => {
+    const sanitized = lift((val) => sanitizeValue(val))(inputParam);
+    const overrides = cell<Record<string, number> | null>(null);
+
+    const computed = lift(({ base, overrides }) => {
+      const active = overrides ?? base;
+      return calculateSomething(active);
+    })({ base: sanitized, overrides });
+
+    const derivedValue = derive(computed, (state) => state.result);
+
+    return {
+      [NAME]: "My Pattern",
+      [UI]: (/* ... */),
+      // ✅ Export the INPUT cells
+      inputParam,  // Original input cell from recipe args
+      overrides,   // Writeable cell that affects derived values
+      // Also export derived values for reading
+      result: derivedValue,
+    };
+  }
+);
+```
+
+**Now the test works:**
+
+```typescript
+// ✅ Set the writeable cell - triggers reactive updates!
+await charm.result.set(newValue, ["overrides"]);
+
+// Allow reactive updates to propagate
+await new Promise(resolve => setTimeout(resolve, 5000));
+
+// Derived value now reflects the change
+const result = charm.result.get(["result"]);
+assertEquals(result, expectedValue);
+```
+
+### Identifying What to Export
+
+**Export these for testing:**
+- ✅ Recipe input parameters (`total`, `categories`, `items`, `taxRate`, etc.)
+- ✅ Internal `cell()` values that affect derived state (`overrides`, state cells, etc.)
+- ✅ Derived values for **reading** (keeps existing API working)
+
+**Don't rely on these for `charm.result.set()`:**
+- ❌ `derive()` results - read-only
+- ❌ `lift()` results without underlying cell - read-only
+
+### Real-World Example: Budget Planner
+
+**Before (broken for direct manipulation):**
+
+```tsx
+const overrides = cell<AllocationRecord | null>(null);
+const allocationView = derive(summary, (state) => state.allocations);
+
+return {
+  allocations: allocationView,  // ❌ Derived - can't set!
+};
+```
+
+**After (testable):**
+
+```tsx
+const overrides = cell<AllocationRecord | null>(null);
+const allocationView = derive(summary, (state) => state.allocations);
+
+return {
+  // Export writeable cells
+  total,
+  categories,
+  allocationOverrides: overrides,  // ✅ Can set this!
+  // Keep derived for reading
+  allocations: allocationView,
+};
+```
+
+**Test using writeable cell:**
+
+```typescript
+// Get current state
+const currentOverrides = charm.result.get(["allocationOverrides"]) as Record<string, number> | null;
+const currentAllocations = currentOverrides || charm.result.get(["allocations"]) as Record<string, number>;
+
+// Update the writeable cell
+const updated = { ...currentAllocations, food: 600 };
+await charm.result.set(updated, ["allocationOverrides"]);
+
+await new Promise(resolve => setTimeout(resolve, 10000));
+
+// Derived values now reflect the change
+const allocatedTotal = charm.result.get(["allocatedTotal"]);
+assertEquals(allocatedTotal, 600); // ✅ Works!
 ```
 
 ## Running Tests
@@ -480,6 +627,7 @@ it("should add item via button click", async () => {
 - Check that the handler is properly bound in the pattern
 - Verify the state path is correct: `["field"]` vs `["nested", "field"]`
 - **Do not await** `charm.result.get()` calls - they return values synchronously
+- **Check if you're setting a derived value** - see "Exporting Cells for Testing" section. You cannot set derived/computed values directly; you must set the writeable cells that feed into them
 
 ### Heading/Element Text Mismatch
 - The first `waitForSelector("h1")` might find a different h1 than expected

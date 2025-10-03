@@ -452,6 +452,10 @@ export const invoiceGeneratorUx = recipe<InvoiceGeneratorArgs>(
 
     return {
       [NAME]: name,
+      // Export input cells for direct manipulation
+      items,
+      taxRate,
+      invoiceDiscountRate,
       [UI]: (
         <div style="font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 16px; background: #f8f9fa;">
           <div style="background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
@@ -508,7 +512,6 @@ export const invoiceGeneratorUx = recipe<InvoiceGeneratorArgs>(
           </div>
         </div>
       ),
-      items,
       normalizedItems,
       sanitizedItems: normalizedItems,
       sanitizedTaxRate: normalizedTaxRate,
