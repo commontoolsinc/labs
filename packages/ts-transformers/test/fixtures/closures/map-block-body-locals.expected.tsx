@@ -40,12 +40,14 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map(recipe(({ elem, params: { taxRate } }) => {
+        {state.items.map(recipe(({ elem, index, params: { taxRate } }) => {
                 // Local variable declared inside callback
                 const subtotal = elem.price * elem.quantity;
                 const localTax = subtotal * 0.1;
                 // Should only capture state.taxRate, not subtotal or localTax
-                return <div>Subtotal: {subtotal}, Tax: {localTax + taxRate}</div>;
+                return (<div key={index}>
+              Subtotal: {subtotal}, Tax: {localTax + taxRate}
+            </div>);
             }), { taxRate: state.taxRate })}
       </div>),
     };
