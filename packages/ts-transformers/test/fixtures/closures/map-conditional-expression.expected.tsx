@@ -45,7 +45,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.items.map_with_pattern(recipe(({ elem, params: { threshold, discount } }) => (<div>
+        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { threshold, discount } }) => (<div>
             Price: ${elem.price > threshold
                     ? elem.price * (1 - discount)
                     : elem.price}

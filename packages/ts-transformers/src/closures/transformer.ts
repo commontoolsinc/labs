@@ -5,6 +5,7 @@ import {
   Transformer,
 } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { getHelperIdentifier } from "../transformers/opaque-ref/import-resolver.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -561,11 +562,15 @@ function transformMapCallback(
     transformedBody,
   );
 
-  // Wrap in recipe()
+  // Wrap in recipe() using the proper imported identifier
+  const recipeIdentifier = getHelperIdentifier(factory, context.sourceFile, "recipe");
   const recipeCall = factory.createCallExpression(
-    factory.createIdentifier("recipe"),
+    recipeIdentifier,
     undefined,
-    [newCallback],
+    [
+      factory.createStringLiteral("map with pattern including captures"),
+      newCallback,
+    ],
   );
 
   // Create the params object
