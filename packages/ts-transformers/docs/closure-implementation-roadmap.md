@@ -17,7 +17,8 @@ a clean, standalone architecture.
 
 1. **Standalone Closure Transformer** (`src/closures/transformer.ts`)
    - Independent of opaque-ref transformer
-   - Transforms map callbacks on `OpaqueRef<T[]>` and `Cell<T[]>` that have captures
+   - Transforms map callbacks on `OpaqueRef<T[]>` and `Cell<T[]>` that have
+     captures
    - Does NOT transform plain `T[].map()`
    - Runs FIRST in the pipeline
    - Self-contained with own import management
@@ -59,7 +60,8 @@ a clean, standalone architecture.
    - TypeChecker built from original program
    - Both reference same nodes → `node === func` works!
 
-4. **Reactive Arrays Only**: Transform `OpaqueRef<T[]>.map()` and `Cell<T[]>.map()`
+4. **Reactive Arrays Only**: Transform `OpaqueRef<T[]>.map()` and
+   `Cell<T[]>.map()`
    - Targets reactive array map operations
    - Does NOT transform plain array maps
    - Selectively captures variables (excludes module-scoped and functions)
@@ -134,17 +136,13 @@ cellRef.map((item) => item * multiplier); // Left as-is
 
 #### Edge Cases Handled
 
-✅ Nested property access (`state.user.name`)
-✅ Multiple captures (selective - excludes module-scoped/functions)
-✅ Module-scoped constants/functions (NOT captured)
-✅ Handler functions (NOT captured)
-✅ Nested callbacks (DOES capture from parent callback scope)
-✅ JSX elements and attributes (not captured)
-✅ Variables declared inside callback (not captured)
-✅ Callback parameters (not captured)
-✅ Index parameter preservation
-✅ Plain arrays (not transformed)
-✅ Cell arrays (ARE transformed)
+✅ Nested property access (`state.user.name`) ✅ Multiple captures (selective -
+excludes module-scoped/functions) ✅ Module-scoped constants/functions (NOT
+captured) ✅ Handler functions (NOT captured) ✅ Nested callbacks (DOES capture
+from parent callback scope) ✅ JSX elements and attributes (not captured) ✅
+Variables declared inside callback (not captured) ✅ Callback parameters (not
+captured) ✅ Index parameter preservation ✅ Plain arrays (not transformed) ✅
+Cell arrays (ARE transformed)
 
 #### Test Coverage
 
@@ -421,7 +419,8 @@ const isWithin = declStart >= callbackStart && declEnd <= callbackEnd;
    - Functions can't be serialized (don't capture)
    - Parent callback scope SHOULD be captured (enables nested maps)
 5. **TypeChecker is Static**: Always references original source, never updated
-6. **Transformation Order Matters**: Nested callbacks must transform before parameter replacement
+6. **Transformation Order Matters**: Nested callbacks must transform before
+   parameter replacement
 
 ## Open Questions
 
