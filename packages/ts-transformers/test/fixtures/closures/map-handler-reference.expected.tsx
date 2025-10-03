@@ -62,7 +62,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.map(recipe(({ elem, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
+        {state.items.map_with_pattern(recipe(({ elem, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
             {elem.name}
           </ct-button>)), { count: state.count })}
       </div>),

@@ -64,10 +64,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.map(recipe(({ elem, params: { prefix } }) => (<div>
+        {state.items.map_with_pattern(recipe(({ elem, params: { prefix } }) => (<div>
             {prefix}: {elem.name}
             <ul>
-              {elem.tags.map(recipe(({ elem, params: { name } }) => (<li>{name} - {elem.name}</li>)), { name: elem.name })}
+              {elem.tags.map_with_pattern(recipe(({ elem, params: { name } }) => (<li>{name} - {elem.name}</li>)), { name: elem.name })}
             </ul>
           </div>)), { prefix: state.prefix })}
       </div>),

@@ -571,9 +571,19 @@ function transformMapCallback(
   // Create the params object
   const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
-  // Return the transformed map call with recipe as first arg, params as second arg
+  // Create map_with_pattern property access (e.g., state.items.map_with_pattern)
+  // mapCall.expression is a PropertyAccessExpression like state.items.map
+  // We need to replace "map" with "map_with_pattern"
+  const mapWithPatternAccess = ts.isPropertyAccessExpression(mapCall.expression)
+    ? factory.createPropertyAccessExpression(
+      mapCall.expression.expression, // state.items
+      factory.createIdentifier("map_with_pattern"),
+    )
+    : factory.createIdentifier("map_with_pattern"); // Fallback (shouldn't happen)
+
+  // Return the transformed map_with_pattern call with recipe as first arg, params as second arg
   return factory.createCallExpression(
-    mapCall.expression,
+    mapWithPatternAccess,
     mapCall.typeArguments,
     [recipeCall, paramsObject],
   );
