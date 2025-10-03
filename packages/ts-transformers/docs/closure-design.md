@@ -511,19 +511,23 @@ transformed nodes that TypeChecker can't provide.
 
 ### Motivation
 
-To provide clear compile-time errors when the transformer emits incorrect transformations, we introduce a new `map_with_pattern` method (patterns = recipes) instead of overloading the existing `map` method. This ensures:
+To provide clear compile-time errors when the transformer emits incorrect
+transformations, we introduce a new `map_with_pattern` method (patterns =
+recipes) instead of overloading the existing `map` method. This ensures:
 
 1. **Type safety**: Wrong transformations fail at compile time, not runtime
-2. **Clear distinction**: Explicit separation between regular map and closure-transformed map
+2. **Clear distinction**: Explicit separation between regular map and
+   closure-transformed map
 3. **Debugging**: Easy to identify which map variant is being used
 
 ### Implementation
 
 **OpaqueRef/Cell method** (`opaque-ref.ts`):
+
 ```typescript
-map_with_pattern: <S>(
-  op: Recipe,  // Already wrapped by transformer
-  params: Record<string, any>,  // Captured variables
+map_with_pattern: (<S>(
+  op: Recipe, // Already wrapped by transformer
+  params: Record<string, any>, // Captured variables
 ) => {
   mapWithPatternFactory ||= createNodeFactory({
     type: "ref",
@@ -531,13 +535,14 @@ map_with_pattern: <S>(
   });
   return mapWithPatternFactory({
     list: proxy,
-    op: op,  // Don't wrap - already a recipe!
+    op: op, // Don't wrap - already a recipe!
     params: params,
   });
-}
+});
 ```
 
 **Runtime builtin** (`map_with_pattern.ts`):
+
 - Similar to `map.ts` but accepts `params` in schema
 - Schema:
   ```typescript
@@ -551,6 +556,7 @@ map_with_pattern: <S>(
 - No recipe wrapping (already wrapped by transformer)
 
 **Transformer output**:
+
 ```typescript
 // Before (Phase 1 - incorrect):
 state.items.map(recipe(({ elem, params: { discount } }) => ...), { discount: state.discount })
@@ -564,12 +570,12 @@ state.items.map_with_pattern(
 
 ### Key Differences from Regular map
 
-| Aspect | `map()` | `map_with_pattern()` |
-|--------|---------|---------------------|
-| Recipe wrapping | Wraps callback in recipe | Receives pre-wrapped recipe |
-| Parameters | `{ element, index, array }` | `{ elem, index, params }` |
-| Params argument | No params | Accepts params object |
-| Use case | Normal mapping | Closure-transformed mapping |
+| Aspect          | `map()`                     | `map_with_pattern()`        |
+| --------------- | --------------------------- | --------------------------- |
+| Recipe wrapping | Wraps callback in recipe    | Receives pre-wrapped recipe |
+| Parameters      | `{ element, index, array }` | `{ elem, index, params }`   |
+| Params argument | No params                   | Accepts params object       |
+| Use case        | Normal mapping              | Closure-transformed mapping |
 
 ## Future Extensions
 
