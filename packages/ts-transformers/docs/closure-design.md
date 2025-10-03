@@ -155,8 +155,9 @@ function isDeclaredWithinCallback(
    - Module-level constants and functions (not captured)
    - Handlers and function calls (not captured - can't serialize)
 
-**Important**: We capture variables from outer scopes (reactive and non-reactive,
-OpaqueRef and plain) but specifically exclude:
+**Important**: We capture variables from outer scopes (reactive and
+non-reactive, OpaqueRef and plain) but specifically exclude:
+
 - **Module-scoped**: `const TAX_RATE = 0.08` at top level
 - **Functions**: `function formatPrice()` or `const handler = handler(...)`
 - **Globals**: Built-in JavaScript globals
@@ -232,8 +233,7 @@ state.items.map((item) => item.price * state.discount * multiplier);
 
 // Transforms to
 state.items.map(
-  recipe(({ elem, params: { discount } }) =>
-    elem.price * discount * multiplier  // multiplier used directly
+  recipe(({ elem, params: { discount } }) => elem.price * discount * multiplier // multiplier used directly
   ),
   { discount: state.discount },
 );
@@ -273,7 +273,7 @@ state.items.map(
       {elem.name}
     </ct-button>
   )),
-  { count: state.count }
+  { count: state.count },
 );
 ```
 
@@ -334,7 +334,8 @@ items.map((n) => n * multiplier); // Left as-is, no transformation
 
 ### Module-Scoped Detection
 
-Module-scoped declarations (top-level constants and functions) should NOT be captured because they're globally available within the module:
+Module-scoped declarations (top-level constants and functions) should NOT be
+captured because they're globally available within the module:
 
 ```typescript
 function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
@@ -382,7 +383,8 @@ function isFunctionDeclaration(decl: ts.Declaration): boolean {
 
 ### Nested Callback Transformation Order
 
-Critical insight: Nested callbacks must be transformed BEFORE parameter replacement in the outer callback:
+Critical insight: Nested callbacks must be transformed BEFORE parameter
+replacement in the outer callback:
 
 ```typescript
 // WRONG ORDER: Transform params first, then nested callbacks
@@ -409,7 +411,8 @@ function transformMapCallback(...) {
 }
 ```
 
-This ensures nested callbacks can detect captures from parent callback scope before those identifiers are renamed.
+This ensures nested callbacks can detect captures from parent callback scope
+before those identifiers are renamed.
 
 ## Testing Strategy
 
@@ -442,6 +445,7 @@ Configuration in `test/fixture-based.test.ts`:
 All 70 fixture tests passing, including:
 
 **Map Callback Tests (14 tests)**:
+
 - ✅ Single captured variable
 - ✅ Multiple captured variables (selective)
 - ✅ Module-scoped constants (NOT captured)
