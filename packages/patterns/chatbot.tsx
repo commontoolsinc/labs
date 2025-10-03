@@ -23,14 +23,51 @@ import {
 import { MentionableCharm } from "./chatbot-list-view.tsx";
 
 const sendMessage = handler<
-  { detail: { message: string } },
+  {
+    detail: {
+      text: string;
+      attachments: Array<PromptAttachment>;
+      mentions: Array<any>;
+      message: string; // Backward compatibility
+    };
+  },
   {
     addMessage: Stream<BuiltInLLMMessage>;
+    allAttachments: Cell<Array<PromptAttachment>>;
   }
->((event, { addMessage }) => {
+>((event, { addMessage, allAttachments }) => {
+  const { text, attachments = [] } = event.detail;
+
+  // Add new attachments to the growing list
+  const current = allAttachments.get() || [];
+  allAttachments.set([...current, ...attachments]);
+
+  // Build content array from text and attachments
+  const contentParts = [{ type: "text" as const, text }];
+
+  // Process attachments
+  for (const attachment of attachments) {
+    if (attachment.type === "file" && attachment.data) {
+      // TODO: Convert File to multimodal content block
+      // For now, add a text reference
+      contentParts.push({
+        type: "text" as const,
+        text: `[Attached file: ${attachment.name}]`,
+      });
+    } else if (attachment.type === "clipboard" && attachment.data) {
+      // Append clipboard content as additional context
+      contentParts.push({
+        type: "text" as const,
+        text: `\n\n--- Pasted content ---\n${attachment.data}`,
+      });
+    }
+    // Note: mentions are already in the text as clean names
+    // The charm references are available in attachment.charm if needed
+  }
+
   addMessage.send({
     role: "user",
-    content: [{ type: "text", text: event.detail.message }],
+    content: contentParts,
   });
 });
 
@@ -54,12 +91,21 @@ type ChatInput = {
   mentionable: Cell<MentionableCharm[]>;
 };
 
+type PromptAttachment = {
+  id: string;
+  name: string;
+  type: "file" | "clipboard" | "mention";
+  data?: any; // File | Blob | string
+  charm?: any;
+};
+
 type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
   cancelGeneration: Stream<void>;
   title?: string;
+  attachments: Array<PromptAttachment>;
 };
 
 export const TitleGenerator = recipe<
@@ -104,6 +150,7 @@ export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme, mentionable }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
+    const allAttachments = cell<Array<PromptAttachment>>([]);
 
     const { addMessage, cancelGeneration, pending } = llmDialog({
       system: "You are a helpful assistant with some tools.",
@@ -132,10 +179,13 @@ export default recipe<ChatInput, ChatOutput>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <ct-hstack justify="between" slot="header">
+          <ct-vstack slot="header">
             <ct-heading level={4}>{title}</ct-heading>
-            <ct-tools-chip tools={tools} />
-          </ct-hstack>
+            <ct-hstack gap="normal">
+              <ct-attachments-bar attachments={allAttachments} />
+              <ct-tools-chip tools={tools} />
+            </ct-hstack>
+          </ct-vstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
             <ct-chat
@@ -151,7 +201,7 @@ export default recipe<ChatInput, ChatOutput>(
               placeholder="Ask the LLM a question..."
               pending={pending}
               $mentionable={mentionable}
-              onct-send={sendMessage({ addMessage })}
+              onct-send={sendMessage({ addMessage, allAttachments })}
               onct-stop={cancelGeneration}
             />
             <ct-select
@@ -166,6 +216,7 @@ export default recipe<ChatInput, ChatOutput>(
       addMessage,
       cancelGeneration,
       title,
+      attachments: allAttachments,
     };
   },
 );

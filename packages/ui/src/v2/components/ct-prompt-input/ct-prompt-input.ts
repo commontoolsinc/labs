@@ -18,6 +18,7 @@ import {
 import { MentionController } from "../../core/mention-controller.ts";
 import { applyMenuPosition } from "../../core/menu-position.ts";
 import "../ct-button/ct-button.ts";
+import "../ct-chip/ct-chip.ts";
 
 /**
  * Attachment data structure
@@ -246,93 +247,6 @@ export class CTPromptInput extends BaseElement {
             display: flex;
             flex-wrap: wrap;
             gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
-          }
-
-          .pill {
-            display: inline-flex;
-            align-items: center;
-            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
-            padding: 0.25rem 0.5rem;
-            background: var(
-              --ct-theme-surface,
-              var(--ct-color-gray-100, #f3f4f6)
-            );
-            border: 1px solid var(--ct-prompt-input-border);
-            border-radius: var(
-              --ct-theme-border-radius,
-              var(--ct-radius-full, 9999px)
-            );
-            font-size: 0.8125rem;
-            line-height: 1;
-            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
-            cursor: default;
-            user-select: none;
-          }
-
-          .pill-icon {
-            display: flex;
-            align-items: center;
-            font-size: 0.875rem;
-          }
-
-          .pill-name {
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
-
-          .pill-remove {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 1rem;
-            height: 1rem;
-            border-radius: 50%;
-            cursor: pointer;
-            transition: background-color 0.1s;
-            color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
-          }
-
-          .pill-remove:hover {
-            background: var(
-              --ct-theme-color-border,
-              var(--ct-color-gray-300, #d1d5db)
-            );
-            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
-          }
-
-          .pill[data-type="mention"] {
-            background: var(
-              --ct-theme-color-primary-surface,
-              var(--ct-color-blue-50, #eff6ff)
-            );
-            border-color: var(
-              --ct-theme-color-primary,
-              var(--ct-color-blue-200, #bfdbfe)
-            );
-            color: var(
-              --ct-theme-color-primary,
-              var(--ct-color-blue-700, #1d4ed8)
-            );
-          }
-
-          .pill[data-type="file"] {
-            background: var(
-              --ct-theme-surface,
-              var(--ct-color-gray-100, #f3f4f6)
-            );
-          }
-
-          .pill[data-type="clipboard"] {
-            background: var(
-              --ct-theme-color-accent-surface,
-              var(--ct-color-purple-50, #faf5ff)
-            );
-            border-color: var(
-              --ct-theme-color-accent,
-              var(--ct-color-purple-200, #e9d5ff)
-            );
           }
 
           /* File upload styles */
@@ -781,6 +695,20 @@ export class CTPromptInput extends BaseElement {
         }
       }
 
+      private _getAttachmentVariant(
+        type: PromptAttachment["type"],
+      ): "default" | "primary" | "accent" {
+        switch (type) {
+          case "mention":
+            return "primary";
+          case "clipboard":
+            return "accent";
+          case "file":
+          default:
+            return "default";
+        }
+      }
+
       /**
        * Render pills list for attachments
        */
@@ -795,20 +723,16 @@ export class CTPromptInput extends BaseElement {
           <div class="pills-list">
             ${attachmentsArray.map((attachment) =>
               html`
-                <div class="pill" data-type="${attachment.type}">
-                  <span class="pill-icon">${this._getAttachmentIcon(
+                <ct-chip
+                  variant="${this._getAttachmentVariant(attachment.type)}"
+                  removable
+                  @ct-remove="${() => this.removeAttachment(attachment.id)}"
+                >
+                  ${attachment.name}
+                  <span slot="icon">${this._getAttachmentIcon(
                     attachment.type,
                   )}</span>
-                  <span class="pill-name">${attachment.name}</span>
-                  <span
-                    class="pill-remove"
-                    @click="${() => this.removeAttachment(attachment.id)}"
-                    role="button"
-                    aria-label="Remove ${attachment.name}"
-                  >
-                    ×
-                  </span>
-                </div>
+                </ct-chip>
               `
             )}
           </div>
