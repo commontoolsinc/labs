@@ -144,9 +144,6 @@ describe("fetch-data mutex mechanism", () => {
     const relevantCalls = fetchCalls.filter((c) =>
       c.url.includes("/api/concurrent")
     );
-    console.log(
-      `Made ${relevantCalls.length} fetch calls for 2 concurrent requests`,
-    );
 
     // This is the key test: with mutex, redundant requests should be prevented
     expect(relevantCalls.length).toBeLessThanOrEqual(2);
