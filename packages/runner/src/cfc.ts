@@ -224,10 +224,9 @@ export class ContextualFlowControl {
         cycleTracker,
       );
     } else if (schema.$ref) {
-      // Follow the reference
-      const resolvedSchema = ContextualFlowControl.resolveSchemaRefOrThrow(
+      // Follow the references
+      const resolvedSchema = ContextualFlowControl.resolveSchemaRefsOrThrow(
         rootSchema,
-        schema.$ref,
         schema,
       );
       ContextualFlowControl.joinSchema(
@@ -341,6 +340,60 @@ export class ContextualFlowControl {
     throw Error("Improper lattice");
   }
 
+  /**
+   * Resolve a $ref in a schema, following other $ref links if needed.
+   *
+   * This doesn't currently handle $anchor tags or external documents
+   * This will follow the $ref until the top level object is not a $ref.
+   *
+   * @param rootSchema Top level document for the schema which will be used
+   *     to resolve the $ref.
+   * @param schemaObj an object containing the $ref, which may have properties
+   *     that override those in the object pointed to by the $ref.
+   * @returns an updated JSONSchema, with a schema that points to the
+   *     $ref's final target or undefined if the $ref could not be resolved.
+   */
+  static resolveSchemaRefs(
+    rootSchema: JSONSchema,
+    schemaObj: JSONSchemaObj,
+  ): JSONSchema | undefined {
+    // Track seen refs to avoid cycles
+    const seenRefs = new Set<string>();
+    while (true) {
+      const { $ref, ...rest } = schemaObj;
+      if ($ref === undefined) { // no more refs to resolve
+        return schemaObj;
+      } else if (seenRefs.has($ref)) {
+        // Cycle -- equivalent to non-existent ref
+        return undefined;
+      }
+      seenRefs.add($ref);
+      const resolved = ContextualFlowControl.resolveSchemaRef(
+        rootSchema,
+        $ref,
+      );
+      if (resolved === undefined) { // Non-existent ref
+        return undefined;
+      }
+      // If we have other properties, we need to keep them as we resolve refs.
+      // They will override any properties in those refs.
+      if (Object.keys(rest).length > 0) {
+        if (isRecord(resolved)) {
+          // Merge our attributes with those in the ref
+          schemaObj = { ...resolved, ...rest } as JSONSchemaObj;
+        } else {
+          // Resolved to a boolean schema, so we can stop
+          const schema = ContextualFlowControl.toSchemaObj(resolved);
+          schemaObj = { ...schema, ...rest } as JSONSchemaObj;
+        }
+      } else if (typeof resolved === "boolean") {
+        return resolved;
+      } else {
+        schemaObj = resolved;
+      }
+    }
+  }
+
   // TODO(@ubik2): We may need to collect ifc labels as we walk the tree
   // This could be dome similarly to schemaAtPath, but that assumes
   // our cursor points at a schema, while we will walk objects like the
@@ -353,18 +406,18 @@ export class ContextualFlowControl {
    * Resolve a $ref in a schema.
    * This doesn't currently handle $anchor tags or external documents
    *
+   * If the schemaRef points to an object that is also a $ref, this will not
+   * follow that link. Use resolveSchemaRefs for that behavior.
+   *
    * @param rootSchema Top level document for the schema which will be used
    *     to resolve the $ref.
    * @param schemaRef the string value of the $ref
-   * @param schemaObj an optional object containing the $ref, which may have
-   *     properties that override those in the object pointed to by the $ref.
    * @returns an updated SchemaContext, with a schema that points to the
    *     $ref's target or undefined if the $ref could not be resolved.
    */
   static resolveSchemaRef(
     rootSchema: JSONSchema,
     schemaRef: string,
-    schemaObj?: JSONSchemaObj,
   ): JSONSchema | undefined {
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
@@ -391,39 +444,24 @@ export class ContextualFlowControl {
       }
       schemaCursor = schemaCursor[pathToDef[i]];
     }
-    if (schemaObj !== undefined) {
-      const { $ref, ...rest } = schemaObj;
-      if (Object.keys(rest).length > 0) {
-        if (isRecord(schemaCursor)) {
-          return { ...schemaCursor, ...rest } as JSONSchema;
-        } else if (typeof schemaCursor === "boolean") {
-          const schema = ContextualFlowControl.toSchemaObj(schemaCursor);
-          return { ...schema, ...rest } as JSONSchema;
-        }
-      }
-    }
     return schemaCursor as JSONSchema;
   }
 
-  static resolveSchemaRefOrThrow(
+  static resolveSchemaRefsOrThrow(
     rootSchema: JSONSchema | undefined,
-    schemaRef: string | undefined,
-    schemaObj?: JSONSchemaObj,
+    schemaObj: JSONSchemaObj,
   ) {
     if (!isObject(rootSchema)) {
       // We'd need a rootSchema to make this work
       // We don't need to do real cycle detection, since the path is limited
       throw new Error("Found $ref without rootSchema object");
-    } else if (typeof schemaRef !== "string") {
-      throw new Error("Found non-string $ref");
     }
-    const resolved = ContextualFlowControl.resolveSchemaRef(
+    const resolved = ContextualFlowControl.resolveSchemaRefs(
       rootSchema,
-      schemaRef,
       schemaObj,
     );
     if (resolved === undefined) {
-      throw new Error(`Failed to resolve $ref: "${schemaRef}"`);
+      throw new Error(`Failed to resolve $ref in ${JSON.stringify(schemaObj)}`);
     }
     return resolved;
   }
@@ -483,9 +521,8 @@ export class ContextualFlowControl {
       // If the cursor is a $ref, get the target location
       if (isObject(cursor) && "$ref" in cursor) {
         // Follow the reference
-        cursor = ContextualFlowControl.resolveSchemaRefOrThrow(
+        cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           rootSchema,
-          cursor.$ref,
           cursor,
         );
       }
@@ -564,6 +601,14 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays
         return false;
       }
+    }
+    // If the cursor is a $ref, get the target location
+    if (isObject(cursor) && "$ref" in cursor) {
+      // Follow the reference
+      cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        rootSchema,
+        cursor,
+      );
     }
     if (
       isObject(cursor) && cursor.ifc !== undefined &&
