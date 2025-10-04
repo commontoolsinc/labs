@@ -59,9 +59,8 @@ export function resolveSchema(
 
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string" && rootSchema !== undefined) {
-    const resolved = ContextualFlowControl.resolveSchemaRef(
+    const resolved = ContextualFlowControl.resolveSchemaRefs(
       rootSchema,
-      schema.$ref,
       schema,
     );
     if (!isObject(resolved)) {

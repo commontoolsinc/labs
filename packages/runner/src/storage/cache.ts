@@ -524,11 +524,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           return true;
         }
         if (item.$ref !== undefined && isObject(rootSchema)) {
-          item = ContextualFlowControl.resolveSchemaRef(
-            rootSchema,
-            item.$ref,
-            item,
-          );
+          item = ContextualFlowControl.resolveSchemaRefs(rootSchema, item);
           // We might match after resolving the `$ref`
           return JSON.stringify(item) === schemaString;
         }
