@@ -90,34 +90,35 @@ const handleCharmLinkClicked = handler(
   },
 );
 
+const computeBacklinks = lift<
+  { allCharms: Cell<MentionableCharm[]>; self: Cell<MentionableCharm> },
+  MentionableCharm[]
+>(
+  ({ allCharms, self }) => {
+    const cs = allCharms.get();
+    if (!cs) return [];
+
+    const results = [];
+
+    for (let i = 0; i < cs.length; i++) {
+      const c = cs[i];
+      if (c.mentioned?.some((m) => self.equals(allCharms.key(i)))) {
+        results.push(c);
+      }
+    }
+
+    return results;
+  },
+);
+
 const Note = recipe<Input, Output>(
   "Note",
-  ({ title, content, allCharms }) => {
+  function (this: any, { title, content, allCharms }) {
     const mentioned = cell<MentionableCharm[]>([]);
-
-    const computeBacklinks = lift<
-      { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
-      MentionableCharm[]
-    >(
-      ({ allCharms, content }) => {
-        const cs = allCharms.get();
-        if (!cs) return [];
-
-        const self = cs.find((c) => c.content === content.get());
-
-        const results = self
-          ? cs.filter((c) =>
-            c.mentioned?.some((m) => m.content === self.content) ?? false
-          )
-          : [];
-
-        return results;
-      },
-    );
 
     const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
       allCharms,
-      content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
+      self: this,
     });
 
     // The only way to serialize a pattern, apparently?

@@ -109,7 +109,8 @@ export function recipe<T, R>(
       : argumentSchema as JSONSchema | undefined,
   );
 
-  const outputs = fn!(inputs);
+  const self = opaqueRef<Required<R>>(undefined, resultSchema);
+  const outputs = fn!.bind(self)(inputs);
 
   applyInputIfcToOutput(inputs, outputs);
 
@@ -118,6 +119,7 @@ export function recipe<T, R>(
     resultSchema,
     inputs,
     outputs,
+    self,
   );
   popFrame(frame);
   return result;
@@ -135,8 +137,15 @@ export function recipeFromFrame<T, R>(
       ? undefined
       : argumentSchema as JSONSchema | undefined,
   );
-  const outputs = fn(inputs);
-  return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
+  const self = opaqueRef<Required<R>>(undefined, resultSchema);
+  const outputs = fn.bind(self)(inputs);
+  return factoryFromRecipe<T, R>(
+    argumentSchema,
+    resultSchema,
+    inputs,
+    outputs,
+    self,
+  );
 }
 
 function factoryFromRecipe<T, R>(
@@ -144,6 +153,7 @@ function factoryFromRecipe<T, R>(
   resultSchemaArg: JSONSchema | undefined,
   inputs: OpaqueRef<T>,
   outputs: Opaque<R>,
+  self: OpaqueRef<R>,
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
@@ -185,6 +195,7 @@ function factoryFromRecipe<T, R>(
     });
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
+  collectCellsAndNodes(self);
 
   applyInputIfcToOutput(inputs, outputs);
 
@@ -244,6 +255,7 @@ function factoryFromRecipe<T, R>(
 
   // Add the inputs default path
   paths.set(inputs, ["argument"]);
+  paths.set(self, ["resultRef"]);
 
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers
