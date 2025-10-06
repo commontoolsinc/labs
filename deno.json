@@ -91,7 +91,8 @@
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
-      "packages/vendor-astral"
+      "packages/vendor-astral",
+      "tutorials/"
     ]
   },
   "imports": {

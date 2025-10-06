@@ -254,9 +254,10 @@ export class Scheduler implements IScheduler {
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
-                // (Empty dependencies are fine, since it's already being
-                // scheduled for execution.)
-                this.subscribe(action, { reads: [], writes: [] }, true);
+                // Must re-subscribe to ensure dependencies are set before
+                // topologicalSort runs in execute(). Use the log from below
+                // which has the correct dependencies from the previous run.
+                this.subscribe(action, log, true);
               }
             } else {
               // Clear retries after successful commit.

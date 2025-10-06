@@ -1,0 +1,13 @@
+{
+  "name": "common-tools-guide",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build": "myst build --html",
+    "clean": "myst clean --cache || true",
+    "dev": "myst start"
+  },
+  "devDependencies": {
+    "mystmd": "^1.0.0"
+  }
+}
