@@ -29,6 +29,9 @@ RUN curl -fsSL https://tailscale.com/install.sh | sh
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs
 
+# Claude CLI (Claude Code)
+RUN npm install -g @anthropic-ai/claude-code
+
 # Deno
 RUN curl -fsSL https://deno.land/install.sh | sh
 
