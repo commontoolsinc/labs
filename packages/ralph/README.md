@@ -57,6 +57,8 @@ $ docker rm ralph
 - update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
+- move ralph script into ./packages/ralph
+- make ralph easy to run
 - DONE - Add codex and claude packages
 - DONE - write section how to run ralph in this file
 - DONE - git clone the common tools repositories
