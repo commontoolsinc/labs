@@ -22,9 +22,16 @@ Note for `docker run`:
 
 Connecting to the running container:
 ```bash
-docker exec -it ralph bash
+$ docker exec -it ralph bash
 ```
 We are using the `--name ralph` we specified earlier to connect.
+
+## Removing ralph
+You must remove the existing version if you want to run a newer build:
+```bash
+$ docker stop ralph
+$ docker rm ralph
+```
 
 ## TODO
 * Configure tailscale to start up
