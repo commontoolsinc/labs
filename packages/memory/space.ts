@@ -235,6 +235,7 @@ class Space<Subject extends MemorySpace = MemorySpace>
       addMemoryAttributes(span, {
         operation: "querySchema",
         space: this.subject,
+        selector: JSON.stringify(source.args.selectSchema),
       });
 
       return querySchema(this, source);
