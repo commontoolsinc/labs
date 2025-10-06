@@ -1,0 +1,7 @@
+# Node / tooling
+node_modules/
+npm-debug.log*
+
+# Myst build output
+_build/
+.cache/
