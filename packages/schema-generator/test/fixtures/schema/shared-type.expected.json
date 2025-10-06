@@ -1,34 +1,27 @@
 {
+  "$defs": {
+    "Shared": {
+      "properties": {
+        "a": {
+          "type": "number"
+        },
+        "b": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "one": {
-      "properties": {
-        "a": {
-          "type": "number"
-        },
-        "b": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "a",
-        "b"
-      ],
-      "type": "object"
+      "$ref": "#/$defs/Shared"
     },
     "two": {
-      "properties": {
-        "a": {
-          "type": "number"
-        },
-        "b": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "a",
-        "b"
-      ],
-      "type": "object"
+      "$ref": "#/$defs/Shared"
     }
   },
   "required": [
