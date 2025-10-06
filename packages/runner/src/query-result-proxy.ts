@@ -11,6 +11,7 @@ import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
+import { validateAndTransform } from "./schema.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -93,6 +94,15 @@ export function createQueryResultProxy<T>(
   const txStatus = tx?.status();
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLink(readTx, link);
+
+  // If the resolved link has a schema, use validateAndTransform which handles
+  // schema-based transformations (defaults, allOf, etc.) instead of creating a
+  // proxy. Don't do this on top level, since we might have been called from
+  // validateAndTransform.
+  if (link.schema && depth > 0) {
+    return validateAndTransform(runtime, tx, link);
+  }
+
   const value = readTx.readValueOrThrow(link) as any;
 
   if (!isRecord(value) || Object.isFrozen(value)) return value;
@@ -192,6 +202,7 @@ export function createQueryResultProxy<T>(
                   tx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
+                  depth + 1,
                 )
               );
             }
@@ -305,13 +316,14 @@ const createProxyForArrayValue = (
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
+  depth: number,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link);
+      return createQueryResultProxy(runtime, tx, link, depth);
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link));
+      return String(createQueryResultProxy(runtime, tx, link, depth));
     },
     [originalIndex]: source,
   };
