@@ -412,94 +412,154 @@ export function validateAndTransform(
 
   // Handle allOf - must satisfy ALL schemas (intersection)
   if (Array.isArray(schema.allOf)) {
-    const branches = schema.allOf
-      .map((branch) => resolveSchema(branch, rootSchema))
-      .filter((b) => b !== undefined);
+    let allBranches: JSONSchema[] = [];
 
-    if (branches.length === 0) return undefined;
+    let parentDefault = schema.default;
+    let parentAsCell = schema.asCell;
+    let parentAsStream = schema.asStream;
 
-    // Use extracted defaults/asCell/asStream from parent schema (already
-    // extracted by createAllOf)
-    const parentDefault = schema.default;
-    const parentAsCell = schema.asCell;
-    const parentAsStream = schema.asStream;
+    const stack = schema.allOf.filter((b) => b !== undefined);
 
-    // Merge all properties from branches for the schema
-    const allProperties: Record<string, JSONSchema> = {};
-    const allRequired = new Set<string>();
-    let mergedAdditionalProperties: boolean | JSONSchema | undefined;
-    let hasAdditionalPropertiesConstraint = false;
+    while (stack.length > 0) {
+      const candidate = resolveSchema(stack.pop()!, rootSchema);
 
-    for (const branch of branches) {
-      if (isObject(branch) && branch.type === "object") {
-        // Merge properties
-        if (branch.properties) {
-          for (const [key, propSchema] of Object.entries(branch.properties)) {
-            if (!allProperties[key]) {
-              allProperties[key] = propSchema;
-            } else {
-              // Property appears in multiple branches, create nested allOf
-              const existing = allProperties[key];
-              // Flatten nested allOf arrays to prevent deep nesting
-              const existingSchemas = isObject(existing) &&
-                  Array.isArray(existing.allOf)
-                ? existing.allOf
-                : [existing];
-              allProperties[key] = createAllOf([
-                ...existingSchemas,
-                propSchema,
-              ])!;
+      // If any subschema is invalid, the whole allOf is invalid
+      if (candidate === undefined) return undefined;
+
+      // If the subschema is an allOf, we need to merge it with the parent
+      if (isObject(candidate) && Array.isArray(candidate.allOf)) {
+        if (!parentDefault && candidate.default) {
+          parentDefault = candidate.default;
+        }
+        if (!parentAsCell && !parentAsStream) {
+          if (candidate.asCell) parentAsCell = true;
+          if (candidate.asStream) parentAsStream = true;
+        }
+        for (let i = candidate.allOf.length - 1; i >= 0; i--) {
+          stack.push(candidate.allOf[i]);
+        }
+      } else {
+        // Otherwise, it's a regular schema, so we can add it to the branches
+        allBranches.push(candidate);
+      }
+    }
+
+    allBranches.reverse();
+
+    // Empty allOf or any false branches means nothing will match
+    if (allBranches.length === 0 || allBranches.some((b) => b === false)) {
+      return undefined;
+    }
+
+    // Filter out true branches
+    allBranches = allBranches.filter((b) =>
+      b !== true || ContextualFlowControl.isTrueSchema(b)
+    );
+
+    if (allBranches.some((b) => !isObject(b))) {
+      return undefined;
+    }
+
+    const branches = allBranches as (JSONSchema & object)[];
+
+    const baseSchema = {
+      ...(parentDefault !== undefined && { default: parentDefault }),
+      ...(parentAsCell && { asCell: true }),
+      ...(parentAsStream && { asStream: true }),
+    };
+
+    if (branches.length === 0) {
+      // We caught the `never` case above, so if we have an empty allOf array
+      // now, it means we match everything.
+      schema = baseSchema;
+    } else if (branches.length === 1) {
+      schema = { ...branches[0], ...baseSchema };
+    } else {
+      const types = new Set(
+        branches.map((b) => b.type).filter((t) => t !== undefined),
+      );
+      if (types.size > 1) {
+        // If there are more than one type, we can't merge them
+        return undefined;
+      }
+      if (!types.has("object")) {
+        // TODO(seefeld): Properly intersect the types, handle enum, const, etc.
+        schema = { ...branches[0], ...baseSchema };
+      } else {
+        // Merge all properties from branches for the schema
+        const allProperties: Record<string, JSONSchema> = {};
+        const allRequired: Set<string> = new Set();
+        let mergedAdditionalProperties: boolean | JSONSchema | undefined;
+        let hasAdditionalPropertiesConstraint = false;
+
+        for (const branch of branches) {
+          if (isObject(branch) && branch.type === "object") {
+            // Merge properties - union of all properties
+            if (branch.properties) {
+              for (
+                const [key, propSchema] of Object.entries(branch.properties)
+              ) {
+                if (allProperties[key] === undefined) {
+                  allProperties[key] = propSchema;
+                } else {
+                  // Property appears in multiple branches, create nested allOf
+                  const existing = allProperties[key];
+                  const existingSchemas = isObject(existing) &&
+                      Array.isArray(existing.allOf)
+                    ? existing.allOf
+                    : [existing];
+                  allProperties[key] = createAllOf([
+                    ...existingSchemas,
+                    propSchema,
+                  ])!;
+                }
+              }
+            }
+
+            // Merge required fields - union (all required fields from all branches)
+            if (Array.isArray(branch.required)) {
+              for (const field of branch.required) {
+                allRequired.add(field);
+              }
+            }
+
+            // Merge additionalProperties - false wins (strictest constraint)
+            if ("additionalProperties" in branch) {
+              hasAdditionalPropertiesConstraint = true;
+              const branchAdditional = branch.additionalProperties;
+              if (branchAdditional === false) {
+                mergedAdditionalProperties = false;
+              } else if (
+                mergedAdditionalProperties !== false &&
+                branchAdditional !== undefined
+              ) {
+                mergedAdditionalProperties = branchAdditional;
+              }
             }
           }
         }
 
-        // Merge required fields (union - must satisfy all)
-        if (Array.isArray(branch.required)) {
-          branch.required.forEach((r) => allRequired.add(r));
-        }
-
-        // Merge additionalProperties (intersection - false wins over true)
-        if ("additionalProperties" in branch) {
-          hasAdditionalPropertiesConstraint = true;
-          const branchAdditional = branch.additionalProperties;
-          if (branchAdditional === false) {
-            mergedAdditionalProperties = false;
-          } else if (
-            mergedAdditionalProperties !== false &&
-            branchAdditional !== undefined
-          ) {
-            // If current is not false and branch has a value, use it
-            // (true or a schema object)
-            mergedAdditionalProperties = branchAdditional;
+        // Create merged schema with all collected properties and preserved parent values
+        const mergedSchema: JSONSchema = Object.keys(allProperties).length > 0
+          ? {
+            type: "object" as const,
+            properties: allProperties,
+            ...(allRequired.size > 0 && { required: Array.from(allRequired) }),
+            ...(hasAdditionalPropertiesConstraint &&
+              { additionalProperties: mergedAdditionalProperties ?? true }),
           }
-        }
+          : {
+            // No properties to merge - keep the allOf with branches to preserve type/enum/etc
+            allOf: branches,
+            ...(parentDefault !== undefined && { default: parentDefault }),
+            ...(parentAsCell && { asCell: true }),
+            ...(parentAsStream ? { asStream: true } : {}),
+          };
+
+        // Update finalSchema to the merged schema and continue processing below
+        schema = mergedSchema;
       }
     }
-
-    // Create merged schema with all collected properties and preserved parent values
-    const mergedSchema: JSONSchema = Object.keys(allProperties).length > 0
-      ? {
-        type: "object" as const,
-        properties: allProperties,
-        ...(allRequired.size > 0 ? { required: Array.from(allRequired) } : {}),
-        ...(hasAdditionalPropertiesConstraint
-          ? { additionalProperties: mergedAdditionalProperties ?? true }
-          : {}),
-        ...(parentDefault !== undefined ? { default: parentDefault } : {}),
-        ...(parentAsCell ? { asCell: true } : {}),
-        ...(parentAsStream ? { asStream: true } : {}),
-      }
-      : {
-        // No properties to merge - keep the allOf with branches to preserve type/enum/etc
-        allOf: branches,
-        ...(parentDefault !== undefined ? { default: parentDefault } : {}),
-        ...(parentAsCell ? { asCell: true } : {}),
-        ...(parentAsStream ? { asStream: true } : {}),
-      };
-
-    // Update finalSchema to the merged schema and continue processing below
-    schema = mergedSchema;
-    // Fall through to continue processing with the merged schema
   }
 
   // TODO(seefeld): The behavior when one of the options is very permissive
@@ -819,16 +879,6 @@ export function validateAndTransform(
   }
 
   // For primitive types, return as is
-  if (value === undefined && schema.default !== undefined) {
-    const result = processDefaultValue(
-      runtime,
-      tx,
-      { ...ref, schema },
-      schema.default,
-    );
-    seen.push([seenKey, result]);
-    return result; // processDefaultValue already annotates with back to cell
-  }
 
   // Add the current value to seen before returning
   seen.push([seenKey, value]);
