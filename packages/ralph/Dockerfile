@@ -32,6 +32,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # Claude CLI (Claude Code)
 RUN npm install -g @anthropic-ai/claude-code
 
+# Codex CLI - AI coding assistant
+RUN npm install -g @openai/codex
+
 # Deno
 RUN curl -fsSL https://deno.land/install.sh | sh
 

@@ -3,6 +3,8 @@ Docker container to run the Common Tools servers
 
 Ability to run [Ralph](https://ghuntley.com/ralph/)
 
+Claude CLI and Codex are installed
+
 ## How to run Ralph
 
 Running Docker locally (not pushing changes to repositories):
@@ -35,11 +37,11 @@ $ docker rm ralph
 
 ## TODO
 * Configure tailscale to start up
-* Add codex and claude packages
 * git clone the common tools repositories
 * add playwright with mcp
 * start up toolshed server
 * start up shell server
 * push a working image to a docker hub
 * update README to use image from dockerhub 
+* DONE - Add codex and claude packages
 * DONE - write section how to run ralph in this file
