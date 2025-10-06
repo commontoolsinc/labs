@@ -28,7 +28,7 @@ $ docker exec -it ralph bash           # Connect as root (if needed for admin ta
 If you want to build the image yourself with local modifications:
 
 ```bash
-$ cd ./packages/ralph
+$ cd ./tools/ralph
 $ docker build -t ralph .
 $ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ralph
 ```
@@ -81,7 +81,8 @@ $ docker push <user_name>/ralph
 - update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
-- move ralph script into ./packages/ralph
+- change permissions so claude auto updater will work
+- DONE - move ralph script into ./tools/ralph
 - make ralph easy to run
 - DONE - Add codex and claude packages
 - DONE - write section how to run ralph in this file
