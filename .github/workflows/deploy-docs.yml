@@ -4,18 +4,18 @@ on:
   push:
     branches: [main, migrate-tutorials]
     paths:
-      - 'tutorials/**'
-      - '.github/workflows/deploy-docs.yml'
+      - "tutorials/**"
+      - ".github/workflows/deploy-docs.yml"
   pull_request:
     branches: [main]
     paths:
-      - 'tutorials/**'
-      - '.github/workflows/deploy-docs.yml'
+      - "tutorials/**"
+      - ".github/workflows/deploy-docs.yml"
   workflow_dispatch: # Allow manual trigger
 
 env:
   # For custom domain docs.commontools.dev, we don't need a subfolder
-  BASE_URL: ''
+  BASE_URL: ""
 
 permissions:
   contents: read
@@ -23,7 +23,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: 'pages'
+  group: "pages"
   cancel-in-progress: false
 
 jobs:
@@ -36,8 +36,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: tutorials/package-lock.json
 
       - name: Install dependencies
@@ -54,7 +54,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'tutorials/_build/html'
+          path: "tutorials/_build/html"
 
   deploy:
     # Only deploy from main and migrate-tutorials branches, not from PRs

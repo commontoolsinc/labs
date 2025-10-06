@@ -35,7 +35,7 @@ jobs:
         run: deno task check
 
       - name: 🔎 Check codebase formatting
-        run: deno fmt --check --ignore=tutorials
+        run: deno fmt --check
 
       - name: 🔎 Check derived artifacts
         working-directory: packages/static
