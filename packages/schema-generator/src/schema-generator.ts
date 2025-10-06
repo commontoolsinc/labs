@@ -125,9 +125,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
   ): string {
     const existing = context.anonymousNames.get(type);
-    if (existing) {
-      return existing;
-    }
+    if (existing) return existing;
     const synthetic = `AnonymousType_${++context.anonymousNameCounter}`;
     context.anonymousNames.set(type, synthetic);
     return synthetic;
