@@ -2,6 +2,11 @@ name: Deploy MyST Documentation
 
 on:
   push:
+    branches: [main, migrate-tutorials]
+    paths:
+      - 'tutorials/**'
+      - '.github/workflows/deploy-docs.yml'
+  pull_request:
     branches: [main]
     paths:
       - 'tutorials/**'
@@ -52,6 +57,8 @@ jobs:
           path: 'tutorials/_build/html'
 
   deploy:
+    # Only deploy from main and migrate-tutorials branches, not from PRs
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/migrate-tutorials')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
