@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
-import * as DefaultRecipe from "../lib/default-recipe.ts";
+import * as DefaultPattern from "../lib/default-pattern.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 
 export class XSpaceView extends BaseView {
@@ -20,7 +20,7 @@ export class XSpaceView extends BaseView {
   showShellCharmListView = false;
 
   @state()
-  creatingDefaultRecipe = false;
+  creatingDefaultPattern = false;
 
   private _charms = new Task(this, {
     task: async ([rt]) => {
@@ -34,23 +34,23 @@ export class XSpaceView extends BaseView {
     args: () => [this.rt],
   });
 
-  async onRequestDefaultRecipe(e: Event) {
+  async onRequestDefaultPattern(e: Event) {
     e.preventDefault();
-    if (this.creatingDefaultRecipe) {
+    if (this.creatingDefaultPattern) {
       return;
     }
     if (!this.rt) {
       throw new Error(
-        "Cannot create default recipe without a runtime.",
+        "Cannot create default pattern without a runtime.",
       );
     }
-    this.creatingDefaultRecipe = true;
+    this.creatingDefaultPattern = true;
     try {
-      await DefaultRecipe.create(this.rt.cc());
+      await DefaultPattern.create(this.rt.cc());
     } catch (e) {
-      console.error(`Could not create default recipe: ${e}`);
+      console.error(`Could not create default pattern: ${e}`);
     } finally {
-      this.creatingDefaultRecipe = false;
+      this.creatingDefaultPattern = false;
       this._charms.run();
     }
   }
@@ -60,8 +60,8 @@ export class XSpaceView extends BaseView {
       ? this.rt.cc().manager().getSpaceName()
       : undefined;
     const charms = this._charms.value;
-    const defaultRecipe = charms
-      ? DefaultRecipe.getDefaultRecipe(charms)
+    const defaultPattern = charms
+      ? DefaultPattern.getDefaultPattern(charms)
       : undefined;
 
     const inner = !charms
@@ -77,24 +77,24 @@ export class XSpaceView extends BaseView {
           @charm-removed="${() => this._charms.run()}"
         ></x-charm-list-view>
       `
-      : !defaultRecipe
-      ? (this.creatingDefaultRecipe
+      : !defaultPattern
+      ? (this.creatingDefaultPattern
         ? html`
           <v-box center="${true}">
-            <div>Creating default recipe...</div>
+            <div>Creating default pattern...</div>
             <x-spinner></x-spinner>
           </v-box>
         `
         : html`
           <v-box center="${true}">
-            <div>Create default recipe?</div>
+            <div>Create default pattern?</div>
             <x-button variant="primary" @click="${this
-              .onRequestDefaultRecipe}">Go!</x-button>
+              .onRequestDefaultPattern}">Go!</x-button>
           </v-box>
         `)
       // TBD if we want to use x-charm or ct-render directly here
       : html`
-        <x-charm-view .charm="${defaultRecipe}"></x-charm-view>
+        <x-charm-view .charm="${defaultPattern}"></x-charm-view>
       `;
 
     return html`
