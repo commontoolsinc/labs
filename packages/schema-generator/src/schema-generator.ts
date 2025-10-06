@@ -173,9 +173,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (!namedKey && !isWrapperContext) {
       // Only use synthetic names if we're not processing a wrapper type
       const synthetic = context.anonymousNames.get(type);
-      if (synthetic) {
-        namedKey = synthetic;
-      }
+      if (synthetic) namedKey = synthetic;
     }
     if (namedKey) {
       if (
