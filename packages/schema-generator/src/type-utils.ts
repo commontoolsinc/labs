@@ -246,7 +246,9 @@ export function getNamedTypeKey(
     name = ref.target?.symbol?.name ?? name;
   }
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
-  if (!name && aliasName) {
+  // This includes the case where symbol.name is "__type" (anonymous object literal)
+  // but the type has an explicit alias name
+  if ((!name || name === "__type") && aliasName) {
     name = aliasName;
   }
   if (!name || name === "__type") {
