@@ -25,5 +25,14 @@ echo "Servers started. Press Ctrl+C to stop."
 echo "Toolshed PID: $TOOLSHED_PID"
 echo "Shell PID: $SHELL_PID"
 
-# Wait for both processes
-wait $TOOLSHED_PID $SHELL_PID
+# Wait for both processes and capture their exit statuses
+wait $TOOLSHED_PID
+TOOLSHED_EXIT=$?
+wait $SHELL_PID
+SHELL_EXIT=$?
+
+# Exit with error if either server failed
+if [ $TOOLSHED_EXIT -ne 0 ] || [ $SHELL_EXIT -ne 0 ]; then
+    echo "Server exited with error (toolshed: $TOOLSHED_EXIT, shell: $SHELL_EXIT)"
+    exit 1
+fi

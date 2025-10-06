@@ -13,7 +13,7 @@ Running Docker locally (not pushing changes to repositories):
 ```bash
 $ cd ./packages/ralph
 $ docker build -t ralph .
-$ docker run -d --name ralph ralph
+$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ralph
 ```
 
 Note for `docker build`:

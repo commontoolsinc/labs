@@ -53,7 +53,7 @@ ENV PATH="$DENO_INSTALL/bin:$PATH"
 RUN apt-get install -y --no-install-recommends software-properties-common 
 RUN add-apt-repository -y ppa:maveonair/helix-editor && \
     apt-get update && \
-    apt-get install helix
+    apt-get install -y helix
 
 # MyST Markdown
 RUN apt-get update && apt-get install -y python3-pip && \
