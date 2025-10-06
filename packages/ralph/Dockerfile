@@ -71,6 +71,11 @@ WORKDIR /app
 RUN git clone https://github.com/commontoolsinc/labs.git /app/labs && \
     chown -R ralph:ralph /app/labs
 
+# Copy and append DEPLOY.md to AGENTS.md
+COPY --chown=ralph:ralph DEPLOY.md /tmp/DEPLOY.md
+RUN cat /tmp/DEPLOY.md >> /app/labs/AGENTS.md && \
+    rm /tmp/DEPLOY.md
+
 # Copy the startup script from local directory
 COPY --chown=ralph:ralph start-servers.sh /app/start-servers.sh
 RUN chmod +x /app/start-servers.sh
