@@ -218,18 +218,24 @@ describe("allOf schema composition", () => {
 
   describe("Link chain composition", () => {
     it("combines schemas from link chain into allOf", () => {
-      // Create first cell with data
-      const cell1 = runtime.getCell(space, "cell1", undefined, tx);
-      cell1.set({ x: 1 });
-
       const schema1: JSONSchema = {
         properties: {
           x: { type: "number", default: 10 },
         },
       };
 
+      const schema2: JSONSchema = {
+        properties: {
+          y: { type: "number", default: 20 },
+        },
+      };
+
+      // Create first cell with data
+      const cell1 = runtime.getCell(space, "cell1", schema1, tx);
+      cell1.set({ x: 1 });
+
       // Create second cell with link to first and additional schema
-      const cell2 = runtime.getCell(space, "cell2", undefined, tx);
+      const cell2 = runtime.getCell(space, "cell2", schema2, tx);
       cell2.setRaw({
         "/": {
           "link@1": {
@@ -239,24 +245,8 @@ describe("allOf schema composition", () => {
         },
       });
 
-      const schema2: JSONSchema = {
-        properties: {
-          y: { type: "number", default: 20 },
-        },
-      };
-
       // Read through link chain should combine schemas
-      const result = validateAndTransform(
-        runtime,
-        tx,
-        {
-          id: toURI(cell2.entityId),
-          space,
-          type: "application/json",
-          path: [],
-          schema: schema2,
-        },
-      );
+      const result = cell2.get();
 
       // Should have x from actual value and y from default
       expect(result).toEqualIgnoringSymbols({ x: 1, y: 20 });
@@ -448,36 +438,7 @@ describe("allOf schema composition", () => {
   });
 
   describe("asCell/asStream in allOf", () => {
-    it("uses asCell from first branch that has it", () => {
-      const cell = runtime.getCell(space, "test-{ value: 42 }", undefined, tx);
-      cell.set({ value: 42 });
-
-      const schema: JSONSchema = {
-        allOf: [
-          { properties: { x: { type: "number" } } },
-          { properties: { y: { type: "number", asCell: true } } },
-          { properties: { z: { type: "number", asCell: true } } },
-        ],
-      };
-
-      const result = validateAndTransform(
-        runtime,
-        undefined,
-        {
-          id: toURI(cell.entityId),
-          space,
-          type: "application/json",
-          path: [],
-          schema,
-        },
-      );
-
-      // Should use asCell from second branch (first with asCell)
-      expect(result).toBeDefined();
-      // Cell creation is tested elsewhere
-    });
-
-    it("ignores asCell from later branches", () => {
+    it("uses asCell as sibling of allOf", () => {
       const cell = runtime.getCell(space, "test-{}", undefined, tx);
       cell.set({});
 

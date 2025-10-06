@@ -1,6 +1,5 @@
-import { JSONSchemaObj } from "@commontools/api";
 import { getLogger } from "@commontools/utils/logger";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isBoolean, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
@@ -9,7 +8,6 @@ import { createAllOf, readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type IMemorySpaceAddress } from "./storage/interface.ts";
 import {
   createQueryResultProxy,
   isQueryResultForDereferencing,
@@ -50,10 +48,9 @@ export function resolveSchema(
   filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
-  if (
-    typeof schema !== "object" || schema === null ||
-    ContextualFlowControl.isTrueSchema(schema)
-  ) {
+  if (typeof schema === "boolean" || schema === undefined || schema === null) {
+    return schema;
+  } else if (!isObject(schema)) {
     return undefined;
   }
 
@@ -64,9 +61,8 @@ export function resolveSchema(
       schema,
     );
     if (!isObject(resolved)) {
-      // For boolean schema or the default `{}` schema, we don't have any
-      // meaningful information in the schema, so just return undefined.
-      return undefined;
+      // Return boolean or undefined if the schema is not an object
+      return typeof schema === "boolean" ? schema : undefined;
     }
     finalSchema = resolved;
   }
@@ -83,15 +79,6 @@ export function resolveSchema(
   if (schema.asStream && finalSchema?.asStream && filterAsCell) {
     finalSchema = { ...finalSchema };
     delete (finalSchema as any).asStream;
-  }
-
-  // Return no schema if all it said is that this was a reference or an
-  // object without properties.
-  if (
-    finalSchema === undefined ||
-    ContextualFlowControl.isTrueSchema(finalSchema)
-  ) {
-    return undefined;
   }
 
   return finalSchema;
@@ -333,41 +320,15 @@ export function validateAndTransform(
   // reflect that reality.
   if (tx?.status().status !== "ready") tx = undefined;
 
-  // Reconstruct doc, path, schema, rootSchema from link and runtime
-  const schema = link.schema;
-  let rootSchema = link.rootSchema ?? schema;
-  let finalSchema = resolveSchema(schema, rootSchema, true);
-
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
   const resolvedLink = resolveLink(tx ?? runtime.edit(), link, "writeRedirect");
 
-  // Use schema from alias if provided and no explicit schema was set
-  if (finalSchema === undefined && resolvedLink.schema) {
-    // Call resolveSchema to strip asCell/asStream here as well. It's still the
-    // initial `schema` that says whether this should be a cell, not the
-    // resolved schema.
-    finalSchema = resolveSchema(
-      resolvedLink.schema,
-      resolvedLink.rootSchema,
-      true,
-    );
-    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
-  }
-
-  link = {
-    ...resolvedLink,
-    schema: finalSchema,
-    rootSchema,
-  };
-
-  // Check if we've seen this exact cell/path/schema combination before
-  const seenKey = JSON.stringify(link);
-  const seenEntry = seen.find((entry) => entry[0] === seenKey);
-  if (seenEntry) {
-    return seenEntry[1];
-  }
+  const postRedirectSchema = resolveSchema(
+    resolvedLink.schema,
+    resolvedLink.rootSchema,
+  );
 
   // If this should be a reference, return as a Cell of finalSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
@@ -375,75 +336,34 @@ export function validateAndTransform(
   // anyOf gets handled here if all options are cells, so we don't read the
   // data. Below we handle the case where some options are meant to be cells.
   if (
-    isObject(schema) &&
-    ((schema.asCell || schema.asStream) ||
-      (isObject(finalSchema) && (
-        (Array.isArray(finalSchema?.anyOf) &&
-          finalSchema.anyOf.every((
-            option,
-          ) => (option.asCell || option.asStream))) ||
-        (Array.isArray(finalSchema?.oneOf) &&
-          finalSchema.oneOf.every((
-            option,
-          ) => (option.asCell || option.asStream)))
-      )))
+    isObject(postRedirectSchema) &&
+    (postRedirectSchema.asCell || postRedirectSchema.asStream)
   ) {
-    // The reference should reflect the current _value_. So if it's a reference,
-    // read the reference and return a cell based on it.
+    // The reference should reflect the current _value_. So if it's a link, read
+    // the link and return a cell based on it.
     //
-    // But references can be paths beyond the current doc, so we create a
-    // new reference based on the next doc in the chain and the remaining path.
+    // resolveLink above made sure that the value at the path is either the
+    // current value or a link.
 
-    // Start with empty path, iterate to full path (hence <= and not <)
-    for (let i = 0; i <= link.path.length; i++) {
-      const parsedLink = readMaybeLink(
-        tx ?? runtime.edit(),
-        {
-          ...link,
-          path: link.path.slice(0, i),
-        },
+    // See if the current value is a link:
+    const parsedLink = readMaybeLink(tx ?? runtime.edit(), resolvedLink);
+
+    if (parsedLink?.overwrite === "redirect") {
+      throw new Error(
+        "Unexpected write redirect in path, should have been handled by resolvePath",
       );
-
-      if (parsedLink?.overwrite === "redirect") {
-        throw new Error(
-          "Unexpected write redirect in path, should have been handled by resolvePath",
-        );
-      }
-      if (parsedLink) {
-        const extraPath = [...link.path.slice(i)];
-        const newPath = [...parsedLink.path, ...extraPath];
-        const cfc = runtime.cfc;
-        let newSchema;
-        if (parsedLink.schema !== undefined) {
-          newSchema = cfc.getSchemaAtPath(
-            parsedLink.schema,
-            extraPath.map((key) => key.toString()),
-            rootSchema,
-          );
-        } else if (i === link.path.length) {
-          // we don't have a schema provided directly for this cell link,
-          // but we can apply the one from our parent, since we are at
-          // the end of the path.
-          newSchema = cfc.getSchemaAtPath(finalSchema, []);
-        }
-        return createCell(
-          runtime,
-          {
-            ...parsedLink,
-            path: newPath,
-            schema: newSchema,
-            rootSchema,
-          },
-          tx,
-        );
-      }
     }
-    return createCell(runtime, link, tx);
-  }
 
-  // If there is no schema, return as raw data via query result proxy
-  if (finalSchema === undefined) {
-    return createQueryResultProxy(runtime, tx, link);
+    // Then use either the link or otherwise the resolved link (the value)
+    const link = parsedLink ?? resolvedLink;
+
+    // Remove asCell and asStream from the link schema
+    const linkSchema = resolveSchema(link.schema, link.rootSchema, true);
+
+    return createCell(runtime, {
+      ...link,
+      schema: linkSchema,
+    }, tx);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`
@@ -451,52 +371,67 @@ export function validateAndTransform(
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
   const ref = resolveLink(tx ?? runtime.edit(), link);
-  const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
-  // Use the resolved link's schema if available (may have allOf from link chain)
-  if (ref.schema) {
-    finalSchema = resolveSchema(ref.schema, rootSchema, true);
+  // Reconstruct doc, path, schema, rootSchema from link and runtime
+  let schema = resolveSchema(ref.schema, ref.rootSchema);
+  const rootSchema = ref.rootSchema ?? schema;
+
+  // Return undefined if the schema is false, i.e. nothing matches
+  if (schema === false) return undefined;
+
+  // If there is no schema, or the schema is `any`, create a query result proxy
+  // so we don't crawl everything.
+  if (
+    schema === undefined || !isObject(schema) ||
+    ContextualFlowControl.isTrueSchema(schema)
+  ) {
+    return createQueryResultProxy(runtime, tx, ref);
   }
+
+  // Check if we've seen this exact cell/path/schema combination before
+  const seenKey = JSON.stringify(ref);
+  const seenEntry = seen.find((entry) => entry[0] === seenKey);
+  if (seenEntry) return seenEntry[1];
+
+  const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (
-    value === undefined && isObject(finalSchema) &&
-    finalSchema.default !== undefined
+    value === undefined &&
+    schema.default !== undefined
   ) {
     const result = processDefaultValue(
       runtime,
       tx,
-      { ...link, schema: finalSchema },
-      finalSchema.default,
+      { ...ref, schema },
+      schema.default,
     );
     seen.push([seenKey, result]);
     return result; // processDefaultValue already annotates with back to cell
   }
 
   // Handle allOf - must satisfy ALL schemas (intersection)
-  if (isObject(finalSchema) && Array.isArray(finalSchema.allOf)) {
-    const branches = finalSchema.allOf
-      .map((branch) => resolveSchema(branch, rootSchema, false)) // Don't filter asCell here
+  if (Array.isArray(schema.allOf)) {
+    const branches = schema.allOf
+      .map((branch) => resolveSchema(branch, rootSchema))
       .filter((b) => b !== undefined);
 
     if (branches.length === 0) return undefined;
 
-    // Use extracted defaults/asCell/asStream from parent schema (already extracted by createAllOf)
-    const parentDefault = "default" in finalSchema
-      ? finalSchema.default
-      : undefined;
-    const parentAsCell = finalSchema.asCell;
-    const parentAsStream = finalSchema.asStream;
+    // Use extracted defaults/asCell/asStream from parent schema (already
+    // extracted by createAllOf)
+    const parentDefault = schema.default;
+    const parentAsCell = schema.asCell;
+    const parentAsStream = schema.asStream;
 
     // Merge all properties from branches for the schema
     const allProperties: Record<string, JSONSchema> = {};
     const allRequired = new Set<string>();
-    let mergedAdditionalProperties: boolean | JSONSchema | undefined =
-      undefined;
+    let mergedAdditionalProperties: boolean | JSONSchema | undefined;
     let hasAdditionalPropertiesConstraint = false;
 
     for (const branch of branches) {
-      if (isObject(branch)) {
+      if (isObject(branch) && branch.type === "object") {
         // Merge properties
         if (branch.properties) {
           for (const [key, propSchema] of Object.entries(branch.properties)) {
@@ -563,17 +498,17 @@ export function validateAndTransform(
       };
 
     // Update finalSchema to the merged schema and continue processing below
-    finalSchema = mergedSchema;
+    schema = mergedSchema;
     // Fall through to continue processing with the merged schema
   }
 
-  // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
-  // or an object that allows any props) is not well defined.
+  // TODO(seefeld): The behavior when one of the options is very permissive
+  // (e.g. no type or an object that allows any props) is not well defined.
   if (
-    isObject(finalSchema) &&
-    (Array.isArray(finalSchema.anyOf) || Array.isArray(finalSchema.oneOf))
+    isObject(schema) &&
+    (Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf))
   ) {
-    const options = ((finalSchema.anyOf ?? finalSchema.oneOf)!)
+    const options = ((schema.anyOf ?? schema.oneOf)!)
       .map((option) => {
         const resolved = resolveSchema(option, rootSchema);
         // Copy `asCell` and `asStream` over, necessary for $ref case.
@@ -588,18 +523,16 @@ export function validateAndTransform(
       })
       .filter((option) => option !== undefined);
 
-    // TODO(@ubik2): We should support boolean and empty entries in the anyOf
-    const objOptions: JSONSchemaObj[] = options.filter(isObject);
     if (Array.isArray(value)) {
-      const arrayOptions = objOptions.filter((option) =>
-        option.type === "array"
+      const arrayOptions = options.filter((option) =>
+        isObject(option) && option.type === "array"
       );
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1) {
         return validateAndTransform(
           runtime,
           tx,
-          { ...link, schema: arrayOptions[0] },
+          { ...ref, schema: arrayOptions[0] },
           synced,
           seen,
         );
@@ -608,28 +541,29 @@ export function validateAndTransform(
       // TODO(seefeld): Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
       for (const option of arrayOptions) {
+        // Flatten anyOf and oneOf arrays
         if (
-          isObject(option.items) && (
-            (option.items?.anyOf && Array.isArray(option.items.anyOf)) ||
-            (option.items?.oneOf && Array.isArray(option.items.oneOf))
+          isObject(option) && isObject(option.items) && (
+            Array.isArray(option.items.anyOf) ||
+            Array.isArray(option.items.oneOf)
           )
         ) {
-          merged.push(
-            ...((option.items.anyOf ?? option.items.oneOf)!),
-          );
-        } else if (option.items) merged.push(option.items);
+          merged.push(...((option.items.anyOf ?? option.items.oneOf)!));
+        } else if (isObject(option) && option.items) {
+          merged.push(option.items);
+        }
       }
       return validateAndTransform(
         runtime,
         tx,
-        { ...link, schema: { type: "array", items: { anyOf: merged } } },
+        { ...ref, schema: { type: "array", items: { anyOf: merged } } },
         synced,
         seen,
       );
     } else if (isObject(value)) {
-      let objectCandidates = objOptions.filter((option) =>
-        option.type === "object"
-      );
+      let objectCandidates = options.filter((option) =>
+        isObject(option) && option.type === "object"
+      ) as (JSONSchema & object)[];
       const numAsCells = objectCandidates.filter((option) =>
         option.asCell || option.asStream
       ).length;
@@ -651,8 +585,7 @@ export function validateAndTransform(
       }
 
       // Run extraction for each union branch.
-      const candidates = objOptions
-        .filter((option) => option.type === "object")
+      const candidates = objectCandidates
         .map((option) => {
           const candidateSeen = [...seen];
           return {
@@ -660,7 +593,7 @@ export function validateAndTransform(
             result: validateAndTransform(
               runtime,
               tx,
-              { ...link, schema: option },
+              { ...ref, schema: option },
               synced,
               candidateSeen,
             ),
@@ -673,7 +606,6 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: IMemorySpaceAddress[] = [];
       for (const { result } of candidates) {
         if (isCell(result)) {
           merged = result;
@@ -691,10 +623,12 @@ export function validateAndTransform(
       return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
       // For primitive types, try each option that matches the type
-      const candidates = objOptions
-        .filter((option) =>
+      const candidates = options
+        .filter((
+          option,
+        ) => (isObject(option) &&
           (option.type === "integer" ? "number" : option.type) ===
-            typeof value as string
+            typeof value as string)
         )
         .map((option) => {
           // Create a new seen array for each candidate to avoid false positives
@@ -713,15 +647,16 @@ export function validateAndTransform(
       if (candidates.length === 0) return undefined;
       if (candidates.length === 1) return candidates[0].result;
 
-      // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
-      const anyTypeOption = objOptions.find((option) =>
-        option.type === undefined
+      // If we get more than one candidate, see if there is one that matches
+      // anything, and if not return the first one
+      const anyTypeOption = options.find((option) =>
+        isBoolean(option) || ContextualFlowControl.isTrueSchema(option)
       );
       if (anyTypeOption) {
         return validateAndTransform(
           runtime,
           tx,
-          { ...link, schema: anyTypeOption },
+          { ...ref, schema: anyTypeOption },
           synced,
           seen,
         );
@@ -729,14 +664,14 @@ export function validateAndTransform(
         return annotateWithBackToCellSymbols(
           candidates[0].result,
           runtime,
-          link,
+          ref,
           tx,
         );
       }
     }
   }
 
-  if (isObject(finalSchema) && finalSchema.type === "object") {
+  if (isObject(schema) && schema.type === "object") {
     const keys = isRecord(value) ? Object.keys(value) : [];
 
     const result: Record<string, any> = {};
@@ -745,10 +680,10 @@ export function validateAndTransform(
     seen.push([seenKey, result]);
 
     // Handle explicitly defined properties
-    if (finalSchema.properties) {
-      for (const key of Object.keys(finalSchema.properties)) {
+    if (schema.properties) {
+      for (const key of Object.keys(schema.properties)) {
         const childSchema = runtime.cfc.getSchemaAtPath(
-          finalSchema,
+          schema,
           [key],
           rootSchema,
         );
@@ -776,7 +711,7 @@ export function validateAndTransform(
           const transformed = validateAndTransform(
             runtime,
             tx,
-            { ...link, path: [...link.path, key], schema: childSchema },
+            { ...ref, path: [...ref.path, key], schema: childSchema },
             synced,
             seen,
           );
@@ -789,13 +724,13 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    if (finalSchema.additionalProperties || !finalSchema.properties) {
+    if (schema.additionalProperties || !schema.properties) {
       for (const key of keys) {
         // Skip properties that were already processed above:
-        if (!finalSchema.properties || !(key in finalSchema.properties)) {
+        if (!schema.properties || !(key in schema.properties)) {
           // Will use additionalProperties if present
           const childSchema = runtime.cfc.getSchemaAtPath(
-            finalSchema,
+            schema,
             [key],
             rootSchema,
           );
@@ -804,16 +739,16 @@ export function validateAndTransform(
             logger.warn(() => [
               "validateAndTransform: unexpected undefined schema for additional property",
               key,
-              finalSchema,
+              schema,
               rootSchema,
-              link,
+              ref,
             ]);
             continue;
           }
           result[key] = validateAndTransform(
             runtime,
             tx,
-            { ...link, path: [...link.path, key], schema: childSchema },
+            { ...ref, path: [...ref.path, key], schema: childSchema },
             synced,
             seen,
           );
@@ -827,11 +762,11 @@ export function validateAndTransform(
     if (!isRecord(value) && Object.keys(result).length === 0) {
       return undefined;
     }
-    const annotated = annotateWithBackToCellSymbols(result, runtime, link, tx);
+    const annotated = annotateWithBackToCellSymbols(result, runtime, ref, tx);
     return annotated;
   }
 
-  if (isObject(finalSchema) && finalSchema.type === "array") {
+  if (isObject(schema) && schema.type === "array") {
     if (!Array.isArray(value)) {
       const result: any[] = [];
       seen.push([seenKey, result]);
@@ -856,25 +791,11 @@ export function validateAndTransform(
       // ```
       // work as expected.
       // Handle boolean items values for element schema
-      let elementSchema: JSONSchema;
-      if (finalSchema.items === true) {
-        // items: true means allow any item type
-        elementSchema = {};
-      } else if (finalSchema.items === false) {
-        // items: false means no additional items allowed
-        // This should technically be an error, but for compatibility we'll use empty schema
-        elementSchema = {};
-      } else if (finalSchema.items) {
-        // items is a JSONSchema object
-        elementSchema = finalSchema.items;
-      } else {
-        // No items schema specified, default to empty schema
-        elementSchema = {};
-      }
+      const elementSchema: JSONSchema = schema.items ?? true;
 
       let elementLink: NormalizedFullLink = {
-        ...link,
-        path: [...link.path, String(i)],
+        ...ref,
+        path: [...ref.path, String(i)],
         schema: elementSchema,
       };
       const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
@@ -894,19 +815,16 @@ export function validateAndTransform(
         seen,
       );
     }
-    return annotateWithBackToCellSymbols(result, runtime, link, tx);
+    return annotateWithBackToCellSymbols(result, runtime, ref, tx);
   }
 
   // For primitive types, return as is
-  if (
-    value === undefined && isObject(finalSchema) &&
-    finalSchema.default !== undefined
-  ) {
+  if (value === undefined && schema.default !== undefined) {
     const result = processDefaultValue(
       runtime,
       tx,
-      { ...link, schema: finalSchema },
-      finalSchema.default,
+      { ...ref, schema },
+      schema.default,
     );
     seen.push([seenKey, result]);
     return result; // processDefaultValue already annotates with back to cell
@@ -914,7 +832,7 @@ export function validateAndTransform(
 
   // Add the current value to seen before returning
   seen.push([seenKey, value]);
-  return annotateWithBackToCellSymbols(value, runtime, link, tx);
+  return annotateWithBackToCellSymbols(value, runtime, ref, tx);
 }
 
 /**
