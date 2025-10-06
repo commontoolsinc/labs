@@ -421,10 +421,7 @@ export function validateAndTransform(
     const stack = schema.allOf.filter((b) => b !== undefined);
 
     while (stack.length > 0) {
-      const candidate = resolveSchema(stack.pop()!, rootSchema);
-
-      // If any subschema is invalid, the whole allOf is invalid
-      if (candidate === undefined) return undefined;
+      const candidate = resolveSchema(stack.pop()!, rootSchema) ?? true;
 
       // If the subschema is an allOf, we need to merge it with the parent
       if (isObject(candidate) && Array.isArray(candidate.allOf)) {
@@ -453,12 +450,8 @@ export function validateAndTransform(
 
     // Filter out true branches
     allBranches = allBranches.filter((b) =>
-      b !== true || ContextualFlowControl.isTrueSchema(b)
+      !ContextualFlowControl.isTrueSchema(b)
     );
-
-    if (allBranches.some((b) => !isObject(b))) {
-      return undefined;
-    }
 
     const branches = allBranches as (JSONSchema & object)[];
 
