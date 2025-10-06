@@ -162,10 +162,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
     // Wrapper types erase to their inner type, so we must check typeNode to
     // distinguish wrapper context from inner context.
-    const typeNodeName = context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
-      ts.isIdentifier(context.typeNode.typeName)
-      ? context.typeNode.typeName.text
-      : undefined;
+    const typeNodeName =
+      context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
+        ts.isIdentifier(context.typeNode.typeName)
+        ? context.typeNode.typeName.text
+        : undefined;
     const isWrapperContext = typeNodeName &&
       ["Default", "Cell", "Stream", "OpaqueRef"].includes(typeNodeName);
 
