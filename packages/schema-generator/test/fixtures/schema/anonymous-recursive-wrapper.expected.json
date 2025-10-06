@@ -1,21 +1,18 @@
 {
   "$defs": {
-    "AnonymousType_1": {
-      "type": "object",
-      "properties": {
-        "self": {
-          "$ref": "#/$defs/SchemaRoot"
-        }
-      },
-      "required": [
-        "self"
-      ]
-    },
     "SchemaRoot": {
       "type": "object",
       "properties": {
         "field": {
-          "$ref": "#/$defs/AnonymousType_1",
+          "type": "object",
+          "properties": {
+            "self": {
+              "$ref": "#/$defs/SchemaRoot"
+            }
+          },
+          "required": [
+            "self"
+          ],
           "default": {}
         }
       },

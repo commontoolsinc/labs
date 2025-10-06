@@ -175,15 +175,14 @@ export class SchemaGenerator implements ISchemaGenerator {
       const synthetic = context.anonymousNames.get(type);
       if (synthetic) namedKey = synthetic;
     }
+
+    // Check if this type is already being built or exists
     if (namedKey) {
       if (
         context.inProgressNames.has(namedKey) || context.definitions[namedKey]
       ) {
         // Already being built or exists: emit a ref
         context.emittedRefs.add(namedKey);
-        context.definitionStack.delete(
-          this.createStackKey(type, context.typeNode, context.typeChecker),
-        );
         return { "$ref": `#/$defs/${namedKey}` };
       }
       // Start building this named type; we'll store the result below
