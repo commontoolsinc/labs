@@ -67,9 +67,7 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(schema, schema, false);
-      // resolveSchema only resolves one level, so we still have a $ref
       expect(resolved).toHaveProperty("default", "outermost");
-      expect(resolved).toHaveProperty("$ref");
     });
 
     it("should preserve default even when filterAsCell is true", () => {
@@ -316,5 +314,31 @@ describe("$ref with default support", () => {
         asStream: true,
       });
     });
+  });
+
+  it("should return undefined when circular $ref is detected with filterAsCell=true", () => {
+    const rootSchema: JSONSchema = {
+      $defs: {
+        Circular: { $ref: "#/$defs/Circular", asCell: true },
+      },
+      $ref: "#/$defs/Circular",
+      asCell: true,
+    };
+
+    const resolved = resolveSchema(rootSchema, rootSchema, true);
+    expect(resolved).not.toBeDefined();
+  });
+
+  it("should return undefined when circular $ref is detected with filterAsCell=false", () => {
+    const rootSchema: JSONSchema = {
+      $defs: {
+        Circular: { $ref: "#/$defs/Circular", asCell: true },
+      },
+      $ref: "#/$defs/Circular",
+      asCell: true,
+    };
+
+    const resolved = resolveSchema(rootSchema, rootSchema, false);
+    expect(resolved).not.toBeDefined();
   });
 });

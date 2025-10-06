@@ -1591,6 +1591,49 @@ describe("Schema Support", () => {
       });
     });
 
+    it("should resolve defaults in $ref when using $ref in property schemas", () => {
+      const schema = {
+        $defs: {
+          Settings: {
+            type: "object",
+            properties: {
+              enabled: { type: "boolean" },
+              label: { type: "string" },
+            },
+            default: { enabled: true, label: "from ref" },
+          },
+          SettingsWithDefault: {
+            $ref: "#/$defs/Settings",
+            default: { enabled: false, label: "from default" },
+          },
+        },
+        type: "object",
+        properties: {
+          config: {
+            $ref: "#/$defs/SettingsWithDefault",
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{
+        config?: { enabled: boolean; label: string };
+      }>(
+        space,
+        "should resolve defaults in $ref when using $ref in property schemas",
+        undefined,
+        tx,
+      );
+      c.set({});
+
+      const cell = c.asSchema(schema);
+      const value = cell.get();
+
+      expect(value.config).toEqualIgnoringSymbols({
+        enabled: false,
+        label: "from default",
+      });
+    });
+
     it("should use the default value with asCell for objects", () => {
       const c = runtime.getCell<{
         name: string;
