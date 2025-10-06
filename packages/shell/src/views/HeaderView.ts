@@ -177,7 +177,7 @@ export class XHeaderView extends BaseView {
                 size="small"
                 @click="${this.handleToggleClick}"
                 title="${this.showShellCharmListView
-                  ? "Show Default Recipe"
+                  ? "Show Default Pattern"
                   : "Show All Charms"}"
               >
                 ${this.showShellCharmListView ? "📋" : "🔍"}

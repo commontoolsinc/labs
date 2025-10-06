@@ -25,7 +25,7 @@ export async function create(cc: CharmsController): Promise<CharmController> {
 
     if (!sourceCell) {
       // Not sure how/when this happens
-      throw new Error("Could not create and link default recipe.");
+      throw new Error("Could not create and link default pattern.");
     }
 
     // Get the well-known allCharms cell using its EntityId format
@@ -41,7 +41,7 @@ export async function create(cc: CharmsController): Promise<CharmController> {
   return charm;
 }
 
-export function getDefaultRecipe(
+export function getDefaultPattern(
   charms: CharmController[],
 ): CharmController | undefined {
   return charms.find((c) => {
