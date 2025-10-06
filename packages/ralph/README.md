@@ -36,12 +36,16 @@ $ docker rm ralph
 ```
 
 ## TODO
-* add playwright with mcp
-* Configure tailscale to start up
+* add playwright to codex
+* configure tailscale to start up
 * push a working image to a docker hub
 * update README to use image from dockerhub 
+* figure out how LLM tokens should be set for toolshed
 * DONE - Add codex and claude packages
 * DONE - write section how to run ralph in this file
 * DONE - git clone the common tools repositories
 * DONE - start up toolshed server
 * DONE - start up shell server
+* DONE - add playwright mcp to claude
+  * created ralph user since chrome doesnt like to run as root, probably better this way anyway
+  * made ralph sudoer

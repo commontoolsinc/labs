@@ -35,9 +35,16 @@ RUN npm install -g @anthropic-ai/claude-code
 # Codex CLI - AI coding assistant
 RUN npm install -g @openai/codex
 
-# Deno
-RUN curl -fsSL https://deno.land/install.sh | sh
-ENV DENO_INSTALL="/root/.deno"
+# Create ralph user (with sudo privileges for development)
+RUN useradd -m -s /bin/bash ralph && \
+    apt-get update && apt-get install -y sudo && \
+    echo "ralph ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Deno (install globally)
+RUN curl -fsSL https://deno.land/install.sh | sh -s -- --no-modify-path && \
+    mv /root/.deno /opt/deno && \
+    chmod -R 755 /opt/deno
+ENV DENO_INSTALL="/opt/deno"
 ENV PATH="$DENO_INSTALL/bin:$PATH"
 
 # Helix editor
@@ -52,15 +59,28 @@ RUN add-apt-repository -y ppa:maveonair/helix-editor && \
 RUN apt-get update && apt-get install -y python3-pip && \
     pip install mystmd
 
-# Set up working directory
+# Install Playwright browser and dependencies
+RUN npx playwright install chrome && \
+    npx playwright install-deps chrome
+
+# Set up working directory with proper ownership
+RUN mkdir -p /app && chown ralph:ralph /app
 WORKDIR /app
 
 # Clone the Common Tools repository into labs subdirectory
-RUN git clone https://github.com/commontoolsinc/labs.git /app/labs
+RUN git clone https://github.com/commontoolsinc/labs.git /app/labs && \
+    chown -R ralph:ralph /app/labs
 
 # Copy the startup script from local directory
-COPY start-servers.sh /app/start-servers.sh
+COPY --chown=ralph:ralph start-servers.sh /app/start-servers.sh
 RUN chmod +x /app/start-servers.sh
+
+# Switch to ralph user
+USER ralph
+
+# Configure Claude MCP server for ralph user
+# --no-sandbox is required because Docker containers restrict namespace creation
+RUN claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
 
 # Start Common Tool servers
 CMD ["/app/start-servers.sh"]
