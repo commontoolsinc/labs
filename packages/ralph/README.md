@@ -36,12 +36,12 @@ $ docker rm ralph
 ```
 
 ## TODO
-* Configure tailscale to start up
-* git clone the common tools repositories
 * add playwright with mcp
-* start up toolshed server
-* start up shell server
+* Configure tailscale to start up
 * push a working image to a docker hub
 * update README to use image from dockerhub 
 * DONE - Add codex and claude packages
 * DONE - write section how to run ralph in this file
+* DONE - git clone the common tools repositories
+* DONE - start up toolshed server
+* DONE - start up shell server

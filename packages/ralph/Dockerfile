@@ -37,6 +37,8 @@ RUN npm install -g @openai/codex
 
 # Deno
 RUN curl -fsSL https://deno.land/install.sh | sh
+ENV DENO_INSTALL="/root/.deno"
+ENV PATH="$DENO_INSTALL/bin:$PATH"
 
 # Helix editor
 # need to install add-apt-repository from
@@ -50,7 +52,15 @@ RUN add-apt-repository -y ppa:maveonair/helix-editor && \
 RUN apt-get update && apt-get install -y python3-pip && \
     pip install mystmd
 
+# Set up working directory
 WORKDIR /app
-COPY . /app
 
-CMD ["sleep", "infinity"]
+# Clone the Common Tools repository into labs subdirectory
+RUN git clone https://github.com/commontoolsinc/labs.git /app/labs
+
+# Copy the startup script from local directory
+COPY start-servers.sh /app/start-servers.sh
+RUN chmod +x /app/start-servers.sh
+
+# Start Common Tool servers
+CMD ["/app/start-servers.sh"]
