@@ -47,4 +47,4 @@ RUN apt-get update && apt-get install -y python3-pip && \
 WORKDIR /app
 COPY . /app
 
-CMD ["/bin/bash"]
+CMD ["sleep", "infinity"]
