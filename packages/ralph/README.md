@@ -8,7 +8,24 @@ Claude CLI and Codex are installed
 
 ## How to run Ralph
 
-Running Docker locally (not pushing changes to repositories):
+### Using pre-built image from Docker Hub (recommended)
+
+```bash
+$ docker pull ellyxir/ralph
+$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ellyxir/ralph
+```
+
+To connect to the container (connecting as ralph user is recommended):
+
+```bash
+$ docker exec -it -u ralph ralph bash  # Connect as ralph user (recommended)
+# OR
+$ docker exec -it ralph bash           # Connect as root (if needed for admin tasks)
+```
+
+### Building locally
+
+If you want to build the image yourself with local modifications:
 
 ```bash
 $ cd ./packages/ralph
@@ -47,6 +64,13 @@ You must remove the existing version if you want to run a newer build:
 ```bash
 $ docker stop ralph
 $ docker rm ralph
+```
+
+## Pushing new image to Dockerhub
+
+```
+$ docker login
+$ docker push <user_name>/ralph
 ```
 
 ## TODO

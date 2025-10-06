@@ -11,6 +11,9 @@ First, create an identity key if one doesn't exist:
 NO_COLOR=1 deno task ct id new > my.key
 ```
 
+**Important:** Do NOT add `2>&1` to this command - it will corrupt the key file
+by mixing error output with the actual key.
+
 This creates a new identity key file named `my.key` in the current directory.
 
 ## Step 2: Deploy the Charm
