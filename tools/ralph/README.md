@@ -77,7 +77,6 @@ $ docker push <user_name>/ralph
 ## TODO
 
 - add playwright to codex
-- configure tailscale to start up
 - push a working image to a docker hub
 - update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed

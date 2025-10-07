@@ -22,9 +22,6 @@ RUN type -p curl >/dev/null || (apt-get update && apt-get install -y curl) && \
     tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
     apt-get update && apt-get install -y gh
 
-# Tailscale official install script
-RUN curl -fsSL https://tailscale.com/install.sh | sh
-
 # Node.js 24 (via Nodesource)
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs
