@@ -89,3 +89,11 @@ Then use Playwright to:
 1. Navigate to the URL
 2. Complete registration (first time)
 3. Test the charm functionality
+
+# Restarting servers
+
+There are two servers that need to be running: toolshed and shell
+
+1. kill deno processes
+2. toolshed: go into ./packages/toolshed and run `deno task dev`
+3. shell: go into ./packages/shell and run `deno task dev-local`
