@@ -29,8 +29,8 @@ If you want to build the image yourself with local modifications:
 
 ```bash
 $ cd ./tools/ralph
-$ docker build -t ralph .
-$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ralph
+$ docker build -t <user_name>/ralph .
+$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 <user_name>/ralph
 ```
 
 Note for `docker build`:
@@ -41,11 +41,12 @@ Note for `docker run`:
 
 - -d is for detached mode
 - --name gives it an easier name to use for connecting to it later
-- the last _ralph_ referes to the build tag we used earlier
+- the last _<user_name>/ralph_ referes to the build tag we used earlier
 
 Connecting to the running container:
 
 ```bash
+$ docker exec -it -u ralph ralph bash  # Connect as ralph user (recommended)
 $ docker exec -it ralph bash
 ```
 
@@ -81,9 +82,9 @@ $ docker push <user_name>/ralph
 - update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
-- change permissions so claude auto updater will work
-- DONE - move ralph script into ./tools/ralph
 - make ralph easy to run
+- DONE - change permissions so claude auto updater will work
+- DONE - move ralph script into ./tools/ralph
 - DONE - Add codex and claude packages
 - DONE - write section how to run ralph in this file
 - DONE - git clone the common tools repositories

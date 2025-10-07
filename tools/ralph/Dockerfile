@@ -29,17 +29,6 @@ RUN curl -fsSL https://tailscale.com/install.sh | sh
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs
 
-# Claude CLI (Claude Code)
-RUN npm install -g @anthropic-ai/claude-code
-
-# Codex CLI - AI coding assistant
-RUN npm install -g @openai/codex
-
-# Create ralph user (with sudo privileges for development)
-RUN useradd -m -s /bin/bash ralph && \
-    apt-get update && apt-get install -y sudo && \
-    echo "ralph ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Deno (install globally)
 RUN curl -fsSL https://deno.land/install.sh | sh -s -- --no-modify-path && \
     mv /root/.deno /opt/deno && \
@@ -63,6 +52,11 @@ RUN apt-get update && apt-get install -y python3-pip && \
 RUN npx playwright install chrome && \
     npx playwright install-deps chrome
 
+# Create ralph user (with sudo privileges for development)
+RUN useradd -m -s /bin/bash ralph && \
+    apt-get update && apt-get install -y sudo && \
+    echo "ralph ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
 # Set up working directory with proper ownership
 RUN mkdir -p /app && chown ralph:ralph /app
 WORKDIR /app
@@ -82,6 +76,16 @@ RUN chmod +x /app/start-servers.sh
 
 # Switch to ralph user
 USER ralph
+
+# Configure npm to install global packages in user directory
+RUN npm config set prefix ~/.npm-global
+
+# Add npm-global bin to PATH
+ENV PATH="/home/ralph/.npm-global/bin:$PATH"
+
+# Install Claude CLI and Codex as ralph user (can auto-update)
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm install -g @openai/codex
 
 # Configure Claude MCP server for ralph user
 # --no-sandbox is required because Docker containers restrict namespace creation
