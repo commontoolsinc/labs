@@ -80,5 +80,6 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # --no-sandbox is required because Docker containers restrict namespace creation
 RUN claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
 
-# Start Common Tool servers
-CMD ["/app/start-servers.sh"]
+# Start Common Tool servers in background and keep container alive
+# the sleep ensures that restarting the server doesnt cause the container to exit
+CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]

@@ -12,7 +12,7 @@ Claude CLI and Codex are installed
 
 ```bash
 $ docker pull ellyxir/ralph
-$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ellyxir/ralph
+$ docker run -d --name ralph -p 8000:8000 ellyxir/ralph
 ```
 
 To connect to the container (connecting as ralph user is recommended):
@@ -30,7 +30,7 @@ If you want to build the image yourself with local modifications:
 ```bash
 $ cd ./tools/ralph
 $ docker build -t <user_name>/ralph .
-$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 <user_name>/ralph
+$ docker run -d --name ralph -p 8000:8000 <user_name>/ralph
 ```
 
 Note for `docker build`:
@@ -77,11 +77,11 @@ $ docker push <user_name>/ralph
 ## TODO
 
 - add playwright to codex
-- push a working image to a docker hub
-- update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
 - make ralph easy to run
+- DONE - update README to use image from dockerhub
+- DONE - push a working image to a docker hub
 - DONE - change permissions so claude auto updater will work
 - DONE - move ralph script into ./tools/ralph
 - DONE - Add codex and claude packages
