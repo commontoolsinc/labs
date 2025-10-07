@@ -5,6 +5,7 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { detectWrapperViaNode, resolveWrapperNode } from "../type-utils.ts";
 
 type WrapperKind = "Cell" | "Stream" | "OpaqueRef";
 
@@ -24,35 +25,61 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Prefer Default via node (erased at type-level)
-    const n = context.typeNode;
-    if (n && ts.isTypeReferenceNode(n)) {
-      const nodeName = this.getTypeRefIdentifierName(n);
-      if (
-        nodeName === "Default" || this.isAliasToDefault(n, context.typeChecker)
-      ) {
-        return true;
-      }
+    // Check via typeNode for Default (erased at type-level) and all wrapper aliases
+    const wrapperViaNode = detectWrapperViaNode(context.typeNode, context.typeChecker);
+    if (wrapperViaNode) {
+      return true;
     }
 
-    // Check if this is a wrapper type (Cell/Stream/OpaqueRef)
-    return this.getWrapperTypeInfo(type) !== undefined;
+    // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
+    const wrapperInfo = this.getWrapperTypeInfo(type);
+    return wrapperInfo !== undefined;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const n = context.typeNode;
 
+    // Check via typeNode for all wrapper types (handles both direct usage and aliases)
+    const resolvedWrapper = n ? resolveWrapperNode(n, context.typeChecker) : undefined;
+
     // Handle Default via node (direct or alias)
-    if (n && ts.isTypeReferenceNode(n)) {
-      const isDefaultNode =
-        (ts.isIdentifier(n.typeName) && n.typeName.text === "Default") ||
-        this.isAliasToDefault(n, context.typeChecker);
-      if (isDefaultNode) {
-        return this.formatDefaultType(n, context);
+    if (resolvedWrapper?.kind === "Default") {
+      // For Default, we need the node with concrete type arguments.
+      // If the original node has type arguments, use it.
+      // Otherwise, use the resolved node (for direct Default references).
+      const nodeForDefault = n && ts.isTypeReferenceNode(n) && n.typeArguments
+        ? n  // Original has type args, use it for concrete types
+        : resolvedWrapper.node; // Direct reference or fallback
+
+      if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
+        return this.formatDefaultType(nodeForDefault, context);
       }
     }
 
-    // Get wrapper type information (Cell/Stream/OpaqueRef)
+    // Handle Cell/Stream/OpaqueRef via node (direct or alias)
+    if (resolvedWrapper && resolvedWrapper.kind !== "Default") {
+      // Use the ACTUAL type from the usage site (which has concrete type arguments)
+      const wrapperInfo = this.getWrapperTypeInfo(type);
+      if (wrapperInfo) {
+        // For choosing which node to pass to formatWrapperType:
+        // - If original node has type arguments: use it (has concrete types from usage site)
+        // - If original node is just identifier (alias): use resolved node
+        //   formatWrapperType will check if node has type args before extracting inner types
+        const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
+          ? n  // Original has type args, use it
+          : resolvedWrapper.node; // Original is just alias, use resolved (but won't extract inner types from it)
+
+        return this.formatWrapperType(
+          wrapperInfo.typeRef,
+          nodeToPass,
+          context,
+          wrapperInfo.kind,
+        );
+      }
+    }
+
+    // Fallback: try to get wrapper type information from type structure
+    // (for cases where we don't have a typeNode)
     const wrapperInfo = this.getWrapperTypeInfo(type);
     if (wrapperInfo) {
       return this.formatWrapperType(
@@ -76,9 +103,26 @@ export class CommonToolsFormatter implements TypeFormatter {
     wrapperKind: WrapperKind,
   ): SchemaDefinition {
     const innerTypeFromType = typeRef.typeArguments?.[0];
-    const innerTypeNode = typeRefNode && ts.isTypeReferenceNode(typeRefNode)
-      ? typeRefNode.typeArguments?.[0]
-      : undefined;
+
+    // Only extract innerTypeNode if the typeRefNode has type arguments AND
+    // those arguments are not generic type parameters.
+    // If typeRefNode has no type arguments, or if the arguments are generic parameters
+    // (e.g., T from an alias declaration), we should NOT extract inner types from it.
+    let innerTypeNode: ts.TypeNode | undefined = undefined;
+    if (typeRefNode && ts.isTypeReferenceNode(typeRefNode) && typeRefNode.typeArguments) {
+      const firstArg = typeRefNode.typeArguments[0];
+      if (firstArg) {
+        // Check if this node represents a type parameter
+        const argType = context.typeChecker.getTypeFromTypeNode(firstArg);
+        const isTypeParameter = (argType.flags & ts.TypeFlags.TypeParameter) !== 0;
+        if (!isTypeParameter) {
+          // Not a type parameter, safe to use
+          innerTypeNode = firstArg;
+        }
+        // Otherwise leave innerTypeNode as undefined (don't use type parameter nodes)
+      }
+    }
+
 
     // Resolve inner type, preferring type information; fall back to node if needed
     let innerType: ts.Type | undefined = innerTypeFromType;
@@ -91,13 +135,21 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
+    // When we resolve aliases (e.g., StringCell -> Cell<string>), the resolved node's
+    // type arguments may contain unbound generics (e.g., T) from the alias declaration.
+    // In that case, we must NOT pass the node, since the type information has the
+    // concrete types (e.g., string) from the usage site.
+    // We detect this by checking if the inner type is a type parameter.
+    const innerTypeIsGeneric = (innerType.flags & ts.TypeFlags.TypeParameter) !== 0;
+
     // Don't pass synthetic TypeNodes - they lose type information (especially for arrays)
     // Synthetic nodes have pos === -1 and end === -1
     // But DO pass real TypeNodes from source code for proper type detection (e.g., Default)
     const isSyntheticNode = innerTypeNode && innerTypeNode.pos === -1 &&
       innerTypeNode.end === -1;
 
-    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode;
+    // Only pass typeNode if it's real (not synthetic) AND not a generic type parameter
+    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode && !innerTypeIsGeneric;
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       context,
@@ -184,62 +236,6 @@ export class CommonToolsFormatter implements TypeFormatter {
     const objectType = type as ts.ObjectType;
     return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
       (type as ts.TypeReference).target?.symbol?.name === "Stream";
-  }
-
-  private isAliasToDefault(
-    typeNode: ts.TypeReferenceNode,
-    typeChecker: ts.TypeChecker,
-  ): boolean {
-    return this.followAliasChain(typeNode, typeChecker, new Set());
-  }
-
-  private followAliasChain(
-    typeNode: ts.TypeReferenceNode,
-    typeChecker: ts.TypeChecker,
-    visited: Set<string>,
-  ): boolean {
-    if (!ts.isIdentifier(typeNode.typeName)) {
-      return false;
-    }
-
-    const typeName = typeNode.typeName.text;
-
-    // Detect circular aliases and throw descriptive error
-    if (visited.has(typeName)) {
-      const aliasChain = Array.from(visited).join(" -> ");
-      throw new Error(
-        `Circular type alias detected: ${aliasChain} -> ${typeName}`,
-      );
-    }
-    visited.add(typeName);
-
-    // Check if we've reached "Default"
-    if (typeName === "Default") {
-      return true;
-    }
-
-    // Look up the symbol for this type name
-    const symbol = typeChecker.getSymbolAtLocation(typeNode.typeName);
-    if (!symbol || !(symbol.flags & ts.SymbolFlags.TypeAlias)) {
-      return false;
-    }
-
-    const aliasDeclaration = symbol.valueDeclaration ||
-      symbol.declarations?.[0];
-    if (!aliasDeclaration || !ts.isTypeAliasDeclaration(aliasDeclaration)) {
-      return false;
-    }
-
-    const aliasedType = aliasDeclaration.type;
-    if (
-      ts.isTypeReferenceNode(aliasedType) &&
-      ts.isIdentifier(aliasedType.typeName)
-    ) {
-      // Recursively follow the alias chain
-      return this.followAliasChain(aliasedType, typeChecker, visited);
-    }
-
-    return false;
   }
 
   private formatDefaultType(

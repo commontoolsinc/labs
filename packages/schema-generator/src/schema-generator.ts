@@ -14,6 +14,7 @@ import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
 import {
+  detectWrapperViaNode,
   getNamedTypeKey,
   isDefaultTypeRef,
   safeGetIndexTypeOfType,
@@ -85,7 +86,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
     typeNode?: ts.TypeNode,
   ): SchemaDefinition {
-    const childContext = typeNode ? { ...context, typeNode } : context;
+    // IMPORTANT: Always create a new context, replacing typeNode (even if undefined).
+    // If we pass the parent context as-is when typeNode is undefined, the child will
+    // inherit the parent's typeNode which leads to mismatched type/node pairs.
+    const { typeNode: _, ...baseContext } = context;
+    const childContext = typeNode ? { ...context, typeNode } : baseContext;
     return this.formatType(type, childContext, false);
   }
 
@@ -160,13 +165,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
     // Wrapper types erase to their inner type, so we must check typeNode to
     // distinguish wrapper context from inner context.
-    const typeNodeName =
-      context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
-        ts.isIdentifier(context.typeNode.typeName)
-        ? context.typeNode.typeName.text
-        : undefined;
-    const isWrapperContext = typeNodeName &&
-      ["Default", "Cell", "Stream", "OpaqueRef"].includes(typeNodeName);
+    // This now handles both direct wrappers and aliases (e.g., type MyDefault<T> = Default<T, T>)
+    const wrapperKind = detectWrapperViaNode(context.typeNode, context.typeChecker);
+    const isWrapperContext = wrapperKind !== undefined;
 
     let namedKey = getNamedTypeKey(type, context.typeNode);
 
