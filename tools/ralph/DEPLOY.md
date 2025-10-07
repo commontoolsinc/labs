@@ -38,13 +38,13 @@ The command will output a charm ID (e.g.,
 The URL format for localhost is:
 
 ```
-http://localhost:5173/<SPACE_NAME>/<CHARM_ID>
+http://localhost:8000/<SPACE_NAME>/<CHARM_ID>
 ```
 
 Example:
 
 ```
-http://localhost:5173/ellyse/baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
+http://localhost:8000/ellyse/baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
 ```
 
 ## Step 4: Test with Playwright
@@ -52,7 +52,7 @@ http://localhost:5173/ellyse/baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw2
 ### 4.1 Navigate to the Charm URL
 
 ```javascript
-await page.goto("http://localhost:5173/<SPACE_NAME>/<CHARM_ID>");
+await page.goto("http://localhost:8000/<SPACE_NAME>/<CHARM_ID>");
 ```
 
 ### 4.2 Register/Login (First Time Only)
@@ -81,7 +81,7 @@ deno task ct charm new --identity ./my.key --api-url http://127.0.0.1:8000 --spa
 # Output: baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
 
 # 3. URL will be:
-# http://localhost:5173/ellyse/baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
+# http://localhost:8000/ellyse/baedreidon464mghox4uar46bbym5t6bnmlvn6wwzby5vvdmsw24oxaalp4
 ```
 
 Then use Playwright to:
@@ -95,5 +95,6 @@ Then use Playwright to:
 There are two servers that need to be running: toolshed and shell
 
 1. kill deno processes
-2. toolshed: go into ./packages/toolshed and run `deno task dev`
+2. toolshed: go into ./packages/toolshed and run
+   `SHELL_URL=http://localhost:5173 deno task dev`
 3. shell: go into ./packages/shell and run `deno task dev-local`

@@ -12,7 +12,7 @@ Claude CLI and Codex are installed
 
 ```bash
 $ docker pull ellyxir/ralph
-$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 ellyxir/ralph
+$ docker run -d --name ralph -p 8000:8000 ellyxir/ralph
 ```
 
 To connect to the container (connecting as ralph user is recommended):
@@ -30,7 +30,7 @@ If you want to build the image yourself with local modifications:
 ```bash
 $ cd ./tools/ralph
 $ docker build -t <user_name>/ralph .
-$ docker run -d --name ralph -p 8000:8000 -p 5173:5173 <user_name>/ralph
+$ docker run -d --name ralph -p 8000:8000 <user_name>/ralph
 ```
 
 Note for `docker build`:
