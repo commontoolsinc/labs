@@ -106,6 +106,7 @@ type ChatOutput = {
   cancelGeneration: Stream<void>;
   title?: string;
   attachments: Array<PromptAttachment>;
+  tools: any;
 };
 
 export const TitleGenerator = recipe<
@@ -152,10 +153,33 @@ export default recipe<ChatInput, ChatOutput>(
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
 
-    const { addMessage, cancelGeneration, pending } = llmDialog({
+    // Derive tools from attachments
+    const dynamicTools = derive(allAttachments, (attachments) => {
+      const tools: Record<string, any> = {};
+
+      for (const attachment of attachments || []) {
+        if (attachment.type === "mention" && attachment.charm) {
+          const charmName = attachment.charm[NAME] || "Charm";
+          tools[charmName] = {
+            charm: attachment.charm,
+            description: `Handlers from ${charmName}`,
+          };
+        }
+      }
+
+      return tools;
+    });
+
+    // Merge static and dynamic tools
+    const mergedTools = derive([tools, dynamicTools], ([staticTools, dynamic]: [any, any]) => ({
+      ...staticTools,
+      ...dynamic,
+    }));
+
+    const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog({
       system: "You are a helpful assistant with some tools.",
       messages,
-      tools,
+      tools: mergedTools,
       model,
     });
 
@@ -183,7 +207,7 @@ export default recipe<ChatInput, ChatOutput>(
             <ct-heading level={4}>{title}</ct-heading>
             <ct-hstack gap="normal">
               <ct-attachments-bar attachments={allAttachments} />
-              <ct-tools-chip tools={tools} />
+              <ct-tools-chip tools={flattenedTools} />
             </ct-hstack>
           </ct-vstack>
 
@@ -192,7 +216,7 @@ export default recipe<ChatInput, ChatOutput>(
               theme={theme}
               $messages={messages}
               pending={pending}
-              tools={tools}
+              tools={flattenedTools}
             />
           </ct-vscroll>
 
@@ -217,6 +241,7 @@ export default recipe<ChatInput, ChatOutput>(
       cancelGeneration,
       title,
       attachments: allAttachments,
+      tools: flattenedTools,
     };
   },
 );

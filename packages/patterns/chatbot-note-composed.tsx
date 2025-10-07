@@ -276,11 +276,11 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
       readActiveNote: {
         description: "Read the currently focused note.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-        } as JSONSchema,
+        // inputSchema: {
+        //   type: "object",
+        //   properties: {},
+        //   required: [],
+        // } as JSONSchema,
         handler: readNote({ content }),
       },
       listNotes: {
