@@ -374,7 +374,10 @@ export function getArrayElementInfo(
             );
             // If the element type is a type parameter (e.g., T from the alias declaration),
             // don't use it - fall through to extract from the actual type instead
-            if (elementType && (elementType.flags & ts.TypeFlags.TypeParameter) === 0) {
+            if (
+              elementType &&
+              (elementType.flags & ts.TypeFlags.TypeParameter) === 0
+            ) {
               return {
                 elementType,
                 elementNode: aliased.elementType,
@@ -396,7 +399,10 @@ export function getArrayElementInfo(
               );
               // If the element type is a type parameter (e.g., T from the alias declaration),
               // don't use it - fall through to extract from the actual type instead
-              if (elementType && (elementType.flags & ts.TypeFlags.TypeParameter) === 0) {
+              if (
+                elementType &&
+                (elementType.flags & ts.TypeFlags.TypeParameter) === 0
+              ) {
                 return {
                   elementType,
                   elementNode: argNode,
@@ -607,16 +613,24 @@ export function detectWrapperViaNode(
 export function resolveWrapperNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
-): { kind: "Default" | "Cell" | "Stream" | "OpaqueRef"; node: ts.TypeReferenceNode } | undefined {
-  if (!typeNode || !ts.isTypeReferenceNode(typeNode) || !ts.isIdentifier(typeNode.typeName)) {
+): {
+  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  node: ts.TypeReferenceNode;
+} | undefined {
+  if (
+    !typeNode || !ts.isTypeReferenceNode(typeNode) ||
+    !ts.isIdentifier(typeNode.typeName)
+  ) {
     return undefined;
   }
 
   const literalName = typeNode.typeName.text;
 
   // Fast path: direct wrapper reference
-  if (literalName === "Default" || literalName === "Cell" ||
-      literalName === "Stream" || literalName === "OpaqueRef") {
+  if (
+    literalName === "Default" || literalName === "Cell" ||
+    literalName === "Stream" || literalName === "OpaqueRef"
+  ) {
     return { kind: literalName, node: typeNode };
   }
 
@@ -632,7 +646,10 @@ function followAliasToWrapperNode(
   typeNode: ts.TypeReferenceNode,
   typeChecker: ts.TypeChecker,
   visited: Set<string>,
-): { kind: "Default" | "Cell" | "Stream" | "OpaqueRef"; node: ts.TypeReferenceNode } | undefined {
+): {
+  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  node: ts.TypeReferenceNode;
+} | undefined {
   if (!ts.isIdentifier(typeNode.typeName)) {
     return undefined;
   }
@@ -649,8 +666,10 @@ function followAliasToWrapperNode(
   visited.add(typeName);
 
   // Check if we've reached a wrapper type
-  if (typeName === "Default" || typeName === "Cell" ||
-      typeName === "Stream" || typeName === "OpaqueRef") {
+  if (
+    typeName === "Default" || typeName === "Cell" ||
+    typeName === "Stream" || typeName === "OpaqueRef"
+  ) {
     return { kind: typeName, node: typeNode };
   }
 
@@ -666,7 +685,9 @@ function followAliasToWrapperNode(
   }
 
   const aliasedType = aliasDeclaration.type;
-  if (ts.isTypeReferenceNode(aliasedType) && ts.isIdentifier(aliasedType.typeName)) {
+  if (
+    ts.isTypeReferenceNode(aliasedType) && ts.isIdentifier(aliasedType.typeName)
+  ) {
     // Recursively follow the alias chain, returning the final resolved node
     return followAliasToWrapperNode(aliasedType, typeChecker, visited);
   }

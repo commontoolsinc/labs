@@ -26,7 +26,10 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Check via typeNode for Default (erased at type-level) and all wrapper aliases
-    const wrapperViaNode = detectWrapperViaNode(context.typeNode, context.typeChecker);
+    const wrapperViaNode = detectWrapperViaNode(
+      context.typeNode,
+      context.typeChecker,
+    );
     if (wrapperViaNode) {
       return true;
     }
@@ -40,7 +43,9 @@ export class CommonToolsFormatter implements TypeFormatter {
     const n = context.typeNode;
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
-    const resolvedWrapper = n ? resolveWrapperNode(n, context.typeChecker) : undefined;
+    const resolvedWrapper = n
+      ? resolveWrapperNode(n, context.typeChecker)
+      : undefined;
 
     // Handle Default via node (direct or alias)
     if (resolvedWrapper?.kind === "Default") {
@@ -48,7 +53,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       // If the original node has type arguments, use it.
       // Otherwise, use the resolved node (for direct Default references).
       const nodeForDefault = n && ts.isTypeReferenceNode(n) && n.typeArguments
-        ? n  // Original has type args, use it for concrete types
+        ? n // Original has type args, use it for concrete types
         : resolvedWrapper.node; // Direct reference or fallback
 
       if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
@@ -66,7 +71,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         // - If original node is just identifier (alias): use resolved node
         //   formatWrapperType will check if node has type args before extracting inner types
         const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
-          ? n  // Original has type args, use it
+          ? n // Original has type args, use it
           : resolvedWrapper.node; // Original is just alias, use resolved (but won't extract inner types from it)
 
         return this.formatWrapperType(
@@ -109,12 +114,16 @@ export class CommonToolsFormatter implements TypeFormatter {
     // If typeRefNode has no type arguments, or if the arguments are generic parameters
     // (e.g., T from an alias declaration), we should NOT extract inner types from it.
     let innerTypeNode: ts.TypeNode | undefined = undefined;
-    if (typeRefNode && ts.isTypeReferenceNode(typeRefNode) && typeRefNode.typeArguments) {
+    if (
+      typeRefNode && ts.isTypeReferenceNode(typeRefNode) &&
+      typeRefNode.typeArguments
+    ) {
       const firstArg = typeRefNode.typeArguments[0];
       if (firstArg) {
         // Check if this node represents a type parameter
         const argType = context.typeChecker.getTypeFromTypeNode(firstArg);
-        const isTypeParameter = (argType.flags & ts.TypeFlags.TypeParameter) !== 0;
+        const isTypeParameter =
+          (argType.flags & ts.TypeFlags.TypeParameter) !== 0;
         if (!isTypeParameter) {
           // Not a type parameter, safe to use
           innerTypeNode = firstArg;
@@ -122,7 +131,6 @@ export class CommonToolsFormatter implements TypeFormatter {
         // Otherwise leave innerTypeNode as undefined (don't use type parameter nodes)
       }
     }
-
 
     // Resolve inner type, preferring type information; fall back to node if needed
     let innerType: ts.Type | undefined = innerTypeFromType;
@@ -140,7 +148,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     // In that case, we must NOT pass the node, since the type information has the
     // concrete types (e.g., string) from the usage site.
     // We detect this by checking if the inner type is a type parameter.
-    const innerTypeIsGeneric = (innerType.flags & ts.TypeFlags.TypeParameter) !== 0;
+    const innerTypeIsGeneric =
+      (innerType.flags & ts.TypeFlags.TypeParameter) !== 0;
 
     // Don't pass synthetic TypeNodes - they lose type information (especially for arrays)
     // Synthetic nodes have pos === -1 and end === -1
@@ -149,7 +158,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       innerTypeNode.end === -1;
 
     // Only pass typeNode if it's real (not synthetic) AND not a generic type parameter
-    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode && !innerTypeIsGeneric;
+    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode &&
+      !innerTypeIsGeneric;
     const innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       context,

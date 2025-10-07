@@ -1,6 +1,6 @@
 // Test wrapper type aliases - both direct and aliased wrapper types
 // Using proper interface definitions that match actual CommonTools wrappers
-interface Default<T, V extends T = T> {}
+type Default<T, V extends T = T> = T;
 interface Cell<T> {
   get(): T;
   set(v: T): void;

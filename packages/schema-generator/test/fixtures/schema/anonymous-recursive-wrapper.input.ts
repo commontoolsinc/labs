@@ -6,5 +6,6 @@ type Default<T, V extends T = T> = T;
 
 interface SchemaRoot {
   // Anonymous object type wrapped in Default, containing self-reference to SchemaRoot
+  // deno-lint-ignore ban-types
   field: Default<{ self: SchemaRoot }, {}>;
 }

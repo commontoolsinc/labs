@@ -166,7 +166,10 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Wrapper types erase to their inner type, so we must check typeNode to
     // distinguish wrapper context from inner context.
     // This now handles both direct wrappers and aliases (e.g., type MyDefault<T> = Default<T, T>)
-    const wrapperKind = detectWrapperViaNode(context.typeNode, context.typeChecker);
+    const wrapperKind = detectWrapperViaNode(
+      context.typeNode,
+      context.typeChecker,
+    );
     const isWrapperContext = wrapperKind !== undefined;
 
     let namedKey = getNamedTypeKey(type, context.typeNode);
