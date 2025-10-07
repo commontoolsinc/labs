@@ -804,7 +804,7 @@ export class XDebuggerView extends LitElement {
         if (isRecord(fn) && isRecord(fn.recipe)) {
           details.push(html`
             <div class="event-detail">
-              <span class="event-detail-label">recipe:</span>
+              <span class="event-detail-label">pattern:</span>
               <span class="event-detail-value">${"name" in fn.recipe
                 ? fn.recipe.name
                 : "unknown"}</span>

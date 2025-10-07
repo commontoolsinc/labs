@@ -156,8 +156,22 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
     // into definitions and return $ref for non-root uses. Cycle detection
     // still applies via definitionStack.
+
+    // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
+    // Wrapper types erase to their inner type, so we must check typeNode to
+    // distinguish wrapper context from inner context.
+    const typeNodeName =
+      context.typeNode && ts.isTypeReferenceNode(context.typeNode) &&
+        ts.isIdentifier(context.typeNode.typeName)
+        ? context.typeNode.typeName.text
+        : undefined;
+    const isWrapperContext = typeNodeName &&
+      ["Default", "Cell", "Stream", "OpaqueRef"].includes(typeNodeName);
+
     let namedKey = getNamedTypeKey(type, context.typeNode);
-    if (!namedKey) {
+
+    if (!namedKey && !isWrapperContext) {
+      // Only use synthetic names if we're not processing a wrapper type
       const synthetic = context.anonymousNames.get(type);
       if (synthetic) namedKey = synthetic;
     }
@@ -204,7 +218,11 @@ export class SchemaGenerator implements ISchemaGenerator {
         const result = formatter.formatType(type, context);
 
         // If this is a named type (all-named policy), store in definitions.
-        const keyForDef = namedKey ?? context.anonymousNames.get(type);
+        // We already computed namedKey above with wrapper checks, so reuse it.
+        // Only look up synthetic names if namedKey wasn't already set and we're
+        // not in a wrapper context (to avoid storing wrapper results).
+        const keyForDef = namedKey ??
+          (isWrapperContext ? undefined : context.anonymousNames.get(type));
         if (keyForDef) {
           context.definitions[keyForDef] = result;
           context.inProgressNames.delete(keyForDef);
