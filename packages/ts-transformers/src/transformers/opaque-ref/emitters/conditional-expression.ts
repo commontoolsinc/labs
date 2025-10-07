@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 import type { Emitter, OpaqueRefHelperName } from "../types.ts";
-import { createIfElseCall } from "../builtins.ts";
+import { createIfElseCall } from "../../builtins/ifelse.ts";
 import { selectDataFlowsWithin } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
@@ -15,6 +15,8 @@ export const emitConditionalExpression: Emitter = ({
   dataFlows,
   analysis,
   context,
+  analyze,
+  rewriteChildren,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
@@ -26,7 +28,6 @@ export const emitConditionalExpression: Emitter = ({
   const shouldDerivePredicate = predicateDataFlows.length > 0 &&
     !isSimpleOpaqueRefAccess(expression.condition, context.checker);
 
-  const helpers = new Set<OpaqueRefHelperName>(["ifElse"]);
   let predicate: ts.Expression = expression.condition;
   let whenTrue: ts.Expression = expression.whenTrue;
   let whenFalse: ts.Expression = expression.whenFalse;
@@ -38,9 +39,8 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedPredicate !== expression.condition) {
+    if (derivedPredicate) {
       predicate = derivedPredicate;
-      helpers.add("derive");
     }
   }
 
@@ -51,7 +51,7 @@ export const emitConditionalExpression: Emitter = ({
   );
 
   // Check if the whenTrue branch actually requires rewriting
-  const whenTrueAnalysis = context.analyze(expression.whenTrue);
+  const whenTrueAnalysis = analyze(expression.whenTrue);
 
   if (whenTrueDataFlows.length > 0 && whenTrueAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenTrueDataFlows);
@@ -60,16 +60,19 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedWhenTrue !== expression.whenTrue) {
+    if (derivedWhenTrue) {
       whenTrue = derivedWhenTrue;
-      helpers.add("derive");
     } else {
-      const rewritten = context.rewriteChildren(expression.whenTrue);
-      if (rewritten !== expression.whenTrue) whenTrue = rewritten;
+      const rewritten = rewriteChildren(expression.whenTrue);
+      if (rewritten) {
+        whenTrue = rewritten;
+      }
     }
   } else {
-    const rewritten = context.rewriteChildren(expression.whenTrue);
-    if (rewritten !== expression.whenTrue) whenTrue = rewritten;
+    const rewritten = rewriteChildren(expression.whenTrue);
+    if (rewritten) {
+      whenTrue = rewritten;
+    }
   }
 
   const whenFalseDataFlows = filterRelevantDataFlows(
@@ -79,7 +82,7 @@ export const emitConditionalExpression: Emitter = ({
   );
 
   // Check if the whenFalse branch actually requires rewriting
-  const whenFalseAnalysis = context.analyze(expression.whenFalse);
+  const whenFalseAnalysis = analyze(expression.whenFalse);
 
   if (whenFalseDataFlows.length > 0 && whenFalseAnalysis.requiresRewrite) {
     const plan = createBindingPlan(whenFalseDataFlows);
@@ -88,31 +91,30 @@ export const emitConditionalExpression: Emitter = ({
       plan,
       context,
     );
-    if (derivedWhenFalse !== expression.whenFalse) {
+    if (derivedWhenFalse) {
       whenFalse = derivedWhenFalse;
-      helpers.add("derive");
     } else {
-      const rewritten = context.rewriteChildren(expression.whenFalse);
-      if (rewritten !== expression.whenFalse) whenFalse = rewritten;
+      const rewritten = rewriteChildren(expression.whenFalse);
+      if (rewritten) {
+        whenFalse = rewritten;
+      }
     }
   } else {
-    const rewritten = context.rewriteChildren(expression.whenFalse);
-    if (rewritten !== expression.whenFalse) whenFalse = rewritten;
+    const rewritten = rewriteChildren(expression.whenFalse);
+    if (rewritten) {
+      whenFalse = rewritten;
+    }
   }
 
-  const rewritten = createIfElseCall(
+  return createIfElseCall({
     expression,
-    context.factory,
-    context.sourceFile,
-    {
+    factory: context.factory,
+    imports: context.imports,
+    sourceFile: context.sourceFile,
+    overrides: {
       predicate,
       whenTrue,
       whenFalse,
     },
-  );
-
-  return {
-    expression: rewritten,
-    helpers,
-  };
+  });
 };

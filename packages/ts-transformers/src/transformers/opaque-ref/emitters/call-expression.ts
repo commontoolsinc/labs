@@ -13,6 +13,7 @@ export const emitCallExpression: Emitter = ({
   dataFlows,
   context,
   analysis,
+  rewriteChildren,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
@@ -21,21 +22,12 @@ export const emitCallExpression: Emitter = ({
 
   if (hint?.kind === "skip-call-rewrite") {
     if (hint.reason === "array-map") {
-      const rewritten = context.rewriteChildren(expression);
-      if (rewritten !== expression) {
-        return {
-          expression: rewritten,
-          helpers: new Set(),
-        };
-      }
-      return undefined;
+      return rewriteChildren(expression);
     }
     return undefined;
   }
 
   if (hint?.kind === "call-if-else") {
-    const helpers = new Set<OpaqueRefHelperName>();
-
     const predicateDataFlows = selectDataFlowsWithin(
       dataFlows,
       hint.predicate,
@@ -54,18 +46,17 @@ export const emitCallExpression: Emitter = ({
         plan,
         context,
       );
-      if (derivedPredicate !== hint.predicate) {
+      if (derivedPredicate && derivedPredicate !== hint.predicate) {
         rewrittenPredicate = derivedPredicate;
-        helpers.add("derive");
       }
     } else {
-      const child = context.rewriteChildren(hint.predicate);
+      const child = rewriteChildren(hint.predicate);
       if (child !== hint.predicate) {
         rewrittenPredicate = child;
       }
     }
 
-    const rewrittenCallee = context.rewriteChildren(expression.expression);
+    const rewrittenCallee = rewriteChildren(expression.expression);
     const rewrittenArgs: ts.Expression[] = [];
     let changed = rewrittenCallee !== expression.expression;
 
@@ -74,7 +65,7 @@ export const emitCallExpression: Emitter = ({
       if (index === 0) {
         updated = rewrittenPredicate;
       } else {
-        const child = context.rewriteChildren(argument);
+        const child = rewriteChildren(argument);
         if (child !== argument) {
           updated = child;
         }
@@ -85,17 +76,12 @@ export const emitCallExpression: Emitter = ({
 
     if (!changed) return undefined;
 
-    const updatedCall = context.factory.updateCallExpression(
+    return context.factory.updateCallExpression(
       expression,
       rewrittenCallee,
       expression.typeArguments,
       rewrittenArgs,
     );
-
-    return {
-      expression: updatedCall,
-      helpers,
-    };
   }
 
   const relevantDataFlows = filterRelevantDataFlows(
@@ -106,11 +92,5 @@ export const emitCallExpression: Emitter = ({
   if (relevantDataFlows.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDataFlows);
-  const rewritten = createDeriveCallForExpression(expression, plan, context);
-  if (rewritten === expression) return undefined;
-
-  return {
-    expression: rewritten,
-    helpers: new Set<OpaqueRefHelperName>(["derive"]),
-  };
+  return createDeriveCallForExpression(expression, plan, context);
 };

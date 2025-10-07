@@ -14,7 +14,7 @@ const DEFAULT_OPTIONS: TransformationOptions = {
 export interface TransformationContextConfig {
   program: ts.Program;
   sourceFile: ts.SourceFile;
-  transformation: ts.TransformationContext;
+  tsContext: ts.TransformationContext;
   options?: TransformationOptions;
   imports?: ImportRequirements;
 }
@@ -27,14 +27,14 @@ export class TransformationContext {
   readonly options: TransformationOptions;
   readonly imports: ImportRequirements;
   readonly diagnostics: TransformationDiagnostic[] = [];
-  readonly transformation: ts.TransformationContext;
+  readonly tsContext: ts.TransformationContext;
   #typeCache = new Map<ts.Node, ts.Type>();
 
   constructor(config: TransformationContextConfig) {
     this.program = config.program;
     this.checker = config.program.getTypeChecker();
-    this.transformation = config.transformation;
-    this.factory = config.transformation.factory;
+    this.tsContext = config.tsContext;
+    this.factory = config.tsContext.factory;
     this.sourceFile = config.sourceFile;
     this.imports = config.imports ?? new ImportRequirements();
     this.options = {

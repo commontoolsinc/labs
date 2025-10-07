@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import type { Emitter } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
@@ -24,11 +24,5 @@ export const emitBinaryExpression: Emitter = ({
   if (relevantDataFlows.length === 0) return undefined;
 
   const plan = createBindingPlan(relevantDataFlows);
-  const rewritten = createDeriveCallForExpression(expression, plan, context);
-  if (rewritten === expression) return undefined;
-
-  return {
-    expression: rewritten,
-    helpers: new Set<OpaqueRefHelperName>(["derive"]),
-  };
+  return createDeriveCallForExpression(expression, plan, context);
 };

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, UI, ifElse, derive, JSONSchema } from "commontools";
+import { Default, h, NAME, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
 interface RecipeState {
     count: Default<number, 0>;
     label: Default<string, "">;
