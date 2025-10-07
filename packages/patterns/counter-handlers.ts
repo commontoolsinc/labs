@@ -1,15 +1,25 @@
 /// <cts-enable />
 import { Cell, derive, handler } from "commontools";
 
-export const increment = handler<unknown, { value: Cell<number> }>(
-  (_, state) => {
+export const increment = handler<
+  { result: Cell<string> },
+  { value: Cell<number> }
+>(
+  (args, state) => {
     state.value.set(state.value.get() + 1);
+    args.result.set(`Incremented to ${state.value.get()}`);
   },
 );
 
-export const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
-});
+export const decrement = handler<
+  { result: Cell<string> },
+  { value: Cell<number> }
+>(
+  (args, state) => {
+    state.value.set(state.value.get() - 1);
+    args.result.set(`Decremented to ${state.value.get()}`);
+  },
+);
 
 export function nth(value: number) {
   if (value === 1) {

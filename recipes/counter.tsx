@@ -17,13 +17,19 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
-  state.value.set(state.value.get() + 1);
-});
+const increment = handler<{ result: Cell<string> }, { value: Cell<number> }>(
+  (args, state) => {
+    state.value.set(state.value.get() + 1);
+    args.result.set(`Incremented to ${state.value.get()}`);
+  },
+);
 
-const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
-});
+const decrement = handler<{ result: Cell<string> }, { value: Cell<number> }>(
+  (args, state) => {
+    state.value.set(state.value.get() - 1);
+    args.result.set(`Decremented to ${state.value.get()}`);
+  },
+);
 
 function previous(value: number) {
   return value - 1;

@@ -31,6 +31,18 @@ const logger = getLogger("llm-dialog", {
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
 
+/**
+ * Slugifies a string to match the pattern ^[a-zA-Z0-9_-]{1,128}$
+ * Replaces spaces and invalid characters with underscores, truncates to 128 chars
+ */
+function slugify(str: string): string {
+  return str
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 128);
+}
+
 const LLMMessageSchema = {
   type: "object",
   properties: {
@@ -127,10 +139,12 @@ const internalSchema = {
  * Converts { charm: ... } entries into individual handler entries.
  *
  * @param toolsCell - Cell containing the tools
+ * @param toolHandlers - Optional map to populate with handler references for invocation
  * @returns Flattened tools object with handler/pattern entries
  */
 function flattenTools(
   toolsCell: Cell<any>,
+  toolHandlers?: Map<string, any>,
 ): Record<
   string,
   { handler?: any; description: string; inputSchema?: JSONSchema }
@@ -144,6 +158,7 @@ function flattenTools(
       const charmCell = tool.charm;
       const charm = charmCell.get();
       const charmName = charm?.[NAME] || name;
+      const slugifiedCharmName = slugify(String(charmName));
 
       if (!charm || typeof charm !== "object") continue;
 
@@ -162,7 +177,7 @@ function flattenTools(
         // Check if value is a Stream
         if (!isStreamValue(value)) continue;
 
-        const toolName = `${charmName}.${key}`;
+        const toolName = `${slugifiedCharmName}_${slugify(key)}`;
 
         // Use asSchema to get the stream with its schema populated
         const handler = charmCell.key(key);
@@ -189,6 +204,11 @@ function flattenTools(
         // Add warning badge if schema is missing
         if (!hasSchema) {
           description = `⚠️ ${description}`;
+        }
+
+        // Store handler reference if map provided
+        if (toolHandlers) {
+          toolHandlers.set(toolName, handler);
         }
 
         flattened[toolName] = { handler, description, inputSchema };
@@ -508,114 +528,42 @@ function startRequest(
   // Map to store handler references for charm-extracted tools
   const toolHandlers = new Map<string, any>();
 
-  // Just send the schemas for each handler to the server
+  // Flatten tools (extracts handlers from charms, stores handler refs)
+  const flattenedTools = flattenTools(toolsCell, toolHandlers);
+
+  // Build schemas for LLM, filtering out tools without schemas
   const toolsWithSchemas = Object.fromEntries(
-    Object.entries(toolsCell.get() ?? {}).flatMap(
-      (
-        [name, tool],
-      ): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
-        // Existing: handler or pattern tool
-        if (tool.handler || tool.pattern) {
-          const pattern = tool.pattern?.get();
-          const handler = tool.handler;
+    Object.entries(flattenedTools).flatMap(
+      ([name, tool]): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
+        const pattern = tool.pattern?.get();
+        const handler = tool.handler;
 
-          let inputSchema = pattern?.argumentSchema ?? handler?.schema;
+        let inputSchema = pattern?.argumentSchema ?? handler?.schema ?? tool.inputSchema;
 
-          if (inputSchema === undefined) {
-            logger.error(`Tool ${name} has no schema`);
-            return [];
-          }
-
-          // Maps `any` and `never` to objects with either any or no properties
-          if (isBoolean(inputSchema)) {
-            inputSchema = {
-              type: "object",
-              properties: {},
-              additionalProperties: inputSchema,
-            };
-          }
-
-          let description: string = (tool.description as string | undefined) ??
-            (inputSchema.description as string | undefined) ??
-            "";
-
-          if (!description) {
-            logger.warn(`Tool ${name} has no description`);
-            // TODO(seefeld): Should we instead ignore the tool?
-            description = "";
-          }
-
-          return [[name, { description, inputSchema }]];
+        if (inputSchema === undefined) {
+          logger.error(`Tool ${name} has no schema`);
+          return [];
         }
 
-        // NEW: charm tool - extract all handlers
-        if (tool.charm?.get()) {
-          const charmCell = tool.charm;
-          const charm = charmCell.get();
-          const charmName = charm?.[NAME] || name;
-          const handlers: Array<
-            [string, { description: string; inputSchema: JSONSchema }]
-          > = [];
-
-          if (!charm || typeof charm !== "object") {
-            logger.warn(`Tool ${name} has invalid charm`);
-            return [];
-          }
-
-          // Iterate charm's top-level keys
-          for (const [key, value] of Object.entries(charm)) {
-            // Skip special keys
-            if (
-              key.startsWith("$") ||
-              key === String(NAME) ||
-              key === String(UI) ||
-              key === String(ID)
-            ) {
-              continue;
-            }
-
-            // Check if value is a Stream
-            if (!isStream(value)) continue;
-
-            const toolName = `${charmName}.${key}`;
-
-            // Use asSchema to get the stream with its schema populated
-            const handler = charmCell.key(key).asSchema({ asStream: true });
-            const hasSchema = !!handler?.schema;
-            let inputSchema = handler?.schema || { type: "object" };
-
-            // Maps `any` and `never` to objects with either any or no properties
-            if (isBoolean(inputSchema)) {
-              inputSchema = {
-                type: "object",
-                properties: {},
-                additionalProperties: inputSchema,
-              };
-            }
-
-            let description: string = (tool.description as string | undefined)
-              ? `${tool.description} - ${key}`
-              : (isBoolean(inputSchema)
-                ? undefined
-                : (inputSchema.description as string | undefined)) ||
-                `${key} handler from ${charmName}`;
-
-            // Add warning badge if schema is missing
-            if (!hasSchema) {
-              description = `⚠️ ${description}`;
-            }
-
-            // Store handler reference for invocation
-            toolHandlers.set(toolName, handler);
-
-            handlers.push([toolName, { description, inputSchema }]);
-          }
-
-          return handlers;
+        // Maps `any` and `never` to objects with either any or no properties
+        if (isBoolean(inputSchema)) {
+          inputSchema = {
+            type: "object",
+            properties: {},
+            additionalProperties: inputSchema,
+          };
         }
 
-        logger.warn(`Tool ${name} has no handler, pattern, or charm`);
-        return [];
+        let description: string = tool.description ??
+          (isBoolean(inputSchema) ? undefined : (inputSchema.description as string | undefined)) ??
+          "";
+
+        if (!description) {
+          logger.warn(`Tool ${name} has no description`);
+          description = "";
+        }
+
+        return [[name, { description, inputSchema }]];
       },
     ),
   );
@@ -667,12 +615,12 @@ function startRequest(
           }
 
           // Extract tool calls from content parts
-          const toolCalls = (llmResult.content as any[]).filter((part) =>
+          const toolCallParts = (llmResult.content as any[]).filter((part) =>
             part.type === "tool-call"
-          );
+          ) as BuiltInLLMToolCallPart[];
 
-          for (const toolCall of toolCalls) {
-            assistantContentParts.push(toolCall);
+          for (const toolCallPart of toolCallParts) {
+            assistantContentParts.push(toolCallPart);
           }
 
           const assistantMessage: BuiltInLLMMessage = {
@@ -682,32 +630,36 @@ function startRequest(
 
           // Execute each tool call and collect results
           const toolResults: any[] = [];
-          for (const toolCall of toolCalls) {
+          for (const toolCallPart of toolCallParts) {
             // Check if this is a charm-extracted handler (dot notation)
-            const charmHandler = toolHandlers.get(toolCall.toolName);
+            const charmHandler = toolHandlers.get(toolCallPart.toolName);
             const toolDef = charmHandler
               ? undefined
-              : toolsCell.key(toolCall.toolName);
+              : toolsCell.key(toolCallPart.toolName);
 
             try {
               const resultValue = await invokeToolCall(
                 runtime,
                 space,
                 toolDef,
-                toolCall,
+                {
+                  id: toolCallPart.toolCallId,
+                  name: toolCallPart.toolName,
+                  input: toolCallPart.input,
+                },
                 charmHandler,
               );
               // this resolves back to a cell, so it may still update in the
               // conversation history reactively later but we intend this to be
               // a static / snapshot at this stage
               toolResults.push({
-                id: toolCall.toolCallId,
+                id: toolCallPart.toolCallId,
                 result: resultValue,
               });
             } catch (error) {
-              console.error(`Tool ${toolCall.toolName} failed:`, error);
+              console.error(`Tool ${toolCallPart.toolName} failed:`, error);
               toolResults.push({
-                id: toolCall.toolCallId,
+                id: toolCallPart.toolCallId,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
@@ -718,7 +670,7 @@ function startRequest(
 
           // Add tool result messages
           for (const toolResult of toolResults) {
-            const matchingToolCall = toolCalls.find((tc) =>
+            const matchingToolCallPart = toolCallParts.find((tc) =>
               tc.toolCallId === toolResult.id
             );
             newMessages.push({
@@ -726,7 +678,7 @@ function startRequest(
               content: [{
                 type: "tool-result",
                 toolCallId: toolResult.id,
-                toolName: matchingToolCall?.toolName || "unknown",
+                toolName: matchingToolCallPart?.toolName || "unknown",
                 output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
                   : toolResult.result,
