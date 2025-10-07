@@ -44,9 +44,8 @@ RUN add-apt-repository -y ppa:maveonair/helix-editor && \
     apt-get update && \
     apt-get install -y helix
 
-# MyST Markdown
-RUN apt-get update && apt-get install -y python3-pip && \
-    pip install mystmd
+# MyST Markdown (via npm to avoid Python PEP 668 issues)
+RUN npm install -g mystmd
 
 # Install Playwright browser and dependencies
 RUN npx playwright install chrome && \
