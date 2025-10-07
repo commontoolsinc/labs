@@ -77,11 +77,11 @@ $ docker push <user_name>/ralph
 ## TODO
 
 - add playwright to codex
-- push a working image to a docker hub
-- update README to use image from dockerhub
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
 - make ralph easy to run
+- DONE - update README to use image from dockerhub
+- DONE - push a working image to a docker hub
 - DONE - change permissions so claude auto updater will work
 - DONE - move ralph script into ./tools/ralph
 - DONE - Add codex and claude packages
