@@ -42,6 +42,10 @@ const logResult = (
 };
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
+  private commitCallbacks = new Set<
+    (tx: IExtendedStorageTransaction) => void
+  >();
+
   constructor(public tx: IStorageTransaction) {}
 
   get journal(): ITransactionJournal {
@@ -175,6 +179,35 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
-    return this.tx.commit();
+    const promise = this.tx.commit();
+
+    // Call commit callbacks after commit completes (success or failure)
+    promise.then((result) => {
+      // Call all callbacks, wrapping each in try/catch to prevent one
+      // failing callback from breaking others
+      for (const callback of this.commitCallbacks) {
+        try {
+          callback(this);
+        } catch (error) {
+          logger.error("Error in commit callback:", error);
+        }
+      }
+    });
+
+    return promise;
+  }
+
+  /**
+   * Add a callback to be called when the transaction commit completes.
+   * The callback receives the transaction as a parameter and is called
+   * regardless of whether the commit succeeded or failed.
+   *
+   * Note: Callbacks are called synchronously after commit completes.
+   * If a callback throws, the error is logged but doesn't affect other callbacks.
+   *
+   * @param callback - Function to call after commit
+   */
+  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+    this.commitCallbacks.add(callback);
   }
 }
