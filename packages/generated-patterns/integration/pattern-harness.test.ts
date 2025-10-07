@@ -1,3 +1,4 @@
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "./pattern-harness.ts";
 import {
@@ -558,8 +559,22 @@ const allScenarios = [
   ...counterResetScenarios,
 ];
 
+// Filter scenarios by exportName via --filter-export flag
+// Usage: deno test -- --filter-export=callCenterSchedulePattern
+const filterExport = Deno.args.find((arg) => arg.startsWith("--filter-export="))
+  ?.split("=")[1];
+
 describe("Pattern integration harness", () => {
-  for (const scenario of allScenarios) {
+  const filteredScenarios = filterExport
+    ? allScenarios.filter((s) => s.exportName?.includes(filterExport))
+    : allScenarios;
+
+  expect(
+    filteredScenarios.length,
+    `No scenarios found for export ${filterExport}`,
+  ).toBeGreaterThan(0);
+
+  for (const scenario of filteredScenarios) {
     it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
