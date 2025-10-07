@@ -26,12 +26,8 @@ RUN type -p curl >/dev/null || (apt-get update && apt-get install -y curl) && \
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs
 
-# Deno (install globally)
-RUN curl -fsSL https://deno.land/install.sh | sh -s -- --no-modify-path && \
-    mv /root/.deno /opt/deno && \
-    chmod -R 755 /opt/deno
-ENV DENO_INSTALL="/opt/deno"
-ENV PATH="$DENO_INSTALL/bin:$PATH"
+# Deno (install globally to /usr/local with pinned version)
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.5.2
 
 # Helix editor
 # need to install add-apt-repository from
