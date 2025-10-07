@@ -164,7 +164,6 @@ export function addMemoryAttributes(
     the?: string;
     cause?: string;
     changeCount?: number;
-    selector?: string;
   },
 ): void {
   if (!span || !config.enabled) return;
@@ -174,7 +173,6 @@ export function addMemoryAttributes(
   if (info.entity) span.setAttribute("memory.entity", info.entity);
   if (info.the) span.setAttribute("memory.the", info.the);
   if (info.cause) span.setAttribute("memory.cause", info.cause);
-  if (info.selector) span.setAttribute("memory.selector", info.selector);
   if (info.changeCount !== undefined) {
     span.setAttribute("memory.change_count", info.changeCount);
   }

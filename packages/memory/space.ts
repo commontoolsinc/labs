@@ -235,7 +235,6 @@ class Space<Subject extends MemorySpace = MemorySpace>
       addMemoryAttributes(span, {
         operation: "querySchema",
         space: this.subject,
-        selector: JSON.stringify(source.args.selectSchema),
       });
 
       return querySchema(this, source);
@@ -888,6 +887,10 @@ export const querySchema = <Space extends MemorySpace>(
 
     if (command.args?.selectSchema) {
       span.setAttribute("querySchema.has_selector", true);
+      span.setAttribute(
+        "querySchema.selectSchema",
+        JSON.stringify(command.args.selectSchema),
+      );
     }
     if (command.args?.since !== undefined) {
       span.setAttribute("querySchema.since", command.args.since);
