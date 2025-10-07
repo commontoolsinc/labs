@@ -12,11 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     lsb-release \
-    unzip
+    unzip \
+    sudo \
+    software-properties-common
 
 # GitHub CLI
-RUN type -p curl >/dev/null || (apt-get update && apt-get install -y curl) && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
     gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
     tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
@@ -29,10 +30,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # Deno (install globally to /usr/local with pinned version)
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.5.2
 
-# Helix editor
-# need to install add-apt-repository from
-# software-properties-common package
-RUN apt-get install -y --no-install-recommends software-properties-common 
+# Helix editor (requires software-properties-common from base tools)
 RUN add-apt-repository -y ppa:maveonair/helix-editor && \
     apt-get update && \
     apt-get install -y helix
@@ -46,7 +44,6 @@ RUN npx playwright install chrome && \
 
 # Create ralph user (with sudo privileges for development)
 RUN useradd -m -s /bin/bash ralph && \
-    apt-get update && apt-get install -y sudo && \
     echo "ralph ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Set up working directory with proper ownership
