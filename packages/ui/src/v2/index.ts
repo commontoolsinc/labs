@@ -78,6 +78,8 @@ export * from "./components/ct-keybind/index.ts";
 export * from "./components/ct-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";
 export * from "./components/keyboard-router.ts";
+export * from "./components/ct-attachments-bar/ct-attachments-bar.ts";
+export * from "./components/ct-chip/ct-chip.ts";
 
 // Type exports
 export type * from "./utils/types.ts";

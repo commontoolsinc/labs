@@ -314,6 +314,7 @@ export interface BuiltInLLMDialogState {
   error: unknown;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
+  flattenedTools: Record<string, any>;
 }
 
 export interface BuiltInGenerateObjectParams {

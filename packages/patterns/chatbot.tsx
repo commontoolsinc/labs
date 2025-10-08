@@ -20,16 +20,87 @@ import {
   Stream,
   UI,
 } from "commontools";
+import { MentionableCharm } from "./chatbot-list-view.tsx";
+
+const addAttachment = handler<
+  {
+    detail: {
+      attachment: PromptAttachment;
+    };
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>((event, { allAttachments }) => {
+  const { attachment } = event.detail;
+  const current = allAttachments.get() || [];
+  allAttachments.set([...current, attachment]);
+});
+
+const removeAttachment = handler<
+  {
+    detail: {
+      id: string;
+    };
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>((event, { allAttachments }) => {
+  const { id } = event.detail;
+  const current = allAttachments.get() || [];
+  allAttachments.set(current.filter((a) => a.id !== id));
+});
 
 const sendMessage = handler<
-  { detail: { message: string } },
+  {
+    detail: {
+      text: string;
+      attachments: Array<PromptAttachment>;
+      mentions: Array<any>;
+      message: string; // Backward compatibility
+    };
+  },
   {
     addMessage: Stream<BuiltInLLMMessage>;
+    allAttachments: Cell<Array<PromptAttachment>>;
   }
->((event, { addMessage }) => {
+>((event, { addMessage, allAttachments }) => {
+  const { text } = event.detail;
+
+  // Build content array from text and attachments
+  const contentParts = [{ type: "text" as const, text }];
+
+  // Get current attachments from the global list
+  const attachments = allAttachments.get() || [];
+
+  // Compute mentions from mention attachments so they are available to consumers
+  const mentions = attachments
+    .filter((a) => a.type === "mention" && a.charm)
+    .map((a) => a.charm);
+
+  // Process attachments
+  for (const attachment of attachments) {
+    if (attachment.type === "file" && attachment.data) {
+      // For now, add a text reference
+      contentParts.push({
+        type: "text" as const,
+        text: `[Attached file: ${attachment.name}]`,
+      });
+    } else if (attachment.type === "clipboard" && attachment.data) {
+      // Append clipboard content as additional context
+      contentParts.push({
+        type: "text" as const,
+        text: `\n\n--- Pasted content ---\n${attachment.data}`,
+      });
+    }
+    // Note: mentions are already in the text as clean names
+    // The charm references are available in attachment.charm if needed
+  }
+
   addMessage.send({
     role: "user",
-    content: [{ type: "text", text: event.detail.message }],
+    content: contentParts,
   });
 });
 
@@ -50,6 +121,15 @@ type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
   theme?: any;
+  mentionable: Cell<MentionableCharm[]>;
+};
+
+type PromptAttachment = {
+  id: string;
+  name: string;
+  type: "file" | "clipboard" | "mention";
+  data?: any; // File | Blob | string
+  charm?: any;
 };
 
 type ChatOutput = {
@@ -58,6 +138,8 @@ type ChatOutput = {
   addMessage: Stream<BuiltInLLMMessage>;
   cancelGeneration: Stream<void>;
   title?: string;
+  attachments: Array<PromptAttachment>;
+  tools: any;
 };
 
 export const TitleGenerator = recipe<
@@ -100,15 +182,44 @@ export const TitleGenerator = recipe<
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools, theme }) => {
+  ({ messages, tools, theme, mentionable }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
+    const allAttachments = cell<Array<PromptAttachment>>([]);
 
-    const { addMessage, cancelGeneration, pending } = llmDialog({
-      system: "You are a helpful assistant with some tools.",
-      messages,
-      tools,
-      model,
+    // Derive tools from attachments
+    const dynamicTools = derive(allAttachments, (attachments) => {
+      const tools: Record<string, any> = {};
+
+      for (const attachment of attachments || []) {
+        if (attachment.type === "mention" && attachment.charm) {
+          const charmName = attachment.charm[NAME] || "Charm";
+          tools[charmName] = {
+            charm: attachment.charm,
+            description: `Handlers from ${charmName}`,
+          };
+        }
+      }
+
+      return tools;
     });
+
+    // Merge static and dynamic tools
+    const mergedTools = derive(
+      [tools, dynamicTools],
+      ([staticTools, dynamic]: [any, any]) => ({
+        ...staticTools,
+        ...dynamic,
+      }),
+    );
+
+    const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog(
+      {
+        system: "You are a helpful assistant with some tools.",
+        messages,
+        tools: mergedTools,
+        model,
+      },
+    );
 
     const { result } = fetchData({
       url: "/api/ai/llm/models",
@@ -130,17 +241,24 @@ export default recipe<ChatInput, ChatOutput>(
       [NAME]: title,
       [UI]: (
         <ct-screen>
-          <ct-hstack justify="between" slot="header">
+          <ct-vstack slot="header">
             <ct-heading level={4}>{title}</ct-heading>
-            <ct-tools-chip tools={tools} />
-          </ct-hstack>
+            <ct-hstack gap="normal">
+              <ct-attachments-bar
+                attachments={allAttachments}
+                removable
+                onct-remove={removeAttachment({ allAttachments })}
+              />
+              <ct-tools-chip tools={flattenedTools} />
+            </ct-hstack>
+          </ct-vstack>
 
           <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
             <ct-chat
               theme={theme}
               $messages={messages}
               pending={pending}
-              tools={tools}
+              tools={flattenedTools}
             />
           </ct-vscroll>
 
@@ -148,8 +266,11 @@ export default recipe<ChatInput, ChatOutput>(
             <ct-prompt-input
               placeholder="Ask the LLM a question..."
               pending={pending}
-              onct-send={sendMessage({ addMessage })}
+              $mentionable={mentionable}
+              onct-send={sendMessage({ addMessage, allAttachments })}
               onct-stop={cancelGeneration}
+              onct-attachment-add={addAttachment({ allAttachments })}
+              onct-attachment-remove={removeAttachment({ allAttachments })}
             />
             <ct-select
               items={items}
@@ -163,6 +284,8 @@ export default recipe<ChatInput, ChatOutput>(
       addMessage,
       cancelGeneration,
       title,
+      attachments: allAttachments,
+      tools: flattenedTools,
     };
   },
 );

@@ -13,13 +13,15 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
-import { isBoolean } from "@commontools/utils/types";
+import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { ID, type Recipe } from "../builder/types.ts";
+import { isStream } from "../cell.ts";
+import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { parseLink } from "../link-utils.ts";
+import { isStreamValue } from "@commontools/runner";
 
 const logger = getLogger("llm-dialog", {
   enabled: true,
@@ -28,6 +30,49 @@ const logger = getLogger("llm-dialog", {
 
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
+
+/**
+ * Slugifies a string to match the pattern ^[a-zA-Z0-9_-]{1,128}$
+ * Replaces spaces and invalid characters with underscores, truncates to 128 chars
+ */
+function slugify(str: string): string {
+  return str
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 128);
+}
+
+/**
+ * Remove the injected `result` field from a JSON schema so tools don't
+ * advertise it as an input parameter.
+ */
+function stripInjectedResult(
+  schema: unknown,
+): unknown {
+  if (!schema || typeof schema !== "object") return schema;
+  const obj = schema as Record<string, unknown>;
+  if (obj.type !== "object") return schema;
+
+  const copy: Record<string, unknown> = { ...obj };
+  const props = copy.properties as Record<string, unknown> | undefined;
+  if (props && typeof props === "object") {
+    const { result, ...rest } = props as Record<string, unknown>;
+    copy.properties = rest;
+  }
+  const req = copy.required as unknown[] | undefined;
+  if (Array.isArray(req)) {
+    copy.required = req.filter((k) => k !== "result");
+  }
+  return copy;
+}
+
+/**
+ * Best-effort sanitizer to remove injected `result` fields from any tool-like
+ * object so UI consumers (e.g., ct-tools-chip) don't show it as a parameter.
+ */
+// Intentionally minimal sanitization for flattened tool entries. We only
+// remove the injected `result` from `inputSchema` if present.
 
 const LLMMessageSchema = {
   type: "object",
@@ -75,13 +120,16 @@ const LLMToolSchema = {
         nodes: { type: "array", items: { type: "object" } },
         program: { type: "object" },
         initial: { type: "object" },
-        result: { type: "object" },
       },
-      required: ["argumentSchema", "resultSchema", "nodes", "result"],
+      required: ["argumentSchema", "resultSchema", "nodes"],
+      asCell: true,
+    },
+    charm: {
+      // Accept whole charm - its own schema defines its handlers
       asCell: true,
     },
   },
-  required: ["description"],
+  required: [],
 } as const satisfies JSONSchema;
 
 const LLMParamsSchema = {
@@ -102,6 +150,7 @@ const resultSchema = {
     pending: { type: "boolean", default: false },
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
+    flattenedTools: { type: "object", default: {} },
   },
   required: ["pending", "addMessage", "cancelGeneration"],
 } as const satisfies JSONSchema;
@@ -114,6 +163,103 @@ const internalSchema = {
   },
   required: ["requestId", "lastActivity"],
 } as const satisfies JSONSchema;
+
+/**
+ * Flattens tools by extracting handlers from charm-based tools.
+ * Converts { charm: ... } entries into individual handler entries.
+ *
+ * @param toolsCell - Cell containing the tools
+ * @param toolHandlers - Optional map to populate with handler references for invocation
+ * @returns Flattened tools object with handler/pattern entries
+ */
+function flattenTools(
+  toolsCell: Cell<any>,
+  toolHandlers?: Map<string, { handler: any; charm: Cell<any> }>,
+): Record<
+  string,
+  { handler?: any; description: string; inputSchema?: JSONSchema }
+> {
+  const flattened: Record<string, any> = {};
+  const tools = toolsCell.get() ?? {};
+
+  for (const [name, tool] of Object.entries(tools)) {
+    // If it's a charm tool, extract handlers
+    if (tool.charm?.get()) {
+      const charmCell = tool.charm;
+      const charm = charmCell.get();
+      const charmName = charm?.[NAME] || name;
+      const slugifiedCharmName = slugify(String(charmName));
+
+      if (!charm || typeof charm !== "object") continue;
+
+      // Iterate charm's top-level keys to find handlers
+      for (const [key, value] of Object.entries(charm)) {
+        // Skip special keys
+        if (
+          key.startsWith("$") ||
+          key === String(NAME) ||
+          key === String(UI) ||
+          key === String(ID)
+        ) {
+          continue;
+        }
+
+        // Check if value is a Stream
+        if (!isStreamValue(value)) continue;
+
+        const toolName = `${slugifiedCharmName}_${slugify(key)}`;
+
+        // Use asSchema to get the stream with its schema populated
+        const handler = charmCell.key(key);
+        const hasSchema = !!handler?.schema &&
+          typeof handler?.schema === "object";
+        let inputSchema = hasSchema ? handler?.schema : { type: "object" };
+
+        // Maps `any` and `never` to objects with either any or no properties
+        if (isBoolean(inputSchema)) {
+          inputSchema = {
+            type: "object",
+            properties: {},
+            additionalProperties: inputSchema,
+          };
+        }
+
+        let description: string = (tool.description as string | undefined)
+          ? `${tool.description} - ${key}`
+          : (isBoolean(inputSchema)
+            ? undefined
+            : (inputSchema.description as string | undefined)) ||
+            `${key} handler from ${charmName}`;
+
+        // Remove injected result field from schema (UI/LLM shouldn't see it)
+        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
+
+        // Add warning badge if schema is missing
+        if (!hasSchema) {
+          description = `⚠️ ${description}`;
+        }
+
+        // Store handler reference if map provided
+        if (toolHandlers) {
+          toolHandlers.set(toolName, { handler, charm: charmCell });
+        }
+
+        flattened[toolName] = { handler, description, inputSchema };
+      }
+    } else {
+      // Regular handler or pattern tool: only sanitize known inputSchema.
+      const passThrough: Record<string, unknown> = { ...tool };
+      if (
+        passThrough.inputSchema && typeof passThrough.inputSchema === "object"
+      ) {
+        passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+      }
+      flattened[name] = passThrough;
+    }
+  }
+
+  return flattened;
+}
 
 /**
  * Performs a mutation on the storage if the pending flag is active and the
@@ -155,6 +301,33 @@ async function safelyPerformUpdate(
 }
 
 /**
+ * Ensures that a source charm is running using the charm context,
+ * then calls runSynced to ensure it's actively running.
+ *
+ * @param runtime - The runtime instance
+ * @param meta - The charm context containing handler and owning charm
+ * @returns Promise that resolves when the charm is running
+ */
+async function ensureSourceCharmRunning(
+  runtime: IRuntime,
+  meta: { handler: any; charm: Cell<any> },
+): Promise<void> {
+  const charm = meta.charm;
+  const result = charm.asSchema({});
+  const process = charm.getSourceCell();
+  const recipeId = process?.get()?.[TYPE];
+  if (recipeId) {
+    const recipe = await runtime.recipeManager.loadRecipe(
+      recipeId,
+      charm.space,
+    );
+    await runtime.runSynced(result, recipe);
+    // Ensure scheduler has registered handlers before we enqueue events
+    await runtime.idle();
+  }
+}
+
+/**
  * Executes a tool call by invoking its handler function and returning the
  * result. Creates a new transaction, sends the tool call arguments to the
  * handler, and waits for the result to be available before returning it.
@@ -163,47 +336,48 @@ async function safelyPerformUpdate(
  * @param parentCell - The parent cell context for the tool execution
  * @param toolDef - Cell containing the tool definition with handler
  * @param toolCall - The LLM tool call containing id, name, and arguments
+ * @param charmHandler - Optional handler for charm-extracted tools
  * @returns Promise that resolves to the tool execution result
  */
 async function invokeToolCall(
   runtime: IRuntime,
   space: MemorySpace,
-  toolDef: Cell<Schema<typeof LLMToolSchema>>,
+  toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
+  charmMeta?: { handler: any; charm: Cell<any> },
 ) {
-  const pattern = toolDef.key("pattern").getRaw() as unknown as
+  const pattern = toolDef?.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
     | undefined;
-  const handler = toolDef.key("handler");
+  const handler = charmMeta?.handler ?? toolDef?.key("handler");
+  // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
-  const { resolve, promise } = Promise.withResolvers<any>();
+  // ensure the charm this handler originates from is actually running
+  if (handler && !pattern && charmMeta) {
+    await ensureSourceCharmRunning(runtime, charmMeta);
+  }
 
+  // runSynced charm
   runtime.editWithRetry((tx) => {
     if (pattern) {
       runtime.run(tx, pattern, toolCall.input, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...toolCall.input,
-        result, // doesn't need tx, since it's just a link
+        result, // doesn't HAVE to be used, but can be
       } as any); // TODO(bf): why any needed?
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
-  }).then((error) => error && resolve({ error })); // Return error if tx failed
-
-  // wait until we know we have the result of the tool call
-  // not just that the transaction has been comitted
-  const cancel = result.sink((r) => {
-    r !== undefined && resolve(r);
   });
-  const resultValue = await promise;
-  cancel();
+
+  await runtime.idle();
 
   // If this was a pattern, stop it now that we have the result
   if (pattern) runtime.runner.stop(result);
 
-  return { type: "json", value: resultValue };
+  return { type: "json", value: result.get() };
 }
 
 /**
@@ -382,6 +556,12 @@ export function llmDialog(
     // Note: If this were sandboxed code, this part would naturally read this
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
+
+    // Update flattened tools whenever tools change
+    const toolsCell = inputs.key("tools");
+    const flattened = flattenTools(toolsCell);
+    result.withTx(tx).key("flattenedTools").set(flattened as any);
+
     if (
       (!result.withTx(tx).key("pending").get() ||
         requestId !== internal.withTx(tx).key("requestId").get()) && requestId
@@ -410,38 +590,56 @@ function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // Just send the schemas for each handler to the server
+  // Map to store handler references for charm-extracted tools
+  const toolHandlers = new Map<string, { handler: any; charm: Cell<any> }>();
+
+  // Flatten tools (extracts handlers from charms, stores handler refs)
+  const flattenedTools = flattenTools(toolsCell, toolHandlers);
+
+  // Build schemas for LLM, filtering out tools without schemas
   const toolsWithSchemas = Object.fromEntries(
-    Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
-      const pattern = tool.pattern?.get();
-      const handler = tool.handler;
+    Object.entries(flattenedTools).flatMap(
+      (
+        [name, tool],
+      ): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
+        const t: any = tool as any;
+        const pattern = t?.pattern?.get?.() ?? t?.pattern;
+        const handler = t?.handler;
 
-      let inputSchema = pattern?.argumentSchema ?? handler?.schema;
+        let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
+          t?.inputSchema;
 
-      if (inputSchema === undefined) {
-        logger.error(`Tool ${name} has no schema`);
-        return [name, undefined];
-      }
+        if (inputSchema === undefined) {
+          logger.error(`Tool ${name} has no schema`);
+          return [];
+        }
 
-      // Maps `any` and `never` to objects with either any or no properties
-      if (isBoolean(inputSchema)) {
-        inputSchema = {
-          type: "object",
-          properties: {},
-          additionalProperties: inputSchema,
-        };
-      }
+        // Maps `any` and `never` to objects with either any or no properties
+        if (isBoolean(inputSchema)) {
+          inputSchema = {
+            type: "object",
+            properties: {},
+            additionalProperties: inputSchema,
+          };
+        }
 
-      let description = tool.description ?? inputSchema.description;
+        // Remove injected `result` field from tool schemas (handlers receive it internally)
+        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
 
-      if (!description) {
-        logger.warn(`Tool ${name} has no description`);
-        // TODO(seefeld): Should we instead ignore the tool?
-        description = "";
-      }
+        let description: string = tool.description ??
+          (isBoolean(inputSchema)
+            ? undefined
+            : (inputSchema.description as string | undefined)) ??
+          "";
 
-      return [name, { description, inputSchema }];
-    }).filter(([_, tool]) => tool !== undefined),
+        if (!description) {
+          logger.warn(`Tool ${name} has no description`);
+          description = "";
+        }
+
+        return [[name, { description, inputSchema }]];
+      },
+    ),
   );
 
   const llmParams: LLMRequest = {
@@ -491,12 +689,12 @@ function startRequest(
           }
 
           // Extract tool calls from content parts
-          const toolCalls = (llmResult.content as any[]).filter((part) =>
+          const toolCallParts = (llmResult.content as any[]).filter((part) =>
             part.type === "tool-call"
-          );
+          ) as BuiltInLLMToolCallPart[];
 
-          for (const toolCall of toolCalls) {
-            assistantContentParts.push(toolCall);
+          for (const toolCallPart of toolCallParts) {
+            assistantContentParts.push(toolCallPart);
           }
 
           const assistantMessage: BuiltInLLMMessage = {
@@ -506,27 +704,38 @@ function startRequest(
 
           // Execute each tool call and collect results
           const toolResults: any[] = [];
-          for (const toolCall of toolCalls) {
-            const toolDef = toolsCell.key(toolCall.toolName);
+          for (const toolCallPart of toolCallParts) {
+            // Check if this is a charm-extracted handler (dot notation)
+            const charmMeta = toolHandlers.get(toolCallPart.toolName);
+            const toolDef = charmMeta
+              ? undefined
+              : toolsCell.key(toolCallPart.toolName) as unknown as Cell<
+                Schema<typeof LLMToolSchema>
+              >;
 
             try {
               const resultValue = await invokeToolCall(
                 runtime,
                 space,
                 toolDef,
-                toolCall,
+                {
+                  id: toolCallPart.toolCallId,
+                  name: toolCallPart.toolName,
+                  input: toolCallPart.input,
+                },
+                charmMeta,
               );
               // this resolves back to a cell, so it may still update in the
               // conversation history reactively later but we intend this to be
               // a static / snapshot at this stage
               toolResults.push({
-                id: toolCall.toolCallId,
+                id: toolCallPart.toolCallId,
                 result: resultValue,
               });
             } catch (error) {
-              console.error(`Tool ${toolCall.toolName} failed:`, error);
+              console.error(`Tool ${toolCallPart.toolName} failed:`, error);
               toolResults.push({
-                id: toolCall.toolCallId,
+                id: toolCallPart.toolCallId,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
@@ -537,7 +746,7 @@ function startRequest(
 
           // Add tool result messages
           for (const toolResult of toolResults) {
-            const matchingToolCall = toolCalls.find((tc) =>
+            const matchingToolCallPart = toolCallParts.find((tc) =>
               tc.toolCallId === toolResult.id
             );
             newMessages.push({
@@ -545,7 +754,7 @@ function startRequest(
               content: [{
                 type: "tool-result",
                 toolCallId: toolResult.id,
-                toolName: matchingToolCall?.toolName || "unknown",
+                toolName: matchingToolCallPart?.toolName || "unknown",
                 output: toolResult.error
                   ? { type: "error-text", value: toolResult.error }
                   : toolResult.result,
