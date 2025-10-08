@@ -22,6 +22,36 @@ import {
 } from "commontools";
 import { MentionableCharm } from "./chatbot-list-view.tsx";
 
+const addAttachment = handler<
+  {
+    detail: {
+      attachment: PromptAttachment;
+    };
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>((event, { allAttachments }) => {
+  const { attachment } = event.detail;
+  const current = allAttachments.get() || [];
+  allAttachments.set([...current, attachment]);
+});
+
+const removeAttachment = handler<
+  {
+    detail: {
+      id: string;
+    };
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>((event, { allAttachments }) => {
+  const { id } = event.detail;
+  const current = allAttachments.get() || [];
+  allAttachments.set(current.filter((a) => a.id !== id));
+});
+
 const sendMessage = handler<
   {
     detail: {
@@ -36,14 +66,13 @@ const sendMessage = handler<
     allAttachments: Cell<Array<PromptAttachment>>;
   }
 >((event, { addMessage, allAttachments }) => {
-  const { text, attachments = [] } = event.detail;
-
-  // Add new attachments to the growing list
-  const current = allAttachments.get() || [];
-  allAttachments.set([...current, ...attachments]);
+  const { text } = event.detail;
 
   // Build content array from text and attachments
   const contentParts = [{ type: "text" as const, text }];
+
+  // Get current attachments from the global list
+  const attachments = allAttachments.get() || [];
 
   // Process attachments
   for (const attachment of attachments) {
@@ -227,6 +256,8 @@ export default recipe<ChatInput, ChatOutput>(
               $mentionable={mentionable}
               onct-send={sendMessage({ addMessage, allAttachments })}
               onct-stop={cancelGeneration}
+              onct-attachment-add={addAttachment({ allAttachments })}
+              onct-attachment-remove={removeAttachment({ allAttachments })}
             />
             <ct-select
               items={items}

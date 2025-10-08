@@ -50,6 +50,8 @@ export interface PromptAttachment {
  * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: Mentionable[] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
  * @fires ct-input - Fired when textarea value changes. detail: { value: string }
+ * @fires ct-attachment-add - Fired when an attachment is added (mention accepted, file uploaded, etc). detail: { attachment: PromptAttachment }
+ * @fires ct-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
  *
  * @example
  * <ct-prompt-input
@@ -668,6 +670,7 @@ export class CTPromptInput extends BaseElement {
        */
       addAttachment(attachment: PromptAttachment): void {
         this.attachments.set(attachment.id, attachment);
+        this.emit("ct-attachment-add", { attachment });
         this.requestUpdate();
       }
 
@@ -676,6 +679,7 @@ export class CTPromptInput extends BaseElement {
        */
       removeAttachment(id: string): void {
         this.attachments.delete(id);
+        this.emit("ct-attachment-remove", { id });
         this.requestUpdate();
       }
 
