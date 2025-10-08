@@ -3132,3 +3132,199 @@ describe("toCell and toOpaqueRef hooks", () => {
     });
   });
 });
+
+describe("Cell success callbacks", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should call onCommit callback after Cell.set() commits successfully", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-set-test",
+      undefined,
+      tx,
+    );
+
+    let callbackCalled = false;
+    let callbackTx: IExtendedStorageTransaction | undefined;
+
+    cell.set(42, (committedTx) => {
+      callbackCalled = true;
+      callbackTx = committedTx;
+    });
+
+    expect(callbackCalled).toBe(false);
+    await tx.commit();
+    expect(callbackCalled).toBe(true);
+    expect(callbackTx).toBe(tx);
+    expect(cell.get()).toBe(42);
+  });
+
+  it("should call onCommit callback after Cell.send() commits successfully", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-send-test",
+      undefined,
+      tx,
+    );
+    cell.set(10);
+
+    let callbackCalled = false;
+    let callbackTx: IExtendedStorageTransaction | undefined;
+
+    cell.send(20, (committedTx) => {
+      callbackCalled = true;
+      callbackTx = committedTx;
+    });
+
+    expect(callbackCalled).toBe(false);
+    await tx.commit();
+    expect(callbackCalled).toBe(true);
+    expect(callbackTx).toBe(tx);
+    expect(cell.get()).toBe(20);
+  });
+
+  it("should handle multiple callbacks on same transaction", async () => {
+    const cell1 = runtime.getCell<number>(
+      space,
+      "callback-multiple-1",
+      undefined,
+      tx,
+    );
+    const cell2 = runtime.getCell<number>(
+      space,
+      "callback-multiple-2",
+      undefined,
+      tx,
+    );
+
+    let callback1Called = false;
+    let callback2Called = false;
+    const callOrder: number[] = [];
+
+    cell1.set(1, () => {
+      callback1Called = true;
+      callOrder.push(1);
+    });
+
+    cell2.set(2, () => {
+      callback2Called = true;
+      callOrder.push(2);
+    });
+
+    expect(callback1Called).toBe(false);
+    expect(callback2Called).toBe(false);
+
+    await tx.commit();
+
+    expect(callback1Called).toBe(true);
+    expect(callback2Called).toBe(true);
+    expect(callOrder).toEqual([1, 2]);
+  });
+
+  it("should not call callback if transaction fails", () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-fail-test",
+      undefined,
+      tx,
+    );
+
+    let callbackCalled = false;
+
+    cell.set(42, () => {
+      callbackCalled = true;
+    });
+
+    // Abort the transaction instead of committing
+    tx.abort("test abort");
+
+    expect(callbackCalled).toBe(false);
+  });
+
+  it("should handle errors in callback gracefully", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-error-test",
+      undefined,
+      tx,
+    );
+
+    let callback1Called = false;
+    let callback2Called = false;
+
+    cell.set(1, () => {
+      callback1Called = true;
+      throw new Error("Callback error");
+    });
+
+    cell.set(2, () => {
+      callback2Called = true;
+    });
+
+    await tx.commit();
+
+    // First callback threw but second should still be called
+    expect(callback1Called).toBe(true);
+    expect(callback2Called).toBe(true);
+  });
+
+  it("should allow cell operations without callback", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-optional-test",
+      undefined,
+      tx,
+    );
+
+    // Should work fine without callback (backward compatible)
+    cell.set(42);
+    await tx.commit();
+    expect(cell.get()).toBe(42);
+  });
+
+  it("should call onCommit callback even when transaction commit fails", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "callback-commit-fail-test",
+      undefined,
+      tx,
+    );
+
+    let callbackCalled = false;
+    let receivedTx: IExtendedStorageTransaction | undefined;
+
+    cell.set(42, (committedTx) => {
+      callbackCalled = true;
+      receivedTx = committedTx;
+    });
+
+    // Cause the transaction to fail by aborting it, then commit
+    tx.abort("intentional abort for test");
+    await tx.commit();
+
+    // Even though aborted, callback should still be called after commit
+    expect(callbackCalled).toBe(true);
+    expect(receivedTx).toBe(tx);
+
+    // Verify the transaction actually failed
+    const status = tx.status();
+    expect(status.status).toBe("error");
+  });
+});

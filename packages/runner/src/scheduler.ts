@@ -82,7 +82,11 @@ const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
 
 export class Scheduler implements IScheduler {
-  private eventQueue: { action: Action; retriesLeft: number }[] = [];
+  private eventQueue: {
+    action: Action;
+    retriesLeft: number;
+    onCommit?: (tx: IExtendedStorageTransaction) => void;
+  }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
   private pending = new Set<Action>();
@@ -313,6 +317,7 @@ export class Scheduler implements IScheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
@@ -320,6 +325,7 @@ export class Scheduler implements IScheduler {
         this.eventQueue.push({
           action: (tx: IExtendedStorageTransaction) => handler(tx, event),
           retriesLeft: retries,
+          onCommit,
         });
       }
     }
@@ -480,7 +486,7 @@ export class Scheduler implements IScheduler {
     // the topological sort in the right way.
     const event = this.eventQueue.shift();
     if (event) {
-      const { action, retriesLeft } = event;
+      const { action, retriesLeft, onCommit } = event;
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
         handler: action,
@@ -496,10 +502,23 @@ export class Scheduler implements IScheduler {
             // enough, especially for a series of event that act on the same
             // conflicting data.
             if (error && retriesLeft > 0) {
-              this.eventQueue.unshift({ action, retriesLeft: retriesLeft - 1 });
+              this.eventQueue.unshift({
+                action,
+                retriesLeft: retriesLeft - 1,
+                onCommit,
+              });
               // Ensure the re-queued event gets processed even if the scheduler
               // finished this cycle before the commit completed.
               this.queueExecution();
+            } else if (onCommit) {
+              // Call commit callback when:
+              // - Commit succeeds (!error), OR
+              // - Commit fails but we're out of retries (retriesLeft === 0)
+              try {
+                onCommit(tx);
+              } catch (callbackError) {
+                logger.error("Error in event commit callback:", callbackError);
+              }
             }
           });
         }

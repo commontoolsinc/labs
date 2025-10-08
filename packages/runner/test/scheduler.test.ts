@@ -973,3 +973,281 @@ describe("reactive retries", () => {
     },
   );
 });
+
+describe("Stream event success callbacks", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should call onCommit callback after Stream event commits successfully", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stream-callback-test",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<number>(
+      space,
+      "stream-callback-result",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.addEventHandler(
+      (tx, event) => {
+        resultCell.withTx(tx).send(event);
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    let callbackCalled = false;
+    let callbackTx: IExtendedStorageTransaction | undefined;
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      42,
+      undefined,
+      (committedTx) => {
+        callbackCalled = true;
+        callbackTx = committedTx;
+      },
+    );
+
+    expect(callbackCalled).toBe(false);
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(callbackCalled).toBe(true);
+    expect(callbackTx).toBeDefined();
+    expect(resultCell.get()).toBe(42);
+  });
+
+  it("should call callback after all retries succeed", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stream-callback-retry-test",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<number>(
+      space,
+      "stream-callback-retry-result",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let eventHandlerCalls = 0;
+    let callbackCalls = 0;
+
+    runtime.scheduler.addEventHandler(
+      (tx, event) => {
+        eventHandlerCalls++;
+        // Fail first time, succeed second time
+        if (eventHandlerCalls === 1) {
+          tx.abort("Intentional failure for test");
+          return;
+        }
+        resultCell.withTx(tx).send(event);
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      42,
+      undefined,
+      () => {
+        callbackCalls++;
+      },
+    );
+
+    await runtime.idle();
+    await runtime.idle(); // Wait for retry
+    await runtime.storageManager.synced();
+
+    // Callback should be called only once after retry succeeds
+    expect(callbackCalls).toBe(1);
+    expect(eventHandlerCalls).toBe(2); // Called twice (fail then succeed)
+    expect(resultCell.get()).toBe(42);
+  });
+
+  it("should handle errors in stream callbacks gracefully", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stream-callback-error-test",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<number>(
+      space,
+      "stream-callback-error-result",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.addEventHandler(
+      (tx, event) => {
+        resultCell.withTx(tx).send(event);
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    let callback1Called = false;
+    let callback2Called = false;
+
+    // Send two events
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      undefined,
+      () => {
+        callback1Called = true;
+        throw new Error("Callback error");
+      },
+    );
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      2,
+      undefined,
+      () => {
+        callback2Called = true;
+      },
+    );
+
+    await runtime.idle();
+    await runtime.storageManager.synced();
+
+    // Both callbacks should be called despite first one throwing
+    expect(callback1Called).toBe(true);
+    expect(callback2Called).toBe(true);
+    expect(resultCell.get()).toBe(2); // Last event processed
+  });
+
+  it("should allow stream operations without callback", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stream-callback-optional-test",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<number>(
+      space,
+      "stream-callback-optional-result",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.addEventHandler(
+      (tx, event) => {
+        resultCell.withTx(tx).send(event);
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    // Should work fine without callback (backward compatible)
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 42);
+    await runtime.idle();
+    expect(resultCell.get()).toBe(42);
+  });
+
+  it("should call onCommit callback even when event fails after all retries", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stream-callback-final-fail-test",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<number>(
+      space,
+      "stream-callback-final-fail-result",
+      undefined,
+      tx,
+    );
+    resultCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let eventHandlerCalls = 0;
+    let callbackCalls = 0;
+    let callbackTx: IExtendedStorageTransaction | undefined;
+
+    runtime.scheduler.addEventHandler(
+      (tx, event) => {
+        eventHandlerCalls++;
+        // Always fail
+        tx.abort("Intentional failure - should exhaust retries");
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      42,
+      2, // Only 2 retries, so fails faster
+      (tx) => {
+        callbackCalls++;
+        callbackTx = tx;
+      },
+    );
+
+    await runtime.idle();
+    await runtime.idle(); // Retry 1
+    await runtime.idle(); // Retry 2 (final)
+    await runtime.storageManager.synced();
+
+    // Callback should be called once even though all attempts failed
+    expect(callbackCalls).toBe(1);
+    expect(eventHandlerCalls).toBe(3); // Initial + 2 retries
+    expect(callbackTx).toBeDefined();
+    // Transaction should show it failed
+    const status = callbackTx!.status();
+    expect(status.status).toBe("error");
+  });
+});

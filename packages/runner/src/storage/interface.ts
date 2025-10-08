@@ -497,6 +497,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
 
   /**
+   * Add a callback to be called when the transaction commit completes.
+   * The callback receives the transaction as a parameter and is called
+   * regardless of whether the commit succeeded or failed.
+   *
+   * Note: Callbacks are called synchronously after commit completes.
+   * If a callback throws, the error is logged but doesn't affect other callbacks.
+   *
+   * @param callback - Function to call after commit
+   */
+  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void;
+
+  /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *

@@ -209,7 +209,12 @@ export interface IScheduler {
   unsubscribe(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
-  queueEvent(eventRef: NormalizedFullLink, event: any): void;
+  queueEvent(
+    eventRef: NormalizedFullLink,
+    event: any,
+    retries?: number,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): void;
   addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
 }
