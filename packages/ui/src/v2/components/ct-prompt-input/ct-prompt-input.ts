@@ -377,11 +377,11 @@ export class CTPromptInput extends BaseElement {
 
         const text = textarea.value;
 
-        // Extract mentions from the text
-        const mentions = this.mentionController.extractMentionsFromText(text);
-
-        // Get all attachments
+        // Get all attachments and derive mentions from mention attachments
         const attachments = Array.from(this.attachments.values());
+        const mentions = attachments
+          .filter((a) => a.type === "mention" && a.charm)
+          .map((a) => a.charm as Mentionable);
 
         // Clear the textarea and attachments
         textarea.value = "";

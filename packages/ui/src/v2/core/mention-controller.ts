@@ -223,11 +223,14 @@ export class MentionController implements ReactiveController {
         return true;
 
       case "Enter":
-        event.preventDefault();
+        // Only intercept Enter if a mention will actually be inserted.
         if (filteredMentions[this._state.selectedIndex]) {
+          event.preventDefault();
           this.insertMention(filteredMentions[this._state.selectedIndex]);
+          return true;
         }
-        return true;
+        // Let caller handle Enter when there are no matches.
+        return false;
 
       case "Escape":
         event.preventDefault();

@@ -74,6 +74,11 @@ const sendMessage = handler<
   // Get current attachments from the global list
   const attachments = allAttachments.get() || [];
 
+  // Compute mentions from mention attachments so they are available to consumers
+  const mentions = attachments
+    .filter((a) => a.type === "mention" && a.charm)
+    .map((a) => a.charm);
+
   // Process attachments
   for (const attachment of attachments) {
     if (attachment.type === "file" && attachment.data) {

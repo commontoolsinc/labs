@@ -41,47 +41,39 @@ export function calculateMenuPosition(
   const vw = globalThis.innerWidth;
   const vh = globalThis.innerHeight;
 
-  // Start with preferred position
-  let top = preferredVertical === "below"
-    ? anchorRect.bottom + gap
-    : anchorRect.top - gap;
+  // Measure menu dimensions (width/height only)
+  const rect = menuElement.getBoundingClientRect();
+  const menuWidth = rect.width;
+  const menuHeight = rect.height;
+
+  // Compute projected left based on preference
   let left = preferredHorizontal === "left"
     ? anchorRect.left
-    : anchorRect.right;
+    : anchorRect.right - menuWidth;
 
-  // Get menu dimensions
-  const menuRect = menuElement.getBoundingClientRect();
-
-  // Horizontal clamping
-  if (menuRect.right > vw - viewportPadding) {
-    left = Math.max(viewportPadding, vw - menuRect.width - viewportPadding);
+  // Clamp horizontally within viewport padding
+  if (left + menuWidth > vw - viewportPadding) {
+    left = Math.max(viewportPadding, vw - menuWidth - viewportPadding);
   }
-  if (left < viewportPadding) {
-    left = viewportPadding;
-  }
+  if (left < viewportPadding) left = viewportPadding;
 
-  // Vertical flip if overflow bottom
-  if (preferredVertical === "below" && menuRect.bottom > vh - viewportPadding) {
-    const above = anchorRect.top - menuRect.height - gap;
-    if (above >= viewportPadding) {
-      // Enough space above - flip to above
-      top = above;
-    } else {
-      // Not enough space above either - clamp to viewport
-      top = Math.max(viewportPadding, vh - menuRect.height - viewportPadding);
-    }
+  // Compute projected top based on preference
+  let top = preferredVertical === "below"
+    ? anchorRect.bottom + gap
+    : anchorRect.top - gap - menuHeight;
+
+  // Flip if overflowing bottom when preferring below
+  if (preferredVertical === "below" && top + menuHeight > vh - viewportPadding) {
+    const above = anchorRect.top - gap - menuHeight;
+    if (above >= viewportPadding) top = above;
+    else top = Math.max(viewportPadding, vh - menuHeight - viewportPadding);
   }
 
-  // Vertical flip if overflow top (when preferring above)
-  if (preferredVertical === "above" && menuRect.top < viewportPadding) {
+  // Flip if overflowing top when preferring above
+  if (preferredVertical === "above" && top < viewportPadding) {
     const below = anchorRect.bottom + gap;
-    if (below + menuRect.height <= vh - viewportPadding) {
-      // Enough space below - flip to below
-      top = below;
-    } else {
-      // Not enough space below either - clamp to viewport
-      top = viewportPadding;
-    }
+    if (below + menuHeight <= vh - viewportPadding) top = below;
+    else top = viewportPadding;
   }
 
   return {
@@ -100,8 +92,7 @@ export function applyMenuPosition(
 ): void {
   // Set initial position for measurement
   menuElement.style.position = "fixed";
-  menuElement.style.top = "0px";
-  menuElement.style.left = "0px";
+  // Leave current position untouched; calculation uses width/height only
 
   // Calculate and apply position in next frame
   requestAnimationFrame(() => {
