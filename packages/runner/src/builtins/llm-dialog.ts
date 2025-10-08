@@ -360,7 +360,6 @@ async function invokeToolCall(
 
   const { resolve, promise } = Promise.withResolvers<any>();
 
-  // runSynced charm
   runtime.editWithRetry((tx) => {
     if (pattern) {
       runtime.run(tx, pattern, toolCall.input, result);
@@ -368,28 +367,30 @@ async function invokeToolCall(
       handler.withTx(tx).send({
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
-      } as any); // TODO(bf): why any needed?
+      }, (completedTx: IExtendedStorageTransaction) => {
+        resolve(result.withTx(completedTx).get()); // withTx likely superfluous
+      }); // TODO(bf): why any needed?
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
   });
 
-  if (pattern) {
-    // wait until we know we have the result of the tool call
-    // not just that the transaction has been comitted
-    const cancel = result.sink((r) => {
-      r !== undefined && resolve(r);
-    });
-    const resultValue = await promise;
-    cancel();
+  // wait until we know we have the result of the tool call
+  // not just that the transaction has been comitted
+  const cancel = result.sink((r) => {
+    r !== undefined && resolve(r);
+  });
+  const resultValue = await promise;
+  cancel();
 
+  if (pattern) {
     // stop it now that we have the result
     runtime.runner.stop(result);
-    return { type: "json", value: resultValue };
   } else {
-    await runtime.idle();
-    return { type: "json", value: result.get() };
+    await runtime.idle(); // maybe pointless
   }
+
+  return { type: "json", value: resultValue ?? "OK" }; // if there was no return value, just tell the LLM it worked
 }
 
 /**
