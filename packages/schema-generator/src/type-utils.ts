@@ -83,7 +83,9 @@ export function safeGetPropertyType(
     const propSymbol = checker.getPropertyOfType(parentType, propName);
     if (propSymbol) {
       typeFromParent = checker.getTypeOfSymbol(propSymbol);
-      const typeStr = typeFromParent ? checker.typeToString(typeFromParent) : undefined;
+      const typeStr = typeFromParent
+        ? checker.typeToString(typeFromParent)
+        : undefined;
       // If we got 'any', treat it as if we didn't get a type
       if (typeStr === "any") {
         typeFromParent = undefined;
@@ -115,11 +117,13 @@ export function safeGetPropertyType(
       // Check if parent is a union that contains undefined, and if removing it gives us the decl type
       if (isOptional && typeFromParent.isUnion()) {
         const parentUnion = typeFromParent as ts.UnionType;
-        const hasUndefined = parentUnion.types.some(t => !!(t.flags & ts.TypeFlags.Undefined));
+        const hasUndefined = parentUnion.types.some((t) =>
+          !!(t.flags & ts.TypeFlags.Undefined)
+        );
 
         if (hasUndefined) {
           const nonUndefinedTypes = parentUnion.types.filter(
-            t => !(t.flags & ts.TypeFlags.Undefined)
+            (t) => !(t.flags & ts.TypeFlags.Undefined),
           );
 
           // Compare the non-undefined part with the declaration type
@@ -133,8 +137,12 @@ export function safeGetPropertyType(
           } else if (nonUndefinedTypes.length > 1) {
             // Multiple non-undefined types - check if decl is also a union with the same types
             // For now, just check string equality which should work for most cases
-            const withoutUndefinedStr = nonUndefinedTypes.map(t => checker.typeToString(t)).join(" | ");
-            if (withoutUndefinedStr === declStr || declStr === withoutUndefinedStr) {
+            const withoutUndefinedStr = nonUndefinedTypes.map((t) =>
+              checker.typeToString(t)
+            ).join(" | ");
+            if (
+              withoutUndefinedStr === declStr || declStr === withoutUndefinedStr
+            ) {
               return typeFromDecl;
             }
           }
@@ -154,7 +162,7 @@ export function safeGetPropertyType(
     if (isOptional && typeFromParent.isUnion()) {
       const unionType = typeFromParent as ts.UnionType;
       const nonUndefinedTypes = unionType.types.filter(
-        t => !(t.flags & ts.TypeFlags.Undefined)
+        (t) => !(t.flags & ts.TypeFlags.Undefined),
       );
       if (nonUndefinedTypes.length === 1 && nonUndefinedTypes[0]) {
         return nonUndefinedTypes[0];

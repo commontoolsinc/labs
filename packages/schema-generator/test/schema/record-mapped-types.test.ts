@@ -253,7 +253,10 @@ describe("Schema: Record and mapped types", () => {
       const schema = transformer(type, checker, typeNode);
 
       console.log("box schema:", JSON.stringify(schema.properties?.box));
-      console.log("explicitBox schema:", JSON.stringify(schema.properties?.explicitBox));
+      console.log(
+        "explicitBox schema:",
+        JSON.stringify(schema.properties?.explicitBox),
+      );
       console.log("$defs keys:", Object.keys(schema.$defs || {}));
 
       // Box without explicit param uses default (string)
