@@ -45,7 +45,44 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {derive(state.items, _v1 => _v1.filter((item) => item.active)).map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { taxRate } }) => (<div>
+        {derive(state.items, _v1 => _v1.filter((item) => item.active)).map_with_pattern(recipe({
+            type: "object",
+            properties: {
+                elem: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
+                    $ref: "#/$defs/Item",
+                    asOpaque: true,
+                    $defs: {
+                        Item: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "number"
+                                },
+                                price: {
+                                    type: "number"
+                                },
+                                active: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["id", "price", "active"]
+                        }
+                    }
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        taxRate: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["taxRate"]
+                }
+            },
+            required: ["elem", "params"]
+        } as const satisfies JSONSchema, ({ elem, params: { taxRate } }) => (<div>
               Total: ${elem.price * (1 + taxRate)}
             </div>)), { taxRate: state.taxRate })}
       </div>),

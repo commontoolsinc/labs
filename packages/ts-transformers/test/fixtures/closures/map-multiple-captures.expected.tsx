@@ -46,7 +46,42 @@ export default recipe({
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { discount, taxRate, multiplier } }) => (<span>
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            },
+                            quantity: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price", "quantity"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            taxRate: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            multiplier: {
+                                type: "number",
+                                enum: [2]
+                            }
+                        },
+                        required: ["discount", "taxRate", "multiplier"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { discount, taxRate, multiplier } }) => (<span>
             Total: {elem.price * elem.quantity * discount * taxRate * multiplier + shippingCost}
           </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier })}
       </div>),

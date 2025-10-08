@@ -56,7 +56,38 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { firstName, lastName } }) => (<div>
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            firstName: {
+                                type: "string",
+                                asOpaque: true
+                            },
+                            lastName: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["firstName", "lastName"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { firstName, lastName } }) => (<div>
             {elem.name} - edited by {firstName} {lastName}
           </div>)), { firstName: state.currentUser.firstName, lastName: state.currentUser.lastName })}
       </div>),

@@ -45,7 +45,38 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { prefix, suffix } }) => (<div>{`${prefix} ${elem.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            prefix: {
+                                type: "string",
+                                asOpaque: true
+                            },
+                            suffix: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["prefix", "suffix"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { prefix, suffix } }) => (<div>{`${prefix} ${elem.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
       </div>),
     };
 });
