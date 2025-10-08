@@ -371,7 +371,6 @@ async function invokeToolCall(
       throw new Error("Tool has neither pattern nor handler");
     }
   });
-  // .then((error) => error && resolve({ error })); // Return error if tx failed
 
   await runtime.idle();
 
