@@ -24,4 +24,8 @@ with the Common Tools framework.
 
 ## Common Issues and Solutions
 
-<!-- Add learnings here as they are discovered -->
+### Pattern File Structure
+
+- Pattern files use `.pattern.ts` extension for non-UI patterns and
+  `.pattern.tsx` for UI patterns
+- Scenario files use `.ts` extension and export a `scenarios` array

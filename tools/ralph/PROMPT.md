@@ -28,7 +28,7 @@ Steps:
      declaration.
    - Keep patterns offline-friendly (no network or LLM).
    - Read `./tools/ralph/LEARNINGS.md` for any other tips.
-
+   - Read .md files in ./tutorials for best practices
 2. Update `./tools/ralph/patterns/pattern-harness.test.ts` to include the new
    scenario modules if needed.
 
@@ -42,7 +42,8 @@ Steps:
    it:
    - Deploy locally according to `./tools/ralph/DEPLOY.md`
    - Test the UI interactions work as expected
-
+   - Use patterns in ./packages/patterns/ as references for UI elements
+   - Read tutorials/common_ui.md for component use
 6. Once all tests pass, check off the completed items in `TASKS.md`:
    - Required: the previously mentioned `deno test` must pass
    - If UI present: Playwright tests must also pass
