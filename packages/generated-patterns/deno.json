@@ -1,7 +1,7 @@
 {
   "name": "@commontools/generated-patterns",
   "tasks": {
-    "integration": "LOG_LEVEL=warn deno test --trace-leaks -A --parallel ./integration/*.test.ts",
+    "integration": "LOG_LEVEL=warn deno test --trace-leaks -A --parallel ./integration/patterns/*.test.ts",
     "test": "echo 'No tests defined.'"
   },
   "lint": {
