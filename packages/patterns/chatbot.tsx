@@ -200,17 +200,22 @@ export default recipe<ChatInput, ChatOutput>(
     });
 
     // Merge static and dynamic tools
-    const mergedTools = derive([tools, dynamicTools], ([staticTools, dynamic]: [any, any]) => ({
-      ...staticTools,
-      ...dynamic,
-    }));
+    const mergedTools = derive(
+      [tools, dynamicTools],
+      ([staticTools, dynamic]: [any, any]) => ({
+        ...staticTools,
+        ...dynamic,
+      }),
+    );
 
-    const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog({
-      system: "You are a helpful assistant with some tools.",
-      messages,
-      tools: mergedTools,
-      model,
-    });
+    const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog(
+      {
+        system: "You are a helpful assistant with some tools.",
+        messages,
+        tools: mergedTools,
+        model,
+      },
+    );
 
     const { result } = fetchData({
       url: "/api/ai/llm/models",

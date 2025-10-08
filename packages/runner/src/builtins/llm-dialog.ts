@@ -240,14 +240,18 @@ function flattenTools(
         }
 
         // Store handler reference if map provided
-        if (toolHandlers) toolHandlers.set(toolName, { handler, charm: charmCell });
+        if (toolHandlers) {
+          toolHandlers.set(toolName, { handler, charm: charmCell });
+        }
 
         flattened[toolName] = { handler, description, inputSchema };
       }
     } else {
       // Regular handler or pattern tool: only sanitize known inputSchema.
       const passThrough: Record<string, unknown> = { ...tool };
-      if (passThrough.inputSchema && typeof passThrough.inputSchema === "object") {
+      if (
+        passThrough.inputSchema && typeof passThrough.inputSchema === "object"
+      ) {
         passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
       }
       flattened[name] = passThrough;
@@ -313,7 +317,10 @@ async function ensureSourceCharmRunning(
   const process = charm.getSourceCell();
   const recipeId = process?.get()?.[TYPE];
   if (recipeId) {
-    const recipe = await runtime.recipeManager.loadRecipe(recipeId, charm.space);
+    const recipe = await runtime.recipeManager.loadRecipe(
+      recipeId,
+      charm.space,
+    );
     await runtime.runSynced(result, recipe);
     // Ensure scheduler has registered handlers before we enqueue events
     await runtime.idle();
@@ -700,10 +707,10 @@ function startRequest(
           const toolResults: any[] = [];
           for (const toolCallPart of toolCallParts) {
             // Check if this is a charm-extracted handler (dot notation)
-          const charmMeta = toolHandlers.get(toolCallPart.toolName);
-          const toolDef = charmMeta
-            ? undefined
-            : toolsCell.key(toolCallPart.toolName);
+            const charmMeta = toolHandlers.get(toolCallPart.toolName);
+            const toolDef = charmMeta
+              ? undefined
+              : toolsCell.key(toolCallPart.toolName);
 
             try {
               const resultValue = await invokeToolCall(
