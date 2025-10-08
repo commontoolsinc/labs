@@ -322,7 +322,7 @@ async function invokeToolCall(
     } else if (handler) {
       handler.withTx(tx).send({
         ...toolCall.input,
-        result, // doesn't need tx, since it's just a link
+        result, // doesn't HAVE to be used, but can be
       } as any); // TODO(bf): why any needed?
     } else {
       throw new Error("Tool has neither pattern nor handler");
