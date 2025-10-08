@@ -15,23 +15,11 @@ describe("Schema: Record and mapped types", () => {
     );
     const schema = transformer(type, checker, typeNode);
 
-    console.log("=== Full Config schema ===");
-    console.log(JSON.stringify(schema, null, 2));
-
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
     expect(schema.properties?.settings).toBeDefined();
 
     const settingsSchema = schema.properties!.settings as any;
-    console.log("=== Settings schema ===");
-    console.log(JSON.stringify(settingsSchema, null, 2));
-
-    // Check if it's a ref or direct object
-    if (settingsSchema.$ref) {
-      console.log("=== Found $ref, checking $defs ===");
-      console.log(JSON.stringify(schema.$defs, null, 2));
-    }
-
     expect(settingsSchema.type).toBe("object");
     expect(settingsSchema.properties).toBeDefined();
 

@@ -224,6 +224,33 @@ export function getNativeTypeSchema(
 }
 
 /**
+ * Check if a type is defined in TypeScript's lib files (built-in/native type)
+ */
+function isLibType(symbol: ts.Symbol | undefined): boolean {
+  if (!symbol) return false;
+
+  for (const decl of symbol.declarations ?? []) {
+    const sourceFile = decl.getSourceFile();
+    const fileName = sourceFile?.fileName ?? "";
+
+    // Check for TypeScript lib files by various patterns:
+    // 1. Path contains "/lib." or "\\lib." (e.g., /lib.es2015.d.ts)
+    // 2. Filename starts with "lib." and ends with ".d.ts" (e.g., lib.es5.d.ts)
+    // 3. Filename matches ES*.d.ts pattern (e.g., ES2023.d.ts, ES2015.d.ts)
+    // 4. Path contains "/typescript/" and ends with ".d.ts" (npm cache)
+    const fileNameOnly = fileName.split("/").pop() ?? fileName.split("\\").pop() ?? fileName;
+
+    if (fileName.includes("/lib.") || fileName.includes("\\lib.") ||
+        (fileNameOnly.startsWith("lib.") && fileNameOnly.endsWith(".d.ts")) ||
+        (fileNameOnly.match(/^ES\d+\.d\.ts$/) !== null) ||
+        (fileName.endsWith(".d.ts") && fileName.includes("/typescript/"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
  * that we do not want to promote into top-level definitions.
@@ -248,7 +275,8 @@ export function getNamedTypeKey(
   }
 
   // Check if this is a Default/Cell/Stream/OpaqueRef wrapper type via alias
-  const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+  const aliasSymbol = (type as TypeWithInternals).aliasSymbol;
+  const aliasName = aliasSymbol?.name;
   if (
     aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream" ||
     aliasName === "OpaqueRef"
@@ -260,9 +288,15 @@ export function getNamedTypeKey(
   const symbol = type.symbol;
   let name = symbol?.name;
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
-  if (!name && (objectFlags & ts.ObjectFlags.Reference)) {
+
+  // For type references, check the target symbol
+  let targetSymbol: ts.Symbol | undefined;
+  if (objectFlags & ts.ObjectFlags.Reference) {
     const ref = type as unknown as ts.TypeReference;
-    name = ref.target?.symbol?.name ?? name;
+    targetSymbol = ref.target?.symbol;
+    if (!name && targetSymbol) {
+      name = targetSymbol.name;
+    }
   }
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
@@ -299,6 +333,17 @@ export function getNamedTypeKey(
     return undefined;
   }
   if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
+
+  // Don't hoist TypeScript lib types (Record, Partial, Pick, etc.)
+  // These are built-in mapped types defined in lib.*.d.ts files
+  if (isLibType(symbol)) return undefined;
+
+  // Also check target symbol for type references (where the name came from)
+  if (targetSymbol && isLibType(targetSymbol)) return undefined;
+
+  // Also check alias symbol (where the name may have come from via line 304)
+  if (aliasSymbol && isLibType(aliasSymbol)) return undefined;
+
   return name;
 }
 
