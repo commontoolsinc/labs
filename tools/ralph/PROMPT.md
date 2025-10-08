@@ -32,8 +32,11 @@ Steps:
    ```
 
    For the selected task:
-   - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
-     conventions in `./tools/ralph/patterns/`.
+   - If this is a child task (indented under a parent), EXTEND the existing
+     pattern files from the parent task rather than creating new ones. Build
+     upon the existing functionality by adding new features to the same files.
+   - If this is a top-level task, create new `*.pattern.ts` + `*.ts` scenario
+     files matching our existing conventions in `./tools/ralph/patterns/`.
    - Use CTS APIs (`handler`, `recipe`, `lift`, `str`, `cell`, `createCell`) to
      realize the described structure. You can use `derive` as well, it is just a
      convenience wrapper around lift: `derive(x, x => x+1)` is the same as
