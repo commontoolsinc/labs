@@ -6,6 +6,43 @@ import { getTypeFromCode } from "../utils.ts";
 describe("Schema: Record and mapped types", () => {
   const transformer = createSchemaTransformerV2();
 
+  it("should generate correct schemas for Default<Record<union, primitive>>", async () => {
+    const { type, checker, typeNode } = await getTypeFromCode(
+      `type Default<T, D> = T;
+       type ColumnKey = "backlog" | "inProgress" | "review" | "done";
+       interface Config {
+         wipLimits: Default<Record<ColumnKey, number>, any>;
+       }`,
+      "Config",
+    );
+    const schema = transformer(type, checker, typeNode);
+
+    expect(schema.type).toBe("object");
+    expect(schema.properties).toBeDefined();
+    expect(schema.properties?.wipLimits).toBeDefined();
+
+    const wipLimitsSchema = schema.properties!.wipLimits as any;
+    expect(wipLimitsSchema.type).toBe("object");
+    expect(wipLimitsSchema.properties).toBeDefined();
+
+    // Each property should have the correct type schema
+    expect(wipLimitsSchema.properties.backlog).toEqual({ type: "number" });
+    expect(wipLimitsSchema.properties.inProgress).toEqual({ type: "number" });
+    expect(wipLimitsSchema.properties.review).toEqual({ type: "number" });
+    expect(wipLimitsSchema.properties.done).toEqual({ type: "number" });
+
+    // All keys should be required
+    expect(wipLimitsSchema.required).toEqual([
+      "backlog",
+      "inProgress",
+      "review",
+      "done",
+    ]);
+
+    // Should NOT have Record in $defs
+    expect(schema.$defs?.Record).toBeUndefined();
+  });
+
   it("should generate correct schemas for Record<union, primitive>", async () => {
     const { type, checker, typeNode } = await getTypeFromCode(
       `interface Config {

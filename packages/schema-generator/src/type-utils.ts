@@ -222,34 +222,6 @@ export function getNativeTypeSchema(
 
   return resolve(type);
 }
-
-/**
- * Check if a type is defined in TypeScript's lib files (built-in/native type)
- */
-function isLibType(symbol: ts.Symbol | undefined): boolean {
-  if (!symbol) return false;
-
-  for (const decl of symbol.declarations ?? []) {
-    const sourceFile = decl.getSourceFile();
-    const fileName = sourceFile?.fileName ?? "";
-
-    // Check for TypeScript lib files by various patterns:
-    // 1. Path contains "/lib." or "\\lib." (e.g., /lib.es2015.d.ts)
-    // 2. Filename starts with "lib." and ends with ".d.ts" (e.g., lib.es5.d.ts)
-    // 3. Filename matches ES*.d.ts pattern (e.g., ES2023.d.ts, ES2015.d.ts)
-    // 4. Path contains "/typescript/" and ends with ".d.ts" (npm cache)
-    const fileNameOnly = fileName.split("/").pop() ?? fileName.split("\\").pop() ?? fileName;
-
-    if (fileName.includes("/lib.") || fileName.includes("\\lib.") ||
-        (fileNameOnly.startsWith("lib.") && fileNameOnly.endsWith(".d.ts")) ||
-        (fileNameOnly.match(/^ES\d+\.d\.ts$/) !== null) ||
-        (fileName.endsWith(".d.ts") && fileName.includes("/typescript/"))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
@@ -334,15 +306,14 @@ export function getNamedTypeKey(
   }
   if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
 
-  // Don't hoist TypeScript lib types (Record, Partial, Pick, etc.)
-  // These are built-in mapped types defined in lib.*.d.ts files
-  if (isLibType(symbol)) return undefined;
-
-  // Also check target symbol for type references (where the name came from)
-  if (targetSymbol && isLibType(targetSymbol)) return undefined;
-
-  // Also check alias symbol (where the name may have come from via line 304)
-  if (aliasSymbol && isLibType(aliasSymbol)) return undefined;
+  // Don't hoist generic type instantiations (Record<K,V>, Partial<T>, Box<T>, etc.)
+  // These have aliasTypeArguments, meaning they're a generic type applied to specific type arguments
+  // The name "Record" or "Box" is meaningless without the type parameters - what matters is the
+  // resolved/instantiated type structure
+  const typeWithAlias = type as TypeWithInternals;
+  if (typeWithAlias.aliasTypeArguments && typeWithAlias.aliasTypeArguments.length > 0) {
+    return undefined;
+  }
 
   return name;
 }
