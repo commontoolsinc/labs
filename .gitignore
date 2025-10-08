@@ -22,3 +22,4 @@ claude-research.key
 .knowledge
 packages/local-dev-toolshed.log
 local-dev-shell.log
+tools/ralph/logs/
