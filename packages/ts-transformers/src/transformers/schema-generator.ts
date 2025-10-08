@@ -57,7 +57,12 @@ export class SchemaGeneratorTransformer extends Transformer {
         ) {
           // This is a synthetic TypeNode that didn't resolve to a proper Type
           // Analyze the TypeNode structure, checking typeRegistry for property Types
-          schema = analyzeTypeNodeStructure(typeArg, checker, context.factory, typeRegistry);
+          schema = analyzeTypeNodeStructure(
+            typeArg,
+            checker,
+            context.factory,
+            typeRegistry,
+          );
         } else {
           // Normal path: use Type-based schema generation
           schema = generateSchema!(type, checker, typeArg);
@@ -236,7 +241,12 @@ function analyzeTypeNodeStructure(
           propSchema = generateSchema(propType, checker, member.type);
         } else {
           // No Type available - recurse on TypeNode structure
-          propSchema = analyzeTypeNodeStructure(member.type, checker, factory, typeRegistry);
+          propSchema = analyzeTypeNodeStructure(
+            member.type,
+            checker,
+            factory,
+            typeRegistry,
+          );
         }
 
         properties[propName] = propSchema;
