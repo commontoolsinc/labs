@@ -358,6 +358,8 @@ async function invokeToolCall(
     await ensureSourceCharmRunning(runtime, charmMeta);
   }
 
+  const { resolve, promise } = Promise.withResolvers<any>();
+
   // runSynced charm
   runtime.editWithRetry((tx) => {
     if (pattern) {
@@ -372,12 +374,24 @@ async function invokeToolCall(
     }
   });
 
-  await runtime.idle();
+  if (pattern) {
+    // wait until we know we have the result of the tool call
+    // not just that the transaction has been comitted
+    const cancel = result.sink((r) => {
+      r !== undefined && resolve(r);
+    });
+    const resultValue = await promise;
+    cancel();
 
-  // If this was a pattern, stop it now that we have the result
-  if (pattern) runtime.runner.stop(result);
+    // stop it now that we have the result
+    runtime.runner.stop(result);
+    return { type: "json", value: resultValue };
+  } else {
+    await runtime.idle();
+    return { type: "json", value: result.get() };
+  }
 
-  return { type: "json", value: result.get() };
+
 }
 
 /**
