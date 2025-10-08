@@ -43,6 +43,37 @@ function slugify(str: string): string {
     .slice(0, 128);
 }
 
+/**
+ * Remove the injected `result` field from a JSON schema so tools don't
+ * advertise it as an input parameter.
+ */
+function stripInjectedResult(
+  schema: unknown,
+): unknown {
+  if (!schema || typeof schema !== "object") return schema;
+  const obj = schema as Record<string, unknown>;
+  if (obj.type !== "object") return schema;
+
+  const copy: Record<string, unknown> = { ...obj };
+  const props = copy.properties as Record<string, unknown> | undefined;
+  if (props && typeof props === "object") {
+    const { result, ...rest } = props as Record<string, unknown>;
+    copy.properties = rest;
+  }
+  const req = copy.required as unknown[] | undefined;
+  if (Array.isArray(req)) {
+    copy.required = req.filter((k) => k !== "result");
+  }
+  return copy;
+}
+
+/**
+ * Best-effort sanitizer to remove injected `result` fields from any tool-like
+ * object so UI consumers (e.g., ct-tools-chip) don't show it as a parameter.
+ */
+// Intentionally minimal sanitization for flattened tool entries. We only
+// remove the injected `result` from `inputSchema` if present.
+
 const LLMMessageSchema = {
   type: "object",
   properties: {
@@ -89,9 +120,8 @@ const LLMToolSchema = {
         nodes: { type: "array", items: { type: "object" } },
         program: { type: "object" },
         initial: { type: "object" },
-        result: { type: "object" },
       },
-      required: ["argumentSchema", "resultSchema", "nodes", "result"],
+      required: ["argumentSchema", "resultSchema", "nodes"],
       asCell: true,
     },
     charm: {
@@ -201,6 +231,9 @@ function flattenTools(
             : (inputSchema.description as string | undefined)) ||
             `${key} handler from ${charmName}`;
 
+        // Remove injected result field from schema (UI/LLM shouldn't see it)
+        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
+
         // Add warning badge if schema is missing
         if (!hasSchema) {
           description = `⚠️ ${description}`;
@@ -212,8 +245,12 @@ function flattenTools(
         flattened[toolName] = { handler, description, inputSchema };
       }
     } else {
-      // Regular handler or pattern tool
-      flattened[name] = tool;
+      // Regular handler or pattern tool: only sanitize known inputSchema.
+      const passThrough: Record<string, unknown> = { ...tool };
+      if (passThrough.inputSchema && typeof passThrough.inputSchema === "object") {
+        passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+      }
+      flattened[name] = passThrough;
     }
   }
 
@@ -335,7 +372,7 @@ async function invokeToolCall(
   // If this was a pattern, stop it now that we have the result
   if (pattern) runtime.runner.stop(result);
 
-  return { type: "json", value: "OK" };
+  return { type: "json", value: result.get() };
 }
 
 /**
@@ -579,6 +616,9 @@ function startRequest(
             additionalProperties: inputSchema,
           };
         }
+
+        // Remove injected `result` field from tool schemas (handlers receive it internally)
+        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
 
         let description: string = tool.description ??
           (isBoolean(inputSchema)

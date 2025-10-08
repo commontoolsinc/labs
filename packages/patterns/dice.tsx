@@ -8,7 +8,7 @@ interface RecipeState {
 
 export default recipe<RecipeState>("Dice", (state) => {
   return {
-    [NAME]: str`Dice roller: ${state.value}`,
+    [NAME]: `Dice Roller`,
     [UI]: (
       <div>
         <ct-button onClick={roll(state)}>
@@ -25,7 +25,7 @@ export default recipe<RecipeState>("Dice", (state) => {
         </ct-button>
       </div>
     ),
-    value: state.value,
+    value: getValue(state),
     roll: roll(state),
   };
 });
