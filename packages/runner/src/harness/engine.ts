@@ -253,7 +253,10 @@ function computeId(program: Program): string {
 }
 
 // Checks if a source file has a default export by parsing its AST.
-// Detects both `export default ...` and `export { ... as default }` patterns.
+// Detects:
+// - export default <expression>
+// - export default function/class
+// - export { ... as default }
 function hasDefaultExport(source: Source): boolean {
   const sourceFile = ts.createSourceFile(
     source.name,
@@ -265,6 +268,14 @@ function hasDefaultExport(source: Source): boolean {
   for (const statement of sourceFile.statements) {
     // Check for: export default ...
     if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      return true;
+    }
+    // Check for: export default function/class
+    if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement)) &&
+      statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)
+    ) {
       return true;
     }
     // Check for: export { ... as default } or export { default } from "..."
