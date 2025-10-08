@@ -63,7 +63,9 @@ export function calculateMenuPosition(
     : anchorRect.top - gap - menuHeight;
 
   // Flip if overflowing bottom when preferring below
-  if (preferredVertical === "below" && top + menuHeight > vh - viewportPadding) {
+  if (
+    preferredVertical === "below" && top + menuHeight > vh - viewportPadding
+  ) {
     const above = anchorRect.top - gap - menuHeight;
     if (above >= viewportPadding) top = above;
     else top = Math.max(viewportPadding, vh - menuHeight - viewportPadding);
