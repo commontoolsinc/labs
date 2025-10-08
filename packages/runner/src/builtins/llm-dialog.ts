@@ -604,11 +604,12 @@ function startRequest(
       (
         [name, tool],
       ): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
-        const pattern = tool.pattern?.get();
-        const handler = tool.handler;
+        const t: any = tool as any;
+        const pattern = t?.pattern?.get?.() ?? t?.pattern;
+        const handler = t?.handler;
 
         let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-          tool.inputSchema;
+          t?.inputSchema;
 
         if (inputSchema === undefined) {
           logger.error(`Tool ${name} has no schema`);
@@ -707,10 +708,12 @@ function startRequest(
           const toolResults: any[] = [];
           for (const toolCallPart of toolCallParts) {
             // Check if this is a charm-extracted handler (dot notation)
-            const charmMeta = toolHandlers.get(toolCallPart.toolName);
-            const toolDef = charmMeta
-              ? undefined
-              : toolsCell.key(toolCallPart.toolName);
+          const charmMeta = toolHandlers.get(toolCallPart.toolName);
+          const toolDef = charmMeta
+            ? undefined
+            : toolsCell.key(toolCallPart.toolName) as unknown as Cell<
+              Schema<typeof LLMToolSchema>
+            >;
 
             try {
               const resultValue = await invokeToolCall(
