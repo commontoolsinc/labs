@@ -151,7 +151,6 @@ export class ServerObjectManager extends BaseObjectManager<
 export const selectSchema = <Space extends MemorySpace>(
   session: Session<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
-  selectionTracker?: MapSet<string, SchemaPathSelector>,
 ): FactSelection => {
   const startTime = performance.timeOrigin + performance.now();
 
@@ -178,9 +177,6 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
-      const factKey = manager.toKey(entry.address);
-      // TODO(@ubik2): need to remove this or schemaTracker
-      selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry, entry.cause, entry.since);
 
