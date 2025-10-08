@@ -52,7 +52,7 @@ describe("OpaqueRef map callbacks", () => {
     );
     assertStringIncludes(
       output,
-      '({ elem, index, params: { defaultName } }) =>',
+      "({ elem, index, params: { defaultName } }) =>",
     );
     assertStringIncludes(
       output,
