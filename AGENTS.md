@@ -359,4 +359,4 @@ If you are running inside the Ralph Docker container (user is "ralph" or
 
 - See `tools/ralph/DEPLOY.md` for Playwright MCP testing and server restart
   instructions
-- The servers are already running on localhost (toolshed on 8000, shell on 5173)
+- toolshed should run on 8000 and shell on port 5173

@@ -29,6 +29,32 @@ Steps:
    - Keep patterns offline-friendly (no network or LLM).
    - Read `./tools/ralph/LEARNINGS.md` for any other tips.
    - Read .md files in ./tutorials for best practices
+   - If the item in TASKS.md appears to be implemented but unchecked, verify
+     that it actually passes all criteria
+   - When implementing UI interactions (buttons, inputs, etc.):
+     - FIRST search `./packages/patterns/` for similar patterns (use grep to
+       find examples)
+     - Study how they pass data to handlers - data is passed via handler binding
+       parameters, NOT via event.target or DOM attributes
+     - Key pattern: Runtime values (like loop index) are passed as binding
+       parameters
+       ```tsx
+       items.map((item, index) => (
+         <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
+       ));
+       ```
+     - Handler receives binding parameters in its second argument:
+       ```tsx
+       const removeItem = handler<
+         EventType,
+         { items: Cell<Item[]>; index: number }
+       >(
+         (event, { items, index }) => {/* use index here */},
+       );
+       ```
+     - Example files to reference: `array-in-cell-with-remove-editable.tsx`,
+       `list-operations.tsx`
+
 2. Update `./tools/ralph/patterns/pattern-harness.test.ts` to include the new
    scenario modules if needed.
 
@@ -61,6 +87,9 @@ Steps:
 9. Exit
 
 IMPORTANT: Only build one test case at a time! See `tools/ralph/DEPLOY.md` for
-Playwright MCP testing and server restart instructions
+Playwright MCP testing and server restart instructions. When developing UI for
+components, DOM access is not allowed. You also cannot access the event from the
+JSX components. Please look at `packages/patterns/` for examples on how the JSX
+components work, how events work, and how handlers work with them.
 
 Please begin.
