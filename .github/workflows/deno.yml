@@ -180,8 +180,8 @@ jobs:
           API_URL=http://localhost:8000/ \
           deno task integration
 
-  pattern-tests-integration-test:
-    name: "Pattern Tests Integration Tests"
+  generated-patterns-integration-test:
+    name: "Generated Patterns Integration Tests"
     runs-on: ubuntu-latest
     needs: ["build"]
     environment: ci
@@ -192,8 +192,8 @@ jobs:
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
 
-      - name: 🧪 Run pattern tests integration tests
-        working-directory: packages/pattern-tests
+      - name: 🧪 Run generated patterns integration tests
+        working-directory: packages/generated-patterns
         run: deno task integration
 
   attest-binaries:
