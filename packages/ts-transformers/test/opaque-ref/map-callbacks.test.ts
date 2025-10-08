@@ -45,10 +45,14 @@ describe("OpaqueRef map callbacks", () => {
       types: { "commontools.d.ts": commontools },
     });
 
-    // Map callback should be transformed to recipe with params for captured defaultName
+    // Map callback should be transformed to recipe with schema for captured defaultName
     assertStringIncludes(
       output,
-      'recipe("map with pattern including captures", ({ elem, index, params: { defaultName } }) =>',
+      "recipe({",
+    );
+    assertStringIncludes(
+      output,
+      '({ elem, index, params: { defaultName } }) =>',
     );
     assertStringIncludes(
       output,

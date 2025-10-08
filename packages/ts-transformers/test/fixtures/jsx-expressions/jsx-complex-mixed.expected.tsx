@@ -62,7 +62,44 @@ export default recipe({
         
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
+          {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            price: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "name", "price", "active"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            taxRate: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["discount", "taxRate"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
               <span>{elem.name}</span>
               <span> - Original: ${elem.price}</span>
               <span> - Discounted: ${(elem.price * (1 - discount)).toFixed(2)}</span>

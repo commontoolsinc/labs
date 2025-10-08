@@ -337,6 +337,208 @@ function getCaptureName(expr: ts.Expression): string | undefined {
 }
 
 /**
+ * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
+ * Returns a TypeLiteral representing { elem: T, index?: number, params: {...} }
+ */
+function buildCallbackParamTypeNode(
+  mapCall: ts.CallExpression,
+  elemParam: ts.ParameterDeclaration | undefined,
+  indexParam: ts.ParameterDeclaration | undefined,
+  capturedVarNames: Set<string>,
+  captures: Map<string, ts.Expression>,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+
+  // 1. Build elem type property
+  let elemTypeNode: ts.TypeNode;
+  let elemType: ts.Type | undefined;
+
+  // Check if we have an explicit type annotation that's not 'any'
+  if (elemParam?.type) {
+    const annotationType = checker.getTypeFromTypeNode(elemParam.type);
+    if (!(annotationType.flags & ts.TypeFlags.Any)) {
+      // Use the explicit annotation
+      elemTypeNode = elemParam.type;
+      elemType = annotationType;
+    } else {
+      // Annotation is 'any', try to infer from array
+      const inferred = inferElementType(mapCall, context);
+      elemTypeNode = inferred.typeNode;
+      elemType = inferred.type;
+    }
+  } else {
+    // No annotation, infer from array
+    const inferred = inferElementType(mapCall, context);
+    elemTypeNode = inferred.typeNode;
+    elemType = inferred.type;
+  }
+
+  // Register elem TypeNode if we have a Type
+  if (typeRegistry && elemType) {
+    typeRegistry.set(elemTypeNode, elemType);
+  }
+
+  const callbackParamProperties: ts.TypeElement[] = [
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier("elem"),
+      undefined,
+      elemTypeNode,
+    ),
+  ];
+
+  // 2. Add index property if present
+  if (indexParam) {
+    callbackParamProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier("index"),
+        factory.createToken(ts.SyntaxKind.QuestionToken),
+        factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      ),
+    );
+  }
+
+  // 3. Build params object type with captured variables
+  const paramsProperties: ts.TypeElement[] = [];
+  for (const varName of capturedVarNames) {
+    const expr = captures.get(varName);
+    if (!expr) continue;
+
+    // Get the Type of the captured expression
+    const exprType = checker.getTypeAtLocation(expr);
+
+    // Convert Type to TypeNode
+    const typeNode = checker.typeToTypeNode(
+      exprType,
+      context.sourceFile,
+      ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+    // Register this property's TypeNode with its Type
+    if (typeRegistry) {
+      typeRegistry.set(typeNode, exprType);
+    }
+
+    paramsProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier(varName),
+        undefined,
+        typeNode,
+      ),
+    );
+  }
+
+  // Add params property
+  callbackParamProperties.push(
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier("params"),
+      undefined,
+      factory.createTypeLiteralNode(paramsProperties),
+    ),
+  );
+
+  return factory.createTypeLiteralNode(callbackParamProperties);
+}
+
+/**
+ * Infer the element type from an OpaqueRef<T[]> or Array<T> being mapped.
+ */
+function inferElementType(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { factory, checker } = context;
+
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    return {
+      typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    };
+  }
+
+  const arrayExpr = mapCall.expression.expression;
+  const arrayType = checker.getTypeAtLocation(arrayExpr);
+
+  // Handle OpaqueRef<T[]> which is an intersection type
+  let actualArrayType = arrayType;
+  if (arrayType.flags & ts.TypeFlags.Intersection) {
+    const intersectionType = arrayType as ts.IntersectionType;
+    // Look for the Reference type member (e.g., OpaqueRefMethods<T[]>)
+    for (const type of intersectionType.types) {
+      if (type.flags & ts.TypeFlags.Object) {
+        const objType = type as ts.ObjectType;
+        if (objType.objectFlags & ts.ObjectFlags.Reference) {
+          actualArrayType = type;
+          break;
+        }
+      }
+    }
+  }
+
+  // Get type arguments from the reference type
+  let typeArgs: readonly ts.Type[] | undefined;
+  if (actualArrayType.flags & ts.TypeFlags.Object) {
+    const objectType = actualArrayType as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
+    }
+  }
+
+  if (typeArgs && typeArgs.length > 0) {
+    const innerType = typeArgs[0];
+    if (innerType) {
+      // innerType is either T[] or T depending on the structure
+      let elementType: ts.Type;
+      if (checker.isArrayType(innerType)) {
+        // It's T[], extract T
+        const extracted = checker.getIndexTypeOfType(innerType, ts.IndexKind.Number);
+        if (extracted) {
+          elementType = extracted;
+        } else {
+          return {
+            typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+          };
+        }
+      } else {
+        // It's already T
+        elementType = innerType;
+      }
+
+      // Convert Type to TypeNode
+      const typeNode = checker.typeToTypeNode(
+        elementType,
+        context.sourceFile,
+        ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      return { typeNode, type: elementType };
+    }
+  }
+
+  // Fallback for plain Array<T>
+  if (checker.isArrayType(arrayType)) {
+    const elementType = checker.getIndexTypeOfType(arrayType, ts.IndexKind.Number);
+    if (elementType) {
+      const typeNode = checker.typeToTypeNode(
+        elementType,
+        context.sourceFile,
+        ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      return { typeNode, type: elementType };
+    }
+  }
+
+  return {
+    typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+  };
+}
+
+/**
  * Transform a map callback that captures variables.
  */
 function transformMapCallback(
@@ -562,7 +764,19 @@ function transformMapCallback(
     transformedBody,
   );
 
-  // Wrap in recipe() using the proper imported identifier
+  // Build a TypeNode for the callback parameter to pass as a type argument to recipe<T>()
+  // The callback signature is: ({ elem, index?, params: { captured1, captured2, ... } }) => ...
+  // Also register individual property TypeNodes in typeRegistry so SchemaGeneratorTransformer can resolve them
+  const callbackParamTypeNode = buildCallbackParamTypeNode(
+    mapCall,
+    elemParam,
+    indexParam,
+    capturedVarNames,
+    captures,
+    context,
+  );
+
+  // Wrap in recipe<T>() using type argument (SchemaInjectionTransformer will convert to toSchema<T>)
   const recipeIdentifier = getHelperIdentifier(
     factory,
     context.sourceFile,
@@ -570,11 +784,8 @@ function transformMapCallback(
   );
   const recipeCall = factory.createCallExpression(
     recipeIdentifier,
-    undefined,
-    [
-      factory.createStringLiteral("map with pattern including captures"),
-      newCallback,
-    ],
+    [callbackParamTypeNode], // Type argument
+    [newCallback],
   );
 
   // Create the params object

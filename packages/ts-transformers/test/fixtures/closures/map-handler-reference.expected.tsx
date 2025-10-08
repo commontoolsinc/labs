@@ -62,7 +62,35 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            count: {
+                                type: "number",
+                                asCell: true,
+                                asOpaque: true
+                            }
+                        },
+                        required: ["count"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
             {elem.name}
           </ct-button>)), { count: state.count })}
       </div>),
