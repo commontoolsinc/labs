@@ -29,6 +29,9 @@ Once connected to the container, to use Ralph for automated pattern development:
 # Navigate to labs directory
 $ cd labs
 
+# run claude once to set up to authenticate
+$ claude
+
 # Get latest changes
 $ git pull
 
