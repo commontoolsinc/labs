@@ -311,7 +311,10 @@ export function getNamedTypeKey(
   // The name "Record" or "Box" is meaningless without the type parameters - what matters is the
   // resolved/instantiated type structure
   const typeWithAlias = type as TypeWithInternals;
-  if (typeWithAlias.aliasTypeArguments && typeWithAlias.aliasTypeArguments.length > 0) {
+  if (
+    typeWithAlias.aliasTypeArguments &&
+    typeWithAlias.aliasTypeArguments.length > 0
+  ) {
     return undefined;
   }
 
