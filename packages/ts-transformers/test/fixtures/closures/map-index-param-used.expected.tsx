@@ -41,7 +41,37 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, index, params: { offset } }) => (<div>
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            offset: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["offset"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, index, params: { offset } }) => (<div>
             Item #{index + offset}: {elem.name}
           </div>)), { offset: state.offset })}
       </div>),

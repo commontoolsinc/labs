@@ -23,7 +23,34 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { prefix } }) => (<div>
+        {typedItems.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            prefix: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["prefix"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { prefix } }) => (<div>
             {prefix}: {elem.name}
           </div>)), { prefix: state.prefix })}
       </div>),
