@@ -390,8 +390,6 @@ async function invokeToolCall(
     await runtime.idle();
     return { type: "json", value: result.get() };
   }
-
-
 }
 
 /**
