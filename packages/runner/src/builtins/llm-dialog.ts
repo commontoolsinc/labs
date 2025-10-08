@@ -13,10 +13,10 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
-import { isBoolean, isObject } from "@commontools/utils/types";
+import { isBoolean, isObject, isRecord } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isStream } from "../cell.ts";
-import { ID, NAME, type Recipe, UI } from "../builder/types.ts";
+import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -144,7 +144,7 @@ const internalSchema = {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  toolHandlers?: Map<string, any>,
+  toolHandlers?: Map<string, { handler: any; charm: Cell<any> }>,
 ): Record<
   string,
   { handler?: any; description: string; inputSchema?: JSONSchema }
@@ -207,9 +207,7 @@ function flattenTools(
         }
 
         // Store handler reference if map provided
-        if (toolHandlers) {
-          toolHandlers.set(toolName, handler);
-        }
+        if (toolHandlers) toolHandlers.set(toolName, { handler, charm: charmCell });
 
         flattened[toolName] = { handler, description, inputSchema };
       }
@@ -261,6 +259,73 @@ async function safelyPerformUpdate(
   return !error && success;
 }
 
+export async function getResultAndRecipeFromStream(
+  stream: Stream<any>,
+): Promise<{ result: Cell<any>; recipeId?: string; recipe?: Recipe }> {
+  // The handler stream lives under the result doc; zero path to reach doc root
+  const rootLink = stream.getAsNormalizedFullLink();
+  let result = stream.runtime.getCellFromLink({ ...rootLink, path: [] });
+
+  // Prefer the canonical relation: result doc -> source (process cell)
+  let process = result.getSourceCell();
+
+  // Fallback: Some historical shapes expose resultRef on the root doc.
+  // If no source link, detect a process-like doc by presence of resultRef.
+  if (!process) {
+    const rootValue = result.getRaw();
+    if (isRecord(rootValue) && rootValue.resultRef) {
+      const link = parseLink(rootValue.resultRef, result);
+      if (link) {
+        result = stream.runtime.getCellFromLink(link);
+      }
+      // In this shape, the current root is the process cell
+      process = result.getSourceCell() ?? (result as unknown as Cell<any>);
+    }
+  }
+
+  const recipeId = process?.get()?.[TYPE];
+  const recipe = recipeId
+    ? await stream.runtime.recipeManager.loadRecipe(recipeId, result.space)
+    : undefined;
+  return { result, recipeId, recipe };
+}
+
+/**
+ * Ensures that a source charm is running by getting its result and recipe,
+ * then calling runSynced to ensure it's actively running.
+ *
+ * @param runtime - The runtime instance
+ * @param stream - The stream to get the source charm from
+ * @returns Promise that resolves when the charm is running
+ */
+async function ensureSourceCharmRunning(
+  runtime: IRuntime,
+  streamOrMeta: Stream<any> | { handler: any; charm: Cell<any> },
+): Promise<void> {
+  // Prefer explicit charm context if available (from flattenTools)
+  let result: Cell<any> | undefined;
+  let recipe: Recipe | undefined;
+
+  if (isRecord(streamOrMeta) && "charm" in streamOrMeta) {
+    const charm = streamOrMeta.charm as Cell<any>;
+    result = charm.asSchema({});
+    const process = charm.getSourceCell();
+    const recipeId = process?.get()?.[TYPE];
+    recipe = recipeId
+      ? await runtime.recipeManager.loadRecipe(recipeId, charm.space)
+      : undefined;
+  } else {
+    const { result: res, recipe: rec } =
+      await getResultAndRecipeFromStream(streamOrMeta as Stream<any>);
+    result = res; recipe = rec;
+  }
+  if (recipe) {
+    await runtime.runSynced(result, recipe);
+    // Ensure scheduler has registered handlers before we enqueue events
+    await runtime.idle();
+  }
+}
+
 /**
  * Executes a tool call by invoking its handler function and returning the
  * result. Creates a new transaction, sends the tool call arguments to the
@@ -278,16 +343,22 @@ async function invokeToolCall(
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
-  charmHandler?: any,
+  charmMeta?: { handler: any; charm: Cell<any> },
 ) {
   const pattern = toolDef?.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
     | undefined;
-  const handler = charmHandler ?? toolDef?.key("handler");
+  const handler = charmMeta?.handler ?? toolDef?.key("handler");
+  // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
-  const { resolve, promise } = Promise.withResolvers<any>();
+  // const { resolve, promise } = Promise.withResolvers<any>();
+  // ensure the charm this handler originates from is actually running
+  if (handler && !pattern) {
+    await ensureSourceCharmRunning(runtime, charmMeta ?? handler);
+  }
 
+  // runSynced charm
   runtime.editWithRetry((tx) => {
     if (pattern) {
       runtime.run(tx, pattern, toolCall.input, result);
@@ -299,20 +370,22 @@ async function invokeToolCall(
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
-  }).then((error) => error && resolve({ error })); // Return error if tx failed
+  });
+  // .then((error) => error && resolve({ error })); // Return error if tx failed
 
   // wait until we know we have the result of the tool call
   // not just that the transaction has been comitted
-  const cancel = result.sink((r) => {
-    r !== undefined && resolve(r);
-  });
-  const resultValue = await promise;
-  cancel();
+  // const cancel = result.sink((r) => {
+  //   r !== undefined && resolve(r);
+  // });
+  // const resultValue = await promise;
+  await runtime.idle();
+  // cancel();
 
   // If this was a pattern, stop it now that we have the result
   if (pattern) runtime.runner.stop(result);
 
-  return { type: "json", value: resultValue };
+  return { type: "json", value: "OK" };
 }
 
 /**
@@ -526,7 +599,7 @@ function startRequest(
   const toolsCell = inputs.key("tools");
 
   // Map to store handler references for charm-extracted tools
-  const toolHandlers = new Map<string, any>();
+  const toolHandlers = new Map<string, { handler: any; charm: Cell<any> }>();
 
   // Flatten tools (extracts handlers from charms, stores handler refs)
   const flattenedTools = flattenTools(toolsCell, toolHandlers);
@@ -534,11 +607,14 @@ function startRequest(
   // Build schemas for LLM, filtering out tools without schemas
   const toolsWithSchemas = Object.fromEntries(
     Object.entries(flattenedTools).flatMap(
-      ([name, tool]): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
+      (
+        [name, tool],
+      ): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
         const pattern = tool.pattern?.get();
         const handler = tool.handler;
 
-        let inputSchema = pattern?.argumentSchema ?? handler?.schema ?? tool.inputSchema;
+        let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
+          tool.inputSchema;
 
         if (inputSchema === undefined) {
           logger.error(`Tool ${name} has no schema`);
@@ -555,7 +631,9 @@ function startRequest(
         }
 
         let description: string = tool.description ??
-          (isBoolean(inputSchema) ? undefined : (inputSchema.description as string | undefined)) ??
+          (isBoolean(inputSchema)
+            ? undefined
+            : (inputSchema.description as string | undefined)) ??
           "";
 
         if (!description) {
@@ -632,10 +710,10 @@ function startRequest(
           const toolResults: any[] = [];
           for (const toolCallPart of toolCallParts) {
             // Check if this is a charm-extracted handler (dot notation)
-            const charmHandler = toolHandlers.get(toolCallPart.toolName);
-            const toolDef = charmHandler
-              ? undefined
-              : toolsCell.key(toolCallPart.toolName);
+          const charmMeta = toolHandlers.get(toolCallPart.toolName);
+          const toolDef = charmMeta
+            ? undefined
+            : toolsCell.key(toolCallPart.toolName);
 
             try {
               const resultValue = await invokeToolCall(
@@ -647,7 +725,7 @@ function startRequest(
                   name: toolCallPart.toolName,
                   input: toolCallPart.input,
                 },
-                charmHandler,
+                charmMeta,
               );
               // this resolves back to a cell, so it may still update in the
               // conversation history reactively later but we intend this to be
