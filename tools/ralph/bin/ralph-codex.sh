@@ -13,6 +13,12 @@ cd "$LABS_DIR"
 # Ensure logs directory exists
 mkdir -p ./tools/ralph/logs
 
+# Rotate logs keeping last 5
+for i in 4 3 2 1; do
+  [ -f ./tools/ralph/logs/ralph-codex.log.$i ] && mv ./tools/ralph/logs/ralph-codex.log.$i ./tools/ralph/logs/ralph-codex.log.$((i+1))
+done
+[ -f ./tools/ralph/logs/ralph-codex.log ] && mv ./tools/ralph/logs/ralph-codex.log ./tools/ralph/logs/ralph-codex.log.1
+
 # llm command to summarize changes
 LLM="./tools/ralph/bin/llm.sh"
 

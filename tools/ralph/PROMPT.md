@@ -13,10 +13,25 @@ message.
 Steps:
 
 1. Open `./tools/ralph/TASKS.md` and pick ONE random unchecked task that is
-   eligible (a task is eligible if either it has no parent task, or all its
-   parent tasks are already checked/completed). The hierarchy can be N levels
-   deep - ensure all ancestors are complete before selecting a child task. For
-   the selected task:
+   eligible. A task is eligible if and only if:
+   - It is unchecked (has `[]` not `[x]`), AND
+   - Either it has no parent task (is at the top level), OR all its parent tasks
+     are checked `[x]`
+
+   IMPORTANT: The hierarchy can be N levels deep. You MUST trace all the way up
+   the indentation tree and verify EVERY ancestor is checked before selecting a
+   task.
+
+   Example: If you see this structure:
+   ```
+   - [x] Parent task
+     - [] Child task 1
+       - [] Grandchild task A  <- NOT ELIGIBLE (child task 1 is unchecked)
+     - [x] Child task 2
+       - [] Grandchild task B  <- ELIGIBLE (all ancestors checked)
+   ```
+
+   For the selected task:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions in `./tools/ralph/patterns/`.
    - Use CTS APIs (`handler`, `recipe`, `lift`, `str`, `cell`, `createCell`) to
@@ -43,17 +58,6 @@ Steps:
          <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
        ));
        ```
-     - Handler receives binding parameters in its second argument:
-       ```tsx
-       const removeItem = handler<
-         EventType,
-         { items: Cell<Item[]>; index: number }
-       >(
-         (event, { items, index }) => {/* use index here */},
-       );
-       ```
-     - Example files to reference: `array-in-cell-with-remove-editable.tsx`,
-       `list-operations.tsx`
 
 2. Update `./tools/ralph/patterns/pattern-harness.test.ts` to include the new
    scenario modules if needed.
