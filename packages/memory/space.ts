@@ -199,16 +199,20 @@ export type Options = {
   url: URL;
 };
 
-export interface Session<Space extends MemorySpace> {
-  subject: Space;
+export interface SpaceStoreSession<Space extends MemorySpace = MemorySpace>
+  extends SpaceSession<Space> {
   store: Database;
 }
-
 class Space<Subject extends MemorySpace = MemorySpace>
-  implements Session<Subject>, SpaceSession {
-  constructor(public subject: Subject, public store: Database) {}
+  implements SpaceStoreSession<Subject> {
+  constructor(
+    public subject: Subject,
+    public store: Database,
+  ) {}
 
-  transact(transaction: Transaction<Subject>) {
+  transact(
+    transaction: Transaction<Subject>,
+  ): Result<Commit<Subject>, ConflictError | TransactionError> {
     return traceSync("space.instance.transact", (span) => {
       addMemoryAttributes(span, {
         operation: "transact",
@@ -219,7 +223,7 @@ class Space<Subject extends MemorySpace = MemorySpace>
     });
   }
 
-  query(source: Query<Subject>) {
+  query(source: Query<Subject>): Result<Selection<MemorySpace>, QueryError> {
     return traceSync("space.instance.query", (span) => {
       addMemoryAttributes(span, {
         operation: "query",
@@ -230,7 +234,9 @@ class Space<Subject extends MemorySpace = MemorySpace>
     });
   }
 
-  querySchema(source: SchemaQuery<Subject>) {
+  querySchema(
+    source: SchemaQuery<Subject>,
+  ): Result<Selection<MemorySpace>, AuthorizationError | QueryError> {
     return traceSync("space.instance.querySchema", (span) => {
       addMemoryAttributes(span, {
         operation: "querySchema",
@@ -387,7 +393,7 @@ export const open = async <Subject extends MemorySpace>({
 
 export const close = <Space extends MemorySpace>({
   store,
-}: Session<Space>): Result<Unit, SystemError> => {
+}: SpaceStoreSession<Space>): Result<Unit, SystemError> => {
   return traceSync("space.close", (span) => {
     addMemoryAttributes(span, { operation: "close" });
 
@@ -410,7 +416,7 @@ type StateRow = {
 };
 
 const recall = <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  { store }: SpaceStoreSession<Space>,
   { the, of }: { the: The; of: Entity },
 ): Revision<Fact> | null => {
   const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
@@ -451,7 +457,7 @@ type CauseRow = {
  * @returns an array of Revisions constructed from the associated facts
  */
 const causeChain = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   { the, of }: { the: The; of: Entity },
   excludeFact: string | undefined,
 ): Revision<Fact>[] => {
@@ -481,7 +487,7 @@ const causeChain = <Space extends MemorySpace>(
  *     there was no match.
  */
 const getFact = <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  { store }: SpaceStoreSession<Space>,
   { fact }: { fact: string },
 ): Revision<Fact> | undefined => {
   const row = store.prepare(GET_FACT).get({ fact }) as StateRow | undefined;
@@ -507,7 +513,7 @@ const getFact = <Space extends MemorySpace>(
 };
 
 const select = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   { since, select }: Query["args"],
 ): Selection<Space>[Space] => {
   const factSelection: FactSelection = {}; // we'll store our facts here
@@ -554,7 +560,7 @@ export type SelectedFact = {
 
 // Select facts matching the selector. Facts are ordered by since.
 export const selectFacts = function* <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  { store }: SpaceStoreSession<Space>,
   { the, of, cause, is, since }: FactSelector,
 ): Iterable<SelectedFact> {
   const rows = store.prepare(EXPORT).all({
@@ -577,7 +583,7 @@ export const selectFacts = function* <Space extends MemorySpace>(
 };
 
 export const selectFact = function <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  { store }: SpaceStoreSession<Space>,
   { the, of, since }: { the: The; of: Entity; since?: number },
 ): SelectedFact | undefined {
   const rows = store.prepare(EXPORT).all({
@@ -608,7 +614,7 @@ export const selectFact = function <Space extends MemorySpace>(
  * key is merkle-reference for it or an "undefined" for the `undefined`.
  */
 const importDatum = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   datum: JSONValue | undefined,
 ): string => {
   if (datum === undefined) {
@@ -653,7 +659,7 @@ const iterateTransaction = function* (
  * take place but error will be raised if claimed memory state is not current.
  */
 const swap = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   source: Retract | Assert | Claim,
   { since, transaction }: { since: number; transaction: Transaction<Space> },
 ) => {
@@ -748,7 +754,7 @@ const swap = <Space extends MemorySpace>(
 };
 
 const commit = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   transaction: Transaction<Space>,
 ): Commit<Space> => {
   const the = COMMIT_LOG_TYPE;
@@ -793,13 +799,13 @@ const execute = <
   Subject extends MemorySpace,
   Tr extends DBTransaction<
     (
-      session: Session<Subject>,
+      session: SpaceStoreSession<Subject>,
       transaction: Transaction<Subject>,
     ) => Commit<Subject>
   >,
 >(
   update: Tr,
-  session: Session<Subject>,
+  session: SpaceStoreSession<Subject>,
   transaction: Transaction<Subject>,
 ): Result<Commit<Subject>, ConflictError | TransactionError> => {
   try {
@@ -819,7 +825,7 @@ const execute = <
 };
 
 export const transact = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   transaction: Transaction<Space>,
 ) => {
   return traceSync("space.transact", (span) => {
@@ -836,7 +842,7 @@ export const transact = <Space extends MemorySpace>(
 };
 
 export const query = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   command: Query<Space>,
 ): Result<Selection<Space>, QueryError> => {
   return traceSync("space.query", (span) => {
@@ -876,7 +882,7 @@ export const query = <Space extends MemorySpace>(
 };
 
 export const querySchema = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   command: SchemaQuery<Space>,
 ): Result<Selection<Space>, AuthorizationError | QueryError> => {
   return traceSync("space.querySchema", (span) => {
@@ -934,7 +940,7 @@ export function getLabels<
   Space extends MemorySpace,
   T,
 >(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   includedFacts: OfTheCause<Revision<T>>,
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
@@ -962,7 +968,7 @@ export function getLabels<
 
 // Get the label that applies to the entity.
 export function getLabel<Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   of: Entity,
 ) {
   return selectFact(session, { of, the: LABEL_TYPE });
@@ -1034,7 +1040,7 @@ export function redactCommitData(commitData: CommitData): CommitData {
 
 function loadFacts<Space extends MemorySpace>(
   selection: FactSelection,
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   factSelector: FactSelector,
 ): FactSelection {
   for (

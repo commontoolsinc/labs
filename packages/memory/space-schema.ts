@@ -49,6 +49,7 @@ import {
   selectFact,
   selectFacts,
   type Session,
+  SpaceStoreSession,
   toSelection,
 } from "./space.ts";
 
@@ -76,7 +77,7 @@ export class ServerObjectManager extends BaseObjectManager<
   private restrictedValues = new Set<string>();
 
   constructor(
-    private session: Session<MemorySpace>,
+    private session: SpaceStoreSession<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
     super();
@@ -149,7 +150,7 @@ export class ServerObjectManager extends BaseObjectManager<
 }
 
 export const selectSchema = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
 ): FactSelection => {
   const startTime = performance.timeOrigin + performance.now();
@@ -293,7 +294,7 @@ function loadFactsForDoc(
 
 const redactCommits = <Space extends MemorySpace>(
   includedFacts: FactSelection,
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
 ) => {
   const change = getChange(includedFacts, session.subject, COMMIT_LOG_TYPE);
   if (change !== undefined) {
@@ -343,7 +344,7 @@ function addToSelection(
 
 // Get the ValueEntry objects for the facts that match our selector
 function getMatchingFacts<Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   factSelector: FactSelector,
 ): Iterable<IAttestation & { cause: Cause; since: number }> {
   const results = [];
