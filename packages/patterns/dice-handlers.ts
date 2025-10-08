@@ -2,7 +2,7 @@
 import { Cell, Default, handler } from "commontools";
 
 export const roll = handler<
-  { result: Cell<string>; sides?: Default<number, 6> },
+  { result?: Cell<string>; sides?: Default<number, 6> },
   { value: Cell<number> }
 >(
   (args, state) => {
@@ -11,16 +11,16 @@ export const roll = handler<
     const sides = Number.isFinite(floored) && floored > 0 ? floored : 6;
     const rolled = Math.floor(Math.random() * sides) + 1;
     state.value.set(rolled);
-    args.result.set(`Rolled a ${rolled} on a ${sides}-sided die`);
+    args.result?.set(`Rolled a ${rolled} on a ${sides}-sided die`);
   },
 );
 
 export const getValue = handler<
-  { result: Cell<string> },
+  { result?: Cell<string> },
   { value: Cell<number> }
 >(
   (args, state) => {
     const current = state.value.get();
-    args.result.set(`Current die value is ${current}`);
+    args.result?.set(`Current die value is ${current}`);
   },
 );
