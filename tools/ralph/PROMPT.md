@@ -61,5 +61,6 @@ Steps:
 9. Exit
 
 IMPORTANT: Only build one test case at a time!
+See `tools/ralph/DEPLOY.md` for Playwright MCP testing and server restart instructions
 
 Please begin.
