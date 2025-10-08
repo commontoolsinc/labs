@@ -244,7 +244,11 @@ export default recipe<ChatInput, ChatOutput>(
           <ct-vstack slot="header">
             <ct-heading level={4}>{title}</ct-heading>
             <ct-hstack gap="normal">
-              <ct-attachments-bar attachments={allAttachments} />
+              <ct-attachments-bar
+                attachments={allAttachments}
+                removable
+                onct-remove={removeAttachment({ allAttachments })}
+              />
               <ct-tools-chip tools={flattenedTools} />
             </ct-hstack>
           </ct-vstack>

@@ -86,7 +86,8 @@ export class CTAttachmentsBar extends BaseElement {
     }
   }
 
-  private _handleRemove(id: string): void {
+  private _handleRemove(id: string, e?: Event): void {
+    e?.stopPropagation();
     this.emit("ct-remove", { id });
   }
 
@@ -110,7 +111,7 @@ export class CTAttachmentsBar extends BaseElement {
                 variant="${this._getVariant(attachment.type)}"
                 ?removable="${this.removable}"
                 interactive
-                @ct-remove="${() => this._handleRemove(attachment.id)}"
+                @ct-remove="${(e: Event) => this._handleRemove(attachment.id, e)}"
                 @ct-click="${() =>
                   this._handleClick(attachment.id, attachment)}"
               >
