@@ -77,7 +77,6 @@ const sendMessage = handler<
   // Process attachments
   for (const attachment of attachments) {
     if (attachment.type === "file" && attachment.data) {
-      // TODO: Convert File to multimodal content block
       // For now, add a text reference
       contentParts.push({
         type: "text" as const,
