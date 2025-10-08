@@ -18,7 +18,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
-import BacklinksIndex from "./backlinks-index.tsx";
+import BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
@@ -37,6 +37,7 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   allCharms: Cell<any[]>;
+  index: BacklinksMap;
   theme?: {
     accentColor: Default<string, "#3b82f6">;
     fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -90,7 +91,7 @@ const storeCharm = lift(
     charm: any;
     selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
     charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<any[]>;
+    allCharms: Cell<MentionableCharm[]>;
     theme?: {
       accentColor: Default<string, "#3b82f6">;
       fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -239,15 +240,12 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
-  ({ selectedCharm, charmsList, allCharms, theme }) => {
+  ({ selectedCharm, charmsList, allCharms, index, theme }) => {
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
     const combined = combineLists({
       allCharms: allCharms as unknown as MentionableCharm[],
       charmsList,
-    });
-    const index = BacklinksIndex({
-      allCharms: combined as unknown as OpaqueRef<Cell<MentionableCharm[]>>,
     });
 
     populateChatList({

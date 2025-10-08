@@ -19,7 +19,7 @@ import Chatbot from "./chatbot.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { type MentionableCharm } from "./chatbot-note-composed.tsx";
 import { default as Note } from "./note.tsx";
-import BacklinksIndex from "./backlinks-index.tsx";
+import BacklinksIndex, { type BacklinksMap } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 
 export type Charm = {
@@ -66,12 +66,13 @@ const removeCharm = handler<
 
 const spawnChatList = handler<
   Record<string, never>,
-  { allCharms: Cell<Charm[]> }
+  { allCharms: Cell<Charm[]>, index: any }
 >((_, state) => {
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
     charmsList: [],
     allCharms: state.allCharms, // we should handle empty here
+    index: state.index,
   }));
 });
 
@@ -129,6 +130,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             preventDefault
             onct-keybind={spawnChatList({
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+              index: index as unknown as OpaqueRef<any>,
             })}
           />
 
@@ -141,6 +143,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                   allCharms: allCharms as unknown as OpaqueRef<
                     MentionableCharm[]
                   >,
+                  index: index as unknown as OpaqueRef<any>,
                 })}
               >
                 📂 Chat List
