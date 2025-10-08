@@ -16,4 +16,4 @@ export {
 } from "./transformers/mod.ts";
 export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
 
-export { getExportInfo, type ExportInfo } from "./utils/mod.ts";
+export { type ExportInfo, getExportInfo } from "./utils/mod.ts";

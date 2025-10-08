@@ -98,24 +98,19 @@ export function getExportInfo(
             namedExports.push(decl.name.text);
           }
         }
-      }
-      // Function declarations: export function foo() {}
+      } // Function declarations: export function foo() {}
       else if (ts.isFunctionDeclaration(statement) && statement.name) {
         namedExports.push(statement.name.text);
-      }
-      // Class declarations: export class Foo {}
+      } // Class declarations: export class Foo {}
       else if (ts.isClassDeclaration(statement) && statement.name) {
         namedExports.push(statement.name.text);
-      }
-      // Type alias: export type Foo = ...
+      } // Type alias: export type Foo = ...
       else if (ts.isTypeAliasDeclaration(statement)) {
         namedExports.push(statement.name.text);
-      }
-      // Interface: export interface Foo {}
+      } // Interface: export interface Foo {}
       else if (ts.isInterfaceDeclaration(statement)) {
         namedExports.push(statement.name.text);
-      }
-      // Enum: export enum Foo {}
+      } // Enum: export enum Foo {}
       else if (ts.isEnumDeclaration(statement)) {
         namedExports.push(statement.name.text);
       }

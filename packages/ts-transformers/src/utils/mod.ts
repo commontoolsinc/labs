@@ -1,1 +1,1 @@
-export { getExportInfo, type ExportInfo } from "./export-info.ts";
+export { type ExportInfo, getExportInfo } from "./export-info.ts";
