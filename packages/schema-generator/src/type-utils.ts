@@ -247,8 +247,7 @@ export function getNamedTypeKey(
   }
 
   // Check if this is a Default/Cell/Stream/OpaqueRef wrapper type via alias
-  const aliasSymbol = (type as TypeWithInternals).aliasSymbol;
-  const aliasName = aliasSymbol?.name;
+  const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
     aliasName === "Default" || aliasName === "Cell" || aliasName === "Stream" ||
     aliasName === "OpaqueRef"
@@ -260,15 +259,9 @@ export function getNamedTypeKey(
   const symbol = type.symbol;
   let name = symbol?.name;
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
-
-  // For type references, check the target symbol
-  let targetSymbol: ts.Symbol | undefined;
-  if (objectFlags & ts.ObjectFlags.Reference) {
+  if (!name && (objectFlags & ts.ObjectFlags.Reference)) {
     const ref = type as unknown as ts.TypeReference;
-    targetSymbol = ref.target?.symbol;
-    if (!name && targetSymbol) {
-      name = targetSymbol.name;
-    }
+    name = ref.target?.symbol?.name ?? name;
   }
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)

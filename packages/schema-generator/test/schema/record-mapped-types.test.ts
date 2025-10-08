@@ -217,4 +217,82 @@ describe("Schema: Record and mapped types", () => {
     // Required makes everything required
     expect(schema.required).toEqual(["name", "age"]);
   });
+
+  describe("edge cases", () => {
+    it("should handle Record<string, T> with additionalProperties", async () => {
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `interface Config {
+          metadata: Record<string, string>;
+          data: Record<string, number>;
+        }`,
+        "Config",
+      );
+      const schema = transformer(type, checker, typeNode);
+
+      // Record<string, T> should use additionalProperties pattern
+      const metadataSchema = schema.properties!.metadata as any;
+      expect(metadataSchema.type).toBe("object");
+      expect(metadataSchema.properties).toEqual({});
+      expect(metadataSchema.additionalProperties).toEqual({ type: "string" });
+
+      const dataSchema = schema.properties!.data as any;
+      expect(dataSchema.type).toBe("object");
+      expect(dataSchema.properties).toEqual({});
+      expect(dataSchema.additionalProperties).toEqual({ type: "number" });
+    });
+
+    it("should handle generic with default type parameters", async () => {
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `type Box<T = string> = { value: T };
+         interface Config {
+           box: Box;
+           explicitBox: Box<number>;
+         }`,
+        "Config",
+      );
+      const schema = transformer(type, checker, typeNode);
+
+      console.log("box schema:", JSON.stringify(schema.properties?.box));
+      console.log("explicitBox schema:", JSON.stringify(schema.properties?.explicitBox));
+      console.log("$defs keys:", Object.keys(schema.$defs || {}));
+
+      // Box without explicit param uses default (string)
+      const boxSchema = schema.properties!.box as any;
+      expect(boxSchema.type).toBe("object");
+      expect(boxSchema.properties.value).toEqual({ type: "string" });
+
+      // Box with explicit param uses that type
+      const explicitBoxSchema = schema.properties!.explicitBox as any;
+      expect(explicitBoxSchema.type).toBe("object");
+      expect(explicitBoxSchema.properties.value).toEqual({ type: "number" });
+
+      // Neither should create "Box" in $defs
+      expect(schema.$defs?.Box).toBeUndefined();
+    });
+
+    it("should handle conditional types resolving to Records", async () => {
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `type MaybeRecord<T extends string> = T extends string ? Record<T, number> : never;
+         interface Config {
+           data: MaybeRecord<"foo" | "bar">;
+         }`,
+        "Config",
+      );
+      const schema = transformer(type, checker, typeNode);
+
+      console.log("data schema:", JSON.stringify(schema.properties?.data));
+      console.log("$defs keys:", Object.keys(schema.$defs || {}));
+
+      // Conditional should resolve to Record<"foo" | "bar", number>
+      const dataSchema = schema.properties!.data as any;
+      expect(dataSchema.type).toBe("object");
+      expect(dataSchema.properties).toBeDefined();
+      expect(dataSchema.properties.foo).toEqual({ type: "number" });
+      expect(dataSchema.properties.bar).toEqual({ type: "number" });
+
+      // Should not create MaybeRecord or Record in $defs
+      expect(schema.$defs?.MaybeRecord).toBeUndefined();
+      expect(schema.$defs?.Record).toBeUndefined();
+    });
+  });
 });
