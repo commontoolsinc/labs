@@ -71,6 +71,7 @@ export function opaqueRef<T>(
           unsafe_materialize(unsafe_binding, path); // TODO(seefeld): Set value
         } else setValueAtPath(store, ["value", ...path], newValue);
       },
+      send: (newValue: Opaque<any>) => proxy.set(newValue),
       key: (key: PropertyKey) => {
         // Determine child schema when accessing a property
         const childSchema = key in methods

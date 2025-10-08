@@ -23,8 +23,6 @@ import ChatList from "./chatbot-list-view.tsx";
 
 export type Charm = {
   [NAME]?: string;
-  [UI]?: unknown;
-  [key: string]: any;
 };
 
 type CharmsListInput = {
@@ -33,7 +31,7 @@ type CharmsListInput = {
 
 // Recipe returns only UI, no data outputs (only symbol properties)
 interface CharmsListOutput {
-  [key: string]: unknown;
+  [UI]: unknown;
 }
 
 const visit = handler<

@@ -6,6 +6,7 @@ import type {
   ModuleFactory,
   NodeRef,
   Opaque,
+  OpaqueOrCells,
   OpaqueRef,
   Schema,
   SchemaWithoutCell,
@@ -36,7 +37,7 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+  return Object.assign((inputs: OpaqueOrCells<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -143,36 +144,39 @@ export function handler<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<StripCell<T>>) => OpaqueRef<E>;
+    bind: (inputs: OpaqueOrCells<StripCell<T>>) => OpaqueRef<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    with: (inputs: OpaqueOrCells<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
+    bind: (inputs: OpaqueOrCells<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
-    const stream = opaqueRef<E>(undefined, eventSchema);
+  const factory = Object.assign(
+    (props: OpaqueOrCells<StripCell<T>>): OpaqueRef<E> => {
+      const stream = opaqueRef<E>(undefined, eventSchema);
 
-    // Set stream marker (cast to E as stream is typed for the events it accepts)
-    stream.set({ $stream: true } as E);
-    const node: NodeRef = {
-      module,
-      inputs: { $ctx: props, $event: stream },
-      outputs: {},
-      frame: getTopFrame(),
-    };
+      // Set stream marker (cast to E as stream is typed for the events it accepts)
+      stream.set({ $stream: true } as E);
+      const node: NodeRef = {
+        module,
+        inputs: { $ctx: props, $event: stream },
+        outputs: {},
+        frame: getTopFrame(),
+      };
 
-    connectInputAndOutputs(node);
-    stream.connect(node);
+      connectInputAndOutputs(node);
+      stream.connect(node);
 
-    return stream;
-  }, module);
+      return stream;
+    },
+    module,
+  );
 
   return factory;
 }
@@ -183,13 +187,13 @@ export function derive<
 >(
   argumentSchema: InputSchema,
   resultSchema: ResultSchema,
-  input: Opaque<SchemaWithoutCell<InputSchema>>,
+  input: OpaqueOrCells<SchemaWithoutCell<InputSchema>>,
   f: (
     input: Schema<InputSchema>,
   ) => Schema<ResultSchema>,
 ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 export function derive<In, Out>(
-  input: Opaque<In>,
+  input: OpaqueOrCells<In>,
   f: (input: In) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(...args: any[]): OpaqueRef<any> {

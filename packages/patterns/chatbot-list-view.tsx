@@ -154,7 +154,7 @@ const createChatRecipe = handler<
   {
     selectedCharm: Cell<{ charm: any }>;
     charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<any[]>;
+    allCharms: Cell<MentionableCharm[]>;
   }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
@@ -235,7 +235,7 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, allCharms, theme }) => {
-    logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+    logCharmsList({ charmsList: charmsList });
 
     populateChatList({
       selectedCharm: selectedCharm as unknown as Cell<

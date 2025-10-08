@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeRef,
   type Opaque,
+  type OpaqueOrCells,
   type OpaqueRef,
   type Recipe,
   type RecipeFactory,
@@ -349,26 +350,29 @@ function factoryFromRecipe<T, R>(
     toJSON: () => recipeToJSON(recipeFactory),
   };
 
-  const recipeFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
-    const module: Module & toJSON = {
-      type: "recipe",
-      implementation: recipeFactory,
-      toJSON: () => moduleToJSON(module),
-    };
+  const recipeFactory = Object.assign(
+    (inputs: OpaqueOrCells<T>): OpaqueRef<R> => {
+      const module: Module & toJSON = {
+        type: "recipe",
+        implementation: recipeFactory,
+        toJSON: () => moduleToJSON(module),
+      };
 
-    const outputs = opaqueRef<R>();
-    const node: NodeRef = {
-      module,
-      inputs,
-      outputs,
-      frame: getTopFrame(),
-    };
+      const outputs = opaqueRef<R>();
+      const node: NodeRef = {
+        module,
+        inputs,
+        outputs,
+        frame: getTopFrame(),
+      };
 
-    connectInputAndOutputs(node);
-    outputs.connect(node);
+      connectInputAndOutputs(node);
+      outputs.connect(node);
 
-    return outputs;
-  }, recipe) satisfies RecipeFactory<T, R>;
+      return outputs;
+    },
+    recipe,
+  ) satisfies RecipeFactory<T, R>;
 
   // Bind all cells to the recipe
   // TODO(seefeld): Does OpaqueRef cause issues here?
