@@ -91,8 +91,12 @@ export function safeGetPropertyType(
         typeFromParent = undefined;
       }
     }
-  } catch {
-    // Type resolution can fail for some edge cases
+  } catch (error) {
+    // Type resolution can fail for some edge cases - fall back to declaration type
+    console.warn(
+      `Failed to resolve property type from parent for "${prop.getName()}":`,
+      error,
+    );
   }
 
   // Try to get type from declaration
