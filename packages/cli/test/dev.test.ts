@@ -28,4 +28,27 @@ describe("cli dev", () => {
     const rendered = bytesToLines(await Deno.readFile(temp));
     expect(rendered[rendered.length - 1]).toEqual("//# sourceURL=test-file.js");
   });
+
+  it("Uses default export when no --main-export specified", async () => {
+    const { code, stdout, stderr } = await ct(
+      "dev fixtures/named-export.tsx",
+    );
+    checkStderr(stderr);
+    const output = JSON.parse(stdout.join("\n"));
+    expect(output.result.message).toBe("from default export");
+    expect(code).toBe(0);
+  });
+
+  it("Uses specified named export with --main-export", async () => {
+    const { code, stdout, stderr } = await ct(
+      "dev fixtures/named-export.tsx --main-export myNamedRecipe",
+    );
+    checkStderr(stderr);
+    const output = JSON.parse(stdout.join("\n"));
+    // Named export uses cell reference, so check the argument schema
+    expect(output.argumentSchema.default.message).toBe("from named export");
+    // Also verify mainExport was set correctly in program
+    expect(output.program.mainExport).toBe("myNamedRecipe");
+    expect(code).toBe(0);
+  });
 });
