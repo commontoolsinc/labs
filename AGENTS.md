@@ -351,3 +351,12 @@ Sometimes a low-level try/catch is appropriate, of course:
   ED25519 features we need supported natively for this platform? if not use a
   polyfill), then this is not a fatal error, and we explicitly do not want to
   throw and handle it elsewhere.
+
+## Ralph Container Information
+
+If you are running inside the Ralph Docker container (user is "ralph" or
+`/app/start-servers.sh` exists):
+
+- See `tools/ralph/DEPLOY.md` for Playwright MCP testing and server restart
+  instructions
+- The servers are already running on localhost (toolshed on 8000, shell on 5173)
