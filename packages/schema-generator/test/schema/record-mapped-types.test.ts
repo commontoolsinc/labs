@@ -270,7 +270,7 @@ describe("Schema: Record and mapped types", () => {
       expect(schema.$defs?.Box).toBeUndefined();
     });
 
-    it("should handle conditional types resolving to Records", async () => {
+    it("should handle distributive conditional types as unions", async () => {
       const { type, checker, typeNode } = await getTypeFromCode(
         `type MaybeRecord<T extends string> = T extends string ? Record<T, number> : never;
          interface Config {
@@ -280,15 +280,26 @@ describe("Schema: Record and mapped types", () => {
       );
       const schema = transformer(type, checker, typeNode);
 
-      console.log("data schema:", JSON.stringify(schema.properties?.data));
-      console.log("$defs keys:", Object.keys(schema.$defs || {}));
-
-      // Conditional should resolve to Record<"foo" | "bar", number>
+      // TypeScript distributes the conditional over the union, resulting in:
+      // Record<"foo", number> | Record<"bar", number>
+      // This is correct behavior for distributive conditional types
       const dataSchema = schema.properties!.data as any;
-      expect(dataSchema.type).toBe("object");
-      expect(dataSchema.properties).toBeDefined();
-      expect(dataSchema.properties.foo).toEqual({ type: "number" });
-      expect(dataSchema.properties.bar).toEqual({ type: "number" });
+      expect(dataSchema.anyOf).toBeDefined();
+      expect(dataSchema.anyOf).toHaveLength(2);
+
+      // First option: { foo: number }
+      expect(dataSchema.anyOf[0]).toEqual({
+        type: "object",
+        properties: { foo: { type: "number" } },
+        required: ["foo"],
+      });
+
+      // Second option: { bar: number }
+      expect(dataSchema.anyOf[1]).toEqual({
+        type: "object",
+        properties: { bar: { type: "number" } },
+        required: ["bar"],
+      });
 
       // Should not create MaybeRecord or Record in $defs
       expect(schema.$defs?.MaybeRecord).toBeUndefined();
