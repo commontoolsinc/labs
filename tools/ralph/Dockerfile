@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     unzip \
     sudo \
-    software-properties-common
+    software-properties-common \
+    less
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
