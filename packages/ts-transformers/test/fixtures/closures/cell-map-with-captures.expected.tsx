@@ -23,7 +23,25 @@ export default recipe({
     const typedValues: Cell<number[]> = cell(state.values);
     return {
         [UI]: (<div>
-        {typedValues.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { multiplier } }) => (<span>{elem * multiplier}</span>)), { multiplier: state.multiplier })}
+        {typedValues.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["multiplier"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { multiplier } }) => (<span>{elem * multiplier}</span>)), { multiplier: state.multiplier })}
       </div>),
     };
 });
