@@ -353,7 +353,6 @@ async function invokeToolCall(
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
-  // const { resolve, promise } = Promise.withResolvers<any>();
   // ensure the charm this handler originates from is actually running
   if (handler && !pattern && charmMeta) {
     await ensureSourceCharmRunning(runtime, charmMeta);

@@ -262,35 +262,15 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
       editActiveNote: {
         description: "Modify the shared note.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            body: {
-              type: "string",
-              description: "The content of the note.",
-            },
-          },
-          required: ["body"],
-        } as JSONSchema,
         handler: editNote({ content }),
       },
       readActiveNote: {
         description: "Read the currently focused note.",
-        // inputSchema: {
-        //   type: "object",
-        //   properties: {},
-        //   required: [],
-        // } as JSONSchema,
         handler: readNote({ content }),
       },
       listNotes: {
         description:
           "List all mentionable note titles (read the body with readNoteByIndex).",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-        } as JSONSchema,
         handler: listMentionable({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
@@ -298,16 +278,6 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       readNoteByIndex: {
         description:
           "Read the body of a note by its index in the listNotes() list.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            index: {
-              type: "number",
-              description: "The index of the note in the notes list.",
-            },
-          },
-          required: ["index"],
-        } as JSONSchema,
         handler: readNoteByIndex({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
@@ -315,56 +285,18 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       editNoteByIndex: {
         description:
           "Edit the body of a note by its index in the listNotes() list.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            index: {
-              type: "number",
-              description: "The index of the note in the notes list.",
-            },
-            body: {
-              type: "string",
-              description: "The new content of the note.",
-            },
-          },
-          required: ["index", "body"],
-        } as JSONSchema,
         handler: editNoteByIndex({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
       },
       navigateToNote: {
         description: "Navigate to a note by its index in the listNotes() list.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            index: {
-              type: "number",
-              description: "The index of the note in the notes list.",
-            },
-          },
-          required: ["index"],
-        } as JSONSchema,
         handler: navigateToNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
       },
       newNote: {
-        description: "Read the shared note.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              description: "The title of the note.",
-            },
-            content: {
-              type: "string",
-              description: "The content of the note.",
-            },
-          },
-          required: ["title"],
-        } as JSONSchema,
+        description: "Create a new note instance",
         handler: newNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),
