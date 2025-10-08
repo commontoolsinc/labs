@@ -13,7 +13,7 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
-import { isBoolean, isObject, isRecord } from "@commontools/utils/types";
+import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isStream } from "../cell.ts";
 import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
@@ -259,67 +259,24 @@ async function safelyPerformUpdate(
   return !error && success;
 }
 
-export async function getResultAndRecipeFromStream(
-  stream: Stream<any>,
-): Promise<{ result: Cell<any>; recipeId?: string; recipe?: Recipe }> {
-  // The handler stream lives under the result doc; zero path to reach doc root
-  const rootLink = stream.getAsNormalizedFullLink();
-  let result = stream.runtime.getCellFromLink({ ...rootLink, path: [] });
-
-  // Prefer the canonical relation: result doc -> source (process cell)
-  let process = result.getSourceCell();
-
-  // Fallback: Some historical shapes expose resultRef on the root doc.
-  // If no source link, detect a process-like doc by presence of resultRef.
-  if (!process) {
-    const rootValue = result.getRaw();
-    if (isRecord(rootValue) && rootValue.resultRef) {
-      const link = parseLink(rootValue.resultRef, result);
-      if (link) {
-        result = stream.runtime.getCellFromLink(link);
-      }
-      // In this shape, the current root is the process cell
-      process = result.getSourceCell() ?? (result as unknown as Cell<any>);
-    }
-  }
-
-  const recipeId = process?.get()?.[TYPE];
-  const recipe = recipeId
-    ? await stream.runtime.recipeManager.loadRecipe(recipeId, result.space)
-    : undefined;
-  return { result, recipeId, recipe };
-}
-
 /**
- * Ensures that a source charm is running by getting its result and recipe,
- * then calling runSynced to ensure it's actively running.
+ * Ensures that a source charm is running using the charm context,
+ * then calls runSynced to ensure it's actively running.
  *
  * @param runtime - The runtime instance
- * @param stream - The stream to get the source charm from
+ * @param meta - The charm context containing handler and owning charm
  * @returns Promise that resolves when the charm is running
  */
 async function ensureSourceCharmRunning(
   runtime: IRuntime,
-  streamOrMeta: Stream<any> | { handler: any; charm: Cell<any> },
+  meta: { handler: any; charm: Cell<any> },
 ): Promise<void> {
-  // Prefer explicit charm context if available (from flattenTools)
-  let result: Cell<any> | undefined;
-  let recipe: Recipe | undefined;
-
-  if (isRecord(streamOrMeta) && "charm" in streamOrMeta) {
-    const charm = streamOrMeta.charm as Cell<any>;
-    result = charm.asSchema({});
-    const process = charm.getSourceCell();
-    const recipeId = process?.get()?.[TYPE];
-    recipe = recipeId
-      ? await runtime.recipeManager.loadRecipe(recipeId, charm.space)
-      : undefined;
-  } else {
-    const { result: res, recipe: rec } =
-      await getResultAndRecipeFromStream(streamOrMeta as Stream<any>);
-    result = res; recipe = rec;
-  }
-  if (recipe) {
+  const charm = meta.charm;
+  const result = charm.asSchema({});
+  const process = charm.getSourceCell();
+  const recipeId = process?.get()?.[TYPE];
+  if (recipeId) {
+    const recipe = await runtime.recipeManager.loadRecipe(recipeId, charm.space);
     await runtime.runSynced(result, recipe);
     // Ensure scheduler has registered handlers before we enqueue events
     await runtime.idle();
@@ -354,8 +311,8 @@ async function invokeToolCall(
 
   // const { resolve, promise } = Promise.withResolvers<any>();
   // ensure the charm this handler originates from is actually running
-  if (handler && !pattern) {
-    await ensureSourceCharmRunning(runtime, charmMeta ?? handler);
+  if (handler && !pattern && charmMeta) {
+    await ensureSourceCharmRunning(runtime, charmMeta);
   }
 
   // runSynced charm
@@ -373,14 +330,7 @@ async function invokeToolCall(
   });
   // .then((error) => error && resolve({ error })); // Return error if tx failed
 
-  // wait until we know we have the result of the tool call
-  // not just that the transaction has been comitted
-  // const cancel = result.sink((r) => {
-  //   r !== undefined && resolve(r);
-  // });
-  // const resultValue = await promise;
   await runtime.idle();
-  // cancel();
 
   // If this was a pattern, stop it now that we have the result
   if (pattern) runtime.runner.stop(result);
