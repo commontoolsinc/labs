@@ -92,7 +92,7 @@ export function safeGetPropertyType(
     if (typeFromFallback) return typeFromFallback;
   }
 
-  // Last resort: use symbol location
+  // Try symbol location
   if (decl) {
     const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
       checker,
@@ -101,6 +101,25 @@ export function safeGetPropertyType(
       "property symbol location",
     );
     if (typeFromSymbol) return typeFromSymbol;
+  }
+
+  // For mapped types like Record<K, V>, properties don't have explicit declarations
+  // but the checker can still resolve their types through the parent type
+  try {
+    const propName = prop.getName();
+    const propSymbol = checker.getPropertyOfType(parentType, propName);
+    if (propSymbol) {
+      const typeFromProperty = checker.getTypeOfSymbol(propSymbol);
+      if (typeFromProperty) {
+        // Make sure we didn't get 'any' - if we did, continue to final fallback
+        const typeStr = checker.typeToString(typeFromProperty);
+        if (typeStr !== "any") {
+          return typeFromProperty;
+        }
+      }
+    }
+  } catch {
+    // Type resolution can fail for some edge cases, continue to fallback
   }
 
   // If all else fails, return any
