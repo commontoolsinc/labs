@@ -181,8 +181,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   commit(): Promise<Result<Unit, CommitError>> {
     const promise = this.tx.commit();
 
-    // Call commit callbacks after commit completes (success or failure)
-    promise.then((result) => {
+    // Call commit callbacks after commit completes (success or failure) Note
+    // that promise always resolves, even if the commit fails, in which case it
+    // passes an error message as result. An exception here would be an internal
+    // error that should propagate.
+    promise.then((_result) => {
       // Call all callbacks, wrapping each in try/catch to prevent one
       // failing callback from breaking others
       for (const callback of this.commitCallbacks) {
