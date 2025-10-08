@@ -29,7 +29,31 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe("map with pattern including captures", ({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), { discount: state.discount })}
+        {state.items.map_with_pattern(recipe({
+                type: "object",
+                properties: {
+                    elem: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["discount"]
+                    }
+                },
+                required: ["elem", "params"]
+            } as const satisfies JSONSchema, ({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), { discount: state.discount })}
       </div>),
     };
 });
