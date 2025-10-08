@@ -414,7 +414,8 @@ function buildCallbackParamTypeNode(
     const typeNode = checker.typeToTypeNode(
       exprType,
       context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     // Register this property's TypeNode with its Type
@@ -495,12 +496,17 @@ function inferElementType(
       let elementType: ts.Type;
       if (checker.isArrayType(innerType)) {
         // It's T[], extract T
-        const extracted = checker.getIndexTypeOfType(innerType, ts.IndexKind.Number);
+        const extracted = checker.getIndexTypeOfType(
+          innerType,
+          ts.IndexKind.Number,
+        );
         if (extracted) {
           elementType = extracted;
         } else {
           return {
-            typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+            typeNode: factory.createKeywordTypeNode(
+              ts.SyntaxKind.UnknownKeyword,
+            ),
           };
         }
       } else {
@@ -512,7 +518,8 @@ function inferElementType(
       const typeNode = checker.typeToTypeNode(
         elementType,
         context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
       ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       return { typeNode, type: elementType };
@@ -521,12 +528,16 @@ function inferElementType(
 
   // Fallback for plain Array<T>
   if (checker.isArrayType(arrayType)) {
-    const elementType = checker.getIndexTypeOfType(arrayType, ts.IndexKind.Number);
+    const elementType = checker.getIndexTypeOfType(
+      arrayType,
+      ts.IndexKind.Number,
+    );
     if (elementType) {
       const typeNode = checker.typeToTypeNode(
         elementType,
         context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+        ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
       ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       return { typeNode, type: elementType };
