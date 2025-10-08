@@ -1909,11 +1909,6 @@
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },
-      "packages/runner": {
-        "dependencies": [
-          "npm:typescript@*"
-        ]
-      },
       "packages/schema-generator": {
         "dependencies": [
           "npm:typescript@*"

@@ -17,12 +17,14 @@ import {
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
 } from "@commontools/js-runtime";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import {
+  CommonToolsTransformerPipeline,
+  getExportInfo,
+} from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
-import ts from "typescript";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -252,47 +254,6 @@ function computeId(program: Program): string {
   return merkleReference.refer(source).toString();
 }
 
-// Checks if a source file has a default export by parsing its AST.
-// Detects:
-// - export default <expression>
-// - export default function/class
-// - export { ... as default }
-function hasDefaultExport(source: Source): boolean {
-  const sourceFile = ts.createSourceFile(
-    source.name,
-    source.contents,
-    ts.ScriptTarget.Latest,
-    true,
-  );
-
-  for (const statement of sourceFile.statements) {
-    // Check for: export default ...
-    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
-      return true;
-    }
-    // Check for: export default function/class
-    if (
-      (ts.isFunctionDeclaration(statement) ||
-        ts.isClassDeclaration(statement)) &&
-      statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)
-    ) {
-      return true;
-    }
-    // Check for: export { ... as default } or export { default } from "..."
-    if (ts.isExportDeclaration(statement)) {
-      const exportClause = statement.exportClause;
-      if (exportClause && ts.isNamedExports(exportClause)) {
-        for (const element of exportClause.elements) {
-          if (element.name.text === "default") {
-            return true;
-          }
-        }
-      }
-    }
-  }
-  return false;
-}
-
 // Adds `id` as a prefix to all files in the program.
 // Injects a new entry at root `/index.ts` to re-export
 // the entry contents because otherwise `typescript`
@@ -304,7 +265,9 @@ function mapPrefixProgramFiles(program: RuntimeProgram, id: string): Program {
 
   // Check if the main file actually has a default export by parsing its AST
   const mainFile = program.files.find((f) => f.name === program.main);
-  const hasDefault = mainFile ? hasDefaultExport(mainFile) : false;
+  const hasDefault = mainFile
+    ? getExportInfo(mainFile.contents, mainFile.name).hasDefaultExport
+    : false;
 
   const files = [
     ...program.files.map((source) => ({

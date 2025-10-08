@@ -15,3 +15,5 @@ export {
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
 export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
+
+export { getExportInfo, type ExportInfo } from "./utils/mod.ts";
