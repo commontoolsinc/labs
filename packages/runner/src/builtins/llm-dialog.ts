@@ -706,12 +706,12 @@ function startRequest(
           const toolResults: any[] = [];
           for (const toolCallPart of toolCallParts) {
             // Check if this is a charm-extracted handler (dot notation)
-          const charmMeta = toolHandlers.get(toolCallPart.toolName);
-          const toolDef = charmMeta
-            ? undefined
-            : toolsCell.key(toolCallPart.toolName) as unknown as Cell<
-              Schema<typeof LLMToolSchema>
-            >;
+            const charmMeta = toolHandlers.get(toolCallPart.toolName);
+            const toolDef = charmMeta
+              ? undefined
+              : toolsCell.key(toolCallPart.toolName) as unknown as Cell<
+                Schema<typeof LLMToolSchema>
+              >;
 
             try {
               const resultValue = await invokeToolCall(
