@@ -36,6 +36,7 @@ export interface OpaqueRefMethods<T> {
     setName(name: string): void;
     setSchema(schema: JSONSchema): void;
     map<S>(fn: (element: T extends Array<infer U> ? Opaque<U> : Opaque<T>, index: Opaque<number>, array: T) => Opaque<S>): Opaque<S[]>;
+    mapWithPattern<S>(op: Recipe, params: Record<string, any>): Opaque<S[]>;
 }
 export interface Recipe {
     argumentSchema: JSONSchema;
