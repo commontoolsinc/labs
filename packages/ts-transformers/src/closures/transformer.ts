@@ -60,6 +60,166 @@ function isFunctionDeclaration(decl: ts.Declaration): boolean {
 }
 
 /**
+ * Check if a declaration is within a callback's scope using node identity.
+ */
+function isDeclaredWithinCallback(
+  decl: ts.Declaration,
+  func: ts.FunctionLikeDeclaration,
+): boolean {
+  // Walk up the tree from the declaration
+  let current: ts.Node | undefined = decl;
+  while (current) {
+    // Found our callback function
+    if (current === func) {
+      return true;
+    }
+
+    // Stop at function boundaries (don't cross into nested functions)
+    if (current !== decl && ts.isFunctionLike(current)) {
+      return false;
+    }
+
+    current = current.parent;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a property access expression should be captured.
+ * Returns the expression to capture, or undefined if it shouldn't be captured.
+ */
+function shouldCapturePropertyAccess(
+  node: ts.PropertyAccessExpression,
+  func: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): ts.PropertyAccessExpression | undefined {
+  // Get the root object (e.g., 'state' in 'state.discount')
+  let root = node.expression;
+  while (ts.isPropertyAccessExpression(root)) {
+    root = root.expression;
+  }
+
+  if (!ts.isIdentifier(root)) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(root);
+  if (!symbol) return undefined;
+
+  const declarations = symbol.getDeclarations();
+  if (!declarations || declarations.length === 0) return undefined;
+
+  // Skip module-scoped declarations
+  if (declarations.some((decl) => isModuleScopedDeclaration(decl))) {
+    return undefined;
+  }
+
+  // Skip function declarations
+  if (declarations.some((decl) => isFunctionDeclaration(decl))) {
+    return undefined;
+  }
+
+  // Check if ANY declaration is outside the callback
+  const hasExternalDeclaration = declarations.some((decl) =>
+    !isDeclaredWithinCallback(decl, func)
+  );
+
+  if (hasExternalDeclaration) {
+    // Capture the whole property access expression
+    return node;
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if an identifier should be captured.
+ * Returns the identifier to capture, or undefined if it shouldn't be captured.
+ */
+function shouldCaptureIdentifier(
+  node: ts.Identifier,
+  func: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): ts.Identifier | undefined {
+  // Skip if node doesn't have a parent (can happen with synthetic nodes)
+  if (!node.parent) {
+    return undefined;
+  }
+
+  // Skip if this is part of a property access (handled separately)
+  if (
+    ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
+  ) {
+    return undefined;
+  }
+
+  // Skip JSX element tag names (e.g., <li>, <div>)
+  if (
+    ts.isJsxOpeningElement(node.parent) ||
+    ts.isJsxClosingElement(node.parent) ||
+    ts.isJsxSelfClosingElement(node.parent)
+  ) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(node);
+  if (!symbol) {
+    return undefined;
+  }
+
+  const declarations = symbol.getDeclarations();
+  if (!declarations || declarations.length === 0) {
+    return undefined;
+  }
+
+  // Check if ALL declarations are within the callback
+  const allDeclaredInside = declarations.every((decl) =>
+    isDeclaredWithinCallback(decl, func)
+  );
+
+  if (allDeclaredInside) {
+    return undefined;
+  }
+
+  // Check if it's a JSX attribute (should not be captured)
+  const isJsxAttr = declarations.some((decl) => ts.isJsxAttribute(decl));
+  if (isJsxAttr) {
+    return undefined;
+  }
+
+  // Skip imports - they're module-scoped and don't need to be captured
+  const isImport = declarations.some((decl) =>
+    ts.isImportSpecifier(decl) ||
+    ts.isImportClause(decl) ||
+    ts.isNamespaceImport(decl)
+  );
+  if (isImport) {
+    return undefined;
+  }
+
+  // Skip module-scoped declarations (constants/variables at top level)
+  const isModuleScoped = declarations.some((decl) =>
+    isModuleScopedDeclaration(decl)
+  );
+  if (isModuleScoped) {
+    return undefined;
+  }
+
+  // Skip function declarations (can't serialize functions)
+  const isFunction = declarations.some((decl) =>
+    isFunctionDeclaration(decl)
+  );
+  if (isFunction) {
+    return undefined;
+  }
+
+  // If we got here, at least one declaration is outside the callback
+  // So it's a captured variable
+  return node;
+}
+
+/**
  * Detects captured variables in a function using TypeScript's symbol table.
  * Returns all captured expressions (both reactive and non-reactive).
  */
@@ -69,27 +229,6 @@ function collectCaptures(
 ): Set<ts.Expression> {
   const captures = new Set<ts.Expression>();
 
-  // Helper to check if a declaration is within the callback's scope using node identity
-  function isDeclaredWithinCallback(decl: ts.Declaration): boolean {
-    // Walk up the tree from the declaration
-    let current: ts.Node | undefined = decl;
-    while (current) {
-      // Found our callback function
-      if (current === func) {
-        return true;
-      }
-
-      // Stop at function boundaries (don't cross into nested functions)
-      if (current !== decl && ts.isFunctionLike(current)) {
-        return false;
-      }
-
-      current = current.parent;
-    }
-
-    return false;
-  }
-
   function visit(node: ts.Node) {
     // Don't visit inside nested functions - their scope is separate
     if (node !== func && ts.isFunctionLike(node)) {
@@ -98,120 +237,20 @@ function collectCaptures(
 
     // For property access like state.discount, capture the whole expression
     if (ts.isPropertyAccessExpression(node)) {
-      // Get the root object (e.g., 'state' in 'state.discount')
-      let root = node.expression;
-      while (ts.isPropertyAccessExpression(root)) {
-        root = root.expression;
-      }
-
-      if (ts.isIdentifier(root)) {
-        const symbol = checker.getSymbolAtLocation(root);
-        if (!symbol) return;
-
-        const declarations = symbol.getDeclarations();
-        if (!declarations || declarations.length === 0) return;
-
-        // Skip module-scoped declarations
-        if (declarations.some((decl) => isModuleScopedDeclaration(decl))) {
-          return;
-        }
-
-        // Skip function declarations
-        if (declarations.some((decl) => isFunctionDeclaration(decl))) {
-          return;
-        }
-
-        // Check if ANY declaration is outside the callback
-        const hasExternalDeclaration = declarations.some((decl) =>
-          !isDeclaredWithinCallback(decl)
-        );
-
-        if (hasExternalDeclaration) {
-          // Capture the whole property access expression
-          captures.add(node);
-          // Don't visit children of this property access
-          return;
-        }
+      const captured = shouldCapturePropertyAccess(node, func, checker);
+      if (captured) {
+        captures.add(captured);
+        // Don't visit children of this property access
+        return;
       }
     }
 
     // For plain identifiers
     if (ts.isIdentifier(node)) {
-      // Skip if node doesn't have a parent (can happen with synthetic nodes)
-      if (!node.parent) {
-        return;
+      const captured = shouldCaptureIdentifier(node, func, checker);
+      if (captured) {
+        captures.add(captured);
       }
-
-      // Skip if this is part of a property access (handled above)
-      if (
-        ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
-      ) {
-        return;
-      }
-
-      // Skip JSX element tag names (e.g., <li>, <div>)
-      if (
-        ts.isJsxOpeningElement(node.parent) ||
-        ts.isJsxClosingElement(node.parent) ||
-        ts.isJsxSelfClosingElement(node.parent)
-      ) {
-        return;
-      }
-
-      const symbol = checker.getSymbolAtLocation(node);
-      if (!symbol) {
-        return;
-      }
-
-      const declarations = symbol.getDeclarations();
-      if (!declarations || declarations.length === 0) {
-        return;
-      }
-
-      // Check if ALL declarations are within the callback
-      const allDeclaredInside = declarations.every((decl) =>
-        isDeclaredWithinCallback(decl)
-      );
-
-      if (allDeclaredInside) {
-        return;
-      }
-
-      // Check if it's a JSX attribute (should not be captured)
-      const isJsxAttr = declarations.some((decl) => ts.isJsxAttribute(decl));
-      if (isJsxAttr) {
-        return;
-      }
-
-      // Skip imports - they're module-scoped and don't need to be captured
-      const isImport = declarations.some((decl) =>
-        ts.isImportSpecifier(decl) ||
-        ts.isImportClause(decl) ||
-        ts.isNamespaceImport(decl)
-      );
-      if (isImport) {
-        return;
-      }
-
-      // Skip module-scoped declarations (constants/variables at top level)
-      const isModuleScoped = declarations.some((decl) =>
-        isModuleScopedDeclaration(decl)
-      );
-      if (isModuleScoped) {
-        return;
-      }
-
-      // Skip function declarations (can't serialize functions)
-      const isFunction = declarations.some((decl) =>
-        isFunctionDeclaration(decl)
-      );
-      if (isFunction) {
-        return;
-      }
-
-      // If we got here, at least one declaration is outside the callback
-      // So it's a captured variable
-      captures.add(node);
     }
 
     ts.forEachChild(node, visit);
@@ -336,72 +375,52 @@ function getCaptureName(expr: ts.Expression): string | undefined {
 }
 
 /**
- * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
- * Returns a TypeLiteral representing { elem: T, index?: number, params: {...} }
+ * Determine the element type for a map callback parameter.
+ * Prefers explicit type annotation, falls back to inference from array type.
  */
-function buildCallbackParamTypeNode(
+function determineElementType(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
-  indexParam: ts.ParameterDeclaration | undefined,
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
   context: TransformationContext,
-): ts.TypeNode {
-  const { factory, checker } = context;
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { checker } = context;
   const typeRegistry = context.options.typeRegistry;
-
-  // 1. Build elem type property
-  let elemTypeNode: ts.TypeNode;
-  let elemType: ts.Type | undefined;
 
   // Check if we have an explicit type annotation that's not 'any'
   if (elemParam?.type) {
     const annotationType = checker.getTypeFromTypeNode(elemParam.type);
     if (!(annotationType.flags & ts.TypeFlags.Any)) {
       // Use the explicit annotation
-      elemTypeNode = elemParam.type;
-      elemType = annotationType;
-    } else {
-      // Annotation is 'any', try to infer from array
-      const inferred = inferElementType(mapCall, context);
-      elemTypeNode = inferred.typeNode;
-      elemType = inferred.type;
+      const result = { typeNode: elemParam.type, type: annotationType };
+      // Register with typeRegistry
+      if (typeRegistry && annotationType) {
+        typeRegistry.set(elemParam.type, annotationType);
+      }
+      return result;
     }
-  } else {
-    // No annotation, infer from array
-    const inferred = inferElementType(mapCall, context);
-    elemTypeNode = inferred.typeNode;
-    elemType = inferred.type;
   }
 
-  // Register elem TypeNode if we have a Type
-  if (typeRegistry && elemType) {
-    typeRegistry.set(elemTypeNode, elemType);
+  // No annotation or annotation is 'any', infer from array
+  const inferred = inferElementType(mapCall, context);
+  // Register with typeRegistry
+  if (typeRegistry && inferred.type) {
+    typeRegistry.set(inferred.typeNode, inferred.type);
   }
+  return inferred;
+}
 
-  const callbackParamProperties: ts.TypeElement[] = [
-    factory.createPropertySignature(
-      undefined,
-      factory.createIdentifier("element"),
-      undefined,
-      elemTypeNode,
-    ),
-  ];
-
-  // 2. Add index property if present
-  if (indexParam) {
-    callbackParamProperties.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier("index"),
-        factory.createToken(ts.SyntaxKind.QuestionToken),
-        factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
-      ),
-    );
-  }
-
-  // 3. Build params object type with captured variables
+/**
+ * Build params object type properties for captured variables.
+ */
+function buildParamsProperties(
+  capturedVarNames: Set<string>,
+  captures: Map<string, ts.Expression>,
+  context: TransformationContext,
+): ts.TypeElement[] {
+  const { factory, checker } = context;
+  const typeRegistry = context.options.typeRegistry;
   const paramsProperties: ts.TypeElement[] = [];
+
   for (const varName of capturedVarNames) {
     const expr = captures.get(varName);
     if (!expr) continue;
@@ -432,7 +451,60 @@ function buildCallbackParamTypeNode(
     );
   }
 
-  // Add params property
+  return paramsProperties;
+}
+
+/**
+ * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
+ * Returns a TypeLiteral representing { element: T, index?: number, params: {...} }
+ */
+function buildCallbackParamTypeNode(
+  mapCall: ts.CallExpression,
+  elemParam: ts.ParameterDeclaration | undefined,
+  indexParam: ts.ParameterDeclaration | undefined,
+  capturedVarNames: Set<string>,
+  captures: Map<string, ts.Expression>,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory } = context;
+
+  // 1. Determine element type
+  const { typeNode: elemTypeNode } = determineElementType(
+    mapCall,
+    elemParam,
+    context,
+  );
+
+  // 2. Build callback parameter properties
+  const callbackParamProperties: ts.TypeElement[] = [
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier("element"),
+      undefined,
+      elemTypeNode,
+    ),
+  ];
+
+  // 3. Add optional index property if present
+  if (indexParam) {
+    callbackParamProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier("index"),
+        factory.createToken(ts.SyntaxKind.QuestionToken),
+        factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      ),
+    );
+  }
+
+  // 4. Build params object type with captured variables
+  const paramsProperties = buildParamsProperties(
+    capturedVarNames,
+    captures,
+    context,
+  );
+
+  // 5. Add params property
   callbackParamProperties.push(
     factory.createPropertySignature(
       undefined,
@@ -549,45 +621,173 @@ function inferElementType(
 }
 
 /**
- * Transform a map callback that captures variables.
+ * Recursively compare expressions for structural equality.
  */
-function transformMapCallback(
+function expressionsMatch(a: ts.Expression, b: ts.Expression): boolean {
+  if (ts.isPropertyAccessExpression(a) && ts.isPropertyAccessExpression(b)) {
+    // Property names must match
+    if (a.name.text !== b.name.text) return false;
+    // Recursively compare the object expressions
+    return expressionsMatch(a.expression, b.expression);
+  } else if (ts.isIdentifier(a) && ts.isIdentifier(b)) {
+    return a.text === b.text;
+  }
+  return false;
+}
+
+/**
+ * Transform nested map callbacks within a callback body.
+ */
+function transformNestedMapCallbacks(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const { checker } = context;
+
+  const nestedVisitor: ts.Visitor = (node) => {
+    // Check for nested OpaqueRef<T[]> map calls
+    if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
+      const nestedCallback = node.arguments[0];
+      if (
+        nestedCallback &&
+        (ts.isArrowFunction(nestedCallback) ||
+          ts.isFunctionExpression(nestedCallback))
+      ) {
+        const nestedCaptures = collectCaptures(nestedCallback, checker);
+        if (nestedCaptures.size > 0) {
+          const capturesByName = new Map<string, ts.Expression>();
+          for (const expr of nestedCaptures) {
+            const name = getCaptureName(expr);
+            if (name && !capturesByName.has(name)) {
+              capturesByName.set(name, expr);
+            }
+          }
+          // Recursively transform the nested callback
+          return transformMapCallback(
+            node,
+            nestedCallback,
+            capturesByName,
+            context,
+          );
+        }
+      }
+    }
+    return ts.visitEachChild(node, nestedVisitor, context.tsContext);
+  };
+
+  return ts.visitNode(body, nestedVisitor) as ts.ConciseBody;
+}
+
+/**
+ * Transform references to original element parameter to use "element" instead.
+ */
+function transformElementReferences(
+  body: ts.ConciseBody,
+  elemParam: ts.ParameterDeclaration | undefined,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  const elemName = elemParam?.name;
+
+  // Replace references to the original param with element
+  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "element") {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node) && node.text === elemName.text) {
+        return factory.createIdentifier("element");
+      }
+      return ts.visitEachChild(node, visitor, undefined);
+    };
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
+  }
+
+  return body;
+}
+
+/**
+ * Transform destructured property references to use element.prop.
+ */
+function transformDestructuredProperties(
+  body: ts.ConciseBody,
+  elemParam: ts.ParameterDeclaration | undefined,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  const elemName = elemParam?.name;
+
+  // Collect destructured property names if the param is a destructured binding pattern
+  const destructuredProps = new Set<string>();
+  if (elemName && ts.isObjectBindingPattern(elemName)) {
+    for (const element of elemName.elements) {
+      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
+        destructuredProps.add(element.name.text);
+      }
+    }
+  }
+
+  // If param was destructured, replace destructured property references with element.prop
+  if (destructuredProps.size > 0) {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
+        // Check if this identifier is not part of a property access already
+        // (e.g., don't transform the 'x' in 'something.x')
+        if (
+          !node.parent ||
+          !(ts.isPropertyAccessExpression(node.parent) &&
+            node.parent.name === node)
+        ) {
+          return factory.createPropertyAccessExpression(
+            factory.createIdentifier("element"),
+            factory.createIdentifier(node.text),
+          );
+        }
+      }
+      return ts.visitEachChild(node, visitor, undefined);
+    };
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
+  }
+
+  return body;
+}
+
+/**
+ * Replace captured expressions with their parameter names.
+ */
+function replaceCaptures(
+  body: ts.ConciseBody,
+  captures: Map<string, ts.Expression>,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  let transformedBody = body;
+
+  for (const [varName, capturedExpr] of captures) {
+    const visitor: ts.Visitor = (node) => {
+      // Check if this node matches the captured expression
+      if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
+        return factory.createIdentifier(varName);
+      }
+      return ts.visitEachChild(node, visitor, undefined);
+    };
+    transformedBody = ts.visitNode(
+      transformedBody,
+      visitor,
+    ) as ts.ConciseBody;
+  }
+
+  return transformedBody;
+}
+
+/**
+ * Create the final recipe call with params object.
+ */
+function createRecipeCallWithParams(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
+  transformedBody: ts.ConciseBody,
+  elemParam: ts.ParameterDeclaration | undefined,
+  indexParam: ts.ParameterDeclaration | undefined,
+  capturedVarNames: Set<string>,
   captures: Map<string, ts.Expression>,
   context: TransformationContext,
 ): ts.CallExpression {
-  const { factory, imports } = context;
-  // Build the params object from captures
-  const paramProperties: ts.PropertyAssignment[] = [];
-  const capturedVarNames = new Set<string>();
-
-  for (const [varName, expr] of captures) {
-    capturedVarNames.add(varName);
-    // Use the full expression as the param value
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        factory.createIdentifier(varName),
-        expr,
-      ),
-    );
-  }
-
-  // If no captures, return the original call
-  if (paramProperties.length === 0) {
-    return mapCall;
-  }
-
-  // Require recipe import
-  imports.require({ module: "commontools", name: "recipe" });
-
-  // Transform the callback parameters
-  // Original: (item, index?) => ...
-  // New: ({element, index?, params: {captured1, captured2}}) => ...
-
-  const originalParams = callback.parameters;
-  const elemParam = originalParams[0];
-  const indexParam = originalParams[1]; // May be undefined
+  const { factory } = context;
 
   // Create the destructured parameter
   const properties: ts.BindingElement[] = [
@@ -640,128 +840,6 @@ function transformMapCallback(
     undefined,
   );
 
-  // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
-  // parameter names. This ensures nested callbacks can properly detect captures from
-  // parent callback scope.
-  const { checker } = context;
-  let transformedBody = callback.body;
-
-  const nestedVisitor: ts.Visitor = (node) => {
-    // Check for nested OpaqueRef<T[]> map calls
-    if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
-      const nestedCallback = node.arguments[0];
-      if (
-        nestedCallback &&
-        (ts.isArrowFunction(nestedCallback) ||
-          ts.isFunctionExpression(nestedCallback))
-      ) {
-        const nestedCaptures = collectCaptures(nestedCallback, checker);
-        if (nestedCaptures.size > 0) {
-          const capturesByName = new Map<string, ts.Expression>();
-          for (const expr of nestedCaptures) {
-            const name = getCaptureName(expr);
-            if (name && !capturesByName.has(name)) {
-              capturesByName.set(name, expr);
-            }
-          }
-          // Recursively transform the nested callback
-          return transformMapCallback(
-            node,
-            nestedCallback,
-            capturesByName,
-            context,
-          );
-        }
-      }
-    }
-    return ts.visitEachChild(node, nestedVisitor, context.tsContext);
-  };
-
-  transformedBody = ts.visitNode(
-    transformedBody,
-    nestedVisitor,
-  ) as typeof transformedBody;
-
-  // Now transform the callback body to use element instead of the original param name
-  const elemName = elemParam?.name;
-
-  // Collect destructured property names if the param is a destructured binding pattern
-  const destructuredProps = new Set<string>();
-  if (elemName && ts.isObjectBindingPattern(elemName)) {
-    for (const element of elemName.elements) {
-      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
-        destructuredProps.add(element.name.text);
-      }
-    }
-  }
-
-  // Replace references to the original param with element
-  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "element") {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && node.text === elemName.text) {
-        return factory.createIdentifier("element");
-      }
-      return ts.visitEachChild(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(
-      transformedBody,
-      visitor,
-    ) as typeof transformedBody;
-  }
-
-  // If param was destructured, replace destructured property references with element.prop
-  if (destructuredProps.size > 0) {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
-        // Check if this identifier is not part of a property access already
-        // (e.g., don't transform the 'x' in 'something.x')
-        if (
-          !node.parent ||
-          !(ts.isPropertyAccessExpression(node.parent) &&
-            node.parent.name === node)
-        ) {
-          return factory.createPropertyAccessExpression(
-            factory.createIdentifier("element"),
-            factory.createIdentifier(node.text),
-          );
-        }
-      }
-      return ts.visitEachChild(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(
-      transformedBody,
-      visitor,
-    ) as typeof transformedBody;
-  }
-
-  // Helper to recursively compare expressions for structural equality
-  function expressionsMatch(a: ts.Expression, b: ts.Expression): boolean {
-    if (ts.isPropertyAccessExpression(a) && ts.isPropertyAccessExpression(b)) {
-      // Property names must match
-      if (a.name.text !== b.name.text) return false;
-      // Recursively compare the object expressions
-      return expressionsMatch(a.expression, b.expression);
-    } else if (ts.isIdentifier(a) && ts.isIdentifier(b)) {
-      return a.text === b.text;
-    }
-    return false;
-  }
-
-  // Replace captured expressions with their parameter names
-  for (const [varName, capturedExpr] of captures) {
-    const visitor: ts.Visitor = (node) => {
-      // Check if this node matches the captured expression
-      if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
-        return factory.createIdentifier(varName);
-      }
-      return ts.visitEachChild(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(
-      transformedBody,
-      visitor,
-    ) as typeof transformedBody;
-  }
-
   // Create the new callback
   const newCallback = factory.createArrowFunction(
     callback.modifiers,
@@ -775,8 +853,6 @@ function transformMapCallback(
   );
 
   // Build a TypeNode for the callback parameter to pass as a type argument to recipe<T>()
-  // The callback signature is: ({ element, index?, params: { captured1, captured2, ... } }) => ...
-  // Also register individual property TypeNodes in typeRegistry so SchemaGeneratorTransformer can resolve them
   const callbackParamTypeNode = buildCallbackParamTypeNode(
     mapCall,
     elemParam,
@@ -786,7 +862,7 @@ function transformMapCallback(
     context,
   );
 
-  // Wrap in recipe<T>() using type argument (SchemaInjectionTransformer will convert to toSchema<T>)
+  // Wrap in recipe<T>() using type argument
   const recipeIdentifier = context.imports.getIdentifier(context, {
     name: "recipe",
     module: "commontools",
@@ -798,11 +874,18 @@ function transformMapCallback(
   );
 
   // Create the params object
+  const paramProperties: ts.PropertyAssignment[] = [];
+  for (const [varName, expr] of captures) {
+    paramProperties.push(
+      factory.createPropertyAssignment(
+        factory.createIdentifier(varName),
+        expr,
+      ),
+    );
+  }
   const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
-  // Create mapWithPattern property access (e.g., state.items.mapWithPattern)
-  // mapCall.expression is a PropertyAccessExpression like state.items.map
-  // We need to replace "map" with "mapWithPattern"
+  // Create mapWithPattern property access
   const mapWithPatternAccess = ts.isPropertyAccessExpression(mapCall.expression)
     ? factory.createPropertyAccessExpression(
       mapCall.expression.expression, // state.items
@@ -810,11 +893,77 @@ function transformMapCallback(
     )
     : factory.createIdentifier("mapWithPattern"); // Fallback (shouldn't happen)
 
-  // Return the transformed mapWithPattern call with recipe as first arg, params as second arg
+  // Return the transformed mapWithPattern call
   return factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,
     [recipeCall, paramsObject],
+  );
+}
+
+/**
+ * Transform a map callback that captures variables.
+ */
+function transformMapCallback(
+  mapCall: ts.CallExpression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  captures: Map<string, ts.Expression>,
+  context: TransformationContext,
+): ts.CallExpression {
+  const { factory, imports } = context;
+
+  // Build set of captured variable names
+  const capturedVarNames = new Set<string>();
+  for (const [varName] of captures) {
+    capturedVarNames.add(varName);
+  }
+
+  // If no captures, return the original call
+  if (capturedVarNames.size === 0) {
+    return mapCall;
+  }
+
+  // Require recipe import
+  imports.require({ module: "commontools", name: "recipe" });
+
+  // Get callback parameters
+  const originalParams = callback.parameters;
+  const elemParam = originalParams[0];
+  const indexParam = originalParams[1]; // May be undefined
+
+  // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
+  // parameter names. This ensures nested callbacks can properly detect captures from
+  // parent callback scope.
+  let transformedBody = transformNestedMapCallbacks(callback.body, context);
+
+  // Transform the callback body in stages:
+  // 1. Replace element parameter name
+  transformedBody = transformElementReferences(
+    transformedBody,
+    elemParam,
+    factory,
+  );
+
+  // 2. Transform destructured properties
+  transformedBody = transformDestructuredProperties(
+    transformedBody,
+    elemParam,
+    factory,
+  );
+
+  // 3. Replace captured expressions with their parameter names
+  transformedBody = replaceCaptures(transformedBody, captures, factory);
+
+  // Create the final recipe call with params
+  return createRecipeCallWithParams(
+    mapCall,
+    callback,
+    transformedBody,
+    elemParam,
+    indexParam,
+    capturedVarNames,
+    captures,
+    context,
   );
 }
 
