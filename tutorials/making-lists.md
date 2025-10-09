@@ -683,3 +683,79 @@ When you deploy this recipe, you can type a name and press Enter to add it to th
 
 We've demonstrated:
 * How adding to a `Cell` array will automatically add elements in a call to `.map()`
+
+## Linking Two Lists
+
+You'll often need to move data from one variable to another. 
+In this section we'll show how this is done by moving friends between two groups -- your
+personal friends and your work friends lists.
+
+First, let's create two separate lists and display them side by side. We'll create two cells,
+one for each list:
+
+```{code-block} typescript
+:label: making_lists_two_cells
+:linenos: true
+:emphasize-lines: 1-2,5-6
+const personalFriends = cell<string[]>([]);
+const workFriends = cell<string[]>([]);
+
+// Initialize with some names
+personalFriends.set(["Alice", "Bob", "Charlie"]);
+workFriends.set(["Diana", "Evan"]);
+```
+
+Lines 1-2 create two separate cells, each holding an array of strings.
+
+Lines 5-6 initialize each list with different names.
+
+Now we can display both lists side by side using a flex layout:
+
+```{code-block} typescript
+:label: making_lists_two_columns
+:linenos: true
+:emphasize-lines: 1,3-9,11-17
+<div style="display: flex; gap: 2rem;">
+  <div>
+    <h3>Personal Friends</h3>
+    <ul>
+      {personalFriends.map((name) => (
+        <li>{name}</li>
+      ))}
+    </ul>
+  </div>
+  <div>
+    <h3>Work Friends</h3>
+    <ul>
+      {workFriends.map((name) => (
+        <li>{name}</li>
+      ))}
+    </ul>
+  </div>
+</div>
+```
+
+Line 1 creates a flex container with a gap between the two lists.
+
+Lines 3-9 display the first list with its own heading.
+
+Lines 11-17 display the second list with its own heading.
+
+When you deploy this recipe, you'll see two lists displayed next to each other.
+
+Next, let's add back the functionality for editing, reordering, and removing items in the list. We can use the exact same handler TK:(is this true??) that we've already build, we'll just be changing which names `Cell` we'll be passing to it. When that `Cell` is modified, the reactive system will update the appropriate list in the UI.
+
+TK: do this please
+
+:::{dropdown} View complete code
+:animate: fade-in
+
+```{literalinclude} ./code/making_lists_two_lists.tsx
+:language: typescript
+```
+:::
+
+We've demonstrated:
+* How to create multiple cells to hold separate arrays
+* Display multiple lists in the same UI
+* Use CSS flexbox for side-by-side layout
