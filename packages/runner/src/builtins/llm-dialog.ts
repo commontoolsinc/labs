@@ -15,7 +15,7 @@ import type {
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isStream } from "../cell.ts";
+import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -65,6 +65,133 @@ function stripInjectedResult(
     copy.required = req.filter((k) => k !== "result");
   }
   return copy;
+}
+
+// --------------------
+// Helper types + utils
+// --------------------
+
+type ToolKind = "handler" | "cell" | "pattern";
+
+type ToolDescriptor = {
+  kind: ToolKind;
+  name: string;
+  path: string[];
+  charm?: Cell<any>;
+  handlerCell?: Cell<any>;
+  cellRef?: Cell<any>;
+  description?: string;
+  schema?: JSONSchema;
+};
+
+function isCharmPrivateKey(key: string): boolean {
+  return key.startsWith("$") || key === String(NAME) || key === String(UI) ||
+    key === String(ID);
+}
+
+function buildToolName(charmName: string, key: string): string {
+  return `${slugify(charmName)}_${slugify(key)}`;
+}
+
+function normalizeInputSchema(schemaLike: unknown): JSONSchema {
+  let inputSchema: any = schemaLike;
+  if (isBoolean(inputSchema)) {
+    inputSchema = {
+      type: "object",
+      properties: {},
+      additionalProperties: inputSchema,
+    };
+  }
+  if (!isObject(inputSchema)) inputSchema = { type: "object" };
+  return stripInjectedResult(inputSchema) as JSONSchema;
+}
+
+function describeTool(
+  baseDescription: string | undefined,
+  inputSchema: JSONSchema | undefined,
+  fallback: string,
+  warnIfNoSchema = false,
+): string {
+  let description: string | undefined = baseDescription ||
+    (isBoolean(inputSchema)
+      ? undefined
+      : (inputSchema?.description as string | undefined));
+  description = description || fallback;
+  if (warnIfNoSchema && !inputSchema) description = `⚠️ ${description}`;
+  return description;
+}
+
+/**
+ * Discover charm-derived tools (streams as handlers, cells as readables).
+ * Keeps current behavior: only top-level keys, skip private keys.
+ */
+function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
+  const descriptors = new Map<string, ToolDescriptor>();
+  const tools = toolsCell.get() ?? {};
+
+  for (const [name, tool] of Object.entries(tools)) {
+    if (tool?.charm?.get?.()) {
+      const charmCell: Cell<any> = tool.charm;
+      const charm = charmCell.get();
+      if (!charm || typeof charm !== "object") continue;
+      const charmName = String(charm?.[NAME] || name);
+
+      for (const [key, value] of Object.entries(charm)) {
+        if (isCharmPrivateKey(key)) continue;
+
+        if (isStreamValue(value)) {
+          const handlerCell = charmCell.key(key);
+          const hasSchema = !!handlerCell?.schema &&
+            typeof handlerCell?.schema === "object";
+          const schema = normalizeInputSchema(
+            hasSchema ? handlerCell?.schema : { type: "object" },
+          );
+          // Prefer a specific per-key description if base exists
+          const baseDesc = tool.description
+            ? `${tool.description} - ${key}`
+            : undefined;
+          const desc = describeTool(
+            baseDesc,
+            hasSchema ? (handlerCell?.schema as JSONSchema) : undefined,
+            `${key} handler from ${charmName}`,
+            !hasSchema,
+          );
+          const nameBuilt = buildToolName(charmName, key);
+          descriptors.set(nameBuilt, {
+            kind: "handler",
+            name: nameBuilt,
+            path: [key],
+            charm: charmCell,
+            handlerCell,
+            description: desc,
+            schema,
+          });
+        } else if (isCell(charmCell.key(key))) {
+          // Cell fields are exposed as read-only tools with no args
+          const cellRef = charmCell.key(key) as Cell<any>;
+          const schema = normalizeInputSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          });
+          // For cells, provide a clear read description without duplication
+          const desc = `Read ${key} from ${charmName}`;
+          const nameBuilt = buildToolName(charmName, key);
+          descriptors.set(nameBuilt, {
+            kind: "cell",
+            name: nameBuilt,
+            path: [key],
+            charm: charmCell,
+            cellRef,
+            description: desc,
+            schema,
+          });
+        }
+      }
+    }
+  }
+
+  return descriptors;
 }
 
 /**
@@ -174,88 +301,87 @@ const internalSchema = {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  toolHandlers?: Map<string, { handler: any; charm: Cell<any> }>,
+  toolHandlers?: Map<
+    string,
+    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
+  >,
 ): Record<
   string,
-  { handler?: any; description: string; inputSchema?: JSONSchema }
+  {
+    handler?: any;
+    description: string;
+    inputSchema?: JSONSchema;
+    internal?: { kind: ToolKind; path: string[]; charmName: string };
+  }
 > {
   const flattened: Record<string, any> = {};
   const tools = toolsCell.get() ?? {};
 
-  for (const [name, tool] of Object.entries(tools)) {
-    // If it's a charm tool, extract handlers
-    if (tool.charm?.get()) {
-      const charmCell = tool.charm;
-      const charm = charmCell.get();
-      const charmName = charm?.[NAME] || name;
-      const slugifiedCharmName = slugify(String(charmName));
-
-      if (!charm || typeof charm !== "object") continue;
-
-      // Iterate charm's top-level keys to find handlers
-      for (const [key, value] of Object.entries(charm)) {
-        // Skip special keys
-        if (
-          key.startsWith("$") ||
-          key === String(NAME) ||
-          key === String(UI) ||
-          key === String(ID)
-        ) {
-          continue;
-        }
-
-        // Check if value is a Stream
-        if (!isStreamValue(value)) continue;
-
-        const toolName = `${slugifiedCharmName}_${slugify(key)}`;
-
-        // Use asSchema to get the stream with its schema populated
-        const handler = charmCell.key(key);
-        const hasSchema = !!handler?.schema &&
-          typeof handler?.schema === "object";
-        let inputSchema = hasSchema ? handler?.schema : { type: "object" };
-
-        // Maps `any` and `never` to objects with either any or no properties
-        if (isBoolean(inputSchema)) {
-          inputSchema = {
-            type: "object",
-            properties: {},
-            additionalProperties: inputSchema,
-          };
-        }
-
-        let description: string = (tool.description as string | undefined)
-          ? `${tool.description} - ${key}`
-          : (isBoolean(inputSchema)
-            ? undefined
-            : (inputSchema.description as string | undefined)) ||
-            `${key} handler from ${charmName}`;
-
-        // Remove injected result field from schema (UI/LLM shouldn't see it)
-        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
-
-        // Add warning badge if schema is missing
-        if (!hasSchema) {
-          description = `⚠️ ${description}`;
-        }
-
-        // Store handler reference if map provided
-        if (toolHandlers) {
-          toolHandlers.set(toolName, { handler, charm: charmCell });
-        }
-
-        flattened[toolName] = { handler, description, inputSchema };
+  // Add charm-derived tools via discovery
+  const descriptors = discoverTools(toolsCell);
+  for (const [toolName, desc] of descriptors.entries()) {
+    if (desc.kind === "handler") {
+      if (toolHandlers && desc.charm && desc.handlerCell) {
+        toolHandlers.set(toolName, {
+          handler: desc.handlerCell,
+          charm: desc.charm,
+        });
       }
-    } else {
-      // Regular handler or pattern tool: only sanitize known inputSchema.
-      const passThrough: Record<string, unknown> = { ...tool };
-      if (
-        passThrough.inputSchema && typeof passThrough.inputSchema === "object"
-      ) {
-        passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+      const charmNameValue = (() => {
+        try {
+          const c = desc.charm?.get?.();
+          return String(c?.[NAME] || "");
+        } catch {
+          return "";
+        }
+      })();
+      flattened[toolName] = {
+        handler: desc.handlerCell,
+        description: desc.description,
+        inputSchema: desc.schema,
+        internal: {
+          kind: "handler",
+          path: desc.path,
+          charmName: charmNameValue,
+        },
+      };
+    } else if (desc.kind === "cell") {
+      if (toolHandlers && desc.charm && desc.cellRef) {
+        toolHandlers.set(toolName, {
+          cell: desc.cellRef,
+          charm: desc.charm,
+        });
       }
-      flattened[name] = passThrough;
+      const charmNameValue = (() => {
+        try {
+          const c = desc.charm?.get?.();
+          return String(c?.[NAME] || "");
+        } catch {
+          return "";
+        }
+      })();
+      flattened[toolName] = {
+        description: desc.description,
+        inputSchema: desc.schema,
+        internal: {
+          kind: "cell",
+          path: desc.path,
+          charmName: charmNameValue,
+        },
+      };
     }
+  }
+
+  // Preserve pass-through for non-charm tools
+  for (const [name, tool] of Object.entries(tools)) {
+    if (tool?.charm?.get?.()) continue; // already handled via discovery
+    const passThrough: Record<string, unknown> = { ...tool };
+    if (
+      passThrough.inputSchema && typeof passThrough.inputSchema === "object"
+    ) {
+      passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+    }
+    flattened[name] = passThrough;
   }
 
   return flattened;
@@ -310,7 +436,7 @@ async function safelyPerformUpdate(
  */
 async function ensureSourceCharmRunning(
   runtime: IRuntime,
-  meta: { handler: any; charm: Cell<any> },
+  meta: { handler?: any; charm: Cell<any> },
 ): Promise<void> {
   const charm = meta.charm;
   const result = charm.asSchema({});
@@ -344,7 +470,7 @@ async function invokeToolCall(
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
-  charmMeta?: { handler: any; charm: Cell<any> },
+  charmMeta?: { handler?: any; cell?: Cell<any>; charm: Cell<any> },
 ) {
   const pattern = toolDef?.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
@@ -353,6 +479,12 @@ async function invokeToolCall(
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
+  // Cell tools: simply read the referenced cell and return its value.
+  if (charmMeta?.cell) {
+    const value = charmMeta.cell.get();
+    return { type: "json", value };
+  }
+
   // ensure the charm this handler originates from is actually running
   if (handler && !pattern && charmMeta) {
     await ensureSourceCharmRunning(runtime, charmMeta);
@@ -360,7 +492,6 @@ async function invokeToolCall(
 
   const { resolve, promise } = Promise.withResolvers<any>();
 
-  // runSynced charm
   runtime.editWithRetry((tx) => {
     if (pattern) {
       runtime.run(tx, pattern, toolCall.input, result);
@@ -368,28 +499,30 @@ async function invokeToolCall(
       handler.withTx(tx).send({
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
-      } as any); // TODO(bf): why any needed?
+      }, (completedTx: IExtendedStorageTransaction) => {
+        resolve(result.withTx(completedTx).get()); // withTx likely superfluous
+      }); // TODO(bf): why any needed?
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
   });
 
-  if (pattern) {
-    // wait until we know we have the result of the tool call
-    // not just that the transaction has been comitted
-    const cancel = result.sink((r) => {
-      r !== undefined && resolve(r);
-    });
-    const resultValue = await promise;
-    cancel();
+  // wait until we know we have the result of the tool call
+  // not just that the transaction has been comitted
+  const cancel = result.sink((r) => {
+    r !== undefined && resolve(r);
+  });
+  const resultValue = await promise;
+  cancel();
 
+  if (pattern) {
     // stop it now that we have the result
     runtime.runner.stop(result);
-    return { type: "json", value: resultValue };
   } else {
-    await runtime.idle();
-    return { type: "json", value: result.get() };
+    await runtime.idle(); // maybe pointless
   }
+
+  return { type: "json", value: resultValue ?? "OK" }; // if there was no return value, just tell the LLM it worked
 }
 
 /**
@@ -602,8 +735,11 @@ function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // Map to store handler references for charm-extracted tools
-  const toolHandlers = new Map<string, { handler: any; charm: Cell<any> }>();
+  // Map to store references for charm-extracted tools (handlers or cells)
+  const toolHandlers = new Map<
+    string,
+    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
+  >();
 
   // Flatten tools (extracts handlers from charms, stores handler refs)
   const flattenedTools = flattenTools(toolsCell, toolHandlers);
@@ -626,17 +762,8 @@ function startRequest(
           return [];
         }
 
-        // Maps `any` and `never` to objects with either any or no properties
-        if (isBoolean(inputSchema)) {
-          inputSchema = {
-            type: "object",
-            properties: {},
-            additionalProperties: inputSchema,
-          };
-        }
-
-        // Remove injected `result` field from tool schemas (handlers receive it internally)
-        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
+        // Normalize and sanitize schema
+        inputSchema = normalizeInputSchema(inputSchema) as JSONSchema;
 
         let description: string = tool.description ??
           (isBoolean(inputSchema)

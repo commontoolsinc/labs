@@ -1,6 +1,12 @@
 /// <cts-enable />
 import { Default, derive, h, NAME, recipe, str, UI } from "commontools";
-import { decrement, increment, nth, previous } from "./counter-handlers.ts";
+import {
+  decrement,
+  getValue,
+  increment,
+  nth,
+  previous,
+} from "./counter-handlers.ts";
 
 interface RecipeState {
   value: Default<number, 0>;

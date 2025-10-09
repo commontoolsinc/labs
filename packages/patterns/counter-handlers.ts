@@ -2,22 +2,29 @@
 import { Cell, derive, handler } from "commontools";
 
 export const increment = handler<
-  { result?: Cell<string> },
+  unknown,
   { value: Cell<number> }
 >(
   (args, state) => {
     state.value.set(state.value.get() + 1);
-    args.result?.set(`Incremented to ${state.value.get()}`);
   },
 );
 
 export const decrement = handler<
-  { result?: Cell<string> },
+  unknown,
   { value: Cell<number> }
 >(
   (args, state) => {
     state.value.set(state.value.get() - 1);
-    args.result?.set(`Decremented to ${state.value.get()}`);
+  },
+);
+
+export const getValue = handler<
+  { result: Cell<string> },
+  { value: Cell<number> }
+>(
+  (args, state) => {
+    args.result.set(`Value is ${state.value.get()}`);
   },
 );
 
