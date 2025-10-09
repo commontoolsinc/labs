@@ -13,7 +13,6 @@ import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Runtime } from "@commontools/runner";
-import { ALL_CHARMS_ID } from "@commontools/charm";
 
 import {
   acceptCompletion,
@@ -97,7 +96,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {string} placeholder - Placeholder text when empty
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
- * @attr {Array} mentionable - Array of mentionable items with Charm structure for backlink autocomplete
+ * @attr {Object} mentions - Cell containing mentions index with `mentionable` and `backlinks`
  * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
  * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
  * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
@@ -129,7 +128,7 @@ export class CTCodeEditor extends BaseElement {
     placeholder: { type: String },
     timingStrategy: { type: String },
     timingDelay: { type: Number },
-    mentionable: { type: Array },
+    mentions: { type: Object },
     mentioned: { type: Array },
     pattern: { type: Object },
     // New editor configuration props
@@ -148,7 +147,12 @@ export class CTCodeEditor extends BaseElement {
   declare placeholder: string;
   declare timingStrategy: InputTimingOptions["strategy"];
   declare timingDelay: number;
-  declare mentionable: Cell<MentionableArray>;
+  /**
+   * Mentions index object or Cell-like containing:
+   * - mentionable: Cell<MentionableArray> (required)
+   * - backlinks: any (optional)
+   */
+  declare mentions?: Cell<any>;
   declare mentioned?: Cell<MentionableArray>;
   declare pattern: Cell<string>;
   declare wordWrap: boolean;
@@ -280,11 +284,12 @@ export class CTCodeEditor extends BaseElement {
    * Get filtered mentionable items based on query
    */
   private getFilteredMentionable(query: string): Cell<Mentionable>[] {
-    if (!this.mentionable) {
+    const mentionableCell = this._getMentionableCell();
+    if (!mentionableCell) {
       return [];
     }
 
-    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableArray = mentionableCell.asSchema(mentionableArraySchema);
     const mentionableData = mentionableArray.get();
 
     if (!mentionableData || mentionableData.length === 0) {
@@ -395,14 +400,20 @@ export class CTCodeEditor extends BaseElement {
 
       // parse + start the recipe + link the inputs
       const pattern = JSON.parse(this.pattern.get());
-      const allCharms = rt.getCellFromEntityId(spaceName, {
-        "/": ALL_CHARMS_ID,
-      });
-      rt.run(tx, pattern, {
+      // Build pattern inputs with unified `index` cell
+      const inputs: Record<string, unknown> = {
         title: backlinkText,
         content: "",
-        allCharms,
-      }, result);
+      };
+
+      if (!this.mentions) {
+        throw new Error(
+          "ct-code-editor: `$mentions` cell is required (mentionable/backlinks)",
+        );
+      }
+      inputs["index"] = this.mentions;
+
+      rt.run(tx, pattern, inputs, result);
 
       // let the pattern know about the new backlink
       tx.commit();
@@ -477,9 +488,10 @@ export class CTCodeEditor extends BaseElement {
    * Find a charm by ID in the mentionable list
    */
   private findCharmById(id: string): Cell<Mentionable> | null {
-    if (!this.mentionable) return null;
+    const mentionableCell = this._getMentionableCell();
+    if (!mentionableCell) return null;
 
-    const mentionableArray = this.mentionable.asSchema(mentionableArraySchema);
+    const mentionableArray = mentionableCell.asSchema(mentionableArraySchema);
     const mentionableData = mentionableArray.get();
     if (!mentionableData) return null;
 
@@ -622,8 +634,9 @@ export class CTCodeEditor extends BaseElement {
    * the source list updates.
    */
   private _setupMentionableSyncHandler(): void {
-    if (!this.mentionable) return;
-    const unsubscribe = this.mentionable.asSchema(mentionableArraySchema).sink(
+    const mentionableCell = this._getMentionableCell();
+    if (!mentionableCell) return;
+    const unsubscribe = mentionableCell.asSchema(mentionableArraySchema).sink(
       () => {
         this._updateMentionedFromContent();
       },
@@ -741,8 +754,8 @@ export class CTCodeEditor extends BaseElement {
       });
     }
 
-    // Re-subscribe if mentionable cell reference changes
-    if (changedProperties.has("mentionable")) {
+    // Re-subscribe if mention source reference changes
+    if (changedProperties.has("mentions")) {
       this._setupMentionableSyncHandler();
       this._updateMentionedFromContent();
     }
@@ -968,7 +981,8 @@ export class CTCodeEditor extends BaseElement {
    * Parse content to a list of unique Charms referenced by [[...]] links.
    */
   private _extractMentionedCharms(content: string): Mentionable[] {
-    if (!content || !this.mentionable) return [];
+    const mentionableCell = this._getMentionableCell();
+    if (!content || !mentionableCell) return [];
 
     const ids: string[] = [];
     const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
@@ -990,6 +1004,18 @@ export class CTCodeEditor extends BaseElement {
       }
     }
     return result;
+  }
+
+  /**
+   * Resolve the active mentionable cell from `$mentions.key('mentionable')`.
+   */
+  private _getMentionableCell(): Cell<MentionableArray> | null {
+    if (!this.mentions) return null;
+    try {
+      return this.mentions.key("mentionable") as Cell<MentionableArray>;
+    } catch {
+      return null;
+    }
   }
 }
 
