@@ -15,7 +15,7 @@ import type {
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isStream } from "../cell.ts";
+import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -174,7 +174,10 @@ const internalSchema = {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  toolHandlers?: Map<string, { handler: any; charm: Cell<any> }>,
+  toolHandlers?: Map<
+    string,
+    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
+  >,
 ): Record<
   string,
   { handler?: any; description: string; inputSchema?: JSONSchema }
@@ -204,47 +207,70 @@ function flattenTools(
           continue;
         }
 
-        // Check if value is a Stream
-        if (!isStreamValue(value)) continue;
-
+        // Check if value is a Stream or a Cell. Streams become handler tools;
+        // Cells become read-only tools that return the current value.
         const toolName = `${slugifiedCharmName}_${slugify(key)}`;
 
-        // Use asSchema to get the stream with its schema populated
-        const handler = charmCell.key(key);
-        const hasSchema = !!handler?.schema &&
-          typeof handler?.schema === "object";
-        let inputSchema = hasSchema ? handler?.schema : { type: "object" };
+        if (isStreamValue(value)) {
+          // Use asSchema to get the stream with its schema populated
+          const handler = charmCell.key(key);
+          const hasSchema = !!handler?.schema &&
+            typeof handler?.schema === "object";
+          let inputSchema = hasSchema ? handler?.schema : { type: "object" };
 
-        // Maps `any` and `never` to objects with either any or no properties
-        if (isBoolean(inputSchema)) {
-          inputSchema = {
+          // Maps `any` and `never` to objects with either any or no properties
+          if (isBoolean(inputSchema)) {
+            inputSchema = {
+              type: "object",
+              properties: {},
+              additionalProperties: inputSchema,
+            };
+          }
+
+          let description: string = (tool.description as string | undefined)
+            ? `${tool.description} - ${key}`
+            : (isBoolean(inputSchema)
+              ? undefined
+              : (inputSchema.description as string | undefined)) ||
+              `${key} handler from ${charmName}`;
+
+          // Remove injected result field from schema (UI/LLM shouldn't see it)
+          inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
+
+          // Add warning badge if schema is missing
+          if (!hasSchema) {
+            description = `⚠️ ${description}`;
+          }
+
+          // Store handler reference if map provided
+          if (toolHandlers) {
+            toolHandlers.set(toolName, { handler, charm: charmCell });
+          }
+
+          flattened[toolName] = { handler, description, inputSchema };
+        } else if (isCell(charmCell.key(key))) {
+          // Expose cells as tools that simply return their current value.
+          const cellRef = charmCell.key(key) as Cell<any>;
+          // No arguments accepted for reading a cell value.
+          const inputSchema: JSONSchema = {
             type: "object",
             properties: {},
-            additionalProperties: inputSchema,
+            additionalProperties: false,
           };
+
+          const description: string = (tool.description as string | undefined)
+            ? `${tool.description} - ${key}`
+            : `${key} value from ${charmName}`;
+
+          // Store cell reference if map provided
+          if (toolHandlers) {
+            toolHandlers.set(toolName, { cell: cellRef, charm: charmCell });
+          }
+
+          flattened[toolName] = { description, inputSchema };
+        } else {
+          continue;
         }
-
-        let description: string = (tool.description as string | undefined)
-          ? `${tool.description} - ${key}`
-          : (isBoolean(inputSchema)
-            ? undefined
-            : (inputSchema.description as string | undefined)) ||
-            `${key} handler from ${charmName}`;
-
-        // Remove injected result field from schema (UI/LLM shouldn't see it)
-        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
-
-        // Add warning badge if schema is missing
-        if (!hasSchema) {
-          description = `⚠️ ${description}`;
-        }
-
-        // Store handler reference if map provided
-        if (toolHandlers) {
-          toolHandlers.set(toolName, { handler, charm: charmCell });
-        }
-
-        flattened[toolName] = { handler, description, inputSchema };
       }
     } else {
       // Regular handler or pattern tool: only sanitize known inputSchema.
@@ -344,7 +370,7 @@ async function invokeToolCall(
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
-  charmMeta?: { handler: any; charm: Cell<any> },
+  charmMeta?: { handler?: any; cell?: Cell<any>; charm: Cell<any> },
 ) {
   const pattern = toolDef?.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
@@ -352,6 +378,12 @@ async function invokeToolCall(
   const handler = charmMeta?.handler ?? toolDef?.key("handler");
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
+
+  // Cell tools: simply read the referenced cell and return its value.
+  if (charmMeta?.cell) {
+    const value = charmMeta.cell.get();
+    return { type: "json", value };
+  }
 
   // ensure the charm this handler originates from is actually running
   if (handler && !pattern && charmMeta) {
@@ -603,8 +635,11 @@ function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // Map to store handler references for charm-extracted tools
-  const toolHandlers = new Map<string, { handler: any; charm: Cell<any> }>();
+  // Map to store references for charm-extracted tools (handlers or cells)
+  const toolHandlers = new Map<
+    string,
+    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
+  >();
 
   // Flatten tools (extracts handlers from charms, stores handler refs)
   const flattenedTools = flattenTools(toolsCell, toolHandlers);

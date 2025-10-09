@@ -29,7 +29,6 @@ export default recipe<RecipeState>("Counter", (state) => {
       </div>
     ),
     value: state.value,
-    getValue: getValue(state),
     increment: increment(state),
     decrement: decrement(state),
   };

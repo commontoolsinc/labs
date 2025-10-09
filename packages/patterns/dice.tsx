@@ -15,7 +15,7 @@ export default recipe<RecipeState>("Dice", (state) => {
           Roll D6
         </ct-button>
         <ct-button onClick={roll(state)}>
-          Roll D20
+          getValue(state), Roll D20
         </ct-button>
         <span id="dice-result">
           Current value: {state.value}
@@ -25,7 +25,7 @@ export default recipe<RecipeState>("Dice", (state) => {
         </ct-button>
       </div>
     ),
-    value: getValue(state),
+    value: state.value,
     roll: roll(state),
   };
 });
