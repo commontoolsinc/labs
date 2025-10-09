@@ -1,17 +1,12 @@
 /// <cts-enable />
 import {
-  Cell,
-  cell,
   Default,
   derive,
   fetchData,
   h,
-  handler,
   lift,
   NAME,
   recipe,
-  schema,
-  str,
   UI,
 } from "commontools";
 

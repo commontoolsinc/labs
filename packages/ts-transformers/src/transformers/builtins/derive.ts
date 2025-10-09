@@ -1,31 +1,5 @@
 import ts from "typescript";
-import {
-  containsOpaqueRef,
-  isOpaqueRefType,
-  isSimpleOpaqueRefAccess,
-} from "../opaque-ref/opaque-ref.ts";
-import {
-  createDataFlowAnalyzer,
-  type DataFlowAnalysis,
-  dedupeExpressions,
-} from "../../ast/mod.ts";
-import { ImportRequirements } from "../../core/mod.ts";
-
-function replaceOpaqueRefWithParam(
-  expression: ts.Expression,
-  opaqueRef: ts.Expression,
-  paramName: string,
-  factory: ts.NodeFactory,
-  context: ts.TransformationContext,
-): ts.Expression {
-  const visit = (node: ts.Node): ts.Node => {
-    if (node === opaqueRef) {
-      return factory.createIdentifier(paramName);
-    }
-    return ts.visitEachChild(node, visit, context);
-  };
-  return visit(expression) as ts.Expression;
-}
+import { CTHelpers } from "../../core/ct-helpers.ts";
 
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -58,7 +32,7 @@ export interface DeriveCallOptions {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly tsContext: ts.TransformationContext;
-  readonly imports: ImportRequirements;
+  readonly ctHelpers: CTHelpers;
 }
 
 function createPropertyName(
@@ -166,7 +140,7 @@ export function createDeriveCall(
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
-  const { factory, tsContext, imports, sourceFile } = options;
+  const { factory, tsContext, ctHelpers, sourceFile } = options;
   const { entries, refToParamName } = planDeriveEntries(refs);
   if (entries.length === 0) return undefined;
 
@@ -186,17 +160,14 @@ export function createDeriveCall(
     lambdaBody,
   );
 
-  const deriveIdentifier = imports.getIdentifier({ factory, sourceFile }, {
-    module: "commontools",
-    name: "derive",
-  });
+  const deriveExpr = ctHelpers.getHelperExpr("derive");
   const deriveArgs = [
     ...createDeriveArgs(factory, entries),
     arrowFunction,
   ];
 
   return factory.createCallExpression(
-    deriveIdentifier,
+    deriveExpr,
     undefined,
     deriveArgs,
   );

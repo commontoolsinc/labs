@@ -1,10 +1,10 @@
 import ts from "typescript";
-import { ImportRequirements } from "../../core/mod.ts";
+import { CTHelpers } from "../../core/mod.ts";
 
 export interface IfElseParams {
   expression: ts.ConditionalExpression;
   factory: ts.NodeFactory;
-  imports: ImportRequirements;
+  ctHelpers: CTHelpers;
   sourceFile: ts.SourceFile;
   overrides?: IfElseOverrides;
 }
@@ -16,11 +16,8 @@ export interface IfElseOverrides {
 }
 
 export function createIfElseCall(params: IfElseParams): ts.CallExpression {
-  const { factory, imports, overrides, expression, sourceFile } = params;
-  const ifElseIdentifier = imports.getIdentifier({ factory, sourceFile }, {
-    module: "commontools",
-    name: "ifElse",
-  });
+  const { factory, ctHelpers, overrides, expression } = params;
+  const ifElseExpr = ctHelpers.getHelperExpr("ifElse");
 
   let predicate = overrides?.predicate ?? expression.condition;
   let whenTrue = overrides?.whenTrue ?? expression.whenTrue;
@@ -34,7 +31,7 @@ export function createIfElseCall(params: IfElseParams): ts.CallExpression {
   }
 
   return factory.createCallExpression(
-    ifElseIdentifier,
+    ifElseExpr,
     undefined,
     [predicate, whenTrue, whenFalse],
   );

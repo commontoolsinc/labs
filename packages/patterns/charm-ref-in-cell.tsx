@@ -2,7 +2,6 @@
 import {
   Cell,
   cell,
-  createCell,
   Default,
   derive,
   h,

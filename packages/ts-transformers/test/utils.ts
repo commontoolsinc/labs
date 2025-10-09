@@ -1,7 +1,10 @@
 import ts from "typescript";
 import { join } from "@std/path";
 import { StaticCache } from "@commontools/static";
-import { CommonToolsTransformerPipeline } from "../src/mod.ts";
+import {
+  CommonToolsTransformerPipeline,
+  transformCtDirective,
+} from "../src/mod.ts";
 import { assert } from "@std/assert";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
@@ -28,7 +31,7 @@ export async function transformSource(
 }
 
 export async function transformFiles(
-  files: Record<string, string>,
+  inFiles: Record<string, string>,
   options: TransformOptions = {},
 ): Promise<Record<string, string>> {
   const {
@@ -39,6 +42,12 @@ export async function transformFiles(
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
+
+  // Pretransform
+  const files = Object.entries(inFiles).reduce((files, [key, value]) => {
+    files[key] = transformCtDirective(value);
+    return files;
+  }, {} as Record<string, string>);
 
   const compilerOptions: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2020,

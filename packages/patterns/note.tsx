@@ -11,7 +11,6 @@ import {
   navigateTo,
   OpaqueRef,
   recipe,
-  toSchema,
   UI,
 } from "commontools";
 import { type BacklinksMap } from "./backlinks-index.tsx";

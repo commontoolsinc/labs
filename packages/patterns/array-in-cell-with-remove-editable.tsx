@@ -1,15 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  derive,
-  h,
-  handler,
-  NAME,
-  recipe,
-  Stream,
-  UI,
-} from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;

@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { Cell, Default, h, handler, recipe, UI, derive, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, Default, h, handler, recipe, UI } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -7,7 +7,7 @@ declare global {
         }
     }
 }
-const handleClick = handler(true as const satisfies JSONSchema, {
+const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {
@@ -16,7 +16,7 @@ const handleClick = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["count"]
-} as const satisfies JSONSchema, (_, { count }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
 export default recipe({
@@ -28,11 +28,11 @@ export default recipe({
         }
     },
     required: ["count"]
-} as const satisfies JSONSchema, ({ count }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ count }) => {
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {derive(count, count => count + 1)}</span>
+          <span>Count: {__ctHelpers.derive(count, count => count + 1)}</span>
           
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
           <ct-button onClick={handleClick({ count })}>
@@ -47,3 +47,4 @@ export default recipe({
         count,
     };
 });
+__ctHelpers.NAME; // <internals>

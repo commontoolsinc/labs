@@ -1,4 +1,4 @@
-/// <cts-enable />
+import * as __ctHelpers from "commontools";
 import { handler } from "commontools";
 const eventSchema = {
     type: "object",
@@ -16,3 +16,4 @@ const logHandler = handler(eventSchema, stateSchema, (event, state) => {
     state.log.push(event.message);
 });
 export { logHandler };
+__ctHelpers.NAME; // <internals>

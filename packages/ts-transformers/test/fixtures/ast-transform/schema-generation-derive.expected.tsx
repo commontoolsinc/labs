@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { derive, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { derive } from "commontools";
 type DeriveInput = {
     count: number;
 };
@@ -15,7 +15,7 @@ export const doubledValue = derive({
         }
     },
     required: ["count"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         doubled: {
@@ -23,6 +23,7 @@ export const doubledValue = derive({
         }
     },
     required: ["doubled"]
-} as const satisfies JSONSchema, source, (input) => ({
+} as const satisfies __ctHelpers.JSONSchema, source, (input) => ({
     doubled: input.count * 2,
 }));
+__ctHelpers.NAME; // <internals>

@@ -8,10 +8,7 @@ import {
   ID,
   lift,
   NAME,
-  Opaque,
   recipe,
-  str,
-  toSchema,
   UI,
 } from "commontools";
 

@@ -1,24 +1,6 @@
 /// <cts-enable />
 
-import {
-  Cell,
-  cell,
-  compileAndRun,
-  Default,
-  derive,
-  h,
-  handler,
-  ifElse,
-  Mutable,
-  NAME,
-  navigateTo,
-  Opaque,
-  OpaqueRef,
-  recipe,
-  render,
-  str,
-  UI,
-} from "commontools";
+import { Default, h, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 type Input = {
   selected: Default<string, "">;

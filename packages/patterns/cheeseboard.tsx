@@ -1,18 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  derive,
-  fetchData,
-  h,
-  handler,
-  ifElse,
-  lift,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { fetchData, h, lift, NAME, recipe, UI } from "commontools";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and

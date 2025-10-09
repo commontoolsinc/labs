@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { handler, h, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler, h } from "commontools";
 interface ClickEvent {
     x: number;
     y: number;
@@ -23,7 +23,7 @@ export const result = (<div>
             }
         },
         required: ["x", "y"]
-    } as const satisfies JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
             clicks: {
@@ -43,8 +43,9 @@ export const result = (<div>
             }
         },
         required: ["clicks", "lastPosition"]
-    } as const satisfies JSONSchema, (event: ClickEvent, state: AppState) => ({
+    } as const satisfies __ctHelpers.JSONSchema, (event: ClickEvent, state: AppState) => ({
         clicks: state.clicks + 1,
         lastPosition: { x: event.x, y: event.y },
     }))}
   </div>);
+__ctHelpers.NAME; // <internals>

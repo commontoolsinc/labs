@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive, h, recipe, UI } from "commontools";
+import { cell, h, recipe, UI } from "commontools";
 
 interface Problem {
   price: number;

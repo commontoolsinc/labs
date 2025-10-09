@@ -3,7 +3,6 @@ import {
   Cell,
   cell,
   createCell,
-  derive,
   h,
   handler,
   ifElse,

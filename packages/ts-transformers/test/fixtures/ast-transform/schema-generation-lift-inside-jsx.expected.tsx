@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { lift, h, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { lift, h } from "commontools";
 interface Person {
     name: string;
     age: number;
@@ -21,7 +21,7 @@ export const result = (<div>
             }
         },
         required: ["name", "age"]
-    } as const satisfies JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
             name: {
@@ -32,8 +32,9 @@ export const result = (<div>
             }
         },
         required: ["name", "birthYear"]
-    } as const satisfies JSONSchema, (person: Person): PersonWithYear => ({
+    } as const satisfies __ctHelpers.JSONSchema, (person: Person): PersonWithYear => ({
         name: person.name,
         birthYear: currentYear - person.age,
     }))}
   </div>);
+__ctHelpers.NAME; // <internals>

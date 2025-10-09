@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { Cell, derive, h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, derive, h, recipe, toSchema, UI } from "commontools";
 interface State {
     value: Cell<number>;
 }
@@ -15,11 +15,11 @@ const model = {
     default: {
         value: 0
     }
-} as const satisfies JSONSchema;
+} as const satisfies __ctHelpers.JSONSchema;
 export default recipe(model, model, (cell) => {
-    const doubled = derive(true as const satisfies JSONSchema, {
+    const doubled = derive(true as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies JSONSchema, cell.value, (v) => v * 2);
+    } as const satisfies __ctHelpers.JSONSchema, cell.value, (v) => v * 2);
     return {
         [UI]: (<div>
         <p>Value: {cell.value}</p>
@@ -28,3 +28,4 @@ export default recipe(model, model, (cell) => {
         value: cell.value,
     };
 });
+__ctHelpers.NAME; // <internals>

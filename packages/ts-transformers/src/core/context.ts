@@ -1,10 +1,10 @@
 import ts from "typescript";
-import { ImportRequirements } from "./imports.ts";
 import {
   DiagnosticInput,
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
+import { CTHelpers } from "./ct-helpers.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
@@ -16,7 +16,6 @@ export interface TransformationContextConfig {
   sourceFile: ts.SourceFile;
   tsContext: ts.TransformationContext;
   options?: TransformationOptions;
-  imports?: ImportRequirements;
 }
 
 export class TransformationContext {
@@ -25,7 +24,7 @@ export class TransformationContext {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
-  readonly imports: ImportRequirements;
+  readonly ctHelpers: CTHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
   #typeCache = new Map<ts.Node, ts.Type>();
@@ -36,7 +35,10 @@ export class TransformationContext {
     this.tsContext = config.tsContext;
     this.factory = config.tsContext.factory;
     this.sourceFile = config.sourceFile;
-    this.imports = config.imports ?? new ImportRequirements();
+    this.ctHelpers = new CTHelpers({
+      factory: this.factory,
+      sourceFile: this.sourceFile,
+    });
     this.options = {
       ...DEFAULT_OPTIONS,
       ...config.options,

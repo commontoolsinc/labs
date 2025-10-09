@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { handler, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler } from "commontools";
 interface CounterEvent {
     increment: number;
 }
@@ -14,7 +14,7 @@ const myHandler = handler({
         }
     },
     required: ["increment"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -22,7 +22,8 @@ const myHandler = handler({
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (event, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.value = state.value + event.increment;
 });
 export { myHandler };
+__ctHelpers.NAME; // <internals>

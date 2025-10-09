@@ -4,31 +4,18 @@ import {
   Cell,
   cell,
   Default,
-  derive,
-  fetchData,
-  getRecipeEnvironment,
   h,
   handler,
-  ID,
-  ifElse,
-  JSONSchema,
-  lift,
-  llm,
-  llmDialog,
   NAME,
   navigateTo,
   OpaqueRef,
   recipe,
-  str,
-  Stream,
-  toSchema,
-  UI,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
 import { type BacklinksMap } from "./backlinks-index.tsx";
-import Tools, {
+import {
   addListItem,
   calculator,
   ListItem,

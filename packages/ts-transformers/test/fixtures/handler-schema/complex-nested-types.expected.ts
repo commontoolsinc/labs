@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { handler, Cell, recipe, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler, Cell, recipe } from "commontools";
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {
@@ -42,7 +42,7 @@ const userHandler = handler({
         }
     },
     required: ["user", "action"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         users: {
@@ -74,7 +74,7 @@ const userHandler = handler({
         }
     },
     required: ["users", "lastAction", "count"]
-} as const satisfies JSONSchema, (event, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     if (event.action === "create") {
         state.users.push({
             id: Date.now().toString(),
@@ -102,7 +102,7 @@ const updateTags = handler({
         }
     },
     required: ["detail"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         tags: {
@@ -114,10 +114,11 @@ const updateTags = handler({
         }
     },
     required: ["tags"]
-} as const satisfies JSONSchema, ({ detail }, state) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ detail }, state) => {
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
 export default recipe("complex-nested-types test", () => {
     return { userHandler };
 });
+__ctHelpers.NAME; // <internals>
