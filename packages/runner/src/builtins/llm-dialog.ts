@@ -99,20 +99,50 @@ async function getCharmResultSchemaAsync(
     const source = charm.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE];
     if (recipeId) {
-      const recipe = await runtime.recipeManager.loadRecipe(
-        recipeId,
-        charm.space,
-      );
-      if (
-        recipe && typeof recipe.resultSchema === "object" &&
-        recipe.resultSchema &&
-        Object.keys(recipe.resultSchema).length > 0
-      ) {
-        return recipe.resultSchema;
-      }
+      await runtime.recipeManager.loadRecipe(recipeId, charm.space);
     }
+    return (
+      getLoadedRecipeResultSchema(runtime, charm) ??
+        buildMinimalSchemaFromValue(charm)
+    );
+  } catch (_e) {
+    return buildMinimalSchemaFromValue(charm);
+  }
+}
 
-    // Fallback: derive minimal object schema from current value
+function stringifySchemaGuarded(schema: JSONSchema | undefined): string {
+  try {
+    const s = JSON.stringify(schema ?? {});
+    return s.length > 4000 ? s.slice(0, 4000) + "…" : s;
+  } catch {
+    return "{}";
+  }
+}
+
+function getLoadedRecipeResultSchema(
+  runtime: IRuntime | undefined,
+  charm: Cell<any>,
+): JSONSchema | undefined {
+  try {
+    const source = charm.getSourceCell(processSchema);
+    const recipeId = source?.get()?.[TYPE];
+    const recipe = recipeId
+      ? runtime?.recipeManager.recipeById(recipeId)
+      : undefined;
+    if (
+      recipe && typeof recipe.resultSchema === "object" &&
+      recipe.resultSchema && Object.keys(recipe.resultSchema).length > 0
+    ) {
+      return recipe.resultSchema;
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
+  try {
     const resultValue = charm.asSchema().get();
     if (resultValue && typeof resultValue === "object") {
       const keys = Object.keys(resultValue).filter((k) => !k.startsWith("$"));
@@ -123,19 +153,10 @@ async function getCharmResultSchemaAsync(
         } as JSONSchema;
       }
     }
-  } catch (_e) {
-    // ignore; fall through
+  } catch {
+    // ignore
   }
   return undefined;
-}
-
-function stringifySchemaGuarded(schema: JSONSchema | undefined): string {
-  try {
-    const s = JSON.stringify(schema ?? {});
-    return s.length > 4000 ? s.slice(0, 4000) + "…" : s;
-  } catch {
-    return "{}";
-  }
 }
 
 const LLMMessageSchema = {
@@ -277,33 +298,9 @@ function flattenTools(
     const runName = `${slug}_run`;
 
     // Best-effort schema for UI: use loaded recipe if present; no async loads here
-    let schema: JSONSchema | undefined;
-    try {
-      const source = charmCell.getSourceCell(processSchema);
-      const recipeId = source?.get()?.[TYPE];
-      const recipe = recipeId
-        ? runtime?.recipeManager.recipeById(recipeId)
-        : undefined;
-      if (
-        recipe && typeof recipe.resultSchema === "object" &&
-        Object.keys(recipe.resultSchema ?? {}).length > 0
-      ) {
-        schema = recipe.resultSchema;
-      } else {
-        const value = charmCell.asSchema().get();
-        if (value && typeof value === "object") {
-          const keys = Object.keys(value).filter((k) => !k.startsWith("$"));
-          if (keys.length > 0) {
-            schema = {
-              type: "object",
-              properties: Object.fromEntries(keys.map((k) => [k, true])),
-            } as JSONSchema;
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
+    let schema: JSONSchema | undefined =
+      getLoadedRecipeResultSchema(runtime, charmCell) ??
+        buildMinimalSchemaFromValue(charmCell);
     schema = schema ?? ({} as JSONSchema);
     const schemaString = stringifySchemaGuarded(schema);
 
