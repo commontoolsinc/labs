@@ -18,6 +18,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
@@ -36,6 +37,7 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   allCharms: Cell<any[]>;
+  index: BacklinksMap;
   theme?: {
     accentColor: Default<string, "#3b82f6">;
     fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -45,6 +47,10 @@ type Input = {
 
 type Output = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
+  // Expose a mentionable list aggregated from local chat entries
+  // Returned as an opaque ref to an array (not a Cell), suitable for
+  // upstream aggregators that read exported mentionables.
+  mentionable?: MentionableCharm[];
 };
 
 const removeChat = handler<
@@ -89,7 +95,7 @@ const storeCharm = lift(
     charm: any;
     selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
     charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<any[]>;
+    allCharms: Cell<MentionableCharm[]>;
     theme?: {
       accentColor: Default<string, "#3b82f6">;
       fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -124,10 +130,11 @@ const populateChatList = lift(
     charmsList: CharmEntry[];
     allCharms: Cell<any[]>;
     selectedCharm: Cell<{ charm: any }>;
+    index: any;
   }>(),
   undefined,
   (
-    { charmsList, allCharms, selectedCharm },
+    { charmsList, allCharms, selectedCharm, index },
   ) => {
     if (charmsList.length === 0) {
       const isInitialized = cell(false);
@@ -137,6 +144,7 @@ const populateChatList = lift(
           messages: [],
           content: "",
           allCharms,
+          index,
         }),
         selectedCharm,
         charmsList,
@@ -155,9 +163,10 @@ const createChatRecipe = handler<
     selectedCharm: Cell<{ charm: any }>;
     charmsList: Cell<CharmEntry[]>;
     allCharms: Cell<any[]>;
+    index: any;
   }
 >(
-  (_, { selectedCharm, charmsList, allCharms }) => {
+  (_, { selectedCharm, charmsList, allCharms, index }) => {
     const isInitialized = cell(false);
 
     const charm = Chat({
@@ -165,6 +174,7 @@ const createChatRecipe = handler<
       messages: [],
       content: "",
       allCharms,
+      index,
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
@@ -234,8 +244,13 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
-  ({ selectedCharm, charmsList, allCharms, theme }) => {
+  ({ selectedCharm, charmsList, allCharms, index, theme }) => {
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+
+    const combined = combineLists({
+      allCharms: allCharms as unknown as MentionableCharm[],
+      charmsList,
+    });
 
     populateChatList({
       selectedCharm: selectedCharm as unknown as Cell<
@@ -243,14 +258,25 @@ export default recipe<Input, Output>(
       >,
       charmsList,
       allCharms,
-    });
-
-    const combined = combineLists({
-      allCharms: allCharms as unknown as any[],
-      charmsList,
+      index,
     });
 
     const selected = getSelectedCharm({ entry: selectedCharm });
+
+    // Aggregate mentionables from the local charms list so that this
+    // container exposes its child chat/note charms as mention targets.
+    const localMentionable = lift<
+      { list: CharmEntry[] },
+      MentionableCharm[]
+    >(({ list }) => {
+      const out: MentionableCharm[] = [];
+      for (const entry of list) {
+        const c = entry.charm;
+        out.push(c.note);
+        out.push(c.chat);
+      }
+      return out;
+    })({ list: charmsList });
 
     const localTheme = theme ?? {
       accentColor: cell("#3b82f6"),
@@ -272,6 +298,7 @@ export default recipe<Input, Output>(
                       selectedCharm,
                       charmsList,
                       allCharms: combined as unknown as any,
+                      index,
                     })}
                   >
                     Create New Chat
@@ -289,6 +316,7 @@ export default recipe<Input, Output>(
                   selectedCharm,
                   charmsList,
                   allCharms: combined as unknown as any,
+                  index,
                 })}
               />
             </div>
@@ -459,6 +487,8 @@ export default recipe<Input, Output>(
       ),
       selectedCharm,
       charmsList,
+      // Expose the aggregated mentionables for parent-level indexing.
+      mentionable: localMentionable,
     };
   },
 );
