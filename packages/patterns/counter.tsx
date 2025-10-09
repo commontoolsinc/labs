@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, derive, h, NAME, recipe, str, UI } from "commontools";
+import { Default, derive, h, NAME, recipe, str, Stream, UI } from "commontools";
 import {
   decrement,
   getValue,
@@ -12,7 +12,13 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-export default recipe<RecipeState>("Counter", (state) => {
+interface RecipeOutput {
+  value: Default<number, 0>;
+  increment: Stream<void>;
+  decrement: Stream<void>;
+}
+
+export default recipe<RecipeState, RecipeOutput>("Counter", (state) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
@@ -29,7 +35,7 @@ export default recipe<RecipeState>("Counter", (state) => {
       </div>
     ),
     value: state.value,
-    increment: increment(state),
-    decrement: decrement(state),
+    increment: increment(state) as unknown as Stream<void>,
+    decrement: decrement(state) as unknown as Stream<void>,
   };
 });
