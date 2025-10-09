@@ -113,7 +113,8 @@ function describeTool(
   warnIfNoSchema = false,
 ): string {
   let description: string | undefined = baseDescription ||
-    (isBoolean(inputSchema) ? undefined
+    (isBoolean(inputSchema)
+      ? undefined
       : (inputSchema?.description as string | undefined));
   description = description || fallback;
   if (warnIfNoSchema && !inputSchema) description = `⚠️ ${description}`;
@@ -145,8 +146,12 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
           const schema = normalizeInputSchema(
             hasSchema ? handlerCell?.schema : { type: "object" },
           );
+          // Prefer a specific per-key description if base exists
+          const baseDesc = tool.description
+            ? `${tool.description} - ${key}`
+            : undefined;
           const desc = describeTool(
-            tool.description as string | undefined,
+            baseDesc,
             hasSchema ? (handlerCell?.schema as JSONSchema) : undefined,
             `${key} handler from ${charmName}`,
             !hasSchema,
@@ -169,11 +174,8 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
             properties: {},
             additionalProperties: false,
           });
-          const desc = describeTool(
-            tool.description as string | undefined,
-            schema,
-            `${key} value from ${charmName}`,
-          );
+          // For cells, avoid generic base description; make it per-key
+          const desc = `${key} value from ${charmName}`;
           const nameBuilt = buildToolName(charmName, key);
           descriptors.set(nameBuilt, {
             kind: "cell",
@@ -343,7 +345,9 @@ function flattenTools(
   for (const [name, tool] of Object.entries(tools)) {
     if (tool?.charm?.get?.()) continue; // already handled via discovery
     const passThrough: Record<string, unknown> = { ...tool };
-    if (passThrough.inputSchema && typeof passThrough.inputSchema === "object") {
+    if (
+      passThrough.inputSchema && typeof passThrough.inputSchema === "object"
+    ) {
       passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
     }
     flattened[name] = passThrough;
@@ -719,7 +723,8 @@ function startRequest(
         const pattern = t?.pattern?.get?.() ?? t?.pattern;
         const handler = t?.handler;
 
-        let inputSchema = pattern?.argumentSchema ?? handler?.schema ?? t?.inputSchema;
+        let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
+          t?.inputSchema;
 
         if (inputSchema === undefined) {
           logger.error(`Tool ${name} has no schema`);
