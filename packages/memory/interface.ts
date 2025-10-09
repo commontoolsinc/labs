@@ -441,7 +441,7 @@ export type Brief<Space extends MemorySpace = MemorySpace> = {
   meta?: Meta;
 };
 
-export interface Session<Space extends MemorySpace = MemorySpace> {
+interface Session<Space extends MemorySpace = MemorySpace> {
   /**
    * Transacts can be used to assert or retract a document from the repository.
    * If `version` asserted / retracted does not match version of the document
@@ -463,8 +463,10 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
   close(): CloseResult;
 }
 
+// Re-declares the Session interface as sync instead of async, and adds the
+// subject field
 export interface SpaceSession<Space extends MemorySpace = MemorySpace>
-  extends Session {
+  extends Session<Space> {
   subject: Space;
 
   transact(
@@ -474,6 +476,9 @@ export interface SpaceSession<Space extends MemorySpace = MemorySpace>
   close(): Result<Unit, SystemError>;
 }
 
+// Adds the subscribe/unsubscribe interface to Session
+// Adds the serviceDID, which is essentially the same as SpaceSession's
+// subject.
 export interface MemorySession<Space extends MemorySpace = MemorySpace>
   extends Session<Space> {
   subscribe(subscriber: Subscriber<Space>): SubscribeResult;
@@ -481,6 +486,7 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
   serviceDid(): DID;
 }
 
+// Interface for the subscriber's scallback
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
   // Notifies a subscriber of a commit that has been applied
   commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;

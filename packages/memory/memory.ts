@@ -12,7 +12,6 @@ import {
   AsyncResult,
   ConnectionError,
   MemorySession,
-  MemorySpace as Subject,
   Query,
   QueryResult,
   Result,
@@ -27,13 +26,17 @@ import {
 export * from "./interface.ts";
 import { type DID } from "@commontools/identity";
 
-interface Session {
+interface MemorySessionState {
   store: URL;
   subscribers: Set<Subscriber>;
-  spaces: Map<string, SpaceSession>;
+  spaces: Map<DID, SpaceSession>;
 }
 
-export class Memory implements Session, MemorySession {
+// There's some confusion in this class whether it wants to handle multiple
+// spaces. The presence of the serviceDid implies there will be one Memory
+// per space, but the map of spaces implies there could be multiple.
+// Currently, there is one Memory per DID (a.k.a. MemorySpace).
+export class Memory implements MemorySessionState, MemorySession {
   store: URL;
   ready: Promise<unknown>;
   #serviceDid: DID;
@@ -41,7 +44,7 @@ export class Memory implements Session, MemorySession {
   constructor(
     options: Options,
     public subscribers: Set<Subscriber> = new Set(),
-    public spaces: Map<Subject, SpaceSession> = new Map(),
+    public spaces: Map<DID, SpaceSession> = new Map(),
   ) {
     this.store = options.store;
     this.ready = Promise.resolve();
@@ -107,11 +110,14 @@ export class Memory implements Session, MemorySession {
  * @param subscriber - The subscriber to add
  * @returns Success result
  */
-export const subscribe = (session: Session, subscriber: Subscriber) => {
+const subscribe = (
+  { subscribers }: MemorySessionState,
+  subscriber: Subscriber,
+) => {
   return traceSync("memory.subscribe", (span) => {
     addMemoryAttributes(span, { operation: "subscribe" });
-    session.subscribers.add(subscriber);
-    span.setAttribute("memory.subscriber_count", session.subscribers.size);
+    subscribers.add(subscriber);
+    span.setAttribute("memory.subscriber_count", subscribers.size);
     return { ok: {} };
   });
 };
@@ -122,16 +128,19 @@ export const subscribe = (session: Session, subscriber: Subscriber) => {
  * @param subscriber - The subscriber to remove
  * @returns Success result
  */
-export const unsubscribe = (session: Session, subscriber: Subscriber) => {
+const unsubscribe = (
+  { subscribers }: MemorySessionState,
+  subscriber: Subscriber,
+) => {
   return traceSync("memory.unsubscribe", (span) => {
     addMemoryAttributes(span, { operation: "unsubscribe" });
-    session.subscribers.delete(subscriber);
-    span.setAttribute("memory.subscriber_count", session.subscribers.size);
+    subscribers.delete(subscriber);
+    span.setAttribute("memory.subscriber_count", subscribers.size);
     return { ok: {} };
   });
 };
 
-export const query = async (session: Session, query: Query) => {
+const query = async (session: MemorySessionState, query: Query) => {
   return await traceAsync("memory.query", async (span) => {
     addMemoryAttributes(span, {
       operation: "query",
@@ -149,7 +158,10 @@ export const query = async (session: Session, query: Query) => {
   });
 };
 
-export const querySchema = async (session: Session, query: SchemaQuery) => {
+export const querySchema = async (
+  session: MemorySessionState,
+  query: SchemaQuery,
+) => {
   return await traceAsync("memory.querySchema", async (span) => {
     addMemoryAttributes(span, {
       operation: "querySchema",
@@ -167,7 +179,10 @@ export const querySchema = async (session: Session, query: SchemaQuery) => {
   });
 };
 
-export const transact = async (session: Session, transaction: Transaction) => {
+const transact = async (
+  session: MemorySessionState,
+  transaction: Transaction,
+) => {
   return await traceAsync("memory.transact", async (span) => {
     addMemoryAttributes(span, {
       operation: "transact",
@@ -185,7 +200,7 @@ export const transact = async (session: Session, transaction: Transaction) => {
     }
 
     span.setAttribute("mount.status", "success");
-    const result = space.transact(transaction);
+    const result = await space.transact(transaction);
 
     if (result.error) {
       return result;
@@ -212,9 +227,9 @@ export const transact = async (session: Session, transaction: Transaction) => {
   });
 };
 
-export const mount = async (
-  session: Session,
-  subject: Subject,
+const mount = async (
+  { spaces, store }: MemorySessionState,
+  subject: DID,
 ): Promise<Result<SpaceSession, ConnectionError>> => {
   return await traceAsync("memory.mount", async (span) => {
     addMemoryAttributes(span, {
@@ -222,7 +237,7 @@ export const mount = async (
       space: subject,
     });
 
-    const space = session.spaces.get(subject);
+    const space = spaces.get(subject);
     if (space) {
       span.setAttribute("memory.mount.cache", "hit");
       return { ok: space };
@@ -230,7 +245,7 @@ export const mount = async (
       span.setAttribute("memory.mount.cache", "miss");
 
       const result = await Space.open({
-        url: new URL(`./${subject}.sqlite`, session.store),
+        url: new URL(`./${subject}.sqlite`, store),
       });
 
       if (result.error) {
@@ -238,8 +253,8 @@ export const mount = async (
       }
 
       const replica = result.ok as SpaceSession;
-      session.spaces.set(subject, replica);
-      span.setAttribute("memory.spaces_count", session.spaces.size);
+      spaces.set(subject, replica);
+      span.setAttribute("memory.spaces_count", spaces.size);
       return { ok: replica };
     }
   });
@@ -281,7 +296,7 @@ export const emulate = (options: ServiceOptions) =>
     store: new URL("memory://"),
   });
 
-export const close = async (session: Session) => {
+export const close = async (session: MemorySessionState) => {
   return await traceAsync("memory.close", async (span) => {
     addMemoryAttributes(span, { operation: "close" });
     span.setAttribute("memory.spaces_count", session.spaces.size);

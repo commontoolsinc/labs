@@ -1,4 +1,5 @@
 import {
+  ContextualFlowControl,
   deepEqual,
   type JSONObject,
   type JSONValue,
@@ -48,8 +49,7 @@ import {
   type SelectedFact,
   selectFact,
   selectFacts,
-  type Session,
-  SpaceStoreSession,
+  type SpaceStoreSession,
   toSelection,
 } from "./space.ts";
 
@@ -163,6 +163,7 @@ export const selectSchema = <Space extends MemorySpace>(
     Immutable<JSONValue>,
     SchemaContext | undefined
   >();
+  const cfc = new ContextualFlowControl();
   const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
@@ -188,6 +189,7 @@ export const selectSchema = <Space extends MemorySpace>(
         entry,
         selectorEntry.value,
         tracker,
+        cfc,
         schemaTracker,
       );
 
@@ -253,6 +255,7 @@ function loadFactsForDoc(
   fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
+  cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
@@ -266,6 +269,7 @@ function loadFactsForDoc(
         factValue,
         selector.path,
         tracker,
+        cfc,
         schemaTracker,
         selector,
       );
