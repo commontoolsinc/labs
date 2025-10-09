@@ -737,8 +737,8 @@ async function startRequest(
       t?.inputSchema;
     if (inputSchema === undefined) continue;
     inputSchema = normalizeInputSchema(inputSchema);
-    let description: string = tool.description ??
-      (inputSchema as any)?.description ?? "";
+      const description: string = tool.description ??
+        (inputSchema as any)?.description ?? "";
     toolsWithSchemas[name] = { description, inputSchema };
   }
 
