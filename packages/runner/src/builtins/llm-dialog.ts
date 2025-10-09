@@ -21,7 +21,6 @@ import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { parseLink } from "../link-utils.ts";
-import { isStreamValue } from "@commontools/runner";
 import { processSchema } from "@commontools/charm";
 
 const logger = getLogger("llm-dialog", {
@@ -74,26 +73,7 @@ function stripInjectedResult(
 
 type ToolKind = "handler" | "cell" | "pattern";
 
-type ToolDescriptor = {
-  kind: ToolKind;
-  name: string;
-  path: string[];
-  charmName: string;
-  charm?: Cell<any>;
-  handlerCell?: Cell<any>;
-  cellRef?: Cell<any>;
-  description?: string;
-  schema?: JSONSchema;
-};
-
-function isCharmPrivateKey(key: string): boolean {
-  return key.startsWith("$") || key === String(NAME) || key === String(UI) ||
-    key === String(ID);
-}
-
-function buildToolName(charmName: string, key: string): string {
-  return `${slugify(charmName)}_${slugify(key)}`;
-}
+// No-op helpers removed: we no longer enumerate charm internals
 
 function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   let inputSchema: any = schemaLike;
@@ -153,29 +133,17 @@ async function getCharmResultSchemaAsync(
   return undefined;
 }
 
-function describeTool(
-  baseDescription: string | undefined,
-  inputSchema: JSONSchema | undefined,
-  fallback: string,
-  warnIfNoSchema = false,
-): string {
-  let description: string | undefined = baseDescription ||
-    (isBoolean(inputSchema)
-      ? undefined
-      : (inputSchema?.description as string | undefined));
-  description = description || fallback;
-  if (warnIfNoSchema && !inputSchema) description = `⚠️ ${description}`;
-  return description;
-}
+// Description assembly handled inline per aggregated tool
 
-/**
- * Discover charm-derived tools (streams as handlers, cells as readables).
- * Keeps current behavior: only top-level keys, skip private keys.
- */
-// We no longer enumerate all charm internals. Aggregated tools resolve paths
-// dynamically at invocation. This helper is retained only for type context.
-function discoverTools(_toolsCell: Cell<any>): Map<string, ToolDescriptor> {
-  return new Map();
+// No discovery/enumeration of charm internals; we expose only aggregated tools.
+
+function stringifySchemaGuarded(schema: JSONSchema | undefined): string {
+  try {
+    const s = JSON.stringify(schema ?? {});
+    return s.length > 4000 ? s.slice(0, 4000) + "…" : s;
+  } catch {
+    return "{}";
+  }
 }
 
 /**
@@ -291,10 +259,6 @@ const internalSchema = {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  toolHandlers?: Map<
-    string,
-    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
-  >,
   runtime?: IRuntime,
 ): Record<
   string,
@@ -361,15 +325,8 @@ function flattenTools(
     } catch {
       // ignore
     }
-    schema = schema ?? {} as JSONSchema;
-    const schemaString = (() => {
-      try {
-        const s = JSON.stringify(schema);
-        return s.length > 4000 ? s.slice(0, 4000) + "…" : s;
-      } catch {
-        return "{}";
-      }
-    })();
+    schema = schema ?? ({} as JSONSchema);
+    const schemaString = stringifySchemaGuarded(schema);
 
     flattened[readName] = {
       description:
@@ -730,41 +687,8 @@ export function llmDialog(
     const toolsCell = inputs.key("tools");
     // Ensure reactivity: register a read of tools with this tx
     toolsCell.withTx(tx).get();
-    const flattened = flattenTools(toolsCell, undefined, runtime);
+    const flattened = flattenTools(toolsCell, runtime);
     result.withTx(tx).key("flattenedTools").set(flattened as any);
-
-    // Best-effort: if schemas are missing because recipes aren't loaded yet,
-    // load them asynchronously and refresh flattened tools once.
-    (async () => {
-      try {
-        const toolsObj = toolsCell.get() ?? {};
-        const toLoad: Array<{ id: string; space: MemorySpace }> = [];
-        for (const tool of Object.values<any>(toolsObj)) {
-          const charmCell: Cell<any> | undefined = tool?.charm?.get?.()
-            ? tool.charm
-            : undefined;
-          if (!charmCell) continue;
-          const source = charmCell.getSourceCell(processSchema);
-          const recipeId = source?.get()?.[TYPE];
-          if (!recipeId) continue;
-          const existing = runtime.recipeManager.recipeById(recipeId);
-          if (!existing) toLoad.push({ id: recipeId, space: charmCell.space });
-        }
-        if (toLoad.length > 0) {
-          await Promise.all(
-            toLoad.map(({ id, space }) =>
-              runtime.recipeManager.loadRecipe(id, space)
-            ),
-          );
-          const tx2 = runtime.edit();
-          const updated = flattenTools(toolsCell, undefined, runtime);
-          result.withTx(tx2).key("flattenedTools").set(updated as any);
-          await tx2.commit();
-        }
-      } catch (_e) {
-        // ignore; not critical for core flow
-      }
-    })();
 
     if (
       (!result.withTx(tx).key("pending").get() ||
@@ -778,7 +702,7 @@ export function llmDialog(
   };
 }
 
-function startRequest(
+async function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
@@ -794,22 +718,11 @@ function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // Map to store references for charm-extracted tools (handlers or cells)
-  const toolHandlers = new Map<
-    string,
-    { handler?: any; cell?: Cell<any>; charm: Cell<any> }
-  >();
+  // No need to flatten here; UI handles flattened tools reactively
 
-  // Flatten tools (extracts handlers from charms, stores handler refs)
-  const flattenedTools = flattenTools(toolsCell, toolHandlers, runtime);
-
-  // Build LLM tools asynchronously so we can load recipes if needed
-  (async () => {
-    const toolsWithSchemas: Record<
-      string,
-      { description: string; inputSchema: JSONSchema }
-    > = {};
-    const aggregatedTools = new Map<string, { charm: Cell<any> }>();
+  // Build LLM tools; may load recipes to fetch schemas
+  const toolsWithSchemas: Record<string, { description: string; inputSchema: JSONSchema }>= {};
+  const aggregatedTools = new Map<string, { charm: Cell<any> }>();
 
     // Pass-through non-charm tools
     for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
@@ -839,14 +752,7 @@ function startRequest(
       const runName = `${slug}_run`;
 
       const schema = await getCharmResultSchemaAsync(runtime, charmCell) ?? {};
-      const schemaString = (() => {
-        try {
-          const s = JSON.stringify(schema);
-          return s.length > 4000 ? s.slice(0, 4000) + "…" : s;
-        } catch {
-          return "{}";
-        }
-      })();
+      const schemaString = stringifySchemaGuarded(schema as JSONSchema);
 
       toolsWithSchemas[readName] = {
         description:
@@ -884,7 +790,7 @@ function startRequest(
       aggregatedTools.set(runName, { charm: charmCell });
     }
 
-    const llmParams: LLMRequest = {
+  const llmParams: LLMRequest = {
       system: system ?? "",
       messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
       maxTokens: maxTokens,
@@ -893,12 +799,12 @@ function startRequest(
       metadata: { context: "charm" },
       cache: true,
       tools: toolsWithSchemas,
-    };
+  };
 
-    // TODO(bf): sendRequest must be given a callback, even if it does nothing
-    const resultPromise = client.sendRequest(llmParams, () => {}, abortSignal);
+  // TODO(bf): sendRequest must be given a callback, even if it does nothing
+  const resultPromise = client.sendRequest(llmParams, () => {}, abortSignal);
 
-    resultPromise
+  resultPromise
       .then(async (llmResult) => {
         // Extract tool calls from content if it's an array
         const hasToolCalls = Array.isArray(llmResult.content) &&
@@ -1076,7 +982,7 @@ function startRequest(
             );
 
             if (success) {
-              console.log("Continuing conversation after tool calls...");
+              logger.info("Continuing conversation after tool calls...");
 
               const continueTx = runtime.edit();
               startRequest(
@@ -1092,9 +998,7 @@ function startRequest(
               );
               continueTx.commit();
             } else {
-              console.info(
-                "Did not write to conversation due to pending=false",
-              );
+              logger.info("Skipping write: pending=false or request changed");
             }
           } catch (error: unknown) {
             console.error(error);
@@ -1122,11 +1026,10 @@ function startRequest(
           );
         }
       })
-      .catch((error: unknown) => {
-        console.error("Error generating data", error);
-        runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-        });
+    .catch((error: unknown) => {
+      console.error("Error generating data", error);
+      runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
       });
-  })();
+    });
 }
