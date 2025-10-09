@@ -73,8 +73,6 @@ function stripInjectedResult(
 
 type ToolKind = "handler" | "cell" | "pattern";
 
-// No-op helpers removed: we no longer enumerate charm internals
-
 function normalizeInputSchema(schemaLike: unknown): JSONSchema {
   let inputSchema: any = schemaLike;
   if (isBoolean(inputSchema)) {
@@ -93,8 +91,6 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */
-// Removed sync variant to avoid duplication; use async resolver where possible.
-
 async function getCharmResultSchemaAsync(
   runtime: IRuntime,
   charm: Cell<any>,
@@ -133,10 +129,6 @@ async function getCharmResultSchemaAsync(
   return undefined;
 }
 
-// Description assembly handled inline per aggregated tool
-
-// No discovery/enumeration of charm internals; we expose only aggregated tools.
-
 function stringifySchemaGuarded(schema: JSONSchema | undefined): string {
   try {
     const s = JSON.stringify(schema ?? {});
@@ -145,19 +137,6 @@ function stringifySchemaGuarded(schema: JSONSchema | undefined): string {
     return "{}";
   }
 }
-
-/**
- * Build a per-charm index for future read/run routing.
- * Groups discovered tools by charm and summarizes readable and runnable paths.
- */
-// (Removed tools index; we can derive from schema on demand.)
-
-/**
- * Best-effort sanitizer to remove injected `result` fields from any tool-like
- * object so UI consumers (e.g., ct-tools-chip) don't show it as a parameter.
- */
-// Intentionally minimal sanitization for flattened tool entries. We only
-// remove the injected `result` from `inputSchema` if present.
 
 const LLMMessageSchema = {
   type: "object",
@@ -737,8 +716,8 @@ async function startRequest(
       t?.inputSchema;
     if (inputSchema === undefined) continue;
     inputSchema = normalizeInputSchema(inputSchema);
-      const description: string = tool.description ??
-        (inputSchema as any)?.description ?? "";
+    const description: string = tool.description ??
+      (inputSchema as any)?.description ?? "";
     toolsWithSchemas[name] = { description, inputSchema };
   }
 
