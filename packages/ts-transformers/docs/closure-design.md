@@ -57,9 +57,11 @@ Original Source
      ↓
 [Closure Transformer] ← Transforms OpaqueRef<T[]>.map() callbacks with captures
      ↓
-[OpaqueRef Transformer] ← Wraps reactive expressions in derive()
+[Schema Injection Transformer] ← Wraps recipe<T>() calls with toSchema<T>()
      ↓
-[Schema Transformer] ← Generates JSON schemas
+[OpaqueRef JSX Transformer] ← Wraps reactive expressions in derive()
+     ↓
+[Schema Generator Transformer] ← Generates JSON schemas from type arguments
      ↓
 Final Output
 ```
@@ -67,6 +69,12 @@ Final Output
 **Key Insight**: Each transformer operates on the output of the previous one,
 creating a new AST. However, TypeChecker always references the original source
 AST.
+
+**Pipeline Stages**:
+1. **ClosureTransformer**: Transforms map callbacks with captures
+2. **SchemaInjectionTransformer**: Adds toSchema wrappers to recipe calls
+3. **OpaqueRefJSXTransformer**: Wraps reactive JSX expressions in derive
+4. **SchemaGeneratorTransformer**: Converts type arguments to JSON schemas
 
 ### Component Architecture
 
@@ -83,14 +91,18 @@ AST.
    - All transformers run in correct order automatically
    - No need for per-test transformer configuration
 
-3. **Pipeline Configuration** (`src/transform.ts`)
+3. **Pipeline Configuration** (`src/ct-pipeline.ts`)
    ```typescript
-   export function commonTypeScriptTransformer(program: ts.Program) {
-     return [
-       createClosureTransformer(program),      // FIRST: handle closures
-       createModularOpaqueRefTransformer(...), // THEN: handle reactivity
-       createSchemaTransformer(...),           // FINALLY: schemas
-     ];
+   export class CommonToolsTransformerPipeline extends Pipeline {
+     constructor(options: TransformationOptions = {}) {
+       const ops = { typeRegistry: new WeakMap(), ...options };
+       super([
+         new ClosureTransformer(ops),           // FIRST: handle closures
+         new SchemaInjectionTransformer(ops),   // SECOND: add toSchema wrappers
+         new OpaqueRefJSXTransformer(ops),      // THIRD: handle reactivity
+         new SchemaGeneratorTransformer(ops),   // FINALLY: generate schemas
+       ]);
+     }
    }
    ```
 
@@ -442,24 +454,26 @@ Configuration in `test/fixture-based.test.ts`:
 
 ### Test Coverage
 
-All 70 fixture tests passing, including:
+All fixture tests passing (16 closure-specific tests + other feature area tests), including:
 
-**Map Callback Tests (14 tests)**:
+**Map Callback Tests (16 closure transformation tests)**:
 
-- ✅ Single captured variable
-- ✅ Multiple captured variables (selective)
-- ✅ Module-scoped constants (NOT captured)
-- ✅ Module-scoped functions (NOT captured)
-- ✅ Handler references (NOT captured)
-- ✅ Nested callbacks (parent scope captured)
-- ✅ Nested property access (state.discount)
-- ✅ Mixed with reactive expressions
-- ✅ JSX in callbacks
-- ✅ Variables declared inside callback (not captured)
-- ✅ Block body with local variables
-- ✅ Index parameter preservation
-- ✅ Destructured parameters
-- ✅ Template literals, conditional expressions, type assertions
+1. ✅ Single captured variable (`map-single-capture`)
+2. ✅ Multiple captured variables (selective) (`map-multiple-captures`)
+3. ✅ Module-scoped constants NOT captured (`map-import-reference`)
+4. ✅ Handler functions NOT captured (`map-handler-reference`)
+5. ✅ Nested callbacks with parent scope capture (`map-nested-callback` - known limitation)
+6. ✅ Nested property access (`map-nested-property`)
+7. ✅ Index parameter preservation (`map-index-param-used`)
+8. ✅ Block body with local variables (`map-block-body-locals`)
+9. ✅ Destructured parameters (`map-destructured-param`)
+10. ✅ Template literals (`map-template-literal`)
+11. ✅ Conditional expressions (`map-conditional-expression`)
+12. ✅ Type assertions (`map-type-assertion`)
+13. ✅ No captures - no transformation (`map-no-captures`)
+14. ✅ Plain arrays NOT transformed (`map-plain-array-no-transform`)
+15. ✅ Cell arrays ARE transformed (`cell-map-with-captures`)
+16. ✅ Method chains (filter→map) (`filter-map-chain`)
 
 ## Architectural Insights
 

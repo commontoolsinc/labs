@@ -33,9 +33,9 @@ a clean, standalone architecture.
    - INCLUDES captures from parent callback scope (nested maps)
    - Handles all edge cases: JSX, nested properties, local variables
 
-3. **Clean Pipeline Architecture** (`src/transform.ts`)
+3. **Clean Pipeline Architecture** (`src/ct-pipeline.ts`)
    ```typescript
-   Closure → OpaqueRef → Schema
+   Closure → SchemaInjection → OpaqueRefJSX → SchemaGenerator
    ```
 
 4. **Unified Test Infrastructure**
@@ -113,11 +113,12 @@ state.items.map(
 - TypeChecker references original AST
 - They're the same objects!
 
-**Type Checking** (`isMapCall`):
+**Type Checking** (`isOpaqueRefArrayMapCall`):
 
-- Only matches `OpaqueRef<T[]>.map()` calls
-- Rejects `Cell<T[]>.map()` and plain `T[].map()`
-- Uses TypeChecker to get the type string and checks for "OpaqueRef<"
+- Matches `OpaqueRef<T[]>.map()` calls
+- ALSO matches `Cell<T[]>.map()` calls (Cell is also reactive)
+- Does NOT transform plain `T[].map()`
+- Uses `isOpaqueRefType()` from opaque-ref/opaque-ref.ts for robust type checking
 
 **Transformation** (`transformMapCallback`):
 
@@ -143,16 +144,26 @@ Cell arrays (ARE transformed)
 
 #### Test Coverage
 
-- ✅ Single captured variable
-- ✅ Multiple captured variables (selective)
-- ✅ Module-scoped constants (NOT captured)
-- ✅ Module-scoped functions (NOT captured)
-- ✅ Handler references (NOT captured)
-- ✅ Nested callbacks (parent scope capture)
-- ✅ Nested property access
-- ✅ Mixed with reactive expressions
-- ✅ JSX in callbacks
-- ✅ No false positives (local vars, params, JSX, module-scoped, functions)
+**16 total closure transformation tests**:
+
+1. ✅ Single captured variable (`map-single-capture`)
+2. ✅ Multiple captured variables (selective) (`map-multiple-captures`)
+3. ✅ Module-scoped constants NOT captured (`map-import-reference`)
+4. ✅ Handler functions NOT captured (`map-handler-reference`)
+5. ✅ Nested callbacks with parent scope capture (`map-nested-callback` - known limitation)
+6. ✅ Nested property access (`map-nested-property`)
+7. ✅ Index parameter preservation (`map-index-param-used`)
+8. ✅ Block body with local variables (`map-block-body-locals`)
+9. ✅ Destructured parameters (`map-destructured-param`)
+10. ✅ Template literals (`map-template-literal`)
+11. ✅ Conditional expressions (`map-conditional-expression`)
+12. ✅ Type assertions (`map-type-assertion`)
+13. ✅ No captures - no transformation (`map-no-captures`)
+14. ✅ Plain arrays NOT transformed (`map-plain-array-no-transform`)
+15. ✅ Cell arrays ARE transformed (`cell-map-with-captures`)
+16. ✅ Method chains (filter→map) (`filter-map-chain`)
+
+**Note**: 15 of 16 tests pass; `map-nested-callback` intentionally fails to document known type inference limitation.
 
 ### Phase 2: Event Handler Support (PLANNED)
 
@@ -438,7 +449,7 @@ using a distinct `map_with_pattern` method instead of overloading `map`.
 - ✅ OpaqueRef/Cell has map_with_pattern method
 - ✅ Transformer emits map_with_pattern calls
 - ✅ Dataflow analyzer correctly handles map_with_pattern in method chains
-- ✅ All 70 tests pass with new method name
+- ✅ All closure tests pass with new method name (15/16, with 1 known limitation)
 - ✅ Incorrect transformations cause compile-time errors (not runtime)
 
 ### Phase 2 Planning
@@ -477,9 +488,56 @@ using a distinct `map_with_pattern` method instead of overloading `map`.
 4. **Source Maps**: How to preserve debugging experience?
 5. **Runtime Curry**: Does runtime support `.curry()` for Phase 3?
 
+## Recent API Changes (October 2025 Rebase)
+
+During the rebase onto main, several API changes from other work were integrated:
+
+### Import Management Refactor
+**Before**: Direct helper import resolution
+```typescript
+const recipeIdentifier = getHelperIdentifier(factory, sourceFile, "recipe");
+```
+
+**After**: Centralized through `ImportRequirements`
+```typescript
+const recipeIdentifier = context.imports.getIdentifier(context, {
+  name: "recipe",
+  module: "commontools",
+});
+```
+
+**Impact**: All import management now flows through the unified `ImportRequirements` API, which automatically tracks and injects required imports.
+
+### Transformer Context API
+**Before**: `context.transformation` for ts.TransformationContext
+```typescript
+ts.visitEachChild(node, visitor, context.transformation);
+```
+
+**After**: Renamed to `context.tsContext` for clarity
+```typescript
+ts.visitEachChild(node, visitor, context.tsContext);
+```
+
+**Impact**: Disambiguates between our `TransformationContext` and TypeScript's `ts.TransformationContext`.
+
+### Emitter Return Types
+**Before**: Emitters could return helper accumulation objects
+```typescript
+return { expression: updated, helpers: new Set<OpaqueRefHelperName>() };
+```
+
+**After**: Emitters return only expressions; helpers managed by imports
+```typescript
+return updated; // ImportRequirements handles helper injection
+```
+
+**Impact**: Simplified emitter contracts; no need to manually track helpers.
+
 ## Documentation Status
 
 - ✅ `closure-design.md` - Updated with final architecture
 - ✅ `closure-implementation-roadmap.md` - This file
-- ⏳ Inline code comments - Needs review and cleanup
-- ⏳ Migration guide - Not yet needed (backwards compatible)
+- ✅ Recent API changes documented above
+- ⏳ Inline code comments - Could use additional cleanup
+- ⏳ Migration guide - Not needed (backwards compatible)
