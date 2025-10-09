@@ -67,6 +67,131 @@ function stripInjectedResult(
   return copy;
 }
 
+// --------------------
+// Helper types + utils
+// --------------------
+
+type ToolKind = "handler" | "cell" | "pattern";
+
+type ToolDescriptor = {
+  kind: ToolKind;
+  name: string;
+  path: string[];
+  charm?: Cell<any>;
+  handlerCell?: Cell<any>;
+  cellRef?: Cell<any>;
+  description?: string;
+  schema?: JSONSchema;
+};
+
+function isCharmPrivateKey(key: string): boolean {
+  return key.startsWith("$") || key === String(NAME) || key === String(UI) ||
+    key === String(ID);
+}
+
+function buildToolName(charmName: string, key: string): string {
+  return `${slugify(charmName)}_${slugify(key)}`;
+}
+
+function normalizeInputSchema(schemaLike: unknown): JSONSchema {
+  let inputSchema: any = schemaLike;
+  if (isBoolean(inputSchema)) {
+    inputSchema = {
+      type: "object",
+      properties: {},
+      additionalProperties: inputSchema,
+    };
+  }
+  if (!isObject(inputSchema)) inputSchema = { type: "object" };
+  return stripInjectedResult(inputSchema) as JSONSchema;
+}
+
+function describeTool(
+  baseDescription: string | undefined,
+  inputSchema: JSONSchema | undefined,
+  fallback: string,
+  warnIfNoSchema = false,
+): string {
+  let description: string | undefined = baseDescription ||
+    (isBoolean(inputSchema) ? undefined
+      : (inputSchema?.description as string | undefined));
+  description = description || fallback;
+  if (warnIfNoSchema && !inputSchema) description = `⚠️ ${description}`;
+  return description;
+}
+
+/**
+ * Discover charm-derived tools (streams as handlers, cells as readables).
+ * Keeps current behavior: only top-level keys, skip private keys.
+ */
+function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
+  const descriptors = new Map<string, ToolDescriptor>();
+  const tools = toolsCell.get() ?? {};
+
+  for (const [name, tool] of Object.entries(tools)) {
+    if (tool?.charm?.get?.()) {
+      const charmCell: Cell<any> = tool.charm;
+      const charm = charmCell.get();
+      if (!charm || typeof charm !== "object") continue;
+      const charmName = String(charm?.[NAME] || name);
+
+      for (const [key, value] of Object.entries(charm)) {
+        if (isCharmPrivateKey(key)) continue;
+
+        if (isStreamValue(value)) {
+          const handlerCell = charmCell.key(key);
+          const hasSchema = !!handlerCell?.schema &&
+            typeof handlerCell?.schema === "object";
+          const schema = normalizeInputSchema(
+            hasSchema ? handlerCell?.schema : { type: "object" },
+          );
+          const desc = describeTool(
+            tool.description as string | undefined,
+            hasSchema ? (handlerCell?.schema as JSONSchema) : undefined,
+            `${key} handler from ${charmName}`,
+            !hasSchema,
+          );
+          const nameBuilt = buildToolName(charmName, key);
+          descriptors.set(nameBuilt, {
+            kind: "handler",
+            name: nameBuilt,
+            path: [key],
+            charm: charmCell,
+            handlerCell,
+            description: desc,
+            schema,
+          });
+        } else if (isCell(charmCell.key(key))) {
+          // Cell fields are exposed as read-only tools with no args
+          const cellRef = charmCell.key(key) as Cell<any>;
+          const schema = normalizeInputSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          });
+          const desc = describeTool(
+            tool.description as string | undefined,
+            schema,
+            `${key} value from ${charmName}`,
+          );
+          const nameBuilt = buildToolName(charmName, key);
+          descriptors.set(nameBuilt, {
+            kind: "cell",
+            name: nameBuilt,
+            path: [key],
+            charm: charmCell,
+            cellRef,
+            description: desc,
+            schema,
+          });
+        }
+      }
+    }
+  }
+
+  return descriptors;
+}
+
 /**
  * Best-effort sanitizer to remove injected `result` fields from any tool-like
  * object so UI consumers (e.g., ct-tools-chip) don't show it as a parameter.
@@ -185,103 +310,43 @@ function flattenTools(
   const flattened: Record<string, any> = {};
   const tools = toolsCell.get() ?? {};
 
-  for (const [name, tool] of Object.entries(tools)) {
-    // If it's a charm tool, extract handlers
-    if (tool.charm?.get()) {
-      const charmCell = tool.charm;
-      const charm = charmCell.get();
-      const charmName = charm?.[NAME] || name;
-      const slugifiedCharmName = slugify(String(charmName));
-
-      if (!charm || typeof charm !== "object") continue;
-
-      // Iterate charm's top-level keys to find handlers
-      for (const [key, value] of Object.entries(charm)) {
-        // Skip special keys
-        if (
-          key.startsWith("$") ||
-          key === String(NAME) ||
-          key === String(UI) ||
-          key === String(ID)
-        ) {
-          continue;
-        }
-
-        // Check if value is a Stream or a Cell. Streams become handler tools;
-        // Cells become read-only tools that return the current value.
-        const toolName = `${slugifiedCharmName}_${slugify(key)}`;
-
-        if (isStreamValue(value)) {
-          // Use asSchema to get the stream with its schema populated
-          const handler = charmCell.key(key);
-          const hasSchema = !!handler?.schema &&
-            typeof handler?.schema === "object";
-          let inputSchema = hasSchema ? handler?.schema : { type: "object" };
-
-          // Maps `any` and `never` to objects with either any or no properties
-          if (isBoolean(inputSchema)) {
-            inputSchema = {
-              type: "object",
-              properties: {},
-              additionalProperties: inputSchema,
-            };
-          }
-
-          let description: string = (tool.description as string | undefined)
-            ? `${tool.description} - ${key}`
-            : (isBoolean(inputSchema)
-              ? undefined
-              : (inputSchema.description as string | undefined)) ||
-              `${key} handler from ${charmName}`;
-
-          // Remove injected result field from schema (UI/LLM shouldn't see it)
-          inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
-
-          // Add warning badge if schema is missing
-          if (!hasSchema) {
-            description = `⚠️ ${description}`;
-          }
-
-          // Store handler reference if map provided
-          if (toolHandlers) {
-            toolHandlers.set(toolName, { handler, charm: charmCell });
-          }
-
-          flattened[toolName] = { handler, description, inputSchema };
-        } else if (isCell(charmCell.key(key))) {
-          // Expose cells as tools that simply return their current value.
-          const cellRef = charmCell.key(key) as Cell<any>;
-          // No arguments accepted for reading a cell value.
-          const inputSchema: JSONSchema = {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          };
-
-          const description: string = (tool.description as string | undefined)
-            ? `${tool.description} - ${key}`
-            : `${key} value from ${charmName}`;
-
-          // Store cell reference if map provided
-          if (toolHandlers) {
-            toolHandlers.set(toolName, { cell: cellRef, charm: charmCell });
-          }
-
-          flattened[toolName] = { description, inputSchema };
-        } else {
-          continue;
-        }
+  // Add charm-derived tools via discovery
+  const descriptors = discoverTools(toolsCell);
+  for (const [toolName, desc] of descriptors.entries()) {
+    if (desc.kind === "handler") {
+      if (toolHandlers && desc.charm && desc.handlerCell) {
+        toolHandlers.set(toolName, {
+          handler: desc.handlerCell,
+          charm: desc.charm,
+        });
       }
-    } else {
-      // Regular handler or pattern tool: only sanitize known inputSchema.
-      const passThrough: Record<string, unknown> = { ...tool };
-      if (
-        passThrough.inputSchema && typeof passThrough.inputSchema === "object"
-      ) {
-        passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+      flattened[toolName] = {
+        handler: desc.handlerCell,
+        description: desc.description,
+        inputSchema: desc.schema,
+      };
+    } else if (desc.kind === "cell") {
+      if (toolHandlers && desc.charm && desc.cellRef) {
+        toolHandlers.set(toolName, {
+          cell: desc.cellRef,
+          charm: desc.charm,
+        });
       }
-      flattened[name] = passThrough;
+      flattened[toolName] = {
+        description: desc.description,
+        inputSchema: desc.schema,
+      };
     }
+  }
+
+  // Preserve pass-through for non-charm tools
+  for (const [name, tool] of Object.entries(tools)) {
+    if (tool?.charm?.get?.()) continue; // already handled via discovery
+    const passThrough: Record<string, unknown> = { ...tool };
+    if (passThrough.inputSchema && typeof passThrough.inputSchema === "object") {
+      passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+    }
+    flattened[name] = passThrough;
   }
 
   return flattened;
@@ -336,7 +401,7 @@ async function safelyPerformUpdate(
  */
 async function ensureSourceCharmRunning(
   runtime: IRuntime,
-  meta: { handler: any; charm: Cell<any> },
+  meta: { handler?: any; charm: Cell<any> },
 ): Promise<void> {
   const charm = meta.charm;
   const result = charm.asSchema({});
@@ -654,25 +719,15 @@ function startRequest(
         const pattern = t?.pattern?.get?.() ?? t?.pattern;
         const handler = t?.handler;
 
-        let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-          t?.inputSchema;
+        let inputSchema = pattern?.argumentSchema ?? handler?.schema ?? t?.inputSchema;
 
         if (inputSchema === undefined) {
           logger.error(`Tool ${name} has no schema`);
           return [];
         }
 
-        // Maps `any` and `never` to objects with either any or no properties
-        if (isBoolean(inputSchema)) {
-          inputSchema = {
-            type: "object",
-            properties: {},
-            additionalProperties: inputSchema,
-          };
-        }
-
-        // Remove injected `result` field from tool schemas (handlers receive it internally)
-        inputSchema = stripInjectedResult(inputSchema) as JSONSchema;
+        // Normalize and sanitize schema
+        inputSchema = normalizeInputSchema(inputSchema) as JSONSchema;
 
         let description: string = tool.description ??
           (isBoolean(inputSchema)
