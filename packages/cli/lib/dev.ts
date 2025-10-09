@@ -21,6 +21,7 @@ export interface ProcessOptions {
   output?: string;
   filename?: string;
   showTransformed?: boolean;
+  mainExport?: string;
 }
 
 export async function process(
@@ -35,6 +36,9 @@ export async function process(
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main),
   );
+  if (options.mainExport) {
+    program.mainExport = options.mainExport;
+  }
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;
