@@ -1,3 +1,4 @@
+import { JSONObject } from "@commontools/api";
 import {
   JSONValue,
   SchemaPathSelector,
@@ -11729,19 +11730,39 @@ class TestObjectManager
   }
 }
 
-// Main test function
-function runTest() {
-  const objectManager = new TestObjectManager();
+const objectManager = new TestObjectManager();
+function initTest(objectManager: TestObjectManager, data: unknown) {
   objectManager.init(data);
-  const traverser = new SchemaObjectTraverser(objectManager, selector);
-  const doc = objectManager.load(docAddress)!;
-  const start = performance.now();
-  traverser.traverse(doc);
-  const end = performance.now();
-  console.log("elapsed", end - start);
 }
 
-runTest();
+// Main test function
+function runTest(objectManager: TestObjectManager) {
+  const traverser = new SchemaObjectTraverser(objectManager, selector);
+  const doc = objectManager.load(docAddress)!;
+  const factValue: IAttestation = {
+    address: { ...doc.address, path: [...doc.address.path, "value"] },
+    value: (doc.value as JSONObject).value,
+  };
+  traverser.traverse(factValue);
+}
+
+function timeFunction(name: string, fn: () => void) {
+  const start = performance.now();
+  fn();
+  const end = performance.now();
+  console.log(name, "took", end - start, "ms");
+}
+
+timeFunction("initTest", () => {
+  initTest(objectManager, data);
+});
+
+const n = 100;
+timeFunction(`traverseLoop${n}`, () => {
+  for (let i = 0; i < n; i++) {
+    runTest(objectManager);
+  }
+});
 
 console.log("\nDone");
 Deno.exit(0);
