@@ -382,7 +382,7 @@ function buildCallbackParamTypeNode(
   const callbackParamProperties: ts.TypeElement[] = [
     factory.createPropertySignature(
       undefined,
-      factory.createIdentifier("elem"),
+      factory.createIdentifier("element"),
       undefined,
       elemTypeNode,
     ),
@@ -583,7 +583,7 @@ function transformMapCallback(
 
   // Transform the callback parameters
   // Original: (item, index?) => ...
-  // New: ({elem, index?, params: {captured1, captured2}}) => ...
+  // New: ({element, index?, params: {captured1, captured2}}) => ...
 
   const originalParams = callback.parameters;
   const elemParam = originalParams[0];
@@ -594,7 +594,7 @@ function transformMapCallback(
     factory.createBindingElement(
       undefined,
       undefined,
-      factory.createIdentifier("elem"),
+      factory.createIdentifier("element"),
       undefined,
     ),
   ];
@@ -682,7 +682,7 @@ function transformMapCallback(
     nestedVisitor,
   ) as typeof transformedBody;
 
-  // Now transform the callback body to use elem instead of the original param name
+  // Now transform the callback body to use element instead of the original param name
   const elemName = elemParam?.name;
 
   // Collect destructured property names if the param is a destructured binding pattern
@@ -695,11 +695,11 @@ function transformMapCallback(
     }
   }
 
-  // Replace references to the original param with elem
-  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "elem") {
+  // Replace references to the original param with element
+  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "element") {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && node.text === elemName.text) {
-        return factory.createIdentifier("elem");
+        return factory.createIdentifier("element");
       }
       return ts.visitEachChild(node, visitor, undefined);
     };
@@ -709,7 +709,7 @@ function transformMapCallback(
     ) as typeof transformedBody;
   }
 
-  // If param was destructured, replace destructured property references with elem.prop
+  // If param was destructured, replace destructured property references with element.prop
   if (destructuredProps.size > 0) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
@@ -721,7 +721,7 @@ function transformMapCallback(
             node.parent.name === node)
         ) {
           return factory.createPropertyAccessExpression(
-            factory.createIdentifier("elem"),
+            factory.createIdentifier("element"),
             factory.createIdentifier(node.text),
           );
         }
@@ -775,7 +775,7 @@ function transformMapCallback(
   );
 
   // Build a TypeNode for the callback parameter to pass as a type argument to recipe<T>()
-  // The callback signature is: ({ elem, index?, params: { captured1, captured2, ... } }) => ...
+  // The callback signature is: ({ element, index?, params: { captured1, captured2, ... } }) => ...
   // Also register individual property TypeNodes in typeRegistry so SchemaGeneratorTransformer can resolve them
   const callbackParamTypeNode = buildCallbackParamTypeNode(
     mapCall,
@@ -800,17 +800,17 @@ function transformMapCallback(
   // Create the params object
   const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
-  // Create map_with_pattern property access (e.g., state.items.map_with_pattern)
+  // Create mapWithPattern property access (e.g., state.items.mapWithPattern)
   // mapCall.expression is a PropertyAccessExpression like state.items.map
-  // We need to replace "map" with "map_with_pattern"
+  // We need to replace "map" with "mapWithPattern"
   const mapWithPatternAccess = ts.isPropertyAccessExpression(mapCall.expression)
     ? factory.createPropertyAccessExpression(
       mapCall.expression.expression, // state.items
-      factory.createIdentifier("map_with_pattern"),
+      factory.createIdentifier("mapWithPattern"),
     )
-    : factory.createIdentifier("map_with_pattern"); // Fallback (shouldn't happen)
+    : factory.createIdentifier("mapWithPattern"); // Fallback (shouldn't happen)
 
-  // Return the transformed map_with_pattern call with recipe as first arg, params as second arg
+  // Return the transformed mapWithPattern call with recipe as first arg, params as second arg
   return factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,

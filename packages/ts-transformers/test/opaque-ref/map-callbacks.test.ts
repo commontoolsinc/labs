@@ -52,7 +52,7 @@ describe("OpaqueRef map callbacks", () => {
     );
     assertStringIncludes(
       output,
-      "({ elem, index, params: { defaultName } }) =>",
+      "({ element, index, params: { defaultName } }) =>",
     );
     assertStringIncludes(
       output,
@@ -63,10 +63,10 @@ describe("OpaqueRef map callbacks", () => {
       output,
       "derive(index, index => index + 1)",
     );
-    // elem[NAME] uses NAME from module scope (import), defaultName from params
+    // element[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
       output,
-      "elem[NAME] || defaultName",
+      "element[NAME] || defaultName",
     );
     // ifElse still gets derive for the negation
     assertStringIncludes(

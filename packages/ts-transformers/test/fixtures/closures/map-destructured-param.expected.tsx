@@ -41,10 +41,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.map_with_pattern(recipe({
+        {state.points.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             x: {
@@ -67,9 +67,9 @@ export default recipe({
                         required: ["scale"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { scale } }) => (<div>
-            Point: ({elem.x * scale}, {elem.y * scale})
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { scale } }) => (<div>
+            Point: ({element.x * scale}, {element.y * scale})
           </div>)), { scale: state.scale })}
       </div>),
     };
