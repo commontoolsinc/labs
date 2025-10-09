@@ -64,10 +64,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -105,14 +105,14 @@ export default recipe({
                         required: ["prefix"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { prefix } }) => (<div>
-            {prefix}: {elem.name}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { prefix } }) => (<div>
+            {prefix}: {element.name}
             <ul>
-              {elem.tags.map_with_pattern(recipe({
+              {element.tags.mapWithPattern(recipe({
                     type: "object",
                     properties: {
-                        elem: {
+                        element: {
                             type: "object",
                             properties: {
                                 id: {
@@ -135,8 +135,8 @@ export default recipe({
                             required: ["name"]
                         }
                     },
-                    required: ["elem", "params"]
-                } as const satisfies JSONSchema, ({ elem, params: { name } }) => (<li>{name} - {elem.name}</li>)), { name: elem.name })}
+                    required: ["element", "params"]
+                } as const satisfies JSONSchema, ({ element, params: { name } }) => (<li>{name} - {element.name}</li>)), { name: element.name })}
             </ul>
           </div>)), { prefix: state.prefix })}
       </div>),

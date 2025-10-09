@@ -29,10 +29,10 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             price: {
@@ -52,8 +52,8 @@ export default recipe({
                         required: ["discount"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { discount } }) => (<span>{elem.price * discount}</span>)), { discount: state.discount })}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { discount } }) => (<span>{element.price * discount}</span>)), { discount: state.discount })}
       </div>),
     };
 });

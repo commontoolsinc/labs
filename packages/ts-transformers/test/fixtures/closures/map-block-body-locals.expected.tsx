@@ -40,10 +40,10 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             price: {
@@ -69,10 +69,10 @@ export default recipe({
                         required: ["taxRate"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, index, params: { taxRate } }) => {
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, index, params: { taxRate } }) => {
                 // Local variable declared inside callback
-                const subtotal = elem.price * elem.quantity;
+                const subtotal = element.price * element.quantity;
                 const localTax = subtotal * 0.1;
                 // Should only capture state.taxRate, not subtotal or localTax
                 return (<div key={index}>

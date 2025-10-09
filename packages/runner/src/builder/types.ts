@@ -128,7 +128,7 @@ declare module "@commontools/api" {
         array: OpaqueRef<T>,
       ) => Opaque<S>,
     ): Opaque<S[]>;
-    map_with_pattern<S>(
+    mapWithPattern<S>(
       op: Recipe,
       params: Record<string, any>,
     ): Opaque<S[]>;
