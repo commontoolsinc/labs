@@ -434,9 +434,13 @@ async function invokeToolCall(
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
-  // Cell tools: read via getAsQueryResult to materialize links/aliases.
+  // Cell tools (aggregated _read): materialize via getAsQueryResult(path)
   if (charmMeta?.cell) {
-    const realized = charmMeta.cell.getAsQueryResult();
+    const input = toolCall.input as any;
+    const pathParts = Array.isArray(input?.path)
+      ? input.path.map((s: any) => String(s))
+      : [];
+    const realized = charmMeta.cell.getAsQueryResult(pathParts);
     // Ensure we return plain JSON by stringifying and parsing
     const value = JSON.parse(JSON.stringify(realized));
     return { type: "json", value };
@@ -861,17 +865,34 @@ async function startRequest(
                 const segs = parts.filter((p: any) =>
                   p !== undefined && p !== null && `${p}`.length > 0
                 );
-                let ref: Cell<any> = agg.charm;
-                for (const p of segs) ref = ref.key(p as any);
 
                 if (name.endsWith("_read")) {
-                  if (isStream(ref)) {
+                  // For reads, keep base charm and use getAsQueryResult(path)
+                  const baseLink = agg.charm.getAsNormalizedFullLink();
+                  const link = {
+                    ...baseLink,
+                    path: [
+                      ...baseLink.path,
+                      ...segs.map((p: any) => p.toString()),
+                    ],
+                  };
+                  const maybeRef: Cell<any> = runtime.getCellFromLink(link);
+                  if (isStream(maybeRef)) {
                     throw new Error(
                       "path resolves to a handler stream; use <slug>_run",
                     );
                   }
-                  charmMeta = { cell: ref, charm: agg.charm } as any;
+                  charmMeta = { cell: agg.charm, charm: agg.charm } as any;
                 } else if (name.endsWith("_run")) {
+                  const baseLink = agg.charm.getAsNormalizedFullLink();
+                  const link = {
+                    ...baseLink,
+                    path: [
+                      ...baseLink.path,
+                      ...segs.map((p: any) => p.toString()),
+                    ],
+                  };
+                  const ref: Cell<any> = runtime.getCellFromLink(link);
                   if (!isStream(ref)) {
                     throw new Error(
                       "path does not resolve to a handler stream",
