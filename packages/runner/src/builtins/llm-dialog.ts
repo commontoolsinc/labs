@@ -856,7 +856,9 @@ async function startRequest(
           for (const toolCallPart of toolCallParts) {
             try {
               const name = toolCallPart.toolName;
-              let charmMeta = toolHandlers.get(name);
+              let charmMeta:
+                | { handler?: any; cell?: Cell<any>; charm: Cell<any> }
+                | undefined;
               let toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined =
                 undefined;
               if (
