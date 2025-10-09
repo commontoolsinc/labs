@@ -56,10 +56,10 @@ export default recipe({
 } as const satisfies JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -86,9 +86,9 @@ export default recipe({
                         required: ["firstName", "lastName"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { firstName, lastName } }) => (<div>
-            {elem.name} - edited by {firstName} {lastName}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { firstName, lastName } }) => (<div>
+            {element.name} - edited by {firstName} {lastName}
           </div>)), { firstName: state.currentUser.firstName, lastName: state.currentUser.lastName })}
       </div>),
     };

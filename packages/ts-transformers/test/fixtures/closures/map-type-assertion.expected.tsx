@@ -23,10 +23,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.map_with_pattern(recipe({
+        {typedItems.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -49,9 +49,9 @@ export default recipe({
                         required: ["prefix"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { prefix } }) => (<div>
-            {prefix}: {elem.name}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { prefix } }) => (<div>
+            {prefix}: {element.name}
           </div>)), { prefix: state.prefix })}
       </div>),
     };
