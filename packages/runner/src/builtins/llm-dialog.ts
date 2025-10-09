@@ -307,7 +307,12 @@ function flattenTools(
   >,
 ): Record<
   string,
-  { handler?: any; description: string; inputSchema?: JSONSchema }
+  {
+    handler?: any;
+    description: string;
+    inputSchema?: JSONSchema;
+    internal?: { kind: ToolKind; path: string[]; charmName: string };
+  }
 > {
   const flattened: Record<string, any> = {};
   const tools = toolsCell.get() ?? {};
@@ -322,10 +327,23 @@ function flattenTools(
           charm: desc.charm,
         });
       }
+      const charmNameValue = (() => {
+        try {
+          const c = desc.charm?.get?.();
+          return String(c?.[NAME] || "");
+        } catch {
+          return "";
+        }
+      })();
       flattened[toolName] = {
         handler: desc.handlerCell,
         description: desc.description,
         inputSchema: desc.schema,
+        internal: {
+          kind: "handler",
+          path: desc.path,
+          charmName: charmNameValue,
+        },
       };
     } else if (desc.kind === "cell") {
       if (toolHandlers && desc.charm && desc.cellRef) {
@@ -334,9 +352,22 @@ function flattenTools(
           charm: desc.charm,
         });
       }
+      const charmNameValue = (() => {
+        try {
+          const c = desc.charm?.get?.();
+          return String(c?.[NAME] || "");
+        } catch {
+          return "";
+        }
+      })();
       flattened[toolName] = {
         description: desc.description,
         inputSchema: desc.schema,
+        internal: {
+          kind: "cell",
+          path: desc.path,
+          charmName: charmNameValue,
+        },
       };
     }
   }
