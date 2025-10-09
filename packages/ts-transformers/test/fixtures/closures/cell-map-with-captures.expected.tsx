@@ -23,10 +23,10 @@ export default recipe({
     const typedValues: Cell<number[]> = cell(state.values);
     return {
         [UI]: (<div>
-        {typedValues.map_with_pattern(recipe({
+        {typedValues.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "number"
                     },
                     params: {
@@ -40,8 +40,8 @@ export default recipe({
                         required: ["multiplier"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { multiplier } }) => (<span>{elem * multiplier}</span>)), { multiplier: state.multiplier })}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { multiplier } }) => (<span>{element * multiplier}</span>)), { multiplier: state.multiplier })}
       </div>),
     };
 });

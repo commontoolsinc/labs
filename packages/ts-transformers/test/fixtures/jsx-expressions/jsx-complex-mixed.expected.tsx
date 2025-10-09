@@ -62,10 +62,10 @@ export default recipe({
         
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map_with_pattern(recipe({
+          {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -98,12 +98,12 @@ export default recipe({
                         required: ["discount", "taxRate"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { discount, taxRate } }) => (<li key={elem.id}>
-              <span>{elem.name}</span>
-              <span> - Original: ${elem.price}</span>
-              <span> - Discounted: ${(elem.price * (1 - discount)).toFixed(2)}</span>
-              <span> - With tax: ${(elem.price * (1 - discount) * (1 + taxRate)).toFixed(2)}</span>
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { discount, taxRate } }) => (<li key={element.id}>
+              <span>{element.name}</span>
+              <span> - Original: ${element.price}</span>
+              <span> - Discounted: ${(element.price * (1 - discount)).toFixed(2)}</span>
+              <span> - With tax: ${(element.price * (1 - discount) * (1 + taxRate)).toFixed(2)}</span>
             </li>)), { discount: state.discount, taxRate: state.taxRate })}
         </ul>
         
