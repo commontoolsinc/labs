@@ -1,12 +1,29 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, str, UI } from "commontools";
+import {
+  Default,
+  h,
+  NAME,
+  OpaqueRef,
+  recipe,
+  str,
+  Stream,
+  UI,
+} from "commontools";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface RecipeState {
   value: Default<number, 1>;
 }
 
-export default recipe<RecipeState>("Dice", (state) => {
+interface RecipeOutput {
+  value: number;
+  something: {
+    nested: string;
+  };
+  roll: Stream<{ sides?: number }>;
+}
+
+export default recipe<RecipeState, RecipeOutput>("Dice", (state) => {
   return {
     [NAME]: `Dice Roller`,
     [UI]: (
@@ -26,7 +43,7 @@ export default recipe<RecipeState>("Dice", (state) => {
       </div>
     ),
     value: state.value,
-    roll: roll(state),
+    roll: roll(state) as unknown as Stream<{ sides?: number }>,
     something: {
       nested: "a secret surprise!",
     },
