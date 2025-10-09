@@ -1,7 +1,9 @@
+import ts from "typescript";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { createTestProgram } from "../utils.ts";
+import { assert } from "@std/assert";
 
 describe("Circular alias error handling", () => {
   it("should throw descriptive error for circular Default aliases", async () => {
@@ -14,14 +16,17 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
-      stmt.kind === 264 && // InterfaceDeclaration
-      (stmt as any).name.text === "SchemaRoot"
-    ) as any;
+      ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"
+    ) as ts.InterfaceDeclaration | undefined;
+    assert(rootInterface, "Found SchemaRoot");
 
     const circularProperty = rootInterface.members[0];
+    assert(circularProperty, "Found circular prop");
+    assert(ts.isPropertySignature(circularProperty), "Is property signature.");
+    assert(circularProperty.type, "Prop has type node.");
     const type = checker.getTypeFromTypeNode(circularProperty.type);
 
     const generator = new SchemaGenerator();
@@ -42,14 +47,17 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
-      stmt.kind === 264 && // InterfaceDeclaration
-      (stmt as any).name.text === "SchemaRoot"
-    ) as any;
+      ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"
+    ) as ts.InterfaceDeclaration | undefined;
+    assert(rootInterface, "Found SchemaRoot");
 
     const circularProperty = rootInterface.members[0];
+    assert(circularProperty, "Found circular prop");
+    assert(ts.isPropertySignature(circularProperty), "Is property signature.");
+    assert(circularProperty.type, "Prop has type node.");
     const type = checker.getTypeFromTypeNode(circularProperty.type);
 
     const generator = new SchemaGenerator();
