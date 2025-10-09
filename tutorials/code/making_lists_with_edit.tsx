@@ -50,7 +50,7 @@ export default recipe("making lists - with edit", () => {
                 value={name}
                 onkeydown={editItem({ names, index })}
               />
-              <button onclick={removeItem({ names, index })}>
+              <button type="button" onclick={removeItem({ names, index })}>
                 Delete
               </button>
             </li>

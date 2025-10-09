@@ -55,7 +55,19 @@ const moveItem = handler<
   },
 );
 
-export default recipe("making lists - with reorder", () => {
+const addFriend = handler<any, { names: Cell<string[]> }>(
+  (event, { names }) => {
+    if (event?.key === "Enter") {
+      const name = event?.target?.value?.trim();
+      if (name) {
+        const currentNames = names.get();
+        names.set([...currentNames, name]);
+      }
+    }
+  },
+);
+
+export default recipe("making lists - with add", () => {
   const names = cell<string[]>([]);
   const selectedIndex = cell<number>(0);
 
@@ -84,6 +96,13 @@ export default recipe("making lists - with reorder", () => {
           key="ArrowDown"
           onct-keybind={moveItem({ names, selectedIndex, direction: "DOWN" })}
         />
+
+        <div>
+          <input
+            onkeydown={addFriend({ names })}
+            placeholder="Add a new friend..."
+          />
+        </div>
 
         <ul>
           {names.map((name, index) => (

@@ -376,7 +376,7 @@ did on list items:
 :emphasize-lines: 2-5
 <li>
   <input value={name} onkeydown={editItem({ names, index })} />
-  <button onclick={removeItem({ names, index })}>
+  <button type="button" onclick={removeItem({ names, index })}>
     Delete
   </button>
 </li>
@@ -595,7 +595,7 @@ Finally, we need to update our list items to be selectable:
 :emphasize-lines: 2
 <li onclick={selectItem({ selectedIndex, index })}>
   <input value={name} onkeydown={editItem({ names, index })} />
-  <button onclick={removeItem({ names, index })}>Delete</button>
+  <button type="button" onclick={removeItem({ names, index })}>Delete</button>
 </li>
 ```
 
@@ -618,3 +618,68 @@ We've demonstrated:
 * Listen for modifier keys (Ctrl) combined with arrow keys
 * Use TypeScript string literal types to create type-safe direction parameters
 * Update multiple cells in response to a single event (names and selectedIndex) 
+
+## Adding Items
+
+Of course we love more friends! We'll add an input field to add new friends.
+Users can type in a new friend name and it will be added to the `Cell<string[]>` holding
+the names of our friends.
+
+Let's create a handler that adds the new name to our list when the user presses Enter.
+The handler will receive a keyboard event from the input field (just like we saw with the [editing section earlier](making_lists_with_inputs)) and the `names` Cell containing all our friends.
+
+```{code-block} typescript
+:label: making_lists_add_handler
+:linenos: true
+:emphasize-lines: 1-10
+const addFriend = handler<any, { names: Cell<string[]> }>(
+  (event, { names }) => {
+    if (event?.key === "Enter") {
+      const name = event?.target?.value?.trim();
+      if (name) {
+        const currentNames = names.get();
+        names.set([...currentNames, name]);
+      }
+    }
+  },
+);
+```
+
+Line 3 checks if the Enter key was pressed.
+
+Line 4 gets the value directly from the input field and removes any extra whitespace with `.trim()`.
+
+Line 5 checks that the name isn't empty (after trimming).
+
+Line 7 uses the spread operator (`...currentNames`) to create a new array with all the existing names, then adds the new name at the end.
+
+Now we can add the input field to our UI:
+
+```{code-block} typescript
+:label: making_lists_add_input
+:linenos: true
+:emphasize-lines: 1-5
+<div>
+  <input
+    onkeydown={addFriend({ names })}
+    placeholder="Add a new friend..."
+  />
+</div>
+```
+
+Line 3 attaches our `addFriend` handler to detect when Enter is pressed.
+
+Line 4 adds placeholder text to show users what the input is for.
+
+When you deploy this recipe, you can type a name and press Enter to add it to the bottom of your friends list.
+
+:::{dropdown} View complete code
+:animate: fade-in
+
+```{literalinclude} ./code/making_lists_with_add.tsx
+:language: typescript
+```
+:::
+
+We've demonstrated:
+* How adding to a `Cell` array will automatically add elements in a call to `.map()`
