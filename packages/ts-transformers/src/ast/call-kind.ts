@@ -79,7 +79,7 @@ function resolveExpressionKind(
 
   if (
     ts.isPropertyAccessExpression(target) &&
-    target.name.text === "map"
+    (target.name.text === "map" || target.name.text === "mapWithPattern")
   ) {
     return { kind: "array-map" };
   }
@@ -178,7 +178,7 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  if (name === "map") {
+  if (name === "map" || name === "mapWithPattern") {
     return { kind: "array-map", symbol: resolved };
   }
 
@@ -228,7 +228,10 @@ function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
 
 function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (declaration.name.text !== "map") return false;
+  if (
+    declaration.name.text !== "map" &&
+    declaration.name.text !== "mapWithPattern"
+  ) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;

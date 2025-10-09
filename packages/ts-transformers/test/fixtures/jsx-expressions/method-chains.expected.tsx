@@ -121,7 +121,26 @@ export default recipe({
 
         {/* Filter then map */}
         <ul>
-          {derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter(x => x > _v2)).map(x => (<li>Value: {derive({ x, state_factor: state.factor }, ({ x: x, state_factor: _v2 }) => x * _v2)}</li>))}
+          {derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter(x => x > _v2)).mapWithPattern(recipe({
+            type: "object",
+            properties: {
+                element: {
+                    type: "number",
+                    asOpaque: true
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        factor: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["factor"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies JSONSchema, ({ element, params: { factor } }) => (<li>Value: {element * factor}</li>)), { factor: state.factor })}
         </ul>
 
         {/* Multiple filters */}

@@ -140,6 +140,22 @@ export function opaqueRef<T>(
           ),
         });
       },
+      mapWithPattern: <S>(
+        op: Recipe,
+        params: Record<string, any>,
+      ) => {
+        // Create the factory if it doesn't exist. Doing it here to avoid
+        // circular dependency.
+        mapFactory ||= createNodeFactory({
+          type: "ref",
+          implementation: "map",
+        });
+        return mapFactory({
+          list: proxy,
+          op: op,
+          params: params,
+        });
+      },
       toJSON: () => null, // TODO(seefeld): Merge with Cell and cover doc-less case
       /**
        * We assume the cell is an array and will provide an infinite iterator.
