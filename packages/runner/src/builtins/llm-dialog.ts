@@ -21,7 +21,7 @@ import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { parseLink } from "../link-utils.ts";
-import { processSchema } from "@commontools/charm";
+// Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
   enabled: true,
@@ -96,7 +96,7 @@ async function getCharmResultSchemaAsync(
   charm: Cell<any>,
 ): Promise<JSONSchema | undefined> {
   try {
-    const source = charm.getSourceCell(processSchema);
+    const source = charm.getSourceCell();
     const recipeId = source?.get()?.[TYPE];
     if (recipeId) {
       await runtime.recipeManager.loadRecipe(recipeId, charm.space);
@@ -124,7 +124,7 @@ function getLoadedRecipeResultSchema(
   charm: Cell<any>,
 ): JSONSchema | undefined {
   try {
-    const source = charm.getSourceCell(processSchema);
+    const source = charm.getSourceCell();
     const recipeId = source?.get()?.[TYPE];
     const recipe = recipeId
       ? runtime?.recipeManager.recipeById(recipeId)
