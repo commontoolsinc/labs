@@ -27,5 +27,8 @@ export default recipe<RecipeState>("Dice", (state) => {
     ),
     value: state.value,
     roll: roll(state),
+    something: {
+      nested: "a secret surprise!",
+    },
   };
 });

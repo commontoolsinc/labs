@@ -77,6 +77,7 @@ type ToolDescriptor = {
   kind: ToolKind;
   name: string;
   path: string[];
+  charmName: string;
   charm?: Cell<any>;
   handlerCell?: Cell<any>;
   cellRef?: Cell<any>;
@@ -161,6 +162,7 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
             kind: "handler",
             name: nameBuilt,
             path: [key],
+            charmName,
             charm: charmCell,
             handlerCell,
             description: desc,
@@ -181,6 +183,7 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
             kind: "cell",
             name: nameBuilt,
             path: [key],
+            charmName,
             charm: charmCell,
             cellRef,
             description: desc,
@@ -193,6 +196,12 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
 
   return descriptors;
 }
+
+/**
+ * Build a per-charm index for future read/run routing.
+ * Groups discovered tools by charm and summarizes readable and runnable paths.
+ */
+// (Removed tools index; we can derive from schema on demand.)
 
 /**
  * Best-effort sanitizer to remove injected `result` fields from any tool-like
@@ -317,60 +326,9 @@ function flattenTools(
   const flattened: Record<string, any> = {};
   const tools = toolsCell.get() ?? {};
 
-  // Add charm-derived tools via discovery
+  // Discover charm-derived tools but do NOT add granular entries; we will only
+  // expose aggregated <Charm>_read and <Charm>_run in the UI.
   const descriptors = discoverTools(toolsCell);
-  for (const [toolName, desc] of descriptors.entries()) {
-    if (desc.kind === "handler") {
-      if (toolHandlers && desc.charm && desc.handlerCell) {
-        toolHandlers.set(toolName, {
-          handler: desc.handlerCell,
-          charm: desc.charm,
-        });
-      }
-      const charmNameValue = (() => {
-        try {
-          const c = desc.charm?.get?.();
-          return String(c?.[NAME] || "");
-        } catch {
-          return "";
-        }
-      })();
-      flattened[toolName] = {
-        handler: desc.handlerCell,
-        description: desc.description,
-        inputSchema: desc.schema,
-        internal: {
-          kind: "handler",
-          path: desc.path,
-          charmName: charmNameValue,
-        },
-      };
-    } else if (desc.kind === "cell") {
-      if (toolHandlers && desc.charm && desc.cellRef) {
-        toolHandlers.set(toolName, {
-          cell: desc.cellRef,
-          charm: desc.charm,
-        });
-      }
-      const charmNameValue = (() => {
-        try {
-          const c = desc.charm?.get?.();
-          return String(c?.[NAME] || "");
-        } catch {
-          return "";
-        }
-      })();
-      flattened[toolName] = {
-        description: desc.description,
-        inputSchema: desc.schema,
-        internal: {
-          kind: "cell",
-          path: desc.path,
-          charmName: charmNameValue,
-        },
-      };
-    }
-  }
 
   // Preserve pass-through for non-charm tools
   for (const [name, tool] of Object.entries(tools)) {
@@ -382,6 +340,59 @@ function flattenTools(
       passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
     }
     flattened[name] = passThrough;
+  }
+
+  // Also include aggregated charm entries for visibility (<Charm>_read/<Charm>_run)
+  const charms = new Map<string, { charm: Cell<any>; slug: string; readables: ToolDescriptor[]; runnables: ToolDescriptor[] }>();
+  for (const desc of descriptors.values()) {
+    const key = desc.charmName;
+    const existing = charms.get(key) ?? { charm: desc.charm!, slug: slugify(desc.charmName), readables: [], runnables: [] };
+    if (desc.kind === "cell") existing.readables.push(desc);
+    if (desc.kind === "handler") existing.runnables.push(desc);
+    charms.set(key, existing);
+  }
+  for (const [charmName, info] of charms) {
+    const readName = `${info.slug}_read`;
+    const runName = `${info.slug}_run`;
+    const readPaths = info.readables.map((d) => d.path.join("."));
+    if (readPaths.length > 0) {
+      const apiShape: Record<string, unknown> = {};
+      for (const d of info.readables) apiShape[d.path.join(".")] = { value: true };
+      for (const d of info.runnables) apiShape[d.path.join(".")] = { Stream: d.schema ?? {} };
+      const apiString = JSON.stringify(apiShape);
+      flattened[readName] = {
+        description: `Read values from charm "${charmName}". API: ${apiString}. Use path: string[] (single key = ["key"]).`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "array", items: { type: "string" }, minItems: 1 },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        } as JSONSchema,
+        internal: { kind: "cell", path: [], charmName },
+      };
+    }
+    const runnablePaths = info.runnables.map((d) => d.path.join("."));
+    if (runnablePaths.length > 0) {
+      const apiShape: Record<string, unknown> = {};
+      for (const d of info.readables) apiShape[d.path.join(".")] = { value: true };
+      for (const d of info.runnables) apiShape[d.path.join(".")] = { Stream: d.schema ?? {} };
+      const apiString = JSON.stringify(apiShape);
+      flattened[runName] = {
+        description: `Run handlers on charm "${charmName}". API: ${apiString}. Use path: string[] and args: object.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "array", items: { type: "string" }, minItems: 1 },
+            args: { type: "object" },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        } as JSONSchema,
+        internal: { kind: "handler", path: [], charmName },
+      };
+    }
   }
 
   return flattened;
@@ -479,9 +490,11 @@ async function invokeToolCall(
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
 
-  // Cell tools: simply read the referenced cell and return its value.
+  // Cell tools: read via getAsQueryResult to materialize links/aliases.
   if (charmMeta?.cell) {
-    const value = charmMeta.cell.get();
+    const realized = charmMeta.cell.getAsQueryResult();
+    // Ensure we return plain JSON by stringifying and parsing
+    const value = JSON.parse(JSON.stringify(realized));
     return { type: "json", value };
   }
 
@@ -744,42 +757,86 @@ function startRequest(
   // Flatten tools (extracts handlers from charms, stores handler refs)
   const flattenedTools = flattenTools(toolsCell, toolHandlers);
 
-  // Build schemas for LLM, filtering out tools without schemas
-  const toolsWithSchemas = Object.fromEntries(
-    Object.entries(flattenedTools).flatMap(
-      (
-        [name, tool],
-      ): Array<[string, { description: string; inputSchema: JSONSchema }]> => {
-        const t: any = tool as any;
-        const pattern = t?.pattern?.get?.() ?? t?.pattern;
-        const handler = t?.handler;
+  // Build LLM tools with aggregated API (two tools per charm) + pass-through non-charm
+  const toolsWithSchemas: Record<string, { description: string; inputSchema: JSONSchema }>= {};
 
-        let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-          t?.inputSchema;
+  // Pass-through non-charm tools
+  for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
+    if (tool?.charm?.get?.()) continue;
+    const t: any = tool as any;
+    const pattern = t?.pattern?.get?.() ?? t?.pattern;
+    const handler = t?.handler;
+    let inputSchema = pattern?.argumentSchema ?? handler?.schema ?? t?.inputSchema;
+    if (inputSchema === undefined) continue;
+    inputSchema = normalizeInputSchema(inputSchema);
+    let description: string = tool.description ?? (inputSchema as any)?.description ?? "";
+    toolsWithSchemas[name] = { description, inputSchema };
+  }
 
-        if (inputSchema === undefined) {
-          logger.error(`Tool ${name} has no schema`);
-          return [];
-        }
+  // Aggregated charm tools
+  const descriptors = discoverTools(toolsCell);
+  const charms = new Map<string, { charm: Cell<any>; slug: string; readables: ToolDescriptor[]; runnables: ToolDescriptor[] }>();
+  for (const desc of descriptors.values()) {
+    const key = desc.charmName;
+    const existing = charms.get(key) ?? { charm: desc.charm!, slug: slugify(desc.charmName), readables: [], runnables: [] };
+    if (desc.kind === "cell") existing.readables.push(desc);
+    if (desc.kind === "handler") existing.runnables.push(desc);
+    charms.set(key, existing);
+  }
 
-        // Normalize and sanitize schema
-        inputSchema = normalizeInputSchema(inputSchema) as JSONSchema;
+  const aggregatedTools = new Map<string, { charm: Cell<any>; readablesByDot: Map<string, Cell<any>>; runnablesByDot: Map<string, { handler: Cell<any> }> }>();
 
-        let description: string = tool.description ??
-          (isBoolean(inputSchema)
-            ? undefined
-            : (inputSchema.description as string | undefined)) ??
-          "";
+  for (const [charmName, info] of charms) {
+    const readName = `${info.slug}_read`;
+    const runName = `${info.slug}_run`;
 
-        if (!description) {
-          logger.warn(`Tool ${name} has no description`);
-          description = "";
-        }
+    const readPaths = info.readables.map((d) => d.path.join("."));
+    if (readPaths.length > 0) {
+      const apiShape: Record<string, unknown> = {};
+      for (const d of info.readables) apiShape[d.path.join(".")] = { value: true };
+      for (const d of info.runnables) apiShape[d.path.join(".")] = { Stream: d.schema ?? {} };
+      const apiString = JSON.stringify(apiShape);
+      toolsWithSchemas[readName] = {
+        description: `Read values from charm "${charmName}". API: ${apiString}. Use path: string[] (single key = ["key"]).`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "array", items: { type: "string" }, minItems: 1 },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        } as JSONSchema,
+      };
+    }
 
-        return [[name, { description, inputSchema }]];
-      },
-    ),
-  );
+    const runnablePaths = info.runnables.map((d) => d.path.join("."));
+    if (runnablePaths.length > 0) {
+      const apiShape: Record<string, unknown> = {};
+      for (const d of info.readables) apiShape[d.path.join(".")] = { value: true };
+      for (const d of info.runnables) apiShape[d.path.join(".")] = { Stream: d.schema ?? {} };
+      const apiString = JSON.stringify(apiShape);
+      toolsWithSchemas[runName] = {
+        description: `Run handlers on charm "${charmName}". API: ${apiString}. Use path: string[] and args: object.`,
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "array", items: { type: "string" }, minItems: 1 },
+            args: { type: "object" },
+          },
+          required: ["path"],
+          additionalProperties: false,
+        } as JSONSchema,
+      };
+    }
+
+    // Prepare aggregates for invocation
+    const readablesByDot = new Map<string, Cell<any>>();
+    for (const d of info.readables) readablesByDot.set(d.path.join("."), d.cellRef!);
+    const runnablesByDot = new Map<string, { handler: Cell<any> }>();
+    for (const d of info.runnables) runnablesByDot.set(d.path.join("."), { handler: d.handlerCell! });
+    aggregatedTools.set(readName, { charm: info.charm, readablesByDot, runnablesByDot });
+    aggregatedTools.set(runName, { charm: info.charm, readablesByDot, runnablesByDot });
+  }
 
   const llmParams: LLMRequest = {
     system: system ?? "",
@@ -843,16 +900,68 @@ function startRequest(
 
           // Execute each tool call and collect results
           const toolResults: any[] = [];
+          // Snapshot tools object to detect presence of legacy/non-aggregated tool defs
+          const toolsObj = toolsCell.get() ?? {};
           for (const toolCallPart of toolCallParts) {
-            // Check if this is a charm-extracted handler (dot notation)
-            const charmMeta = toolHandlers.get(toolCallPart.toolName);
-            const toolDef = charmMeta
-              ? undefined
-              : toolsCell.key(toolCallPart.toolName) as unknown as Cell<
-                Schema<typeof LLMToolSchema>
-              >;
-
             try {
+              const name = toolCallPart.toolName;
+              let charmMeta = toolHandlers.get(name);
+              let toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined = undefined;
+              if (!charmMeta && Object.prototype.hasOwnProperty.call(toolsObj, name)) {
+                toolDef = toolsCell.key(name) as unknown as Cell<Schema<typeof LLMToolSchema>>;
+              }
+
+              // New aggregated API: <Charm>_read | <Charm>_run
+              let adjustedInput = toolCallPart.input;
+              if (!charmMeta && !toolDef && aggregatedTools.has(name)) {
+                const agg = aggregatedTools.get(name)!;
+                const input = toolCallPart.input as any;
+                if (name.endsWith("_read")) {
+                  const parts = Array.isArray((input as any)?.path)
+                    ? (input as any).path.map((s: any) => String(s))
+                    : [];
+                  if (parts.length === 0) {
+                    throw new Error("path must be an array of strings");
+                  }
+                  const pathDot = parts.join(".");
+                  let cellRef = agg.readablesByDot.get(pathDot);
+                  // Fallback to dynamic resolution for nested paths
+                  if (!cellRef) {
+                    const segs = parts.filter(Boolean);
+                    let ref: Cell<any> = agg.charm;
+                    for (const p of segs) ref = ref.key(p as any);
+                    cellRef = ref;
+                  }
+                  charmMeta = { cell: cellRef!, charm: agg.charm } as any;
+                } else if (name.endsWith("_run")) {
+                  const parts = Array.isArray((input as any)?.path)
+                    ? (input as any).path.map((s: any) => String(s))
+                    : [];
+                  if (parts.length === 0) {
+                    throw new Error("path must be an array of strings");
+                  }
+                  const pathDot = parts.join(".");
+                  let handlerRef = agg.runnablesByDot.get(pathDot)?.handler;
+                  if (!handlerRef) {
+                    const segs = parts.filter(Boolean);
+                    let ref: Cell<any> = agg.charm;
+                    for (const p of segs) ref = ref.key(p as any);
+                    handlerRef = ref as any;
+                  }
+                  charmMeta = { handler: handlerRef!, charm: agg.charm } as any;
+                  // For run tools, pass only handler args. Accept both shapes:
+                  // either nested under `args`, or top-level fields alongside path.
+                  toolDef = undefined;
+                  const nestedArgs = (input && typeof input === "object") ? input.args : undefined;
+                  if (nestedArgs !== undefined) {
+                    adjustedInput = nestedArgs;
+                  } else {
+                    const { path, ...rest } = (input && typeof input === "object") ? input : {} as any;
+                    adjustedInput = rest;
+                  }
+                }
+              }
+
               const resultValue = await invokeToolCall(
                 runtime,
                 space,
@@ -860,17 +969,11 @@ function startRequest(
                 {
                   id: toolCallPart.toolCallId,
                   name: toolCallPart.toolName,
-                  input: toolCallPart.input,
+                  input: adjustedInput,
                 },
                 charmMeta,
               );
-              // this resolves back to a cell, so it may still update in the
-              // conversation history reactively later but we intend this to be
-              // a static / snapshot at this stage
-              toolResults.push({
-                id: toolCallPart.toolCallId,
-                result: resultValue,
-              });
+              toolResults.push({ id: toolCallPart.toolCallId, result: resultValue });
             } catch (error) {
               console.error(`Tool ${toolCallPart.toolName} failed:`, error);
               toolResults.push({
