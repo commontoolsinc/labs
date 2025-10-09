@@ -19,7 +19,6 @@ import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 
 let mapFactory: NodeFactory<any, any>;
-let mapWithPatternFactory: NodeFactory<any, any>;
 
 // A opaque ref factory that creates future cells with optional default values.
 //
@@ -141,17 +140,17 @@ export function opaqueRef<T>(
           ),
         });
       },
-      map_with_pattern: <S>(
+      mapWithPattern: <S>(
         op: Recipe,
         params: Record<string, any>,
       ) => {
         // Create the factory if it doesn't exist. Doing it here to avoid
         // circular dependency.
-        mapWithPatternFactory ||= createNodeFactory({
+        mapFactory ||= createNodeFactory({
           type: "ref",
-          implementation: "map_with_pattern",
+          implementation: "map",
         });
-        return mapWithPatternFactory({
+        return mapFactory({
           list: proxy,
           op: op,
           params: params,

@@ -45,10 +45,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -75,8 +75,8 @@ export default recipe({
                         required: ["prefix", "suffix"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { prefix, suffix } }) => (<div>{`${prefix} ${elem.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { prefix, suffix } }) => (<div>{`${prefix} ${element.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
       </div>),
     };
 });

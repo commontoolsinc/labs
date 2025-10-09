@@ -62,10 +62,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.map_with_pattern(recipe({
+        {state.items.mapWithPattern(recipe({
                 type: "object",
                 properties: {
-                    elem: {
+                    element: {
                         type: "object",
                         properties: {
                             id: {
@@ -89,9 +89,9 @@ export default recipe({
                         required: ["count"]
                     }
                 },
-                required: ["elem", "params"]
-            } as const satisfies JSONSchema, ({ elem, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
-            {elem.name}
+                required: ["element", "params"]
+            } as const satisfies JSONSchema, ({ element, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
+            {element.name}
           </ct-button>)), { count: state.count })}
       </div>),
     };
