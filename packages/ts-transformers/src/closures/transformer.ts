@@ -5,7 +5,6 @@ import {
   Transformer,
 } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { getHelperIdentifier } from "../transformers/opaque-ref/import-resolver.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -675,7 +674,7 @@ function transformMapCallback(
         }
       }
     }
-    return ts.visitEachChild(node, nestedVisitor, context.transformation);
+    return ts.visitEachChild(node, nestedVisitor, context.tsContext);
   };
 
   transformedBody = ts.visitNode(
@@ -788,11 +787,10 @@ function transformMapCallback(
   );
 
   // Wrap in recipe<T>() using type argument (SchemaInjectionTransformer will convert to toSchema<T>)
-  const recipeIdentifier = getHelperIdentifier(
-    factory,
-    context.sourceFile,
-    "recipe",
-  );
+  const recipeIdentifier = context.imports.getIdentifier(context, {
+    name: "recipe",
+    module: "commontools",
+  });
   const recipeCall = factory.createCallExpression(
     recipeIdentifier,
     [callbackParamTypeNode], // Type argument
@@ -861,7 +859,7 @@ function transformClosures(context: TransformationContext): ts.SourceFile {
     }
 
     // Continue visiting children
-    return ts.visitEachChild(node, visit, context.transformation);
+    return ts.visitEachChild(node, visit, context.tsContext);
   }
 
   return ts.visitNode(sourceFile, visit) as ts.SourceFile;
