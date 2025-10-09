@@ -174,8 +174,8 @@ function discoverTools(toolsCell: Cell<any>): Map<string, ToolDescriptor> {
             properties: {},
             additionalProperties: false,
           });
-          // For cells, avoid generic base description; make it per-key
-          const desc = `${key} value from ${charmName}`;
+          // For cells, provide a clear read description without duplication
+          const desc = `Read ${key} from ${charmName}`;
           const nameBuilt = buildToolName(charmName, key);
           descriptors.set(nameBuilt, {
             kind: "cell",
