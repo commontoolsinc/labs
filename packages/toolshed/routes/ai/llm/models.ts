@@ -3,8 +3,6 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
-import { createXai, xai } from "@ai-sdk/xai";
-import { createPerplexity, perplexity } from "@ai-sdk/perplexity";
 import type { LanguageModel } from "ai";
 
 import env from "@/env.ts";
@@ -54,9 +52,7 @@ const addModel = ({
     | typeof anthropic
     | typeof groq
     | typeof openai
-    | typeof vertex
-    | typeof xai
-    | typeof perplexity;
+    | typeof vertex;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -415,81 +411,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   });
 }
 
-if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
-  const perplexityProvider = createPerplexity({
-    apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
-  });
-  console.log(" Adding 🤖 perplexity");
-  addModel({
-    provider: perplexityProvider,
-    name: "perplexity:sonar-reasoning-pro",
-    aliases: ["sonar-reasoning-pro"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: false,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
 
-  addModel({
-    provider: perplexityProvider,
-    name: "perplexity:sonar-deep-research",
-    aliases: ["sonar-deep-research"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: false,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
-}
-
-if (env.CTTS_AI_LLM_XAI_API_KEY) {
-  const xaiProvider = createXai({
-    apiKey: env.CTTS_AI_LLM_XAI_API_KEY,
-  });
-  console.log(" Adding 🤖 Xai");
-  addModel({
-    provider: xaiProvider,
-    name: "xai:grok-4",
-    aliases: ["grok-4", "grok-4-latest"],
-    capabilities: {
-      contextWindow: 256_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: xaiProvider,
-    name: "xai:grok-4-thinking",
-    aliases: ["grok-4-thinking", "grok-4-thinking-latest"],
-    capabilities: {
-      contextWindow: 256_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
-}
 
 export const findModel = (name: string) => {
   return MODELS[name];
