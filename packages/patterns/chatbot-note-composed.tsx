@@ -321,7 +321,10 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       backlinks: note.backlinks,
       list,
       // Expose both child charms for mention systems that scan charm exports.
-      mentionable: [chat as unknown as MentionableCharm, note as unknown as MentionableCharm],
+      mentionable: [
+        chat as unknown as MentionableCharm,
+        note as unknown as MentionableCharm,
+      ],
     };
   },
 );
