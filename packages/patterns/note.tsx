@@ -129,7 +129,7 @@ const Note = recipe<Input, Output>(
 
           <ct-code-editor
             $value={content}
-            $mentionable={mentionableSource}
+            $mentions={index}
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
