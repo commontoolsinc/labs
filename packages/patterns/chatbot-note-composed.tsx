@@ -81,6 +81,8 @@ type ChatbotNoteResult = {
   note: any;
   chat: any;
   list: Default<ListItem[], []>;
+  // Optional: expose sub-charms as mentionable targets
+  mentionable?: MentionableCharm[];
 };
 
 const newNote = handler<
@@ -318,6 +320,8 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       mentioned: note.mentioned,
       backlinks: note.backlinks,
       list,
+      // Expose both child charms for mention systems that scan charm exports.
+      mentionable: [chat as unknown as MentionableCharm, note as unknown as MentionableCharm],
     };
   },
 );

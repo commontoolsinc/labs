@@ -47,6 +47,10 @@ type Input = {
 
 type Output = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
+  // Expose a mentionable list aggregated from local chat entries
+  // Returned as an opaque ref to an array (not a Cell), suitable for
+  // upstream aggregators that read exported mentionables.
+  mentionable?: MentionableCharm[];
 };
 
 const removeChat = handler<
@@ -259,6 +263,21 @@ export default recipe<Input, Output>(
 
     const selected = getSelectedCharm({ entry: selectedCharm });
 
+    // Aggregate mentionables from the local charms list so that this
+    // container exposes its child chat/note charms as mention targets.
+    const localMentionable = lift<
+      { list: CharmEntry[] },
+      MentionableCharm[]
+    >(({ list }) => {
+      const out: MentionableCharm[] = [];
+      for (const entry of list) {
+        const c = entry.charm;
+        out.push(c.note);
+        out.push(c.chat);
+      }
+      return out;
+    })({ list: charmsList });
+
     const localTheme = theme ?? {
       accentColor: cell("#3b82f6"),
       fontFace: cell("system-ui, -apple-system, sans-serif"),
@@ -468,6 +487,8 @@ export default recipe<Input, Output>(
       ),
       selectedCharm,
       charmsList,
+      // Expose the aggregated mentionables for parent-level indexing.
+      mentionable: localMentionable,
     };
   },
 );

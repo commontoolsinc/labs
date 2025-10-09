@@ -66,7 +66,7 @@ const removeCharm = handler<
 
 const spawnChatList = handler<
   Record<string, never>,
-  { allCharms: Cell<Charm[]>, index: any }
+  { allCharms: Cell<Charm[]>; index: any }
 >((_, state) => {
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
@@ -116,10 +116,7 @@ const spawnNote = handler<
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   ({ allCharms }) => {
-    // Build one shared backlinks index for all notes in this app
-    const index = BacklinksIndex({
-      allCharms: allCharms as unknown as OpaqueRef<Cell<MentionableCharm[]>>,
-    });
+    const index = BacklinksIndex({ allCharms });
     return {
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
