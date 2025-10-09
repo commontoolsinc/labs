@@ -721,311 +721,312 @@ async function startRequest(
   // No need to flatten here; UI handles flattened tools reactively
 
   // Build LLM tools; may load recipes to fetch schemas
-  const toolsWithSchemas: Record<string, { description: string; inputSchema: JSONSchema }>= {};
+  const toolsWithSchemas: Record<
+    string,
+    { description: string; inputSchema: JSONSchema }
+  > = {};
   const aggregatedTools = new Map<string, { charm: Cell<any> }>();
 
-    // Pass-through non-charm tools
-    for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
-      if (tool?.charm?.get?.()) continue;
-      const t: any = tool as any;
-      const pattern = t?.pattern?.get?.() ?? t?.pattern;
-      const handler = t?.handler;
-      let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-        t?.inputSchema;
-      if (inputSchema === undefined) continue;
-      inputSchema = normalizeInputSchema(inputSchema);
-      let description: string = tool.description ??
-        (inputSchema as any)?.description ?? "";
-      toolsWithSchemas[name] = { description, inputSchema };
-    }
+  // Pass-through non-charm tools
+  for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
+    if (tool?.charm?.get?.()) continue;
+    const t: any = tool as any;
+    const pattern = t?.pattern?.get?.() ?? t?.pattern;
+    const handler = t?.handler;
+    let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
+      t?.inputSchema;
+    if (inputSchema === undefined) continue;
+    inputSchema = normalizeInputSchema(inputSchema);
+    let description: string = tool.description ??
+      (inputSchema as any)?.description ?? "";
+    toolsWithSchemas[name] = { description, inputSchema };
+  }
 
-    // Aggregated charm tools: include schema by loading recipe if needed
-    for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
-      const charmCell: Cell<any> | undefined = tool?.charm?.get?.()
-        ? tool.charm
-        : undefined;
-      if (!charmCell) continue;
-      const charmValue = charmCell.get();
-      const charmName = String(charmValue?.[NAME] || name);
-      const slug = `${slugify(charmName)}`;
-      const readName = `${slug}_read`;
-      const runName = `${slug}_run`;
+  // Aggregated charm tools: include schema by loading recipe if needed
+  for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
+    const charmCell: Cell<any> | undefined = tool?.charm?.get?.()
+      ? tool.charm
+      : undefined;
+    if (!charmCell) continue;
+    const charmValue = charmCell.get();
+    const charmName = String(charmValue?.[NAME] || name);
+    const slug = `${slugify(charmName)}`;
+    const readName = `${slug}_read`;
+    const runName = `${slug}_run`;
 
-      const schema = await getCharmResultSchemaAsync(runtime, charmCell) ?? {};
-      const schemaString = stringifySchemaGuarded(schema as JSONSchema);
+    const schema = await getCharmResultSchemaAsync(runtime, charmCell) ?? {};
+    const schemaString = stringifySchemaGuarded(schema as JSONSchema);
 
-      toolsWithSchemas[readName] = {
-        description:
-          `Read values from charm "${charmName}" using path: string[]. ` +
-          `Construct paths by walking the charm schema (single key -> ["key"]). ` +
-          `Schema: ${schemaString}`,
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: { type: "array", items: { type: "string" }, minItems: 1 },
-          },
-          required: ["path"],
-          additionalProperties: false,
-        } as JSONSchema,
-      };
+    toolsWithSchemas[readName] = {
+      description:
+        `Read values from charm "${charmName}" using path: string[]. ` +
+        `Construct paths by walking the charm schema (single key -> ["key"]). ` +
+        `Schema: ${schemaString}`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "array", items: { type: "string" }, minItems: 1 },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      } as JSONSchema,
+    };
 
-      toolsWithSchemas[runName] = {
-        description:
-          `Run handlers on charm "${charmName}" using path: string[] ` +
-          `to a handler stream and args: object. You may pass args nested ` +
-          `under input.args or as top-level fields (path removed). ` +
-          `Schema: ${schemaString}`,
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: { type: "array", items: { type: "string" }, minItems: 1 },
-            args: { type: "object" },
-          },
-          required: ["path"],
-          additionalProperties: false,
-        } as JSONSchema,
-      };
+    toolsWithSchemas[runName] = {
+      description:
+        `Run handlers on charm "${charmName}" using path: string[] ` +
+        `to a handler stream and args: object. You may pass args nested ` +
+        `under input.args or as top-level fields (path removed). ` +
+        `Schema: ${schemaString}`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "array", items: { type: "string" }, minItems: 1 },
+          args: { type: "object" },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      } as JSONSchema,
+    };
 
-      aggregatedTools.set(readName, { charm: charmCell });
-      aggregatedTools.set(runName, { charm: charmCell });
-    }
+    aggregatedTools.set(readName, { charm: charmCell });
+    aggregatedTools.set(runName, { charm: charmCell });
+  }
 
   const llmParams: LLMRequest = {
-      system: system ?? "",
-      messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
-      maxTokens: maxTokens,
-      stream: true,
-      model: model ?? DEFAULT_MODEL_NAME,
-      metadata: { context: "charm" },
-      cache: true,
-      tools: toolsWithSchemas,
+    system: system ?? "",
+    messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
+    maxTokens: maxTokens,
+    stream: true,
+    model: model ?? DEFAULT_MODEL_NAME,
+    metadata: { context: "charm" },
+    cache: true,
+    tools: toolsWithSchemas,
   };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
   const resultPromise = client.sendRequest(llmParams, () => {}, abortSignal);
 
   resultPromise
-      .then(async (llmResult) => {
-        // Extract tool calls from content if it's an array
-        const hasToolCalls = Array.isArray(llmResult.content) &&
-          llmResult.content.some((part) => part.type === "tool-call");
+    .then(async (llmResult) => {
+      // Extract tool calls from content if it's an array
+      const hasToolCalls = Array.isArray(llmResult.content) &&
+        llmResult.content.some((part) => part.type === "tool-call");
 
-        if (hasToolCalls) {
-          try {
-            const newMessages: BuiltInLLMMessage[] = [];
+      if (hasToolCalls) {
+        try {
+          const newMessages: BuiltInLLMMessage[] = [];
 
-            // Create assistant message with tool-call content parts
-            const assistantContentParts: Array<
-              BuiltInLLMTextPart | BuiltInLLMToolCallPart
-            > = [];
+          // Create assistant message with tool-call content parts
+          const assistantContentParts: Array<
+            BuiltInLLMTextPart | BuiltInLLMToolCallPart
+          > = [];
 
-            // Add text content if present
-            if (typeof llmResult.content === "string" && llmResult.content) {
-              assistantContentParts.push({
-                type: "text",
-                text: llmResult.content,
-              });
-            } else if (Array.isArray(llmResult.content)) {
-              // Content is already an array of parts, use it directly
-              assistantContentParts.push(
-                ...llmResult.content.filter((part) => part.type === "text"),
-              );
-            }
-
-            // Extract tool calls from content parts
-            const toolCallParts = (llmResult.content as any[]).filter((part) =>
-              part.type === "tool-call"
-            ) as BuiltInLLMToolCallPart[];
-
-            for (const toolCallPart of toolCallParts) {
-              assistantContentParts.push(toolCallPart);
-            }
-
-            const assistantMessage: BuiltInLLMMessage = {
-              role: "assistant",
-              content: assistantContentParts,
-            };
-
-            // Execute each tool call and collect results
-            const toolResults: any[] = [];
-            // Snapshot tools object to detect presence of legacy/non-aggregated tool defs
-            const toolsObj = toolsCell.get() ?? {};
-            for (const toolCallPart of toolCallParts) {
-              try {
-                const name = toolCallPart.toolName;
-                let charmMeta = toolHandlers.get(name);
-                let toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined =
-                  undefined;
-                if (
-                  !charmMeta &&
-                  Object.prototype.hasOwnProperty.call(toolsObj, name)
-                ) {
-                  toolDef = toolsCell.key(name) as unknown as Cell<
-                    Schema<typeof LLMToolSchema>
-                  >;
-                }
-
-                // New aggregated API: <Charm>_read | <Charm>_run
-                let adjustedInput = toolCallPart.input;
-                if (!charmMeta && !toolDef && aggregatedTools.has(name)) {
-                  const agg = aggregatedTools.get(name)!;
-                  const input = toolCallPart.input as any;
-
-                  const parts = Array.isArray(input?.path)
-                    ? input.path.map((s: any) => String(s))
-                    : [];
-                  if (parts.length === 0) {
-                    throw new Error("path must be an array of strings");
-                  }
-                  const segs = parts.filter((p: any) =>
-                    p !== undefined && p !== null && `${p}`.length > 0
-                  );
-                  let ref: Cell<any> = agg.charm;
-                  for (const p of segs) ref = ref.key(p as any);
-
-                  if (name.endsWith("_read")) {
-                    if (isStream(ref)) {
-                      throw new Error(
-                        "path resolves to a handler stream; use <slug>_run",
-                      );
-                    }
-                    charmMeta = { cell: ref, charm: agg.charm } as any;
-                  } else if (name.endsWith("_run")) {
-                    if (!isStream(ref)) {
-                      throw new Error(
-                        "path does not resolve to a handler stream",
-                      );
-                    }
-                    charmMeta = {
-                      handler: ref as any,
-                      charm: agg.charm,
-                    } as any;
-                    // For run tools, pass only handler args. Accept both shapes:
-                    // either nested under `args`, or top-level fields alongside path.
-                    toolDef = undefined;
-                    const nestedArgs = (input && typeof input === "object")
-                      ? input.args
-                      : undefined;
-                    if (nestedArgs !== undefined) {
-                      adjustedInput = nestedArgs;
-                    } else {
-                      const { path, ...rest } =
-                        (input && typeof input === "object")
-                          ? input
-                          : {} as any;
-                      adjustedInput = rest;
-                    }
-                  }
-                }
-
-                const resultValue = await invokeToolCall(
-                  runtime,
-                  space,
-                  toolDef,
-                  {
-                    id: toolCallPart.toolCallId,
-                    name: toolCallPart.toolName,
-                    input: adjustedInput,
-                  },
-                  charmMeta,
-                );
-                toolResults.push({
-                  id: toolCallPart.toolCallId,
-                  result: resultValue,
-                });
-              } catch (error) {
-                console.error(`Tool ${toolCallPart.toolName} failed:`, error);
-                toolResults.push({
-                  id: toolCallPart.toolCallId,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-            }
-
-            // Add assistant message with tool calls
-            newMessages.push(assistantMessage);
-
-            // Add tool result messages
-            for (const toolResult of toolResults) {
-              const matchingToolCallPart = toolCallParts.find((tc) =>
-                tc.toolCallId === toolResult.id
-              );
-              newMessages.push({
-                role: "tool",
-                content: [{
-                  type: "tool-result",
-                  toolCallId: toolResult.id,
-                  toolName: matchingToolCallPart?.toolName || "unknown",
-                  output: toolResult.error
-                    ? { type: "error-text", value: toolResult.error }
-                    : toolResult.result,
-                }],
-              });
-            }
-
-            newMessages.forEach((message) => {
-              (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-                llmDialog: { message: cause, id: crypto.randomUUID() },
-              };
+          // Add text content if present
+          if (typeof llmResult.content === "string" && llmResult.content) {
+            assistantContentParts.push({
+              type: "text",
+              text: llmResult.content,
             });
-
-            const success = await safelyPerformUpdate(
-              runtime,
-              pending,
-              internal,
-              requestId,
-              (tx) => {
-                messagesCell.withTx(tx).push(
-                  ...(newMessages as Schema<typeof LLMMessageSchema>[]),
-                );
-              },
+          } else if (Array.isArray(llmResult.content)) {
+            // Content is already an array of parts, use it directly
+            assistantContentParts.push(
+              ...llmResult.content.filter((part) => part.type === "text"),
             );
+          }
 
-            if (success) {
-              logger.info("Continuing conversation after tool calls...");
+          // Extract tool calls from content parts
+          const toolCallParts = (llmResult.content as any[]).filter((part) =>
+            part.type === "tool-call"
+          ) as BuiltInLLMToolCallPart[];
 
-              const continueTx = runtime.edit();
-              startRequest(
-                continueTx,
+          for (const toolCallPart of toolCallParts) {
+            assistantContentParts.push(toolCallPart);
+          }
+
+          const assistantMessage: BuiltInLLMMessage = {
+            role: "assistant",
+            content: assistantContentParts,
+          };
+
+          // Execute each tool call and collect results
+          const toolResults: any[] = [];
+          // Snapshot tools object to detect presence of legacy/non-aggregated tool defs
+          const toolsObj = toolsCell.get() ?? {};
+          for (const toolCallPart of toolCallParts) {
+            try {
+              const name = toolCallPart.toolName;
+              let charmMeta = toolHandlers.get(name);
+              let toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined =
+                undefined;
+              if (
+                !charmMeta &&
+                Object.prototype.hasOwnProperty.call(toolsObj, name)
+              ) {
+                toolDef = toolsCell.key(name) as unknown as Cell<
+                  Schema<typeof LLMToolSchema>
+                >;
+              }
+
+              // New aggregated API: <Charm>_read | <Charm>_run
+              let adjustedInput = toolCallPart.input;
+              if (!charmMeta && !toolDef && aggregatedTools.has(name)) {
+                const agg = aggregatedTools.get(name)!;
+                const input = toolCallPart.input as any;
+
+                const parts = Array.isArray(input?.path)
+                  ? input.path.map((s: any) => String(s))
+                  : [];
+                if (parts.length === 0) {
+                  throw new Error("path must be an array of strings");
+                }
+                const segs = parts.filter((p: any) =>
+                  p !== undefined && p !== null && `${p}`.length > 0
+                );
+                let ref: Cell<any> = agg.charm;
+                for (const p of segs) ref = ref.key(p as any);
+
+                if (name.endsWith("_read")) {
+                  if (isStream(ref)) {
+                    throw new Error(
+                      "path resolves to a handler stream; use <slug>_run",
+                    );
+                  }
+                  charmMeta = { cell: ref, charm: agg.charm } as any;
+                } else if (name.endsWith("_run")) {
+                  if (!isStream(ref)) {
+                    throw new Error(
+                      "path does not resolve to a handler stream",
+                    );
+                  }
+                  charmMeta = {
+                    handler: ref as any,
+                    charm: agg.charm,
+                  } as any;
+                  // For run tools, pass only handler args. Accept both shapes:
+                  // either nested under `args`, or top-level fields alongside path.
+                  toolDef = undefined;
+                  const nestedArgs = (input && typeof input === "object")
+                    ? input.args
+                    : undefined;
+                  if (nestedArgs !== undefined) {
+                    adjustedInput = nestedArgs;
+                  } else {
+                    const { path, ...rest } =
+                      (input && typeof input === "object") ? input : {} as any;
+                    adjustedInput = rest;
+                  }
+                }
+              }
+
+              const resultValue = await invokeToolCall(
                 runtime,
                 space,
-                cause,
-                inputs,
-                pending,
-                internal,
-                requestId,
-                abortSignal,
+                toolDef,
+                {
+                  id: toolCallPart.toolCallId,
+                  name: toolCallPart.toolName,
+                  input: adjustedInput,
+                },
+                charmMeta,
               );
-              continueTx.commit();
-            } else {
-              logger.info("Skipping write: pending=false or request changed");
+              toolResults.push({
+                id: toolCallPart.toolCallId,
+                result: resultValue,
+              });
+            } catch (error) {
+              console.error(`Tool ${toolCallPart.toolName} failed:`, error);
+              toolResults.push({
+                id: toolCallPart.toolCallId,
+                error: error instanceof Error ? error.message : String(error),
+              });
             }
-          } catch (error: unknown) {
-            console.error(error);
           }
-        } else {
-          // No tool calls, just add the assistant message
-          const assistantMessage = {
-            [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
-            role: "assistant",
-            content: llmResult.content,
-          } satisfies BuiltInLLMMessage & { [ID]: unknown };
 
-          // Ignore errors here, it probably means something else took over.
-          await safelyPerformUpdate(
+          // Add assistant message with tool calls
+          newMessages.push(assistantMessage);
+
+          // Add tool result messages
+          for (const toolResult of toolResults) {
+            const matchingToolCallPart = toolCallParts.find((tc) =>
+              tc.toolCallId === toolResult.id
+            );
+            newMessages.push({
+              role: "tool",
+              content: [{
+                type: "tool-result",
+                toolCallId: toolResult.id,
+                toolName: matchingToolCallPart?.toolName || "unknown",
+                output: toolResult.error
+                  ? { type: "error-text", value: toolResult.error }
+                  : toolResult.result,
+              }],
+            });
+          }
+
+          newMessages.forEach((message) => {
+            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
+              llmDialog: { message: cause, id: crypto.randomUUID() },
+            };
+          });
+
+          const success = await safelyPerformUpdate(
             runtime,
             pending,
             internal,
             requestId,
             (tx) => {
               messagesCell.withTx(tx).push(
-                assistantMessage as Schema<typeof LLMMessageSchema>,
+                ...(newMessages as Schema<typeof LLMMessageSchema>[]),
               );
-              pending.withTx(tx).set(false);
             },
           );
+
+          if (success) {
+            logger.info("Continuing conversation after tool calls...");
+
+            const continueTx = runtime.edit();
+            startRequest(
+              continueTx,
+              runtime,
+              space,
+              cause,
+              inputs,
+              pending,
+              internal,
+              requestId,
+              abortSignal,
+            );
+            continueTx.commit();
+          } else {
+            logger.info("Skipping write: pending=false or request changed");
+          }
+        } catch (error: unknown) {
+          console.error(error);
         }
-      })
+      } else {
+        // No tool calls, just add the assistant message
+        const assistantMessage = {
+          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+          role: "assistant",
+          content: llmResult.content,
+        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+
+        // Ignore errors here, it probably means something else took over.
+        await safelyPerformUpdate(
+          runtime,
+          pending,
+          internal,
+          requestId,
+          (tx) => {
+            messagesCell.withTx(tx).push(
+              assistantMessage as Schema<typeof LLMMessageSchema>,
+            );
+            pending.withTx(tx).set(false);
+          },
+        );
+      }
+    })
     .catch((error: unknown) => {
       console.error("Error generating data", error);
       runtime.editWithRetry((tx) => {
