@@ -34,6 +34,11 @@ export class CommonToolsFormatter implements TypeFormatter {
       return true;
     }
 
+    // Check if this is an Opaque<T> union (T | OpaqueRef<T>)
+    if (this.isOpaqueUnion(type, context.typeChecker)) {
+      return true;
+    }
+
     // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
     const wrapperInfo = this.getWrapperTypeInfo(type);
     return wrapperInfo !== undefined;
@@ -41,6 +46,26 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const n = context.typeNode;
+
+    // Check if this is an Opaque<T> union and handle it first
+    // This prevents the UnionFormatter from creating an anyOf
+    const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
+    if (opaqueUnionInfo) {
+      // Format the base type T and add asOpaque: true
+      const innerSchema = this.schemaGenerator.formatChildType(
+        opaqueUnionInfo.baseType,
+        context,
+        undefined, // Don't pass typeNode since we're working with the unwrapped type
+      );
+
+      // Handle boolean schemas
+      if (typeof innerSchema === "boolean") {
+        return innerSchema === false
+          ? { asOpaque: true, not: true } as SchemaDefinition // false = "no value is valid"
+          : { asOpaque: true } as SchemaDefinition; // true = "any value is valid"
+      }
+      return { ...innerSchema, asOpaque: true } as SchemaDefinition;
+    }
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
     const resolvedWrapper = n
@@ -189,6 +214,133 @@ export class CommonToolsFormatter implements TypeFormatter {
         : { [propertyName]: true }; // true = "any value is valid"
     }
     return { ...innerSchema, [propertyName]: true };
+  }
+
+  /**
+   * Check if a type is an Opaque<T> union (T | OpaqueRef<T>)
+   */
+  private isOpaqueUnion(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return this.getOpaqueUnionInfo(type, checker) !== undefined;
+  }
+
+  /**
+   * Extract information from an Opaque<T> union type.
+   * Opaque<T> is defined as: T | OpaqueRef<T>
+   * This function detects this pattern and returns the base type T.
+   */
+  private getOpaqueUnionInfo(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): { baseType: ts.Type } | undefined {
+    // Must be a union type
+    if (!(type.flags & ts.TypeFlags.Union)) {
+      return undefined;
+    }
+
+    const unionType = type as ts.UnionType;
+    const members = unionType.types;
+
+    // Must have exactly 2 members
+    if (members.length !== 2) {
+      return undefined;
+    }
+
+    // One member should be OpaqueRef<T>, the other should be T
+    let opaqueRefMember: ts.Type | undefined;
+    let baseMember: ts.Type | undefined;
+
+    for (const member of members) {
+      // Check if this member is an OpaqueRef type (it will be an intersection)
+      const isOpaqueRef = this.isOpaqueRefType(member);
+      if (isOpaqueRef) {
+        opaqueRefMember = member;
+      } else {
+        baseMember = member;
+      }
+    }
+
+    // Both members must be present for this to be an Opaque<T> union
+    if (!opaqueRefMember || !baseMember) {
+      return undefined;
+    }
+
+    // Verify that the OpaqueRef's type argument matches the base type
+    // Extract T from OpaqueRef<T>
+    const opaqueRefInnerType = this.extractOpaqueRefTypeArgument(
+      opaqueRefMember,
+      checker,
+    );
+    if (!opaqueRefInnerType) {
+      return undefined;
+    }
+
+    // The inner type of OpaqueRef should match the base member
+    // Use type equality check
+    const innerTypeString = checker.typeToString(opaqueRefInnerType);
+    const baseTypeString = checker.typeToString(baseMember);
+
+    if (innerTypeString !== baseTypeString) {
+      // Not a matching Opaque<T> pattern
+      return undefined;
+    }
+
+    return { baseType: baseMember };
+  }
+
+  /**
+   * Check if a type is an OpaqueRef type (intersection with OpaqueRefMethods)
+   */
+  private isOpaqueRefType(type: ts.Type): boolean {
+    // OpaqueRef types are intersection types
+    if (!(type.flags & ts.TypeFlags.Intersection)) {
+      return false;
+    }
+
+    const intersectionType = type as ts.IntersectionType;
+    for (const constituent of intersectionType.types) {
+      if (constituent.flags & ts.TypeFlags.Object) {
+        const objectType = constituent as ts.ObjectType;
+        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+          const typeRef = objectType as ts.TypeReference;
+          const name = typeRef.target?.symbol?.name;
+          if (name === "OpaqueRefMethods") {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract the type argument T from OpaqueRef<T>
+   */
+  private extractOpaqueRefTypeArgument(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): ts.Type | undefined {
+    if (!(type.flags & ts.TypeFlags.Intersection)) {
+      return undefined;
+    }
+
+    const intersectionType = type as ts.IntersectionType;
+    for (const constituent of intersectionType.types) {
+      if (constituent.flags & ts.TypeFlags.Object) {
+        const objectType = constituent as ts.ObjectType;
+        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+          const typeRef = objectType as ts.TypeReference;
+          const name = typeRef.target?.symbol?.name;
+          if (name === "OpaqueRefMethods") {
+            // Found OpaqueRefMethods<T>, extract T
+            const typeArgs = checker.getTypeArguments(typeRef);
+            if (typeArgs && typeArgs.length > 0) {
+              return typeArgs[0];
+            }
+          }
+        }
+      }
+    }
+    return undefined;
   }
 
   /**

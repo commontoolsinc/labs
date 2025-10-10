@@ -551,9 +551,36 @@ function inferElementType(
     }
   }
 
+  // Handle Opaque<T[]> which is a union type (T[] | OpaqueRef<T[]>)
+  if (arrayType.flags & ts.TypeFlags.Union) {
+    const unionType = arrayType as ts.UnionType;
+    // Look for the OpaqueRef<T[]> member (intersection type)
+    for (const member of unionType.types) {
+      if (member.flags & ts.TypeFlags.Intersection || isOpaqueRefType(member, checker)) {
+        actualArrayType = member;
+        break;
+      }
+    }
+  }
+
   // Get type arguments from the reference type
   let typeArgs: readonly ts.Type[] | undefined;
-  if (actualArrayType.flags & ts.TypeFlags.Object) {
+
+  // First check if actualArrayType is an intersection (OpaqueRef case)
+  if (actualArrayType.flags & ts.TypeFlags.Intersection) {
+    const intersectionType = actualArrayType as ts.IntersectionType;
+    // Look for the Reference type member within the intersection
+    for (const member of intersectionType.types) {
+      if (member.flags & ts.TypeFlags.Object) {
+        const objType = member as ts.ObjectType;
+        if (objType.objectFlags & ts.ObjectFlags.Reference) {
+          typeArgs = checker.getTypeArguments(objType as ts.TypeReference);
+          break;
+        }
+      }
+    }
+  } else if (actualArrayType.flags & ts.TypeFlags.Object) {
+    // Plain object/reference type case
     const objectType = actualArrayType as ts.ObjectType;
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
