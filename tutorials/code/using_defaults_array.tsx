@@ -29,7 +29,7 @@ export default recipe<TodoListState>("Todo List with Default", (state) => {
           onmessagesend={addItem({ items: state.items })}
         />
         <ul>
-          {state.items.map((item) => <li>{item}</li>)}
+          {state.items.map((item) => (<li>{item}</li>))}
         </ul>
       </div>
     ),
