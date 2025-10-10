@@ -10,12 +10,10 @@
   },
   "imports": {
     "@/": "./",
-    "@ai-sdk/perplexity": "npm:@ai-sdk/perplexity@^2.0.8",
     "ai": "npm:ai@^5.0.27",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^2.0.9",
     "@ai-sdk/google-vertex": "npm:@ai-sdk/google-vertex@^3.0.16",
-    "@ai-sdk/xai": "npm:@ai-sdk/xai@^2.0.13",
     "@ai-sdk/groq": "npm:@ai-sdk/groq@^2.0.16",
     "@ai-sdk/openai": "npm:@ai-sdk/openai@^2.0.22",
     "@std/cli": "jsr:@std/cli@^1.0.12",
