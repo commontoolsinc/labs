@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
@@ -81,15 +81,31 @@ const logger = getLogger("link-resolution");
  * // => { type: "string" }
  * ```
  */
-export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
+export function createAllOf(
+  schemas: { schema?: JSONSchema; rootSchema?: JSONSchema }[],
+): { schema?: JSONSchema; rootSchema?: JSONSchema } {
   // Extract asCell/asStream from first schema that has either BEFORE filtering.
   // This is intentional: a schema like { asCell: true } is considered "trivial"
   // (adds no type constraints), but we still need to extract and preserve the
   // flag.
   let hasAsCell = false;
   let hasAsStream = false;
-  for (const schema of schemas) {
-    if (schema === undefined || schema === true) continue;
+
+  let $defs: Record<string, JSONSchema> | undefined;
+
+  if (
+    schemas.length === 0 ||
+    schemas.every(({ schema }) => schema === undefined)
+  ) {
+    return {};
+  }
+
+  // If any are false, nothing matches
+  if (schemas.some(({ schema }) => schema === false)) {
+    return { schema: false };
+  }
+
+  for (const { schema } of schemas) {
     if (isObject(schema)) {
       // Only extract the first flag we encounter
       if (schema.asCell && !hasAsCell && !hasAsStream) {
@@ -103,34 +119,34 @@ export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
     }
   }
 
+  for (const { rootSchema } of schemas) {
+    if (isObject(rootSchema) && rootSchema.$defs) {
+      $defs = { ...$defs, ...rootSchema.$defs };
+    }
+  }
+
+  const combinedRootSchema: JSONSchema | undefined = $defs
+    ? { $defs }
+    : undefined;
+
   // Filter out trivial schemas (undefined, true, or schemas with only internal keys)
-  const nonTrivial = schemas.filter((s) =>
-    s !== undefined &&
-    s !== true &&
-    !ContextualFlowControl.isTrueSchema(s)
-  );
+  const nonTrivial = schemas.map(({ schema }) => schema).filter((schema) =>
+    schema !== undefined && !ContextualFlowControl.isTrueSchema(schema)
+  ) as (JSONSchema & object)[];
 
   if (nonTrivial.length === 0) {
     // No non-trivial schemas, but we might have extracted asCell/asStream
     if (hasAsCell || hasAsStream) {
       return {
-        ...(hasAsCell ? { asCell: true } : {}),
-        ...(hasAsStream ? { asStream: true } : {}),
+        schema: {
+          ...(hasAsCell ? { asCell: true } : {}),
+          ...(hasAsStream ? { asStream: true } : {}),
+        },
       };
+    } else {
+      // true, since in every other case we'd have returned earlier
+      return { schema: true };
     }
-    return undefined;
-  }
-  if (nonTrivial.length === 1) {
-    // Single non-trivial schema: add extracted flags to it
-    const schema = nonTrivial[0];
-    if (hasAsCell || hasAsStream) {
-      return {
-        ...ContextualFlowControl.toSchemaObj(schema),
-        ...(hasAsCell ? { asCell: true } : {}),
-        ...(hasAsStream ? { asStream: true } : {}),
-      };
-    }
-    return schema;
   }
 
   // Extract defaults from last schema that has them (last wins)
@@ -145,37 +161,50 @@ export function createAllOf(schemas: JSONSchema[]): JSONSchema | undefined {
     }
   }
 
+  const seen = new Set<string>();
+
   // Remove extracted properties from branches to avoid duplication
   // Also remove any competing flags (e.g., remove asStream if asCell was extracted)
-  const cleanedBranches = nonTrivial.map((schema) => {
+  const cleanedSchemas = nonTrivial.map((schema) => {
     if (!isObject(schema)) return schema;
-    const cleaned = { ...schema };
-    if (hasDefault && "default" in cleaned) {
-      delete (cleaned as any).default;
-    }
-    // Remove the extracted flag
-    if (hasAsCell && cleaned.asCell) {
-      delete (cleaned as any).asCell;
-    }
-    if (hasAsStream && cleaned.asStream) {
-      delete (cleaned as any).asStream;
-    }
-    // Remove competing flags (override behavior)
-    if (hasAsCell && cleaned.asStream) {
-      delete (cleaned as any).asStream;
-    }
-    if (hasAsStream && cleaned.asCell) {
-      delete (cleaned as any).asCell;
-    }
+    const {
+      default: _default,
+      asCell: _asCell,
+      asStream: _asStream,
+      ...cleaned
+    } = schema;
     return cleaned;
   });
 
-  return {
-    allOf: cleanedBranches,
-    ...(hasDefault ? { default: extractedDefault } : {}),
-    ...(hasAsCell ? { asCell: true } : {}),
-    ...(hasAsStream ? { asStream: true } : {}),
-  };
+  const deduplicatedSchemas: (JSONSchema & object)[] = [];
+  for (const schema of cleanedSchemas) {
+    const key = JSON.stringify(schema);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduplicatedSchemas.push(schema);
+  }
+
+  if (deduplicatedSchemas.length === 1) {
+    // Single non-trivial schema: add extracted flags to it
+    return {
+      schema: {
+        ...deduplicatedSchemas[0],
+        ...(hasAsCell && { asCell: true }),
+        ...(hasAsStream && { asStream: true }),
+      },
+      rootSchema: combinedRootSchema,
+    };
+  } else {
+    return {
+      schema: {
+        allOf: deduplicatedSchemas,
+        ...(hasDefault ? { default: extractedDefault } : {}),
+        ...(hasAsCell ? { asCell: true } : {}),
+        ...(hasAsStream ? { asStream: true } : {}),
+      },
+      rootSchema: combinedRootSchema,
+    };
+  }
 }
 
 export type LastNode = "value" | "writeRedirect" | "top";
@@ -233,11 +262,21 @@ export function resolveLink(
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
+  const cfc = new ContextualFlowControl();
+
   let iteration = 0;
 
   // Accumulate schemas from the link chain (but not the initial link's schema,
   // as that's our starting point, not something we're combining with)
-  const schemasFromChain: JSONSchema[] = [];
+  const schemasFromChain: { schema?: JSONSchema; rootSchema?: JSONSchema }[] =
+    [];
+
+  // If there is a schema on the initial link, add it to the chain and remove it
+  // from the link.
+  if (link.schema) {
+    schemasFromChain.push({ schema: link.schema, rootSchema: link.rootSchema });
+    link = { ...link, schema: undefined, rootSchema: undefined };
+  }
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
@@ -315,7 +354,13 @@ export function resolveLink(
         }
 
         if (nextLink) {
+          // Append the remaining path to the next link:
+
+          // Remaining path is the path from the last valid path to the end of
+          // the link path
           const remainingPath = link.path.slice(lastValid.length);
+
+          // Advance the schema of the next link by the remaining path
           let linkSchema = nextLink.schema;
           if (linkSchema !== undefined && remainingPath.length > 0) {
             const cfc = new ContextualFlowControl();
@@ -325,59 +370,50 @@ export function resolveLink(
               nextLink.rootSchema,
             );
           }
+
+          // Construct new link with the remaining path and the advanced schema
           nextLink = {
             ...nextLink,
             path: [...nextLink.path, ...remainingPath],
             ...(linkSchema ? { schema: linkSchema } : {}),
           };
+
+          // Advance all schemas found along the chain by the remaining path
+          for (const chainSchema of schemasFromChain) {
+            chainSchema.schema = cfc.getSchemaAtPath(
+              chainSchema.schema,
+              remainingPath,
+              chainSchema.rootSchema,
+            );
+          }
         }
       }
       // If still nothing found we fall through and break the loop
     }
 
     if (nextLink !== undefined) {
-      // Accumulate schemas when we actually follow a link to a new location
-      // Only combine if the schemas are different (to avoid combining a schema with itself)
-      const schemasAreDifferent = nextLink.schema && link.schema &&
-        JSON.stringify(nextLink.schema) !== JSON.stringify(link.schema);
-
-      if (schemasAreDifferent) {
-        // Both current and next have schemas and they're different - need to combine them
-        if (schemasFromChain.length === 0) {
-          // First time we're combining - add the current link's schema
-          schemasFromChain.push(link.schema!);
-        }
-        schemasFromChain.push(nextLink.schema!);
-      } else if (nextLink.schema && !link.schema) {
-        // Only next has schema - this becomes our new schema (might combine later)
-        schemasFromChain.push(nextLink.schema);
-      }
-
-      if (nextLink.schema === undefined && link.schema !== undefined) {
-        link = {
+      // If a schema is found on the next link, add it to the chain and remove
+      // it from the link.
+      if (nextLink.schema) {
+        schemasFromChain.push({
+          schema: nextLink.schema,
+          rootSchema: nextLink.rootSchema,
+        });
+        nextLink = {
           ...nextLink,
-          schema: link.schema,
-          rootSchema: link.rootSchema,
+          schema: undefined,
+          rootSchema: undefined,
         };
-      } else {
-        link = nextLink;
       }
+
+      link = nextLink;
     } else {
       break;
     }
   }
 
-  const result = { ...link } satisfies NormalizedFullLink;
-
-  // Combine all schemas from the chain into an allOf (only if more than one)
-  if (schemasFromChain.length > 1) {
-    const combinedSchema = createAllOf(schemasFromChain);
-    if (combinedSchema) {
-      result.schema = combinedSchema;
-      // Keep the rootSchema from the last link, or use the combined schema
-      result.rootSchema = result.rootSchema ?? combinedSchema;
-    }
-  }
+  const combinedSchema = createAllOf(schemasFromChain);
+  const result = { ...link, ...combinedSchema } satisfies NormalizedFullLink;
 
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
