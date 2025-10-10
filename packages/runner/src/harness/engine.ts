@@ -22,6 +22,7 @@ import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
 import { StaticCache } from "@commontools/static";
+import { pretransformProgram } from "./pretransform.ts";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -147,7 +148,7 @@ export class Engine extends EventTarget implements Harness {
   > {
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
-    const mappedProgram = mapPrefixProgramFiles(program, id);
+    const mappedProgram = pretransformProgram(program, id);
     const resolver = new EngineProgramResolver(
       mappedProgram,
       this.ctRuntime.staticCache,
@@ -249,33 +250,4 @@ function computeId(program: Program): string {
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
   return merkleReference.refer(source).toString();
-}
-
-// Adds `id` as a prefix to all files in the program.
-// Injects a new entry at root `/index.ts` to re-export
-// the entry contents because otherwise `typescript`
-// flattens the output, eliding the common prefix.
-function mapPrefixProgramFiles(program: RuntimeProgram, id: string): Program {
-  const main = program.main;
-  const exportNameds = `export * from "${prefix(main, id)}";`;
-  const exportDefault = `export { default } from "${prefix(main, id)}";`;
-  const hasDefault = !program.mainExport || program.mainExport === "default";
-  const files = [
-    ...program.files.map((source) => ({
-      name: prefix(source.name, id),
-      contents: source.contents,
-    })),
-    {
-      name: `/index.ts`,
-      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
-    },
-  ];
-  return {
-    main: `/index.ts`,
-    files,
-  };
-}
-
-function prefix(filename: string, id: string): string {
-  return `/${id}${filename}`;
 }

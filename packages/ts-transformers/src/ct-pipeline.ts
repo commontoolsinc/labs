@@ -3,7 +3,7 @@ import {
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
-import { Pipeline, TransformationOptions, TypeRegistry } from "./core/mod.ts";
+import { Pipeline, TransformationOptions } from "./core/mod.ts";
 
 export class CommonToolsTransformerPipeline extends Pipeline {
   constructor(options: TransformationOptions = {}) {

@@ -1,12 +1,12 @@
-/// <cts-enable />
-import { handler, Cell, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler, Cell } from "commontools";
 interface Item {
     text: string;
 }
 interface ListState {
     items: Cell<Item[]>;
 }
-const removeItem = handler(true as const satisfies JSONSchema, {
+const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
@@ -33,7 +33,7 @@ const removeItem = handler(true as const satisfies JSONSchema, {
             required: ["text"]
         }
     }
-} as const satisfies JSONSchema, (_, { items, index }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
@@ -43,7 +43,7 @@ const removeItem = handler(true as const satisfies JSONSchema, {
 type ListStateWithIndex = ListState & {
     index: number;
 };
-const removeItemAlias = handler(true as const satisfies JSONSchema, {
+const removeItemAlias = handler(true as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
@@ -70,10 +70,11 @@ const removeItemAlias = handler(true as const satisfies JSONSchema, {
             required: ["text"]
         }
     }
-} as const satisfies JSONSchema, (_, { items, index }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
         next.splice(index, 1);
     items.set(next);
 });
 export { removeItem, removeItemAlias };
+__ctHelpers.NAME; // <internals>

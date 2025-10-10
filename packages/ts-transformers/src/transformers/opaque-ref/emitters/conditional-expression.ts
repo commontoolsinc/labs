@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { Emitter, OpaqueRefHelperName } from "../types.ts";
+import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import { selectDataFlowsWithin } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
@@ -109,7 +109,7 @@ export const emitConditionalExpression: Emitter = ({
   return createIfElseCall({
     expression,
     factory: context.factory,
-    imports: context.imports,
+    ctHelpers: context.ctHelpers,
     sourceFile: context.sourceFile,
     overrides: {
       predicate,

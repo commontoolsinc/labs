@@ -1,6 +1,6 @@
-/// <cts-enable />
-import { Cell, derive, h, handler, NAME, recipe, str, UI, JSONSchema } from "commontools";
-const adder = handler(true as const satisfies JSONSchema, {
+import * as __ctHelpers from "commontools";
+import { Cell, derive, h, handler, NAME, recipe, str, UI } from "commontools";
+const adder = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         values: {
@@ -12,7 +12,7 @@ const adder = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["values"]
-} as const satisfies JSONSchema, (_, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_, state: {
     values: Cell<string[]>;
 }) => {
     state.values.push(Math.random().toString(36).substring(2, 15));
@@ -28,11 +28,11 @@ export default recipe({
         }
     },
     required: ["values"]
-} as const satisfies JSONSchema, ({ values }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ values }) => {
     derive({
         type: "array",
         items: true
-    } as const satisfies JSONSchema, true as const satisfies JSONSchema, values, (values) => {
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });
     return {
@@ -48,3 +48,4 @@ export default recipe({
         values,
     };
 });
+__ctHelpers.NAME; // <internals>

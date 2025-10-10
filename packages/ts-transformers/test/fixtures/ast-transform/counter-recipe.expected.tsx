@@ -1,12 +1,12 @@
-/// <cts-enable />
-import { Cell, Default, h, handler, NAME, recipe, str, UI, derive, ifElse, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, str, UI } from "commontools";
 interface CounterState {
     value: Cell<number>;
 }
 interface RecipeState {
     value: Default<number, 0>;
 }
-const increment = handler(true as const satisfies JSONSchema, {
+const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -15,10 +15,10 @@ const increment = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (e, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (e, state) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(true as const satisfies JSONSchema, {
+const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -27,7 +27,7 @@ const decrement = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (_, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
@@ -41,16 +41,17 @@ export default recipe({
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [NAME]: str `Simple counter: ${state.value}`,
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {ifElse(state.value, derive(state.value, _v1 => _v1 + 1), "unknown")}</li>
+          <li>next number: {__ctHelpers.ifElse(state.value, __ctHelpers.derive(state.value, _v1 => _v1 + 1), "unknown")}</li>
         </ul>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),
         value: state.value,
     };
 });
+__ctHelpers.NAME; // <internals>

@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  hasCtsEnableDirective,
+  CT_HELPERS_IDENTIFIER,
   TransformationContext,
   Transformer,
 } from "../core/mod.ts";
@@ -10,7 +10,7 @@ let generateSchema: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
 export class SchemaGeneratorTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return hasCtsEnableDirective(context.sourceFile);
+    return context.ctHelpers.sourceHasHelpers();
   }
 
   transform(context: TransformationContext): ts.SourceFile {
@@ -19,17 +19,8 @@ export class SchemaGeneratorTransformer extends Transformer {
     const { logger, typeRegistry } = context.options;
 
     const visit: ts.Visitor = (node) => {
-      if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "toSchema" &&
-        node.typeArguments &&
-        node.typeArguments.length === 1
-      ) {
-        const typeArg = node.typeArguments[0];
-        if (!typeArg) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
+      if (isToSchemaNode(node)) {
+        const typeArg = node.typeArguments[0]!;
 
         // First check if we have a registered Type for this node
         // (from schema-injection when synthetic TypeNodes were created)
@@ -73,16 +64,12 @@ export class SchemaGeneratorTransformer extends Transformer {
           ),
         );
 
-        const jsonSchemaIdentifier = context.imports.getIdentifier(
-          context,
-          { module: "commontools", name: "JSONSchema" },
+        const jsonSchemaName = context.ctHelpers.getHelperQualified(
+          "JSONSchema",
         );
         const satisfiesExpression = context.factory.createSatisfiesExpression(
           constAssertion,
-          context.factory.createTypeReferenceNode(
-            jsonSchemaIdentifier,
-            undefined,
-          ),
+          context.factory.createTypeReferenceNode(jsonSchemaName),
         );
 
         return satisfiesExpression;
@@ -91,17 +78,7 @@ export class SchemaGeneratorTransformer extends Transformer {
       return ts.visitEachChild(node, visit, transformation);
     };
 
-    const result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
-
-    context.imports.forbid({
-      module: "commontools",
-      name: "toSchema",
-    });
-
-    return context.imports.apply(
-      result,
-      transformation.factory,
-    );
+    return ts.visitNode(sourceFile, visit) as ts.SourceFile;
   }
 }
 
@@ -171,4 +148,34 @@ function evaluateExpression(
   );
   if (constantValue !== undefined) return constantValue;
   return undefined;
+}
+
+// Helper type extending CallExpression with
+// truthy typeArguments.
+interface ToSchemaNode extends ts.CallExpression {
+  typeArguments: ts.NodeArray<ts.TypeNode>;
+}
+function isToSchemaNode(node: ts.Node): node is ToSchemaNode {
+  if (!ts.isCallExpression(node)) return false;
+  const { typeArguments, expression } = node;
+  if (!typeArguments || typeArguments.length !== 1) return false;
+
+  // Raw identity expression `toSchema<T>()`
+  if (
+    ts.isIdentifier(expression) &&
+    expression.text === "toSchema" &&
+    typeArguments &&
+    typeArguments.length === 1
+  ) {
+    return true;
+  }
+  // Raw property access expression `__ctHelpers.toSchema<T>()`
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    expression.expression.getText() === CT_HELPERS_IDENTIFIER &&
+    expression.name.text === "toSchema"
+  ) {
+    return true;
+  }
+  return false;
 }

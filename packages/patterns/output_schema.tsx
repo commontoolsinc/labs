@@ -2,14 +2,10 @@
 import {
   Cell,
   Default,
-  derive,
   h,
   handler,
   NAME,
-  Opaque,
-  OpaqueRef,
   recipe,
-  str,
   UI,
   VNode,
 } from "commontools";

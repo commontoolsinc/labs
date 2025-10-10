@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
+import { h, recipe, UI } from "commontools";
 
 interface State {
   text: string;

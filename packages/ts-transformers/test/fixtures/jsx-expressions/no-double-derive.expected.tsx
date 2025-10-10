@@ -1,4 +1,4 @@
-/// <cts-enable />
+import * as __ctHelpers from "commontools";
 import { derive, h } from "commontools";
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))
@@ -20,3 +20,4 @@ export default function TestComponent({ items, cellRef }) {
       <span>Direct access: {cellRef.value}</span>
     </div>);
 }
+__ctHelpers.NAME; // <internals>

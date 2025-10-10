@@ -1,13 +1,10 @@
-export { ImportRequirements as ImportManager } from "./core/imports.ts";
-export type { ImportRequest } from "./core/imports.ts";
-
 export type {
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
   TransformMode,
 } from "./core/mod.ts";
-export { Pipeline, Transformer } from "./core/mod.ts";
+export { Pipeline, transformCtDirective, Transformer } from "./core/mod.ts";
 
 export {
   OpaqueRefJSXTransformer,

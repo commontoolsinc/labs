@@ -1,10 +1,10 @@
-/// <cts-enable />
-import { Cell, handler, recipe, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, handler, recipe } from "commontools";
 interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler(true as const satisfies JSONSchema, {
+const myHandler = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,7 +17,7 @@ const myHandler = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (_, state: State) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
 export default recipe({ type: "object", properties: { value: { type: "number" }, name: { type: "string" } } }, (state) => {
@@ -30,3 +30,4 @@ export default recipe({ type: "object", properties: { value: { type: "number" },
         onClick3: myHandler(state),
     };
 });
+__ctHelpers.NAME; // <internals>

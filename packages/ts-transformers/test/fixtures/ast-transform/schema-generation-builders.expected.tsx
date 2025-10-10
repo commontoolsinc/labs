@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { handler, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler, recipe, UI } from "commontools";
 type TodoState = {
     items: string[];
 };
@@ -14,7 +14,7 @@ const addTodo = handler({
         }
     },
     required: ["add"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -25,7 +25,7 @@ const addTodo = handler({
         }
     },
     required: ["items"]
-} as const satisfies JSONSchema, (event, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.items.push(event.add);
 });
 export default recipe({
@@ -39,7 +39,7 @@ export default recipe({
         }
     },
     required: ["items"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         <button type="button" onClick={addTodo({ items: state.items })}>
@@ -51,3 +51,4 @@ export default recipe({
       </div>),
     };
 });
+__ctHelpers.NAME; // <internals>

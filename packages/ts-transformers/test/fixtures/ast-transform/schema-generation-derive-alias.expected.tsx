@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { derive as deriveAlias, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { derive as deriveAlias } from "commontools";
 type AliasInput = {
     text: string;
 };
@@ -15,7 +15,7 @@ export const textLength = deriveAlias({
         }
     },
     required: ["text"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         length: {
@@ -23,6 +23,7 @@ export const textLength = deriveAlias({
         }
     },
     required: ["length"]
-} as const satisfies JSONSchema, state, (value) => ({
+} as const satisfies __ctHelpers.JSONSchema, state, (value) => ({
     length: value.text.length,
 }));
+__ctHelpers.NAME; // <internals>

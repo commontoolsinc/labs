@@ -8,7 +8,6 @@ import {
   typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 import {
-  hasCtsEnableDirective,
   TransformationContext,
   Transformer,
   type TypeRegistry,
@@ -104,25 +103,22 @@ function collectFunctionSchemaTypeNodes(
 }
 
 function createToSchemaCall(
-  { imports, factory, sourceFile }: Pick<
+  { ctHelpers, factory }: Pick<
     TransformationContext,
-    "imports" | "factory" | "sourceFile"
+    "ctHelpers" | "factory"
   >,
   typeNode: ts.TypeNode,
 ): ts.CallExpression {
-  const identifier = imports.getIdentifier({ factory, sourceFile }, {
-    module: "commontools",
-    name: "toSchema",
-  });
+  const expr = ctHelpers.getHelperExpr("toSchema");
   return factory.createCallExpression(
-    identifier,
+    expr,
     [typeNode],
     [],
   );
 }
 
 function prependSchemaArguments(
-  context: Pick<TransformationContext, "factory" | "imports" | "sourceFile">,
+  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
   node: ts.CallExpression,
   argumentTypeNode: ts.TypeNode,
   argumentType: ts.Type | undefined,
@@ -159,10 +155,11 @@ function prependSchemaArguments(
 
 export class SchemaInjectionTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return hasCtsEnableDirective(context.sourceFile);
+    return context.ctHelpers.sourceHasHelpers();
   }
+
   transform(context: TransformationContext): ts.SourceFile {
-    const { sourceFile, tsContext: transformation, checker, imports } = context;
+    const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.typeRegistry;
 
     const visit = (node: ts.Node): ts.Node => {

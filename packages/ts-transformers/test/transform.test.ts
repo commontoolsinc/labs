@@ -22,23 +22,15 @@ describe("CommonToolsTransformerPipeline", () => {
       "/main.ts": fixture,
     });
     assert(
-      /toSchema/.test(disabled["/main.ts"]!),
-      "no replacements without <cts-enable />",
-    );
-    assert(
-      !/JSONSchema/.test(disabled["/main.ts"]!),
+      !/import \* as __ctHelpers/.test(disabled["/main.ts"]!),
       "no replacements without <cts-enable />",
     );
     const enabled = await transformFiles({
       "/main.ts": `/// <cts-enable />\n` + fixture,
     });
     assert(
-      !/toSchema/.test(enabled["/main.ts"]!),
-      "replacements with <cts-enable />",
-    );
-    assert(
-      /JSONSchema/.test(enabled["/main.ts"]!),
-      "replacements with <cts-enable />",
+      /import \* as __ctHelpers/.test(enabled["/main.ts"]!),
+      "no replacements without <cts-enable />",
     );
   });
 });
