@@ -385,7 +385,10 @@ export function validateAndTransform(
     schema === undefined || !isObject(schema) ||
     ContextualFlowControl.isTrueSchema(schema)
   ) {
-    return createQueryResultProxy(runtime, tx, ref);
+    // Remove the schema, otherwise we go right back to this function
+    const { schema: _schema, rootSchema: _rootSchema, ...refWithoutSchema } =
+      ref;
+    return createQueryResultProxy(runtime, tx, refWithoutSchema);
   }
 
   // Check if we've seen this exact cell/path/schema combination before
@@ -502,9 +505,12 @@ export function validateAndTransform(
                     ? existing.allOf
                     : [existing];
                   allProperties[key] = createAllOf([
-                    ...existingSchemas,
-                    propSchema,
-                  ])!;
+                    ...existingSchemas.map((schema) => ({
+                      schema,
+                      rootSchema,
+                    })),
+                    { schema: propSchema, rootSchema: rootSchema },
+                  ]).schema!;
                 }
               }
             }
