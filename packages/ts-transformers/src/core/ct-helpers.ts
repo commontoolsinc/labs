@@ -79,13 +79,8 @@ export class CTHelpers {
 export function transformCtDirective(
   source: string,
 ): string {
-  // Throw when this symbol name is already in use
-  // for some reason.
-  if (source.indexOf(CT_HELPERS_IDENTIFIER) !== -1) {
-    throw new Error(
-      `Source cannot contain reserved '${CT_HELPERS_IDENTIFIER}' symbol.`,
-    );
-  }
+  checkCTHelperVar(source);
+
   const lines = source.split("\n");
   if (!lines[0] || !isCTSEnabled(lines[0])) {
     return source;
@@ -99,6 +94,27 @@ export function transformCtDirective(
 
 function isCTSEnabled(line: string) {
   return /^\/\/\/\s*<cts-enable\s*\/>/m.test(line);
+}
+
+// Throws if `__ctHelpers` was found as an Identifier
+// in the source code.
+function checkCTHelperVar(source: string) {
+  const sourceFile = ts.createSourceFile(
+    "source.tsx",
+    source,
+    ts.ScriptTarget.ES2023,
+  );
+  const visitor = (node: ts.Node): ts.Node => {
+    if (ts.isIdentifier(node)) {
+      if (node.text === CT_HELPERS_IDENTIFIER) {
+        throw new Error(
+          `Source cannot contain reserved '${CT_HELPERS_IDENTIFIER}' symbol.`,
+        );
+      }
+    }
+    return ts.visitEachChild(node, visitor, undefined);
+  };
+  ts.visitNode(sourceFile, visitor);
 }
 
 function getCTHelpersIdentifier(
