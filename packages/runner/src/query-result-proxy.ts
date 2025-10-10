@@ -97,9 +97,8 @@ export function createQueryResultProxy<T>(
 
   // If the resolved link has a schema, use validateAndTransform which handles
   // schema-based transformations (defaults, allOf, etc.) instead of creating a
-  // proxy. Don't do this on top level, since we might have been called from
-  // validateAndTransform.
-  if (link.schema && depth > 0) {
+  // proxy.
+  if (link.schema) {
     return validateAndTransform(runtime, tx, link);
   }
 
