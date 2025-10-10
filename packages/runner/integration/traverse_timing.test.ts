@@ -16,12 +16,11 @@ import data from "./traverse_timing_test_data.json" with { type: "json" };
 import { ServerObjectManager } from "../../memory/space-schema.ts";
 import { connect, SpaceStoreSession } from "../../memory/space.ts";
 
-const docAddress: BaseMemoryAddress = {
+const sampleDocAddress: BaseMemoryAddress = {
   id: "of:baedreibl64qzbhgkvpuxbfc657ugjeyidc62hixjybt5dpci2ddkkhs26m",
   type: "application/json",
 };
-
-const selector: SchemaPathSelector = {
+const sampleSelector: SchemaPathSelector = {
   "path": [],
   "schemaContext": {
     "schema": {
@@ -63,6 +62,50 @@ const selector: SchemaPathSelector = {
   },
 };
 
+const spaceDocAddress: BaseMemoryAddress = {
+  id: "did:key:z6MkkGMscCkDFETV5efoTSEybcVfo8muPQUp7qMa3mUGC4mF",
+  type: "application/commit+json",
+};
+const spaceSelector: SchemaPathSelector = {
+  "path": [],
+  "schemaContext": {
+    "schema": false,
+    "rootSchema": false,
+  },
+};
+
+const charmsDocAddress: BaseMemoryAddress = {
+  id: "of:baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye",
+  type: "application/json",
+};
+const charmsSelector: SchemaPathSelector = {
+  "path": [],
+  "schemaContext": {
+    "schema": {
+      "type": "array",
+      "items": {
+        "asCell": true,
+      },
+      "ifc": {
+        "classification": [
+          "secret",
+        ],
+      },
+    },
+    "rootSchema": {
+      "type": "array",
+      "items": {
+        "asCell": true,
+      },
+      "ifc": {
+        "classification": [
+          "secret",
+        ],
+      },
+    },
+  },
+};
+
 type SimpleRevision<Is extends JSONValue = JSONValue> = {
   of: URI;
   the: string;
@@ -74,9 +117,17 @@ type SimpleRevision<Is extends JSONValue = JSONValue> = {
 // Helper to avoid typing out this template everywhere
 abstract class TestObjectManager
   extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
+  abstract resetTraverseState(): void;
+  abstract getReadDocs(): Iterable<IAttestation>;
 }
 
-class TestServerObjectManager extends ServerObjectManager {
+interface ITestObjectManager {
+  resetTraverseState(): void;
+  getReadDocs(): Iterable<IAttestation>;
+}
+
+class TestServerObjectManager extends ServerObjectManager
+  implements ITestObjectManager {
   constructor(
     session: SpaceStoreSession<MemorySpace>,
     providedClassifications: Set<string>,
@@ -99,7 +150,8 @@ class TestServerObjectManager extends ServerObjectManager {
 }
 
 // In-memory object manager for testing
-class MemoryObjectManager extends TestObjectManager {
+class MemoryObjectManager extends TestObjectManager
+  implements ITestObjectManager {
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
   public store = new Map<string, SimpleRevision>();
@@ -187,7 +239,11 @@ class MemoryObjectManager extends TestObjectManager {
 }
 
 // Main test function
-function runTest(objectManager: TestObjectManager) {
+function runTest(
+  objectManager: TestObjectManager,
+  docAddress: BaseMemoryAddress,
+  selector: SchemaPathSelector,
+) {
   const traverser = new SchemaObjectTraverser(objectManager, selector);
   const doc = objectManager.load(docAddress)!;
   const factValue: IAttestation = {
@@ -208,7 +264,9 @@ function runTest(objectManager: TestObjectManager) {
   }
 }
 
-async function getObjectManager(useDb: boolean): Promise<TestObjectManager> {
+async function getObjectManager(
+  useDb: boolean,
+): Promise<TestObjectManager> {
   if (useDb) {
     // SQLite based object manager
     const spaceDID = "did:key:z6MkkGMscCkDFETV5efoTSEybcVfo8muPQUp7qMa3mUGC4mF";
@@ -226,6 +284,9 @@ async function getObjectManager(useDb: boolean): Promise<TestObjectManager> {
 }
 
 const objectManager = await getObjectManager(true);
+//const [docAddress, selector] = [sampleDocAddress, sampleSelector];
+const [docAddress, selector] = [charmsDocAddress, charmsSelector];
+//const [docAddress, selector] = [spaceDocAddress, spaceSelector];
 
 function timeFunction(name: string, fn: () => void) {
   const start = performance.now();
@@ -237,12 +298,8 @@ function timeFunction(name: string, fn: () => void) {
 const n = 100;
 timeFunction(`traverseLoop${n}`, () => {
   for (let i = 0; i < n; i++) {
-    runTest(objectManager);
-    if (objectManager instanceof MemoryObjectManager) {
-      objectManager.resetTraverseState();
-    } else if (objectManager instanceof TestServerObjectManager) {
-      objectManager.resetTraverseState();
-    }
+    runTest(objectManager, docAddress, selector);
+    objectManager.resetTraverseState();
   }
 });
 
