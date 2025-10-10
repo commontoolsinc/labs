@@ -229,15 +229,7 @@ describe("Cell", () => {
     const c = runtime.getCell(
       space,
       "should translate circular references into links",
-      {
-        type: "object",
-        properties: {
-          x: { type: "number" },
-          y: { type: "number" },
-          z: { $ref: "#" },
-        },
-        required: ["x", "y", "z"],
-      } as const satisfies JSONSchema,
+      undefined,
       tx,
     );
     const data: any = { x: 1, y: 2 };
@@ -247,32 +239,28 @@ describe("Cell", () => {
     const proxy = c.getAsQueryResult();
     expect(proxy.z).toBe(proxy);
 
-    const value = c.get();
+    const value = c.asSchema(
+      {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          z: { $ref: "#" },
+        },
+        required: ["x", "y", "z"],
+      } as const satisfies JSONSchema,
+    ).get();
     expect(value.z.z.z).toBe(value.z.z);
 
     const raw = c.getRaw();
-    expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+    expect(raw).toMatchObject({ z: { "/": { [LINK_V1_TAG]: { path: [] } } } });
   });
 
   it("should translate circular references into links across cells", () => {
     const c = runtime.getCell(
       space,
       "should translate circular references into links",
-      {
-        type: "object",
-        properties: {
-          list: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { parent: { $ref: "#" } },
-              asCell: true,
-              required: ["parent"],
-            },
-          },
-        },
-        required: ["list"],
-      } as const satisfies JSONSchema,
+      undefined,
       tx,
     );
     const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
@@ -284,7 +272,21 @@ describe("Cell", () => {
     expect(proxy.list[0].parent).toBe(proxy);
 
     const { id } = c.getAsNormalizedFullLink();
-    const innerCell = c.get().list[0];
+    const innerCell = c.asSchema({
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { parent: { $ref: "#" } },
+            asCell: true,
+            required: ["parent"],
+          },
+        },
+      },
+      required: ["list"],
+    } as const satisfies JSONSchema).get().list[0];
     const raw = innerCell.getRaw();
     expect(raw).toMatchObject({
       parent: { "/": { [LINK_V1_TAG]: { id } } },

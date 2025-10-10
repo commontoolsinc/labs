@@ -1035,7 +1035,7 @@ export class Runner implements IRunner {
       const inputsCell = this.runtime.getImmutableCell(
         processCell.space,
         inputs,
-        undefined,
+        module.argumentSchema,
         tx,
       );
 
@@ -1045,9 +1045,7 @@ export class Runner implements IRunner {
       let previousResultCell: Cell<any> | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
+        const argument = inputsCell.withTx(tx).get();
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
