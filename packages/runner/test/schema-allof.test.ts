@@ -17,8 +17,8 @@ describe("createAllOf unit tests", () => {
   describe("Default extraction", () => {
     it("extracts default from last schema (last wins)", () => {
       const result = createAllOf([
-        { type: "number", default: 1 },
-        { type: "number", default: 2 },
+        { schema: { type: "number", default: 1 } },
+        { schema: { type: "number", default: 2 } },
       ]);
 
       expect(result).toEqual({
@@ -32,8 +32,8 @@ describe("createAllOf unit tests", () => {
 
     it("doesn't extract default when only first schema has it", () => {
       const result = createAllOf([
-        { type: "number", default: 1 },
-        { type: "number" },
+        { schema: { type: "number", default: 1 } },
+        { schema: { type: "number" } },
       ]);
 
       expect(result).toEqual({
@@ -47,8 +47,8 @@ describe("createAllOf unit tests", () => {
 
     it("handles nested property defaults", () => {
       const result = createAllOf([
-        { type: "object", properties: { x: { default: 1 } } },
-        { type: "object", properties: { x: { default: 2 } } },
+        { schema: { type: "object", properties: { x: { default: 1 } } } },
+        { schema: { type: "object", properties: { x: { default: 2 } } } },
       ]);
 
       expect(result).toEqual({
@@ -63,9 +63,9 @@ describe("createAllOf unit tests", () => {
   describe("asCell/asStream extraction", () => {
     it("extracts asCell from first schema (first wins)", () => {
       const result = createAllOf([
-        { type: "string" },
-        { type: "string", asCell: true },
-        { type: "string", asCell: true },
+        { schema: { type: "string" } },
+        { schema: { type: "string", asCell: true } },
+        { schema: { type: "string", asCell: true } },
       ]);
 
       expect(result).toEqual({
@@ -80,8 +80,8 @@ describe("createAllOf unit tests", () => {
 
     it("extracts asStream from first schema (first wins)", () => {
       const result = createAllOf([
-        { type: "string", asStream: true },
-        { type: "string", asStream: true },
+        { schema: { type: "string", asStream: true } },
+        { schema: { type: "string", asStream: true } },
       ]);
 
       expect(result).toEqual({
@@ -95,8 +95,8 @@ describe("createAllOf unit tests", () => {
 
     it("extracts only first flag when both asCell and asStream present", () => {
       const result = createAllOf([
-        { type: "string", asCell: true },
-        { type: "string", asStream: true },
+        { schema: { type: "string", asCell: true } },
+        { schema: { type: "string", asStream: true } },
       ]);
 
       expect(result).toEqual({
@@ -110,8 +110,8 @@ describe("createAllOf unit tests", () => {
 
     it("extracts asStream when it appears first", () => {
       const result = createAllOf([
-        { type: "string", asStream: true },
-        { type: "string", asCell: true },
+        { schema: { type: "string", asStream: true } },
+        { schema: { type: "string", asCell: true } },
       ]);
 
       expect(result).toEqual({
@@ -127,8 +127,8 @@ describe("createAllOf unit tests", () => {
   describe("Combined extraction", () => {
     it("extracts default (last) and asCell (first) together", () => {
       const result = createAllOf([
-        { type: "number", default: 1, asCell: true },
-        { type: "number", default: 2 },
+        { schema: { type: "number", default: 1, asCell: true } },
+        { schema: { type: "number", default: 2 } },
       ]);
 
       expect(result).toEqual({
@@ -149,14 +149,14 @@ describe("createAllOf unit tests", () => {
     });
 
     it("returns single schema unwrapped", () => {
-      const result = createAllOf([{ type: "string" }]);
+      const result = createAllOf([{ schema: { type: "string" } }]);
       expect(result).toEqual({ type: "string" });
     });
 
     it("extracts asCell from trivial schema (only has asCell)", () => {
       const result = createAllOf([
-        { asCell: true },
-        { type: "string" },
+        { schema: { asCell: true } },
+        { schema: { type: "string" } },
       ]);
 
       expect(result).toEqual({
@@ -167,9 +167,9 @@ describe("createAllOf unit tests", () => {
 
     it("returns asCell when all schemas are trivial except asCell", () => {
       const result = createAllOf([
-        { asCell: true },
-        true,
-        undefined as any,
+        { schema: { asCell: true } },
+        { schema: true },
+        { schema: undefined as any },
       ]);
 
       expect(result).toEqual({
@@ -179,10 +179,10 @@ describe("createAllOf unit tests", () => {
 
     it("filters out undefined and true schemas", () => {
       const result = createAllOf([
-        undefined as any,
-        { type: "number", default: 1 },
-        true as any,
-        { type: "number", default: 2 },
+        { schema: undefined as any },
+        { schema: { type: "number", default: 1 } },
+        { schema: true as any },
+        { schema: { type: "number", default: 2 } },
       ]);
 
       expect(result).toEqual({
