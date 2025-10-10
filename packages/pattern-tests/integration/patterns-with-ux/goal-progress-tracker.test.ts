@@ -108,6 +108,10 @@ describe("goal progress tracker pattern test", () => {
   it("should add a new milestone via UI form", async () => {
     const page = shell.page();
 
+    // Wait for heading to ensure page is rendered
+    const headings = await page.$$("h2", { strategy: "pierce" });
+    assert(headings.length > 0, "Should find headings");
+
     // Fill in milestone ID
     const idInput = await page.waitForSelector(
       'input[placeholder="e.g., kickoff"]',
@@ -198,8 +202,8 @@ describe("goal progress tracker pattern test", () => {
 
     await charm.result.set(updated, ["milestonesInput"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const milestones = charm.result.get(["milestones"]) as Record<string, MilestoneInput>;
     assert(milestones.direct, "Should have directly added milestone");
@@ -220,8 +224,8 @@ describe("goal progress tracker pattern test", () => {
 
     await charm.result.set(updated, ["milestonesInput"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const milestones = charm.result.get(["milestones"]) as Record<string, MilestoneInput>;
     assertEquals(milestones.direct.completed, true, "Milestone should be marked complete");

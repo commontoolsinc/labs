@@ -104,6 +104,10 @@ describe("currency conversion pattern test", () => {
   it("should update amount via UI", async () => {
     const page = shell.page();
 
+    // Wait for heading to ensure page is rendered
+    const texts = await page.$$("ct-text", { strategy: "pierce" });
+    assert(texts.length > 0, "Should find text elements");
+
     // Find amount input
     const amountInput = await page.waitForSelector("#amount-input", {
       strategy: "pierce",
@@ -144,6 +148,10 @@ describe("currency conversion pattern test", () => {
 
   it("should add/update exchange rate via UI", async () => {
     const page = shell.page();
+
+    // Wait for heading to ensure page is rendered
+    const texts = await page.$$("ct-text", { strategy: "pierce" });
+    assert(texts.length > 0, "Should find text elements");
 
     // Find currency code input
     const currencyInput = await page.waitForSelector("#currency-code-input", {
@@ -214,8 +222,8 @@ describe("currency conversion pattern test", () => {
 
     await charm.result.set(updatedRates, ["rates"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const rates = charm.result.get(["normalizedRates"]) as Record<string, number>;
     assertEquals(rates.CNY, 7.2, "CNY rate should be 7.2");
@@ -233,8 +241,8 @@ describe("currency conversion pattern test", () => {
   it("should update amount via direct operation", async () => {
     await charm.result.set(500, ["amount"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const normalizedAmount = charm.result.get(["normalizedAmount"]) as number;
     assertEquals(normalizedAmount, 500, "Amount should be 500");

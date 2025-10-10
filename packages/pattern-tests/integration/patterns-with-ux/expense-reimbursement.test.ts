@@ -129,6 +129,9 @@ describe("expense reimbursement pattern test", () => {
   it("should approve a claim via UI", async () => {
     const page = shell.page();
 
+    // Wait for heading to ensure page is rendered
+    await page.waitForSelector("h1", { strategy: "pierce" });
+
     // Get a submitted claim ID
     const claimList = charm.result.get(["claimList"]) as ExpenseClaim[];
     const submittedClaim = claimList.find(c => c.status === "submitted");
@@ -172,6 +175,9 @@ describe("expense reimbursement pattern test", () => {
 
   it("should reject a claim via UI", async () => {
     const page = shell.page();
+
+    // Wait for heading to ensure page is rendered
+    await page.waitForSelector("h1", { strategy: "pierce" });
 
     // Get another submitted claim ID
     const claimList = charm.result.get(["claimList"]) as ExpenseClaim[];
@@ -217,6 +223,9 @@ describe("expense reimbursement pattern test", () => {
 
   it("should record payment for approved claim via UI", async () => {
     const page = shell.page();
+
+    // Wait for heading to ensure page is rendered
+    await page.waitForSelector("h1", { strategy: "pierce" });
 
     // Get an approved claim ID
     const claimList = charm.result.get(["claimList"]) as ExpenseClaim[];
@@ -279,8 +288,8 @@ describe("expense reimbursement pattern test", () => {
     const updatedClaims = [...currentClaims, newClaim];
     await charm.result.set(updatedClaims, ["claims"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const claimList = charm.result.get(["claimList"]) as ExpenseClaim[];
     const addedClaim = claimList.find(c => c.id === "test-999");
@@ -303,8 +312,8 @@ describe("expense reimbursement pattern test", () => {
 
     await charm.result.set(updatedClaims, ["claims"]);
 
-    // Wait for reactive updates
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for reactive updates - direct manipulation causes more conflicts
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const claimList = charm.result.get(["claimList"]) as ExpenseClaim[];
     const updatedClaim = claimList.find(c => c.id === "test-999");

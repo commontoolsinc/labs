@@ -355,6 +355,7 @@ export const boundedCounterUx = recipe<BoundedCounterArgs>(
                       align-items: flex-end;
                     ">
                     <ct-button
+                      id="increment-button"
                       onClick={applyIncrease}
                       disabled={atMax}
                       aria-label="Increase counter"
@@ -362,6 +363,7 @@ export const boundedCounterUx = recipe<BoundedCounterArgs>(
                       +{amountMagnitude}
                     </ct-button>
                     <ct-button
+                      id="decrement-button"
                       variant="secondary"
                       onClick={applyDecrease}
                       disabled={atMin}

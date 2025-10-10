@@ -81,18 +81,10 @@ describe("bounded counter pattern test", () => {
   it("should increment counter via UI button", async () => {
     const page = shell.page();
 
-    // Find increment button by aria-label
-    const buttons = await page.$$("ct-button", { strategy: "pierce" });
-    let incrementButton;
-    for (const btn of buttons) {
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute("aria-label")
-      );
-      if (label === "Increase counter") {
-        incrementButton = btn;
-        break;
-      }
-    }
+    // Wait for increment button to be ready
+    const incrementButton = await page.waitForSelector("#increment-button", {
+      strategy: "pierce",
+    });
     assert(incrementButton, "Should find increment button");
 
     await incrementButton.click();
@@ -107,18 +99,10 @@ describe("bounded counter pattern test", () => {
   it("should decrement counter via UI button", async () => {
     const page = shell.page();
 
-    // Find decrement button by aria-label
-    const buttons = await page.$$("ct-button", { strategy: "pierce" });
-    let decrementButton;
-    for (const btn of buttons) {
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute("aria-label")
-      );
-      if (label === "Decrease counter") {
-        decrementButton = btn;
-        break;
-      }
-    }
+    // Wait for decrement button to be ready
+    const decrementButton = await page.waitForSelector("#decrement-button", {
+      strategy: "pierce",
+    });
     assert(decrementButton, "Should find decrement button");
 
     await decrementButton.click();
@@ -133,7 +117,7 @@ describe("bounded counter pattern test", () => {
   it("should change step size via UI input", async () => {
     const page = shell.page();
 
-    // Find step size input
+    // Find step size input (wait for it to be ready)
     const stepInput = await page.waitForSelector(
       'input[aria-label="Choose how far to adjust the counter"]',
       { strategy: "pierce" }
@@ -148,18 +132,10 @@ describe("bounded counter pattern test", () => {
     await stepInput.type("5");
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Find and click increment button
-    const buttons = await page.$$("ct-button", { strategy: "pierce" });
-    let incrementButton;
-    for (const btn of buttons) {
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute("aria-label")
-      );
-      if (label === "Increase counter") {
-        incrementButton = btn;
-        break;
-      }
-    }
+    // Wait for increment button to be ready
+    const incrementButton = await page.waitForSelector("#increment-button", {
+      strategy: "pierce",
+    });
     assert(incrementButton, "Should find increment button");
     await incrementButton.click();
 
@@ -175,21 +151,15 @@ describe("bounded counter pattern test", () => {
 
     // Set value to 9 via direct operation
     await charm.result.set(9, ["value"]);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Direct manipulation causes more conflicts - wait longer
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
-    // Try to increment (should be clamped to max of 10)
-    const buttons = await page.$$("ct-button", { strategy: "pierce" });
-    let incrementButton;
-    for (const btn of buttons) {
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute("aria-label")
-      );
-      if (label === "Increase counter") {
-        incrementButton = btn;
-        break;
-      }
-    }
-    await incrementButton!.click();
+    // Wait for increment button to be ready
+    const incrementButton = await page.waitForSelector("#increment-button", {
+      strategy: "pierce",
+    });
+    assert(incrementButton, "Should find increment button");
+    await incrementButton.click();
 
     await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -202,7 +172,8 @@ describe("bounded counter pattern test", () => {
 
     // Set value to 1 via direct operation
     await charm.result.set(1, ["value"]);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Direct manipulation causes more conflicts - wait longer
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     // Change step size to 5
     const stepInput = await page.waitForSelector(
@@ -216,19 +187,12 @@ describe("bounded counter pattern test", () => {
     await stepInput.type("5");
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Try to decrement (should be clamped to min of 0)
-    const buttons = await page.$$("ct-button", { strategy: "pierce" });
-    let decrementButton;
-    for (const btn of buttons) {
-      const label = await btn.evaluate((el: HTMLElement) =>
-        el.getAttribute("aria-label")
-      );
-      if (label === "Decrease counter") {
-        decrementButton = btn;
-        break;
-      }
-    }
-    await decrementButton!.click();
+    // Wait for decrement button to be ready
+    const decrementButton = await page.waitForSelector("#decrement-button", {
+      strategy: "pierce",
+    });
+    assert(decrementButton, "Should find decrement button");
+    await decrementButton.click();
 
     await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -239,7 +203,8 @@ describe("bounded counter pattern test", () => {
   it("should update min boundary via direct operation", async () => {
     // Set min to 5
     await charm.result.set(5, ["min"]);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Direct manipulation causes more conflicts - wait longer
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const minValue = charm.result.get(["minValue"]) as number;
     assertEquals(minValue, 5, "Min should be updated to 5");
@@ -252,7 +217,8 @@ describe("bounded counter pattern test", () => {
   it("should update max boundary via direct operation", async () => {
     // Set max to 20
     await charm.result.set(20, ["max"]);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Direct manipulation causes more conflicts - wait longer
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
     const maxValue = charm.result.get(["maxValue"]) as number;
     assertEquals(maxValue, 20, "Max should be updated to 20");
