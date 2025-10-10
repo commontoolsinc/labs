@@ -1,30 +1,39 @@
 /// <cts-enable />
-import {
-  cell,
-  h,
-  handler,
-  recipe,
-  UI,
-  type Cell,
-} from "commontools";
+import { type Cell, cell, h, handler, recipe, UI } from "commontools";
 
-const removeItem = handler<unknown, { names: Cell<string[]>, index: number }>(
-  (_, { names, index }) => {
+const removeItem = handler<
+  unknown,
+  { names: Cell<{ name: string }[]>; friend: { name: string } }
+>(
+  (_, { names, friend }) => {
+    // Get the current array from the cell
     const currentNames = names.get();
-    names.set(currentNames.toSpliced(index, 1));
+
+    // Filter out the friend to remove. Here's how the comparison works:
+    // 1. names.key(i) returns a Cell reference to the array element at index i
+    // 2. friend is a proxy object from .map() that has a Symbol("toCell") function attached
+    // 3. When .equals() is called, it invokes friend[Symbol("toCell")]() to convert
+    //    the friend object back into a Cell reference
+    // 4. The two Cell references are compared - they match if they point to the same
+    //    underlying data (same Cell ID and path)
+    const filtered = currentNames.filter((f, i) =>
+      !names.key(i).equals(friend as any)
+    );
+
+    names.set(filtered);
   },
 );
 
 export default recipe("making lists - with remove", () => {
-  const names = cell<string[]>([]);
+  const names = cell<{ name: string }[]>([]);
 
   // Initialize with 5 hardcoded names
   names.set([
-    "Alice",
-    "Bob",
-    "Charlie",
-    "Diana",
-    "Evan",
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "Charlie" },
+    { name: "Diana" },
+    { name: "Evan" },
   ]);
 
   return {
@@ -32,9 +41,9 @@ export default recipe("making lists - with remove", () => {
       <div>
         <h2>My Friends</h2>
         <ul>
-          {names.map((name, index) => (
-            <li onclick={removeItem({ names, index })}>
-              {name}
+          {names.map((friend) => (
+            <li onclick={removeItem({ names, friend })}>
+              {friend.name}
             </li>
           ))}
         </ul>

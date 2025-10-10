@@ -1,21 +1,16 @@
 /// <cts-enable />
-import {
-  cell,
-  h,
-  recipe,
-  UI,
-} from "commontools";
+import { cell, h, recipe, UI } from "commontools";
 
 export default recipe("making lists - simple", () => {
-  const names = cell<string[]>([]);
+  const names = cell<{ name: string }[]>([]);
 
   // Initialize with 5 hardcoded names
   names.set([
-    "Alice",
-    "Bob",
-    "Charlie",
-    "Diana",
-    "Evan",
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "Charlie" },
+    { name: "Diana" },
+    { name: "Evan" },
   ]);
 
   return {
@@ -23,9 +18,7 @@ export default recipe("making lists - simple", () => {
       <div>
         <h2>My Friends</h2>
         <ul>
-          {names.map((name, index) => (
-            <li>{name}</li>
-          ))}
+          {names.map((friend) => <li>{friend.name}</li>)}
         </ul>
       </div>
     ),
