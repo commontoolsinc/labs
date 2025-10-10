@@ -146,7 +146,7 @@ function processDefaultValue(
           "Resolving Wish to asCell",
           { id: entityId },
         ]);
-        return runtime.getCellFromEntityId(link.space, entityId);
+        return runtime.getCellFromEntityId(link.space, { "/": entityId }).withTx(tx);
       }
       // Otherwise, inject a sigil link literal to the target value.
       logger.debug(() => [

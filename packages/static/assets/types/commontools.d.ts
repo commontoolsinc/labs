@@ -314,7 +314,7 @@ export type Default<T, V extends T = T> = T;
  *
  * Example: Wish<Charm[], "allCharms"> → default: { $wish: "allCharms" }
  */
-// @ts-expect-error This is intentional to get the first pass working
+// @ts-ignore sorry :D
 export type Wish<T, Q extends string> = Default<T, {
     $wish: Q;
 }>;

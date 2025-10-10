@@ -79,15 +79,17 @@ const handleNewBacklink = handler<
   },
   {
     // @ts-ignore sorry :D
-    allCharms: Default<MentionableCharm[], { $wish: "#/allCharms" }>;
+    allCharms?: Default<MentionableCharm[], { $wish: "#/allCharms" }>;
   }
->(({ detail }, { mentionable }) => {
+>(({ detail }, { allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
 
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
-    allCharms.push(detail.charm as unknown as MentionableCharm);
+    (allCharms as unknown as Cell<MentionableCharm[]>).push(
+      detail.charm as unknown as MentionableCharm,
+    );
   }
 });
 
@@ -112,9 +114,6 @@ const Note = recipe<Input, Output>(
       return map[key] ?? [];
     })({ index, content });
 
-    // Use shared mentionable list from index
-    const mentionableSource = index.mentionable;
-
     // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
 
@@ -136,7 +135,7 @@ const Note = recipe<Input, Output>(
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({
-              mentionable: mentionableSource as unknown as MentionableCharm[],
+              allCharms: undefined,
             })}
             language="text/markdown"
             theme="light"
