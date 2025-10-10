@@ -24,7 +24,11 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import { validateAndTransform } from "./schema.ts";
+import {
+  processDefaultValue,
+  resolveSchema,
+  validateAndTransform,
+} from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
@@ -565,8 +569,14 @@ export class RegularCell<T> implements Cell<T> {
         [],
         cause,
       );
-      array = isObject(this.schema) && Array.isArray(this.schema?.default)
-        ? this.schema.default
+      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
+      array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
+        ? processDefaultValue(
+          this.runtime,
+          this.tx,
+          this.link,
+          resolvedSchema.default,
+        )
         : [];
     }
 

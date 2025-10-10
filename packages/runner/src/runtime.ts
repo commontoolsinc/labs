@@ -424,7 +424,7 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    return new ExtendedStorageTransaction(this.storageManager.edit());
+    return new ExtendedStorageTransaction(this.storageManager.edit(), this);
   }
 
   /**

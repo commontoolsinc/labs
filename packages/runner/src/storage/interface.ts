@@ -23,6 +23,7 @@ import type {
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
+import type { IRuntime } from "../runtime.ts";
 
 export type {
   Assertion,
@@ -495,6 +496,7 @@ export interface IStorageTransaction {
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
+  runtime: IRuntime;
 
   /**
    * Add a callback to be called when the transaction commit completes.

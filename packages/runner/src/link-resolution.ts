@@ -1,13 +1,15 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
   type CellLink,
+  isSigilLink,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { processDefaultValue, resolveSchema } from "./schema.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -161,19 +163,39 @@ export function resolveLink(
           };
         }
       }
+
       // If still nothing found we fall through and break the loop
     }
 
-    if (nextLink !== undefined) {
-      if (nextLink.schema === undefined && link.schema !== undefined) {
-        link = {
-          ...nextLink,
-          schema: link.schema,
-          rootSchema: link.rootSchema,
-        };
-      } else {
-        link = nextLink;
+    // Restore schema on link
+    if (
+      nextLink && nextLink.schema === undefined && link.schema !== undefined
+    ) {
+      nextLink = {
+        ...nextLink,
+        schema: link.schema,
+        rootSchema: link.rootSchema,
+      };
+    }
+
+    // Handle defaults
+    if (nextLink === undefined && link.schema !== undefined) {
+      const resolvedSchema = resolveSchema(link.schema, link.rootSchema);
+      if (isObject(resolvedSchema) && resolvedSchema.default) {
+        const maybeNextLink = processDefaultValue(
+          tx.runtime,
+          tx,
+          link,
+          resolvedSchema.default,
+        );
+        if (isSigilLink(maybeNextLink)) {
+          nextLink = parseLink(maybeNextLink, link);
+        }
       }
+    }
+
+    if (nextLink !== undefined) {
+      link = nextLink;
     } else {
       break;
     }
