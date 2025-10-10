@@ -114,7 +114,7 @@ export function resolveLink(
         // remove last path element (it's valid in that it can be addressed,
         // but we want to assume it doesn't exist and look for a link there
         // instead)
-        lastValid.pop();
+        const last = lastValid.pop();
 
         if (lastValid.length === link.path.length) {
           // full path candidate, only check legacy-at full path
@@ -145,27 +145,6 @@ export function resolveLink(
           }
         }
 
-        if (nextLink === undefined && link.schema !== undefined) {
-          const resolvedSchema = resolveSchema(link.schema, link.rootSchema);
-          const cfc = new ContextualFlowControl();
-          const schemaAtPath = cfc.getSchemaAtPath(
-            resolvedSchema,
-            lastValid,
-            link.rootSchema,
-          );
-          if (isObject(schemaAtPath) && schemaAtPath.default) {
-            const maybeNextLink = processDefaultValue(
-              tx.runtime,
-              tx,
-              link,
-              schemaAtPath.default,
-            );
-            if (isSigilLink(maybeNextLink)) {
-              nextLink = parseLink(maybeNextLink, link);
-            }
-          }
-        }
-
         if (nextLink) {
           const remainingPath = link.path.slice(lastValid.length);
           let linkSchema = nextLink.schema;
@@ -188,16 +167,35 @@ export function resolveLink(
       // If still nothing found we fall through and break the loop
     }
 
-    if (nextLink !== undefined) {
-      if (nextLink.schema === undefined && link.schema !== undefined) {
-        link = {
-          ...nextLink,
-          schema: link.schema,
-          rootSchema: link.rootSchema,
-        };
-      } else {
-        link = nextLink;
+    // Restore schema on link
+    if (
+      nextLink && nextLink.schema === undefined && link.schema !== undefined
+    ) {
+      nextLink = {
+        ...nextLink,
+        schema: link.schema,
+        rootSchema: link.rootSchema,
+      };
+    }
+
+    // Handle defaults
+    if (nextLink === undefined && link.schema !== undefined) {
+      const resolvedSchema = resolveSchema(link.schema, link.rootSchema);
+      if (isObject(resolvedSchema) && resolvedSchema.default) {
+        const maybeNextLink = processDefaultValue(
+          tx.runtime,
+          tx,
+          link,
+          resolvedSchema.default,
+        );
+        if (isSigilLink(maybeNextLink)) {
+          nextLink = parseLink(maybeNextLink, link);
+        }
       }
+    }
+
+    if (nextLink !== undefined) {
+      link = nextLink;
     } else {
       break;
     }

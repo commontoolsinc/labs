@@ -546,18 +546,6 @@ export type CreateCellFunction = {
 // Default type for specifying default values in type definitions
 export type Default<T, V extends T = T> = T;
 
-/**
- * Wish<T, Q>
- *
- * Interim alias to represent an injectable value identified by a tag.
- * Compiles down to a Default with a special default value shape that the
- * runtime recognizes and resolves to a link or cell.
- *
- * Example: Wish<Charm[], "allCharms"> → default: { $wish: "allCharms" }
- */
-// @ts-expect-error This is intentional to get the first pass working
-export type Wish<T, Q extends string> = Default<T, { $wish: Q }>;
-
 // Re-export opaque ref creators
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;

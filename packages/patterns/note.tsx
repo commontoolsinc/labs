@@ -13,7 +13,6 @@ import {
   recipe,
   toSchema,
   UI,
-  Wish,
 } from "commontools";
 import { type BacklinksMap } from "./backlinks-index.tsx";
 
