@@ -114,6 +114,14 @@ In this section we'll build a feature to remove friends from our list. We'll add
 an onclick listener to the list item and our handler will delete the item from
 the list.
 
+:::{admonition} Using reference to array element
+Instead of passing an index of the element in the array that we want to remove,
+we'll pass a reference to the actual friend object. This lets us use
+Cell equality checking (`.key(i).equals(friend)`) to find and remove the right
+item. We often pass references to share information from one cell to another or
+even one pattern to another as we'll see later.
+:::
+
 First, we need to import the `handler` function and `Cell` type:
 
 ```{code-block} typescript
@@ -130,31 +138,89 @@ import {
 } from "commontools";
 ```
 
-Next, we'll create a handler that removes an item from the array:
+Next, we'll create a handler that removes an item from the array. Note we currently have a bug in the runtime and therefore we reconstruct the array.
 
 ```{code-block} typescript
 :label: making_lists_remove_handler
 :linenos: true
-:emphasize-lines: 1-6
-const removeItem = handler<unknown, { names: Cell<string[]>; index: number }>(
-  (_, { names, index }) => {
+:emphasize-lines: 1-4,14-20
+const removeItem = handler<
+  unknown,
+  { names: Cell<{ name: string }[]>; friend: { name: string } }
+>(
+  (_, { names, friend }) => {
     const currentNames = names.get();
-    names.set(currentNames.toSpliced(index, 1));
+    // Ideal code (once bug is fixed):
+    // const filtered = currentNames.filter((f, i) =>
+    //   !names.key(i).equals(friend as any)
+    // );
+    // names.set(filtered);
+
+    // Current workaround using reduce with object reconstruction:
+    const filtered = currentNames.reduce((acc, _, i) => {
+      if (!names.key(i).equals(friend as any)) {
+        acc.push({ name: currentNames[i].name });
+      }
+      return acc;
+    }, [] as { name: string }[]);
+    names.set(filtered);
   },
 );
 ```
 
-On line 1, we define the handler signature. The first type parameter is
-`unknown` because we don't need any information from the click event. The second
-type parameter specifies that we need the `names` Cell and the `index` of the
-item to remove.
+Lines 1-4 define the handler signature. The second type parameter specifies that
+we need the `names` Cell and the actual `friend` object to remove (not an
+index).
 
-Line 3 gets the current array from the cell.
+Line 6 gets the current array from the cell.
 
-Line 4 uses `.toSpliced()` to create a new array with the item at `index`
-removed, then sets the cell with this new array. The `.toSpliced()` method is a
-non-mutating version of `.splice()` that returns a new array, which triggers the
-UI to update.
+Lines 7-11 show the ideal code that would work once the runtime bug is fixed—a
+simple `.filter()` with `.key(i).equals()` comparison.
+
+Lines 14-19 contain the current workaround using `.reduce()` to build a new
+array that excludes the friend we want to remove.
+
+Line 15 uses `.key(i).equals(friend)` to check if the Cell reference at index
+`i` matches the friend object we want to remove.
+
+Line 16 explicitly reconstructs each object as `{ name: currentNames[i].name }`
+to strip any internal proxy symbols.
+
+Line 20 sets the Cell with the filtered array.
+
+:::{dropdown} Detailed explanation - Why reconstruct the array?
+:animate: fade-in
+
+When you call `.map()` on a Cell array, each item returned is actually a
+Cell reference maintains its connection to the Cell system. These proxies have
+internal symbols like `Symbol("toCell")` and `Symbol("toOpaqueRef")` attached to
+them and a path property that specifies its location in the Cell structure.
+
+
+We must currently reconstruct the objects to avoid a runtime bug, this is what
+we do in the acc.push line below.
+
+```typescript
+// ❌ This doesn't work reliably due to a bug in the system:
+currentNames.filter((f) => f !== friend)
+
+// ✅ This works correctly:
+currentNames.reduce((acc, _, i) => {
+  if (!names.key(i).equals(friend as any)) {
+    acc.push({ name: currentNames[i].name });
+  }
+  return acc;
+}, [])
+```
+
+If we directly push `currentNames[i]`, the proxy symbols get copied into the new
+array. When we call `names.set(filtered)`, the Cell system gets confused by
+these symbols and throws errors. By explicitly creating a new object with just
+the properties we care about, we strip away all the internal metadata and create
+a clean object.
+:::
+
+Line 13 sets the Cell with our filtered array.
 
 Now we can attach this handler to each list item:
 
@@ -163,16 +229,18 @@ Now we can attach this handler to each list item:
 :linenos: true
 :emphasize-lines: 3
 <ul>
-  {state.names.map((name, index) => (
-    <li onclick={removeItem({ names: state.names, index })}>
-      {name}
+  {state.names.map((friend) => (
+    <li onclick={removeItem({ names: state.names, friend })}>
+      {friend.name}
     </li>
   ))}
 </ul>
 ```
 
-Line 3 attaches the `removeItem` handler to each list item. We pass in both the
-`state.names` Cell and the current `index`.
+Line 3 attaches the `removeItem` handler to each list item. We pass in
+`state.names` Cell and the `friend` object itself (not an index). This object is
+the proxy returned from `.map()`, which the handler can compare using
+`.key(i).equals(friend)`.
 
 When you deploy this recipe, clicking on any name will remove it from the list.
 The UI automatically updates because the Cell changes.
@@ -190,22 +258,20 @@ We've demonstrated:
 
 - How to create a handler that modifies array state
 - Use `onclick` on list items to make them interactive
-- Remove items from a cell array using `.get()`, `.toSpliced()`, and `.set()`
-- Pass both the cell and item-specific data (index) to handlers
+- Pass object references instead of indices to handlers (preferred pattern)
+- Use `.key(i).equals(object)` to compare Cell references
+- Remove items from a Cell array using `.reduce()` with object reconstruction
+- Why object reconstruction is necessary to strip proxy symbols from `.map()` results
 
 ## Editing Items
 
 Now we can change the names of our friends. We'll use regular `<input>` elements
 to keep things basic. When the user presses Enter, our `onkeydown` event
 listener kicks in and calls our handler which will modify the friend's name.
-The listener also sends over the 
+
 The handler checks if the key is Enter and, if so, we grab the string
-entered by the user for adding it to the names list.
-
-We'll be passing the index also so we know where to position the new name
-in the list.
-
-*TODO(@ellyxir): don't pass index, instead compare objects*
+entered by the user and update it in the names list. We'll be passing the index
+so we know which position in the array to update.
 
 First, let's create a handler that updates a name in the array:
 

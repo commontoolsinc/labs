@@ -452,12 +452,5 @@ interface State {
 }
 ```
 
-**Benefits of using Default<>:**
-
-- ✅ Automatic Cell creation
-- ✅ Clear default values
-- ✅ Proper schema generation
-- ✅ Better for composing recipes
-
 In the next chapter, we'll explore working with lists in more detail, including
 adding, removing, and editing items.
