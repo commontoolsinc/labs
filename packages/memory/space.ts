@@ -197,13 +197,14 @@ WHERE
 
 export type Options = {
   url: URL;
+  create?: boolean;
 };
 
 export interface SpaceStoreSession<Space extends MemorySpace = MemorySpace>
   extends SpaceSession<Space> {
   store: Database;
 }
-class Space<Subject extends MemorySpace = MemorySpace>
+export class Space<Subject extends MemorySpace = MemorySpace>
   implements SpaceStoreSession<Subject> {
   constructor(
     public subject: Subject,
@@ -321,41 +322,18 @@ const readAddress = (
 export const connect = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
-  return await traceAsync("space.connect", async (span) => {
-    addMemoryAttributes(span, { operation: "connect" });
-    span.setAttribute("space.url", url.toString());
-
-    let database = null;
-    try {
-      const result = readAddress(url);
-      if (result.error) {
-        throw result.error;
-      }
-      const { address, subject } = result.ok;
-      span.setAttribute("space.subject", subject);
-
-      database = await new Database(address ?? ":memory:", {
-        create: false,
-      });
-      database.exec(PREPARE);
-      const session = new Space(subject as Subject, database);
-      return { ok: session };
-    } catch (cause) {
-      if (database) {
-        try {
-          database.close();
-        } catch (closeError) {
-          console.error("Failed to close database after error:", closeError);
-        }
-      }
-      return { error: Error.connection(url, cause as SqliteError) };
-    }
-  });
+  return await open({ url, create: false });
 };
 
+/**
+ * Opens a connection to the existing replica. Creates a new db if replica
+ * does not exist.
+ */
 export const open = async <Subject extends MemorySpace>({
   url,
-}: Options): AsyncResult<Space<Subject>, ConnectionError> => {
+  create,
+}: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
+  const dbCreate = create ?? true;
   return await traceAsync("space.open", async (span) => {
     addMemoryAttributes(span, { operation: "open" });
     span.setAttribute("space.url", url.toString());
@@ -370,20 +348,20 @@ export const open = async <Subject extends MemorySpace>({
       span.setAttribute("space.subject", subject);
 
       database = await new Database(address ?? ":memory:", {
-        create: true,
+        create: dbCreate,
       });
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
     } catch (cause) {
-      // Ensure we close the database if it was opened but failed later
       if (database) {
         try {
           database.close();
         } catch (closeError) {
-          // Just log the close error, but return the original error
           console.error("Failed to close database after error:", closeError);
-          span.setAttribute("space.close_error", true);
+          if (dbCreate) {
+            span.setAttribute("space.close_error", true);
+          }
         }
       }
       return { error: Error.connection(url, cause as SqliteError) };

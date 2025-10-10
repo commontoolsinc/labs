@@ -91,6 +91,15 @@ export class ServerObjectManager extends BaseObjectManager<
    * null if there is no matching fact, or undefined if there is a retraction.
    */
   override load(address: BaseMemoryAddress): IAttestation | null {
+    if (address.id.startsWith("data:appplication/json")) {
+      const [_prefix, encoded] = address.id.split(",", 2);
+      const value = JSON.parse(decodeURIComponent(encoded));
+      const valueEntry = {
+        address: { ...address, path: ["value"] },
+        value: value as (JSONObject | undefined),
+      };
+      return valueEntry;
+    }
     const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;

@@ -1,6 +1,7 @@
 import { JSONObject } from "@commontools/api";
 import {
   JSONValue,
+  MemorySpace,
   SchemaPathSelector,
   URI,
 } from "../src/storage/interface.ts";
@@ -10,8 +11,10 @@ import {
   IAttestation,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-
+import * as Path from "@std/path";
 import data from "./traverse_timing_test_data.json" with { type: "json" };
+import { ServerObjectManager } from "../../memory/space-schema.ts";
+import { connect, SpaceStoreSession } from "../../memory/space.ts";
 
 const docAddress: BaseMemoryAddress = {
   id: "of:baedreibl64qzbhgkvpuxbfc657ugjeyidc62hixjybt5dpci2ddkkhs26m",
@@ -68,15 +71,43 @@ type SimpleRevision<Is extends JSONValue = JSONValue> = {
   since: number;
 };
 
-class TestObjectManager
+// Helper to avoid typing out this template everywhere
+abstract class TestObjectManager
   extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
+}
+
+class TestServerObjectManager extends ServerObjectManager {
+  constructor(
+    session: SpaceStoreSession<MemorySpace>,
+    providedClassifications: Set<string>,
+  ) {
+    super(session, providedClassifications);
+  }
+
+  override load(address: BaseMemoryAddress): IAttestation | null {
+    const rv = super.load(address);
+    if (rv === null) {
+      console.log("Missing", this.toKey(address));
+    }
+    return rv;
+  }
+
+  resetTraverseState() {
+    this.readValues.clear();
+    this.writeValues.clear();
+  }
+}
+
+// In-memory object manager for testing
+class MemoryObjectManager extends TestObjectManager {
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
   public store = new Map<string, SimpleRevision>();
-  public dbStore = new Map<string, string>();
+  public stringStore = new Map<string, string>();
   public useStringStore = true;
-  constructor() {
+  constructor(data: unknown) {
     super();
+    this.init(data);
   }
 
   getReadDocs(): Iterable<IAttestation> {
@@ -88,8 +119,8 @@ class TestObjectManager
   }
 
   // This replicates the JSON.parse/stringify that happens
-  private loadFromDbStore(key: string): SimpleRevision | undefined {
-    const entry = this.dbStore.get(key);
+  private loadFromStringStore(key: string): SimpleRevision | undefined {
+    const entry = this.stringStore.get(key);
     return entry ? (JSON.parse(entry) as SimpleRevision) : undefined;
   }
 
@@ -100,7 +131,7 @@ class TestObjectManager
 
   private loadFromStore(key: string): SimpleRevision | undefined {
     return (this.useStringStore
-      ? this.loadFromDbStore(key)
+      ? this.loadFromStringStore(key)
       : this.loadFromObjStore(key));
   }
 
@@ -137,7 +168,7 @@ class TestObjectManager
     return null;
   }
 
-  init(data: unknown) {
+  private init(data: unknown) {
     for (
       const [uri, attrs] of Object.entries(data as Record<string, unknown>)
     ) {
@@ -145,7 +176,7 @@ class TestObjectManager
       const [[_, revision]] = Object.entries(caused as Record<string, unknown>);
       const address: BaseMemoryAddress = { id: uri as URI, type: type };
       this.store.set(this.toKey(address), revision as SimpleRevision);
-      this.dbStore.set(this.toKey(address), JSON.stringify(revision));
+      this.stringStore.set(this.toKey(address), JSON.stringify(revision));
     }
   }
 
@@ -155,14 +186,8 @@ class TestObjectManager
   }
 }
 
-const objectManager = new TestObjectManager();
-function initTest(objectManager: TestObjectManager, data: unknown) {
-  objectManager.init(data);
-}
-
 // Main test function
 function runTest(objectManager: TestObjectManager) {
-  objectManager.resetTraverseState();
   const traverser = new SchemaObjectTraverser(objectManager, selector);
   const doc = objectManager.load(docAddress)!;
   const factValue: IAttestation = {
@@ -170,7 +195,37 @@ function runTest(objectManager: TestObjectManager) {
     value: (doc.value as JSONObject).value,
   };
   traverser.traverse(factValue);
+  if (objectManager instanceof MemoryObjectManager) {
+    console.log(
+      [...(objectManager as MemoryObjectManager).getReadDocs()].length,
+      "docs read",
+    );
+  } else if (objectManager instanceof TestServerObjectManager) {
+    console.log(
+      [...(objectManager as TestServerObjectManager).getReadDocs()].length,
+      "docs read",
+    );
+  }
 }
+
+async function getObjectManager(useDb: boolean): Promise<TestObjectManager> {
+  if (useDb) {
+    // SQLite based object manager
+    const spaceDID = "did:key:z6MkkGMscCkDFETV5efoTSEybcVfo8muPQUp7qMa3mUGC4mF";
+    const dbURL = new URL(
+      //`../toolshed/cache/memory/${spaceDID}.sqlite`,
+      `../runner/integration/${spaceDID}.sqlite`,
+      Path.toFileUrl(`${Deno.cwd()}/`),
+    );
+    const result = await connect({ url: dbURL });
+    const replica = result.ok!;
+    return new TestServerObjectManager(replica, new Set());
+  } else {
+    return new MemoryObjectManager(data);
+  }
+}
+
+const objectManager = await getObjectManager(true);
 
 function timeFunction(name: string, fn: () => void) {
   const start = performance.now();
@@ -179,16 +234,14 @@ function timeFunction(name: string, fn: () => void) {
   console.log(name, "took", end - start, "ms");
 }
 
-timeFunction("initTest", () => {
-  initTest(objectManager, data);
-});
-
 const n = 100;
 timeFunction(`traverseLoop${n}`, () => {
   for (let i = 0; i < n; i++) {
     runTest(objectManager);
-    if (i === 0) {
-      console.log("missing docs:", objectManager.getMissingDocs());
+    if (objectManager instanceof MemoryObjectManager) {
+      objectManager.resetTraverseState();
+    } else if (objectManager instanceof TestServerObjectManager) {
+      objectManager.resetTraverseState();
     }
   }
 });
