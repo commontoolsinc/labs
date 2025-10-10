@@ -114,7 +114,7 @@ export function resolveLink(
         // remove last path element (it's valid in that it can be addressed,
         // but we want to assume it doesn't exist and look for a link there
         // instead)
-        const last = lastValid.pop();
+        lastValid.pop();
 
         if (lastValid.length === link.path.length) {
           // full path candidate, only check legacy-at full path
