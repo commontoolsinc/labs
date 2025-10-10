@@ -25,7 +25,7 @@ a contact list, or a feed of messages.
 ## Our First List
 
 Let's start simple: we'll create a list of our friends. We'll make an array of 5
-names and store that in a cell.
+names using `Default<>` (from the previous chapter).
 
 We'll need the following imports for this recipe:
 
@@ -35,36 +35,38 @@ We'll need the following imports for this recipe:
 :emphasize-lines:
 /// <cts-enable />
 import {
-  cell,
+  Default,
   h,
   recipe,
   UI,
 } from "commontools";
 ```
 
-Now we can create a cell to hold our list. We'll initialize it with an empty
-array, then set it with our friend names:
+Now we define our state interface with `Default<>` to hold our list of friends:
 
 ```{code-block} typescript
-:label: making_lists_cell
+:label: making_lists_interface
 :linenos: true
-:emphasize-lines: 1,4-10
-const names = cell<{ name: string }[]>([]);
-
-// Initialize with 5 hardcoded names
-names.set([
-  { name: "Alice" },
-  { name: "Bob" },
-  { name: "Charlie" },
-  { name: "Diana" },
-  { name: "Evan" },
-]);
+:emphasize-lines: 1-11
+interface FriendListState {
+  names: Default<
+    { name: string }[],
+    [
+      { name: "Alice" },
+      { name: "Bob" },
+      { name: "Charlie" },
+      { name: "Diana" },
+      { name: "Evan" },
+    ]
+  >;
+}
 ```
 
-On line 1, we create a `Cell` that holds an array of objects, where each object
-has a `name` property. Lines 4-10 set the cell with our friend names.
+Lines 1-11 define our state interface. The `Default<>` type tells the runtime to
+create a Cell that holds an array of objects (each with a `name` property) and
+initialize it with our five friend names.
 
-With our names in hand, we can now display them in the recipe's [UI]. We'll use
+With our state defined, we can now display the names in the recipe's [UI]. We'll use
 the `.map()` function to iterate over each name and render it as a list item:
 
 ```{code-block} typescript
@@ -72,61 +74,18 @@ the `.map()` function to iterate over each name and render it as a list item:
 :linenos: true
 :emphasize-lines: 3-5
 <ul>
-  {names.map((friend) => (
+  {state.names.map((friend) => (
     <li>{friend.name}</li>
   ))}
 </ul>
 ```
 
-The `.map()` function (line 3) iterates over each friend object in our array.
-For each friend, we create an `<li>` element (line 4) that displays the friend's
+The `.map()` function (line 2) iterates over each friend object in our array.
+For each friend, we create an `<li>` element (line 3) that displays the friend's
 name property.
 
-Here's what the complete recipe looks like:
-
-```{code-block} typescript
-:label: making_lists_complete
-:linenos: true
-:emphasize-lines: 10,13-21,27-30
-/// <cts-enable />
-import {
-  cell,
-  h,
-  recipe,
-  UI,
-} from "commontools";
-
-export default recipe("making lists - simple", () => {
-  const names = cell<{ name: string }[]>([]);
-
-  // Initialize with 5 hardcoded names
-  names.set([
-    { name: "Alice" },
-    { name: "Bob" },
-    { name: "Charlie" },
-    { name: "Diana" },
-    { name: "Evan" },
-  ]);
-
-  return {
-    [UI]: (
-      <div>
-        <h2>My Friends</h2>
-        <ul>
-          {names.map((friend) => (
-            <li>{friend.name}</li>
-          ))}
-        </ul>
-      </div>
-    ),
-  };
-});
-```
-
-When you deploy this recipe, you should see a simple list displaying your five
-friend names.
-
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_simple.tsx
 :language: typescript
@@ -136,16 +95,18 @@ friend names.
 
 We've demonstrated the following concepts:
 
-- How to create a `Cell` that holds an array of objects
-- Use `.set()` to populate the array with values
+- How to define a state interface with `Default<>` for an array of objects
 - Use `.map()` to iterate over the array and render list items
 - Access object properties in JSX templates
 - Create a simple unordered list in the `[UI]`
+- Export Cells in the return statement
 
-:::{admonition} Why use a Cell? Even though we initialize the array with static
-values, using a `Cell` makes our list reactive. This means if we later add
-functionality to modify the list (like adding or removing names), the UI will
-automatically update. :::
+:::{admonition} Why use Default<>?
+Even though we initialize the array with static values, using `Default<>` creates
+a reactive Cell. This means when we later add functionality to modify the list
+(like adding or removing names), the UI will automatically update. If we used a
+plain array instead, changes wouldn't trigger UI updates.
+:::
 
 ## Removing Items
 
@@ -153,14 +114,15 @@ In this section we'll build a feature to remove friends from our list. We'll add
 an onclick listener to the list item and our handler will delete the item from
 the list.
 
-First, we need to import the `handler` function:
+First, we need to import the `handler` function and `Cell` type:
 
 ```{code-block} typescript
 :label: making_lists_imports_handler
 :linenos: false
-:emphasize-lines: 4
+:emphasize-lines: 2,4
 import {
-  cell,
+  type Cell,
+  Default,
   h,
   handler,
   recipe,
@@ -168,14 +130,13 @@ import {
 } from "commontools";
 ```
 
-Next, we'll create a handler that removes an item from the array. The handler
-will receive the index of the item to remove:
+Next, we'll create a handler that removes an item from the array:
 
 ```{code-block} typescript
 :label: making_lists_remove_handler
 :linenos: true
 :emphasize-lines: 1-6
-const removeItem = handler<unknown, { names: Cell<string[]>, index: number }>(
+const removeItem = handler<unknown, { names: Cell<string[]>; index: number }>(
   (_, { names, index }) => {
     const currentNames = names.get();
     names.set(currentNames.toSpliced(index, 1));
@@ -187,40 +148,6 @@ On line 1, we define the handler signature. The first type parameter is
 `unknown` because we don't need any information from the click event. The second
 type parameter specifies that we need the `names` Cell and the `index` of the
 item to remove.
-
-:::{dropdown} Detailed explanation - The Event Object :animate: fade-in
-
-Even though we use `_` to ignore the event parameter, the handler actually
-receives a full MouseEvent object when the user clicks. This event contains
-useful information:
-
-```typescript
-const removeItem = handler<any, { names: Cell<string[]>; index: number }>(
-  (event, { names, index }) => {
-    console.log("Event.type:", event?.type); // "click"
-    console.log("Event.detail:", event?.detail); // Click count
-    console.log("Modifier keys:", {
-      alt: event?.altKey, // true if Alt key held
-      ctrl: event?.ctrlKey, // true if Ctrl key held
-      meta: event?.metaKey, // true if Meta/Cmd key held
-      shift: event?.shiftKey, // true if Shift key held
-    });
-
-    // Your handler logic here
-    const currentNames = names.get();
-    names.set(currentNames.toSpliced(index, 1));
-  },
-);
-```
-
-You can use the event to implement features like:
-
-- Delete with confirmation only when holding Shift
-- Different actions based on modifier keys
-- Double-click detection using `event.detail`
-
-For our simple delete, we don't need the event information, so we use `_` as a
-placeholder. :::
 
 Line 3 gets the current array from the cell.
 
@@ -236,8 +163,8 @@ Now we can attach this handler to each list item:
 :linenos: true
 :emphasize-lines: 3
 <ul>
-  {names.map((name, index) => (
-    <li onclick={removeItem({ names, index })}>
+  {state.names.map((name, index) => (
+    <li onclick={removeItem({ names: state.names, index })}>
       {name}
     </li>
   ))}
@@ -245,12 +172,13 @@ Now we can attach this handler to each list item:
 ```
 
 Line 3 attaches the `removeItem` handler to each list item. We pass in both the
-`names` cell and the current `index`.
+`state.names` Cell and the current `index`.
 
 When you deploy this recipe, clicking on any name will remove it from the list.
-The UI automatically updates because the `names` cell changes.
+The UI automatically updates because the Cell changes.
 
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_with_remove.tsx
 :language: typescript
@@ -270,6 +198,14 @@ We've demonstrated:
 Now we can change the names of our friends. We'll use regular `<input>` elements
 to keep things basic. When the user presses Enter, our `onkeydown` event
 listener kicks in and calls our handler which will modify the friend's name.
+The listener also sends over the 
+The handler checks if the key is Enter and, if so, we grab the string
+entered by the user for adding it to the names list.
+
+We'll be passing the index also so we know where to position the new name
+in the list.
+
+*TODO(@ellyxir): don't pass index, instead compare objects*
 
 First, let's create a handler that updates a name in the array:
 
@@ -293,7 +229,8 @@ const editItem = handler<any, { names: Cell<string[]>, index: number }>(
 Line 3 checks if the Enter key was pressed. We only update the array when the
 user presses Enter, not on every keystroke.
 
-:::{dropdown} Detailed explanation - The Keyboard Event :animate: fade-in
+:::{dropdown} Detailed explanation - The Keyboard Event
+:animate: fade-in
 
 The `onkeydown` event provides a KeyboardEvent object with information about the
 key press:
@@ -334,7 +271,8 @@ You could extend this to:
 
 - Save on Enter, cancel on Escape
 - Different behavior with Ctrl+Enter vs plain Enter
-- Navigate between inputs with arrow keys :::
+- Navigate between inputs with arrow keys
+:::
 
 Line 4 gets the new value from the input field using `event.target.value`.
 
@@ -349,11 +287,11 @@ Now let's update our UI to use input fields instead of plain text:
 :linenos: true
 :emphasize-lines: 4-7
 <ul>
-  {names.map((name, index) => (
+  {state.names.map((name, index) => (
     <li>
       <input
         value={name}
-        onkeydown={editItem({ names, index })}
+        onkeydown={editItem({ names: state.names, index })}
       />
     </li>
   ))}
@@ -379,8 +317,8 @@ it did on list items:
 :linenos: true
 :emphasize-lines: 2-5
 <li>
-  <input value={name} onkeydown={editItem({ names, index })} />
-  <button type="button" onclick={removeItem({ names, index })}>
+  <input value={name} onkeydown={editItem({ names: state.names, index })} />
+  <button type="button" onclick={removeItem({ names: state.names, index })}>
     Delete
   </button>
 </li>
@@ -389,7 +327,8 @@ it did on list items:
 The `removeItem` handler is the same one we created earlier - we can reuse it
 with the button's `onclick` event.
 
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_with_edit.tsx
 :language: typescript
@@ -415,21 +354,21 @@ the `<ct-keybind>` component that lets us register keyboard shortcuts.
 We'll use Ctrl+Up Arrow to move an item up in the list, and Ctrl+Down Arrow to
 move it down. First, we need to track which item is currently selected.
 
-In order to keep track of which name is currently selected, we'll create a new
-`Cell` that stores the index of the selected name:
+In order to keep track of which name is currently selected, we'll add a new
+field to our state interface:
 
 ```{code-block} typescript
 :label: making_lists_selected_index
 :linenos: true
-:emphasize-lines: 2,4
-const names = cell<string[]>([]);
-const selectedIndex = cell<number>(0);
-
-names.set(["Alice", "Bob", "Charlie", "Diana", "Evan"]);
+:emphasize-lines: 1-4
+interface FriendListState {
+  names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
+  selectedIndex: Default<number, 0>;
+}
 ```
 
-Line 2 creates a cell to track which list item is currently selected. We
-initialize it to `0` (the first item).
+Line 3 adds a `selectedIndex` field to track which list item is currently selected.
+We initialize it to `0` (the first item).
 
 Next, we need a handler to update the selected index when a user clicks on a
 list item. We pass in the `Cell` which we'll be updating and the index of the
@@ -499,16 +438,24 @@ so it works regardless of which element has focus.
 ```{code-block} typescript
 :label: making_lists_keybinds
 :linenos: true
-:emphasize-lines: 1-10
+:emphasize-lines: 1-14
 <ct-keybind
   ctrl
   key="ArrowUp"
-  onct-keybind={moveItem({ names, selectedIndex, direction: "UP" })}
+  onct-keybind={moveItem({
+    names: state.names,
+    selectedIndex: state.selectedIndex,
+    direction: "UP"
+  })}
 />
 <ct-keybind
   ctrl
   key="ArrowDown"
-  onct-keybind={moveItem({ names, selectedIndex, direction: "DOWN" })}
+  onct-keybind={moveItem({
+    names: state.names,
+    selectedIndex: state.selectedIndex,
+    direction: "DOWN"
+  })}
 />
 ```
 
@@ -516,12 +463,13 @@ Line 2 specifies that the Ctrl key must be held.
 
 Line 3 specifies which key to listen for (ArrowUp or ArrowDown).
 
-Line 4 attaches our handler to the `onct-keybind` event, passing
+Lines 4-8 attach our handler to the `onct-keybind` event, passing both Cells and
 `direction: "UP"` for the up arrow.
 
-Line 9 does the same for the down arrow, passing `direction: "DOWN"`.
+Lines 13-17 do the same for the down arrow, passing `direction: "DOWN"`.
 
-:::{dropdown} More about ct-keybind :animate: fade-in
+:::{dropdown} More about ct-keybind
+:animate: fade-in
 
 The `<ct-keybind>` component supports many options for creating keyboard
 shortcuts:
@@ -613,9 +561,9 @@ Finally, we need to update our list items to be selectable:
 :label: making_lists_selectable_items
 :linenos: true
 :emphasize-lines: 2
-<li onclick={selectItem({ selectedIndex, index })}>
-  <input value={name} onkeydown={editItem({ names, index })} />
-  <button type="button" onclick={removeItem({ names, index })}>Delete</button>
+<li onclick={selectItem({ selectedIndex: state.selectedIndex, index })}>
+  <input value={name} onkeydown={editItem({ names: state.names, index })} />
+  <button type="button" onclick={removeItem({ names: state.names, index })}>Delete</button>
 </li>
 ```
 
@@ -624,7 +572,8 @@ Line 1 adds the `onclick` handler to track which item is selected.
 When you deploy this recipe, you can click on any list item to select it, then
 press Ctrl+Up or Ctrl+Down to move it in the list.
 
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_with_reorder.tsx
 :language: typescript
@@ -644,13 +593,12 @@ We've demonstrated:
 ## Adding Items
 
 Of course we love more friends! We'll add an input field to add new friends.
-Users can type in a new friend name and it will be added to the `Cell<string[]>`
-holding the names of our friends.
+Users can type in a new friend name and it will be added to our friends list.
 
 Let's create a handler that adds the new name to our list when the user presses
 Enter. The handler will receive a keyboard event from the input field (just like
 we saw with the [editing section earlier](making_lists_with_inputs)) and the
-`names` Cell containing all our friends.
+`names` Cell.
 
 ```{code-block} typescript
 :label: making_lists_add_handler
@@ -687,7 +635,7 @@ Now we can add the input field to our UI:
 :emphasize-lines: 1-5
 <div>
   <input
-    onkeydown={addFriend({ names })}
+    onkeydown={addFriend({ names: state.names })}
     placeholder="Add a new friend..."
   />
 </div>
@@ -700,7 +648,8 @@ Line 4 adds placeholder text to show users what the input is for.
 When you deploy this recipe, you can type a name and press Enter to add it to
 the bottom of your friends list.
 
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_with_add.tsx
 :language: typescript
@@ -720,23 +669,20 @@ we'll show how this is done by moving friends between two groups -- your
 personal friends and your work friends lists.
 
 First, let's create two separate lists and display them side by side. We'll
-create two cells, one for each list:
+define a state interface with two arrays:
 
 ```{code-block} typescript
 :label: making_lists_two_cells
 :linenos: true
-:emphasize-lines: 1-2,5-6
-const personalFriends = cell<string[]>([]);
-const workFriends = cell<string[]>([]);
-
-// Initialize with some names
-personalFriends.set(["Alice", "Bob", "Charlie"]);
-workFriends.set(["Diana", "Evan"]);
+:emphasize-lines: 1-4
+interface FriendListsState {
+  personalFriends: Default<string[], ["Alice", "Bob", "Charlie"]>;
+  workFriends: Default<string[], ["Diana", "Evan"]>;
+}
 ```
 
-Lines 1-2 create two separate cells, each holding an array of strings.
-
-Lines 5-6 initialize each list with different names.
+Lines 1-4 define our state interface with two separate friend lists, each
+initialized with different names.
 
 Now we can display both lists side by side using a flex layout:
 
@@ -748,7 +694,7 @@ Now we can display both lists side by side using a flex layout:
   <div>
     <h3>Personal Friends</h3>
     <ul>
-      {personalFriends.map((name) => (
+      {state.personalFriends.map((name) => (
         <li>{name}</li>
       ))}
     </ul>
@@ -756,7 +702,7 @@ Now we can display both lists side by side using a flex layout:
   <div>
     <h3>Work Friends</h3>
     <ul>
-      {workFriends.map((name) => (
+      {state.workFriends.map((name) => (
         <li>{name}</li>
       ))}
     </ul>
@@ -766,21 +712,19 @@ Now we can display both lists side by side using a flex layout:
 
 Line 1 creates a flex container with a gap between the two lists.
 
-Lines 3-9 display the first list with its own heading.
+Lines 3-9 display the personal friends list with its own heading.
 
-Lines 11-17 display the second list with its own heading.
+Lines 11-17 display the work friends list with its own heading.
 
 When you deploy this recipe, you'll see two lists displayed next to each other.
 
-Next, let's add back the functionality for editing, reordering, and removing
-items in the list. We can use the exact same handler TK:(is this true??) that
-we've already build, we'll just be changing which names `Cell` we'll be passing
-to it. When that `Cell` is modified, the reactive system will update the
-appropriate list in the UI.
+Next, you can add functionality for editing, reordering, and removing items by
+reusing the same handlers we've already built. Simply pass the appropriate Cell
+(`state.personalFriends` or `state.workFriends`) to the handlers. When a Cell is
+modified, the reactive system will update the appropriate list in the UI automatically.
 
-TK: do this please
-
-:::{dropdown} View complete code :animate: fade-in
+:::{dropdown} View complete code
+:animate: fade-in
 
 ```{literalinclude} ./code/making_lists_two_lists.tsx
 :language: typescript
@@ -790,6 +734,7 @@ TK: do this please
 
 We've demonstrated:
 
-- How to create multiple cells to hold separate arrays
+- How to define multiple arrays in a state interface using `Default<>`
 - Display multiple lists in the same UI
 - Use CSS flexbox for side-by-side layout
+- Reuse handlers across different Cells

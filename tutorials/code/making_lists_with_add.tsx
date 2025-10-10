@@ -1,21 +1,26 @@
 /// <cts-enable />
 import {
-  cell,
+  type Cell,
+  Default,
   h,
   handler,
   recipe,
   UI,
-  type Cell,
 } from "commontools";
 
-const removeItem = handler<unknown, { names: Cell<string[]>, index: number }>(
+interface FriendListState {
+  names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
+  selectedIndex: Default<number, 0>;
+}
+
+const removeItem = handler<unknown, { names: Cell<string[]>; index: number }>(
   (_, { names, index }) => {
     const currentNames = names.get();
     names.set(currentNames.toSpliced(index, 1));
   },
 );
 
-const editItem = handler<any, { names: Cell<string[]>, index: number }>(
+const editItem = handler<any, { names: Cell<string[]>; index: number }>(
   (event, { names, index }) => {
     if (event?.key === "Enter") {
       const newValue = event?.target?.value;
@@ -27,7 +32,10 @@ const editItem = handler<any, { names: Cell<string[]>, index: number }>(
   },
 );
 
-const selectItem = handler<unknown, { selectedIndex: Cell<number>, index: number }>(
+const selectItem = handler<
+  unknown,
+  { selectedIndex: Cell<number>; index: number }
+>(
   (_, { selectedIndex, index }) => {
     selectedIndex.set(index);
   },
@@ -41,19 +49,21 @@ const moveItem = handler<
     direction: "UP" | "DOWN";
   }
 >((_, { names, selectedIndex, direction }) => {
-    const index = selectedIndex.get();
-    const currentNames = names.get();
-    const offset = direction === "UP" ? -1 : 1;
-    const newIndex = index + offset;
+  const index = selectedIndex.get();
+  const currentNames = names.get();
+  const offset = direction === "UP" ? -1 : 1;
+  const newIndex = index + offset;
 
-    if (newIndex >= 0 && newIndex < currentNames.length) {
-      const newNames = [...currentNames];
-      [newNames[index], newNames[newIndex]] = [newNames[newIndex], newNames[index]];
-      names.set(newNames);
-      selectedIndex.set(newIndex);
-    }
-  },
-);
+  if (newIndex >= 0 && newIndex < currentNames.length) {
+    const newNames = [...currentNames];
+    [newNames[index], newNames[newIndex]] = [
+      newNames[newIndex],
+      newNames[index],
+    ];
+    names.set(newNames);
+    selectedIndex.set(newIndex);
+  }
+});
 
 const addFriend = handler<any, { names: Cell<string[]> }>(
   (event, { names }) => {
@@ -67,19 +77,7 @@ const addFriend = handler<any, { names: Cell<string[]> }>(
   },
 );
 
-export default recipe("making lists - with add", () => {
-  const names = cell<string[]>([]);
-  const selectedIndex = cell<number>(0);
-
-  // Initialize with 5 hardcoded names
-  names.set([
-    "Alice",
-    "Bob",
-    "Charlie",
-    "Diana",
-    "Evan",
-  ]);
-
+export default recipe<FriendListState>("making lists - with add", (state) => {
   return {
     [UI]: (
       <div>
@@ -89,29 +87,45 @@ export default recipe("making lists - with add", () => {
         <ct-keybind
           ctrl
           key="ArrowUp"
-          onct-keybind={moveItem({ names, selectedIndex, direction: "UP" })}
+          onct-keybind={moveItem({
+            names: state.names,
+            selectedIndex: state.selectedIndex,
+            direction: "UP",
+          })}
         />
         <ct-keybind
           ctrl
           key="ArrowDown"
-          onct-keybind={moveItem({ names, selectedIndex, direction: "DOWN" })}
+          onct-keybind={moveItem({
+            names: state.names,
+            selectedIndex: state.selectedIndex,
+            direction: "DOWN",
+          })}
         />
 
         <div>
           <input
-            onkeydown={addFriend({ names })}
+            onkeydown={addFriend({ names: state.names })}
             placeholder="Add a new friend..."
           />
         </div>
 
         <ul>
-          {names.map((name, index) => (
-            <li onclick={selectItem({ selectedIndex, index })}>
+          {state.names.map((name, index) => (
+            <li
+              onclick={selectItem({
+                selectedIndex: state.selectedIndex,
+                index,
+              })}
+            >
               <input
                 value={name}
-                onkeydown={editItem({ names, index })}
+                onkeydown={editItem({ names: state.names, index })}
               />
-              <button type="button" onclick={removeItem({ names, index })}>
+              <button
+                type="button"
+                onclick={removeItem({ names: state.names, index })}
+              >
                 Delete
               </button>
             </li>
@@ -119,5 +133,7 @@ export default recipe("making lists - with add", () => {
         </ul>
       </div>
     ),
+    names: state.names,
+    selectedIndex: state.selectedIndex,
   };
 });

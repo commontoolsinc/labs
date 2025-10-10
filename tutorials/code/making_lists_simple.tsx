@@ -1,26 +1,29 @@
 /// <cts-enable />
-import { cell, h, recipe, UI } from "commontools";
+import { Default, h, recipe, UI } from "commontools";
 
-export default recipe("making lists - simple", () => {
-  const names = cell<{ name: string }[]>([]);
+interface FriendListState {
+  names: Default<
+    { name: string }[],
+    [
+      { name: "Alice" },
+      { name: "Bob" },
+      { name: "Charlie" },
+      { name: "Diana" },
+      { name: "Evan" },
+    ]
+  >;
+}
 
-  // Initialize with 5 hardcoded names
-  names.set([
-    { name: "Alice" },
-    { name: "Bob" },
-    { name: "Charlie" },
-    { name: "Diana" },
-    { name: "Evan" },
-  ]);
-
+export default recipe<FriendListState>("making lists - simple", (state) => {
   return {
     [UI]: (
       <div>
         <h2>My Friends</h2>
         <ul>
-          {names.map((friend) => <li>{friend.name}</li>)}
+          {state.names.map((friend) => <li>{friend.name}</li>)}
         </ul>
       </div>
     ),
+    names: state.names,
   };
 });

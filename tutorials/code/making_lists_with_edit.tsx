@@ -1,21 +1,25 @@
 /// <cts-enable />
 import {
-  cell,
+  type Cell,
+  Default,
   h,
   handler,
   recipe,
   UI,
-  type Cell,
 } from "commontools";
 
-const removeItem = handler<unknown, { names: Cell<string[]>, index: number }>(
+interface FriendListState {
+  names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
+}
+
+const removeItem = handler<unknown, { names: Cell<string[]>; index: number }>(
   (_, { names, index }) => {
     const currentNames = names.get();
     names.set(currentNames.toSpliced(index, 1));
   },
 );
 
-const editItem = handler<any, { names: Cell<string[]>, index: number }>(
+const editItem = handler<any, { names: Cell<string[]>; index: number }>(
   (event, { names, index }) => {
     if (event?.key === "Enter") {
       const newValue = event?.target?.value;
@@ -27,30 +31,19 @@ const editItem = handler<any, { names: Cell<string[]>, index: number }>(
   },
 );
 
-export default recipe("making lists - with edit", () => {
-  const names = cell<string[]>([]);
-
-  // Initialize with 5 hardcoded names
-  names.set([
-    "Alice",
-    "Bob",
-    "Charlie",
-    "Diana",
-    "Evan",
-  ]);
-
+export default recipe<FriendListState>("making lists - with edit", (state) => {
   return {
     [UI]: (
       <div>
         <h2>My Friends</h2>
         <ul>
-          {names.map((name, index) => (
+          {state.names.map((name, index) => (
             <li>
               <input
                 value={name}
-                onkeydown={editItem({ names, index })}
+                onkeydown={editItem({ names: state.names, index })}
               />
-              <button type="button" onclick={removeItem({ names, index })}>
+              <button type="button" onclick={removeItem({ names: state.names, index })}>
                 Delete
               </button>
             </li>
@@ -58,5 +51,6 @@ export default recipe("making lists - with edit", () => {
         </ul>
       </div>
     ),
+    names: state.names,
   };
 });
