@@ -1,13 +1,15 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
   type CellLink,
+  isSigilLink,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { processDefaultValue, resolveSchema } from "./schema.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -143,6 +145,27 @@ export function resolveLink(
           }
         }
 
+        if (nextLink === undefined && link.schema !== undefined) {
+          const resolvedSchema = resolveSchema(link.schema, link.rootSchema);
+          const cfc = new ContextualFlowControl();
+          const schemaAtPath = cfc.getSchemaAtPath(
+            resolvedSchema,
+            lastValid,
+            link.rootSchema,
+          );
+          if (isObject(schemaAtPath) && schemaAtPath.default) {
+            const maybeNextLink = processDefaultValue(
+              tx.runtime,
+              tx,
+              link,
+              schemaAtPath.default,
+            );
+            if (isSigilLink(maybeNextLink)) {
+              nextLink = parseLink(maybeNextLink, link);
+            }
+          }
+        }
+
         if (nextLink) {
           const remainingPath = link.path.slice(lastValid.length);
           let linkSchema = nextLink.schema;
@@ -161,6 +184,7 @@ export function resolveLink(
           };
         }
       }
+
       // If still nothing found we fall through and break the loop
     }
 

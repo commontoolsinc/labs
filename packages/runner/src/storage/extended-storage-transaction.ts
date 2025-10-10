@@ -23,6 +23,7 @@ import type {
 } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -46,7 +47,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     (tx: IExtendedStorageTransaction) => void
   >();
 
-  constructor(public tx: IStorageTransaction) {}
+  constructor(public tx: IStorageTransaction, public runtime: IRuntime) {}
 
   get journal(): ITransactionJournal {
     return this.tx.journal;

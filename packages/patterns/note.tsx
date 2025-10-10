@@ -79,7 +79,7 @@ const handleNewBacklink = handler<
   },
   {
     // @ts-ignore sorry :D
-    allCharms?: Default<MentionableCharm[], { $wish: "#/allCharms" }>;
+    allCharms?: Cell<Default<MentionableCharm[], { $wish: "#/allCharms" }>>;
   }
 >(({ detail }, { allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
