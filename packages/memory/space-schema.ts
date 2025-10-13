@@ -259,8 +259,11 @@ export const selectSchema = <Space extends MemorySpace>(
 
 // The fact passed in is the IAttestation for the top level 'is', so path
 // is empty.
-function loadFactsForDoc(
-  manager: ServerObjectManager,
+export function loadFactsForDoc(
+  manager: BaseObjectManager<
+    BaseMemoryAddress,
+    Immutable<JSONValue> | undefined
+  >,
   fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
@@ -305,7 +308,7 @@ function loadFactsForDoc(
   }
 }
 
-const redactCommits = <Space extends MemorySpace>(
+export const redactCommits = <Space extends MemorySpace>(
   includedFacts: FactSelection,
   session: SpaceStoreSession<Space>,
 ) => {
@@ -340,7 +343,7 @@ const redactCommits = <Space extends MemorySpace>(
 
 // Adds the ValueEntry's object to the selection, merging the since
 // into the `is` field.
-function addToSelection(
+export function addToSelection(
   includedFacts: FactSelection,
   entry: IAttestation,
   cause: Cause,
@@ -356,7 +359,7 @@ function addToSelection(
 }
 
 // Get the ValueEntry objects for the facts that match our selector
-function getMatchingFacts<Space extends MemorySpace>(
+export function getMatchingFacts<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   factSelector: FactSelector,
 ): Iterable<IAttestation & { cause: Cause; since: number }> {
