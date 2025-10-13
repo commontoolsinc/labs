@@ -15,4 +15,7 @@ export const incrementer = handler({
 } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (event: IncrementEvent, state) => {
     console.log("increment by", event.amount);
 });
-__ctHelpers.NAME; // <internals>
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

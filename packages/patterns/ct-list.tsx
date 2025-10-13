@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 
 interface Item {
   title: string;

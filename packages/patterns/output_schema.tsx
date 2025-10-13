@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  h,
-  handler,
-  NAME,
-  recipe,
-  UI,
-  VNode,
-} from "commontools";
+import { Cell, Default, handler, NAME, recipe, UI, VNode } from "commontools";
 
 const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);

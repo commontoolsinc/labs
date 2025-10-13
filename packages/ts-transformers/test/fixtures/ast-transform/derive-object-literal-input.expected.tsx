@@ -54,4 +54,7 @@ const summary = derive({
     rejected: rejected,
 }, (snapshot) => `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
     ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`);
-__ctHelpers.NAME; // <internals>
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

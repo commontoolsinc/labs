@@ -8,7 +8,10 @@ const CT_HELPERS_SPECIFIER = "commontools";
 const HELPERS_STMT =
   `import * as ${CT_HELPERS_IDENTIFIER} from "${CT_HELPERS_SPECIFIER}";`;
 
-const HELPERS_USED_STMT = `${CT_HELPERS_IDENTIFIER}.NAME; // <internals>`;
+const HELPERS_USED_STMT = `// @ts-ignore: Internals
+function h(...args: any[]) { return ${CT_HELPERS_IDENTIFIER}.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = ${CT_HELPERS_IDENTIFIER}.h.fragment`;
 
 export class CTHelpers {
   #sourceFile: ts.SourceFile;
@@ -70,7 +73,9 @@ export class CTHelpers {
 //
 // We must also inject usage of the module before the AST transformer
 // pipeline, otherwise the binding fails, and the helper module
-// is not available in the compiled JS.
+// is not available in the compiled JS. We repropagate the jsx `h`
+// function, which allows authors to not manually specify the import,
+// as well as "use" the helper to avoid treeshaking/binding failure.
 //
 // Source maps are derived from this transformation.
 // Take care in maintaining source lines from its input.
@@ -105,12 +110,10 @@ function checkCTHelperVar(source: string) {
     ts.ScriptTarget.ES2023,
   );
   const visitor = (node: ts.Node): ts.Node => {
-    if (ts.isIdentifier(node)) {
-      if (node.text === CT_HELPERS_IDENTIFIER) {
-        throw new Error(
-          `Source cannot contain reserved '${CT_HELPERS_IDENTIFIER}' symbol.`,
-        );
-      }
+    if (ts.isIdentifier(node) && node.text === CT_HELPERS_IDENTIFIER) {
+      throw new Error(
+        `Source cannot contain reserved '${CT_HELPERS_IDENTIFIER}' symbol.`,
+      );
     }
     return ts.visitEachChild(node, visitor, undefined);
   };

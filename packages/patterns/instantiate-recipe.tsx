@@ -2,7 +2,6 @@
 import {
   Cell,
   Default,
-  h,
   handler,
   NAME,
   navigateTo,
