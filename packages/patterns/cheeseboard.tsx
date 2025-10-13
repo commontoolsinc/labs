@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { fetchData, h, lift, NAME, recipe, UI } from "commontools";
+import { fetchData, lift, NAME, recipe, UI } from "commontools";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and

@@ -3,7 +3,6 @@ import {
   Default,
   derive,
   fetchData,
-  h,
   lift,
   NAME,
   recipe,

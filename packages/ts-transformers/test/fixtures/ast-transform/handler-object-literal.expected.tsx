@@ -30,4 +30,7 @@ export default recipe({ type: "object", properties: { value: { type: "number" },
         onClick3: myHandler(state),
     };
 });
-__ctHelpers.NAME; // <internals>
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

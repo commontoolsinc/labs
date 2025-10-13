@@ -5,7 +5,6 @@ import {
   cell,
   Default,
   derive,
-  h,
   handler,
   llm,
   NAME,

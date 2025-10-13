@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, str, Stream, UI } from "commontools";
+import { Default, NAME, recipe, str, Stream, UI } from "commontools";
 import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {

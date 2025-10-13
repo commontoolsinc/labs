@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Default, h, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 type Input = {
   selected: Default<string, "">;

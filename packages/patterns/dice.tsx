@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, Stream, UI } from "commontools";
+import { Default, NAME, recipe, Stream, UI } from "commontools";
 import { getValue, roll } from "./dice-handlers.ts";
 
 interface RecipeState {

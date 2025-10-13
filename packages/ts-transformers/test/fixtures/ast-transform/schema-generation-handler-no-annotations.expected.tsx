@@ -4,4 +4,7 @@ import { handler } from "commontools";
 export const genericHandler = handler(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     console.log("event:", event, "state:", state);
 });
-__ctHelpers.NAME; // <internals>
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

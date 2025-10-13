@@ -3,7 +3,6 @@ import {
   Cell,
   Default,
   derive,
-  h,
   handler,
   ID,
   lift,

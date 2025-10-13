@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, h, handler, NAME, recipe, str, UI } from "commontools";
+import { Cell, Default, handler, NAME, recipe, str, UI } from "commontools";
 
 interface RecipeState {
   value: Default<number, 0>;

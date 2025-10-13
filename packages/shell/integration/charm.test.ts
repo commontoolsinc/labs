@@ -7,6 +7,7 @@ import { assert } from "@std/assert";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
+import { FileSystemProgramResolver } from "@commontools/js-runtime";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
@@ -25,17 +26,19 @@ describe("shell charm tests", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
+    const sourcePath = join(
+      import.meta.dirname!,
+      "..",
+      "..",
+      "patterns",
+      "counter.tsx",
+    );
+    const program = await cc.manager().runtime.harness
+      .resolve(
+        new FileSystemProgramResolver(sourcePath),
+      );
     const charm = await cc.create(
-      await Deno.readTextFile(
-        join(
-          import.meta.dirname!,
-          "..",
-          "..",
-          "..",
-          "recipes",
-          "counter.tsx",
-        ),
-      ),
+      program,
       { start: false },
     );
     charmId = charm.id;

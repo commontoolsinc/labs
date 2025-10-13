@@ -3,7 +3,6 @@ import {
   BuiltInLLMMessage,
   Cell,
   Default,
-  h,
   handler,
   ifElse,
   JSONSchema,

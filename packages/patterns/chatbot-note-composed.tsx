@@ -4,7 +4,6 @@ import {
   Cell,
   cell,
   Default,
-  h,
   handler,
   NAME,
   navigateTo,

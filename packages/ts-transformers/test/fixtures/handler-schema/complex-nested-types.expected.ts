@@ -121,4 +121,7 @@ export { userHandler };
 export default recipe("complex-nested-types test", () => {
     return { userHandler };
 });
-__ctHelpers.NAME; // <internals>
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
