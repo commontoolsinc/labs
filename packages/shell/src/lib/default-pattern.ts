@@ -17,7 +17,6 @@ export async function create(cc: CharmsController): Promise<CharmController> {
 
   const charm = await cc.create(program);
 
-
   // Wait for the link to be processed
   await runtime.idle();
   await manager.synced();

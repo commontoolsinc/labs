@@ -29,7 +29,7 @@ export type Charm = {
   [key: string]: any;
 };
 
-type CharmsListInput = {};
+type CharmsListInput = Record<string, never>;
 
 // Recipe returns only UI, no data outputs (only symbol properties)
 interface CharmsListOutput {
