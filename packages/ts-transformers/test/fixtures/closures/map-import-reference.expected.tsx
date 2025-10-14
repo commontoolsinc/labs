@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, derive, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -39,13 +39,17 @@ export default recipe({
             required: ["id", "price"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
         {state.items.map((item) => (<div>
-            Item: {derive(item.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
+            Item: {__ctHelpers.derive(item.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
           </div>))}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

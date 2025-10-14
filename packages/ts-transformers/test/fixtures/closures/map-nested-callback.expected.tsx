@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 interface Tag {
     id: number;
     name: string;
@@ -60,11 +60,11 @@ export default recipe({
             required: ["id", "name"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.mapWithPattern(recipe({
+        {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -115,10 +115,10 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, params: { prefix } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { prefix } }) => (<div>
             {prefix}: {element.name}
             <ul>
-              {element.tags.mapWithPattern(recipe({
+              {element.tags.mapWithPattern(__ctHelpers.recipe({
                     $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
@@ -151,9 +151,13 @@ export default recipe({
                             required: ["id", "name"]
                         }
                     }
-                } as const satisfies JSONSchema, ({ element, params: { name } }) => (<li>{name} - {element.name}</li>)), { name: element.name })}
+                } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { name } }) => (<li>{name} - {element.name}</li>)), { name: element.name })}
             </ul>
           </div>)), { prefix: state.prefix })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
