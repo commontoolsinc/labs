@@ -4,6 +4,7 @@ import {
   cell,
   Default,
   handler,
+  ifElse,
   lift,
   recipe,
   UI,
@@ -61,11 +62,24 @@ export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
       todos[date] || [],
   );
 
+  // Get todos for the clicked date using the same lifted function
+  const clickedDateTodos = getTodosForDate({ todos, date: clickedDate });
+
   return {
     [UI]: (
       <div>
         <h2>Calendar</h2>
         <p>Clicked on: {clickedDate}</p>
+        {clickedDate && clickedDateTodos.length > 0 && (
+          <div style="background: #f0f0f0; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+            <h4 style="margin-top: 0;">Todos for {clickedDate}:</h4>
+            <ul>
+              {clickedDateTodos.map((todo, index) => (
+                <li key={index}>{todo}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {dates.map((date) => {
           const dateTodos = getTodosForDate({ todos, date });
           return (
