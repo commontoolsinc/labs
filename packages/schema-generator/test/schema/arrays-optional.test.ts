@@ -26,8 +26,12 @@ describe("Schema: Arrays and optional properties", () => {
     const a = await getTypeFromCode(code, "A");
     const b = await getTypeFromCode(code, "B");
     const gen = createSchemaTransformerV2();
-    const sa = asObjectSchema(gen.generateSchema(a.type, a.checker, a.typeNode));
-    const sb = asObjectSchema(gen.generateSchema(b.type, b.checker, b.typeNode));
+    const sa = asObjectSchema(
+      gen.generateSchema(a.type, a.checker, a.typeNode),
+    );
+    const sb = asObjectSchema(
+      gen.generateSchema(b.type, b.checker, b.typeNode),
+    );
     const saItems = sa.properties?.items as any;
     expect(saItems?.type).toBe("array");
     expect(saItems?.items?.type).toBe("string");
