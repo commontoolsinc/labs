@@ -14,7 +14,6 @@ import type {
   ConsumerResultFor,
   DID,
   EnhancedCommit,
-  Entity,
   Fact,
   FactSelection,
   InferOf,
@@ -44,7 +43,6 @@ import type {
   Selection,
   Selector,
   Signer,
-  The,
   Transaction,
   TransactionResult,
   UCAN,
@@ -375,7 +373,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
       Select<MIME, Select<CauseString, SchemaPathSelector>>
     > = {};
     for (const [of, attributes] of Object.entries(queryArg.select)) {
-      const entityEntry: Select<The, Select<CauseString, SchemaPathSelector>> =
+      const entityEntry: Select<MIME, Select<CauseString, SchemaPathSelector>> =
         {};
       selectSchema[of as URI | SelectAll] = entityEntry;
       let attrEntries = Object.entries(attributes);
