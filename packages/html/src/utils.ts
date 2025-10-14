@@ -14,6 +14,23 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       key: string,
       value: unknown,
     ) {
+      const el = element as any;
+
+      // Handle data-* attributes specially - they need to be set as HTML attributes
+      // to populate the dataset property correctly
+      if (key.startsWith("data-") && el.attribs) {
+        // If value is null or undefined, remove the attribute
+        if (value == null) {
+          if (key in el.attribs) {
+            delete el.attribs[key];
+          }
+        } else {
+          el.attribs[key] = String(value);
+        }
+        return;
+      }
+
+      // For non-data attributes, use the existing logic
       let attrValue;
       if (typeof value === "string") {
         attrValue = value;
@@ -26,7 +43,6 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       } else {
         attrValue = `${value}`;
       }
-      const el = element as domhandler.Element;
       if (!el.attribs[key]) {
         el.attribs[key] = attrValue;
       }
@@ -92,6 +108,48 @@ export class MockDoc {
             // @ts-ignore: domhandler.Element has `attribs`
             return (this as Element).attribs[attrName];
           }
+        },
+      },
+      setAttribute: {
+        value(attrName: string, value: string) {
+          if (this && (this as any).attribs) {
+            // @ts-ignore: domhandler.Element has `attribs`
+            (this as Element).attribs[attrName] = value;
+          }
+        },
+      },
+      hasAttribute: {
+        value(attrName: string) {
+          if (this && (this as any).attribs) {
+            // @ts-ignore: domhandler.Element has `attribs`
+            return attrName in (this as Element).attribs;
+          }
+          return false;
+        },
+      },
+      removeAttribute: {
+        value(attrName: string) {
+          if (this && (this as any).attribs) {
+            // @ts-ignore: domhandler.Element has `attribs`
+            delete (this as Element).attribs[attrName];
+          }
+        },
+      },
+      dataset: {
+        get() {
+          const el = this as any;
+          if (!el.attribs) return {};
+          const dataset: Record<string, string> = {};
+          for (const key in el.attribs) {
+            if (key.startsWith("data-")) {
+              const dataKey = key.slice(5).replace(
+                /-([a-z])/g,
+                (_, char) => char.toUpperCase(),
+              );
+              dataset[dataKey] = el.attribs[key];
+            }
+          }
+          return dataset;
         },
       },
     };
