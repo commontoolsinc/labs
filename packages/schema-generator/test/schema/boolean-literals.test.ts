@@ -14,7 +14,7 @@ describe("Schema: Boolean literals", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "BooleanLiterals");
     const transformer = createSchemaTransformerV2();
-    const schema = transformer(type, checker);
+    const schema = transformer.generateSchema(type, checker);
 
     const alwaysTrue = schema.properties?.alwaysTrue as any;
     expect(alwaysTrue.type).toBe("boolean");
@@ -36,7 +36,7 @@ describe("Schema: Boolean literals", () => {
       "AlwaysTrue",
     );
     const transformer = createSchemaTransformerV2();
-    const trueSchema = transformer(trueType, checker);
+    const trueSchema = transformer.generateSchema(trueType, checker);
 
     expect(trueSchema.type).toBe("boolean");
     expect(trueSchema.enum).toEqual([true]);
@@ -46,7 +46,7 @@ describe("Schema: Boolean literals", () => {
       falseCode,
       "AlwaysFalse",
     );
-    const falseSchema = transformer(falseType, falseChecker);
+    const falseSchema = transformer.generateSchema(falseType, falseChecker);
 
     expect(falseSchema.type).toBe("boolean");
     expect(falseSchema.enum).toEqual([false]);

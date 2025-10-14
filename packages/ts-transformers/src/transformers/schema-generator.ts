@@ -6,7 +6,7 @@ import {
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
 
-let generateSchema: ReturnType<typeof createSchemaTransformerV2> | undefined;
+let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
 export class SchemaGeneratorTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -14,7 +14,7 @@ export class SchemaGeneratorTransformer extends Transformer {
   }
 
   transform(context: TransformationContext): ts.SourceFile {
-    if (!generateSchema) generateSchema = createSchemaTransformerV2();
+    if (!schemaTransformer) schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;
     const { logger, typeRegistry } = context.options;
 
@@ -48,24 +48,22 @@ export class SchemaGeneratorTransformer extends Transformer {
           optionsObj = evaluateObjectLiteral(arg0, checker);
         }
 
-        // If Type resolved to 'any' and we have a synthetic TypeNode, try analyzing its structure
+        // If Type resolved to 'any' and we have a synthetic TypeNode, use new method
         let schema: unknown;
         if (
           (type.flags & ts.TypeFlags.Any) &&
           typeArg.pos === -1 &&
           typeArg.end === -1
         ) {
-          // This is a synthetic TypeNode that didn't resolve to a proper Type
-          // Analyze the TypeNode structure, checking typeRegistry for property Types
-          schema = analyzeTypeNodeStructure(
+          // Synthetic TypeNode path - use new method that shares context properly
+          schema = schemaTransformer!.generateSchemaFromSyntheticTypeNode(
             typeArg,
             checker,
-            context.factory,
             typeRegistry,
           );
         } else {
-          // Normal path: use Type-based schema generation
-          schema = generateSchema!(type, checker, typeArg);
+          // Normal Type path
+          schema = schemaTransformer!.generateSchema(type, checker, typeArg);
         }
 
         // Handle boolean schemas (true/false) - can't spread them
@@ -196,106 +194,4 @@ function isToSchemaNode(node: ts.Node): node is ToSchemaNode {
     return true;
   }
   return false;
-}
-
-/**
- * Analyze a synthetic TypeNode's structure to generate a schema when Type resolution fails.
- * Checks typeRegistry for property Types before recursing.
- */
-function analyzeTypeNodeStructure(
-  typeNode: ts.TypeNode,
-  checker: ts.TypeChecker,
-  factory: ts.NodeFactory,
-  typeRegistry?: import("../core/mod.ts").TypeRegistry,
-): unknown {
-  // Handle TypeLiteral nodes (object types)
-  if (ts.isTypeLiteralNode(typeNode)) {
-    const properties: Record<string, unknown> = {};
-    const required: string[] = [];
-
-    for (const member of typeNode.members) {
-      if (
-        ts.isPropertySignature(member) &&
-        member.name &&
-        ts.isIdentifier(member.name) &&
-        member.type
-      ) {
-        const propName = member.name.text;
-
-        // First, check if this property's TypeNode is in the typeRegistry
-        let propType: ts.Type | undefined;
-        if (typeRegistry && typeRegistry.has(member.type)) {
-          propType = typeRegistry.get(member.type);
-        } else {
-          // Try to get Type from the property's TypeNode
-          const resolvedType = checker.getTypeFromTypeNode(member.type);
-          if (!(resolvedType.flags & ts.TypeFlags.Any)) {
-            propType = resolvedType;
-          }
-        }
-
-        let propSchema: unknown;
-        if (propType) {
-          // We have a real Type - use normal schema generator
-          if (!generateSchema) generateSchema = createSchemaTransformerV2();
-          propSchema = generateSchema(propType, checker, member.type);
-        } else {
-          // No Type available - recurse on TypeNode structure
-          propSchema = analyzeTypeNodeStructure(
-            member.type,
-            checker,
-            factory,
-            typeRegistry,
-          );
-        }
-
-        properties[propName] = propSchema;
-
-        // Add to required if not optional
-        if (!member.questionToken) {
-          required.push(propName);
-        }
-      }
-    }
-
-    const schema: Record<string, unknown> = {
-      type: "object",
-      properties,
-    };
-
-    if (required.length > 0) {
-      schema.required = required;
-    }
-
-    return schema;
-  }
-
-  // Handle keyword types (string, number, boolean, etc.)
-  switch (typeNode.kind) {
-    case ts.SyntaxKind.StringKeyword:
-      return { type: "string" };
-    case ts.SyntaxKind.NumberKeyword:
-      return { type: "number" };
-    case ts.SyntaxKind.BooleanKeyword:
-      return { type: "boolean" };
-    case ts.SyntaxKind.NullKeyword:
-      return { type: "null" };
-    case ts.SyntaxKind.UndefinedKeyword:
-    case ts.SyntaxKind.VoidKeyword:
-    case ts.SyntaxKind.AnyKeyword:
-    case ts.SyntaxKind.UnknownKeyword:
-      // Accept any value
-      return true;
-  }
-
-  // For other TypeNode kinds, try to resolve as Type
-  const type = checker.getTypeFromTypeNode(typeNode);
-  if (!(type.flags & ts.TypeFlags.Any)) {
-    // Successfully resolved - use normal schema generator
-    if (!generateSchema) generateSchema = createSchemaTransformerV2();
-    return generateSchema(type, checker, typeNode);
-  }
-
-  // Fallback: accept any value
-  return true;
 }

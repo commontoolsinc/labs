@@ -11,7 +11,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const s = gen(type, checker);
+    const s = gen.generateSchema(type, checker);
     expect(s.properties?.field1?.type).toBe("string");
     expect(s.properties?.field1?.default).toBe("hello");
     expect(s.properties?.field2?.type).toBe("number");
@@ -25,7 +25,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       interface X { value: Cell<Default<string, "default">>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const v = s.properties?.value as any;
     expect(v.type).toBe("string");
     expect(v.default).toBe("default");
@@ -39,7 +39,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       interface X { events: Stream<Default<string, "initial">>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const ev = s.properties?.events as any;
     expect(ev.type).toBe("string");
     expect(ev.default).toBe("initial");
@@ -53,7 +53,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       interface X { events: Stream<Default<string[], ["a"]>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const ev = s.properties?.events as any;
     expect(ev.type).toBe("array");
     expect(ev.items?.type).toBe("string");
@@ -67,7 +67,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       interface X { items: Array<Cell<string>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const items = s.properties?.items as any;
     expect(items.type).toBe("array");
     expect(items.items?.type).toBe("string");
@@ -83,7 +83,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       interface X { tags: Cell<string[]>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const tags = s.properties?.tags as any;
     expect(tags.type).toBe("array");
     expect(tags.items?.type).toBe("string");
@@ -100,7 +100,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const c = s.properties?.cellOfDefault as any;
     expect(c.type).toBe("string");
     expect(c.default).toBe("d");

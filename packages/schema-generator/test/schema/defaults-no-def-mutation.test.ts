@@ -15,7 +15,7 @@ describe("Schema: Default<T,V> does not mutate shared definitions", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const s = gen(type, checker);
+    const s = gen.generateSchema(type, checker);
 
     const a = s.properties?.a as any;
     const b = s.properties?.b as any;

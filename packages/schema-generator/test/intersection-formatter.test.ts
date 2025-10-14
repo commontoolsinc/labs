@@ -20,7 +20,7 @@ describe("IntersectionFormatter", () => {
         type ItemWithIndex = ItemBase & WithIndex;
       `;
       const { type, checker } = await getTypeFromCode(code, "ItemWithIndex");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.text).toEqual({ type: "string" });
@@ -46,7 +46,7 @@ describe("IntersectionFormatter", () => {
         code,
         "ListStateWithIndex",
       );
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.items?.type).toBe("array");
@@ -67,7 +67,7 @@ describe("IntersectionFormatter", () => {
         type Combined = RequiredFields & OptionalFields;
       `;
       const { type, checker } = await getTypeFromCode(code, "Combined");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -94,7 +94,7 @@ describe("IntersectionFormatter", () => {
         code,
         "IntersectionWithCall",
       );
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -120,7 +120,7 @@ describe("IntersectionFormatter", () => {
         code,
         "IntersectionWithConstruct",
       );
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -144,7 +144,7 @@ describe("IntersectionFormatter", () => {
         type BadIntersection = Base & WithIndex;
       `;
       const { type, checker } = await getTypeFromCode(code, "BadIntersection");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
@@ -160,7 +160,7 @@ describe("IntersectionFormatter", () => {
         type BadIntersection = Base & string;
       `;
       const { type, checker } = await getTypeFromCode(code, "BadIntersection");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
@@ -184,7 +184,7 @@ describe("IntersectionFormatter", () => {
         type Combined = A & B;
       `;
       const { type, checker } = await getTypeFromCode(code, "Combined");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.shared).toEqual({ type: "string" });
@@ -210,7 +210,7 @@ describe("IntersectionFormatter", () => {
         type Triple = A & B & C;
       `;
       const { type, checker } = await getTypeFromCode(code, "Triple");
-      const schema = transformer(type, checker);
+      const schema = transformer.generateSchema(type, checker);
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.a).toEqual({ type: "string" });

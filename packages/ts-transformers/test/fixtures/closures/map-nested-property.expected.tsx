@@ -57,19 +57,11 @@ export default recipe({
     return {
         [UI]: (<div>
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -86,7 +78,21 @@ export default recipe({
                         required: ["firstName", "lastName"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { firstName, lastName } }) => (<div>
             {element.name} - edited by {firstName} {lastName}
           </div>)), { firstName: state.currentUser.firstName, lastName: state.currentUser.lastName })}

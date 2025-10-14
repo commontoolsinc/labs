@@ -46,19 +46,11 @@ export default recipe({
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["id", "price"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -75,7 +67,21 @@ export default recipe({
                         required: ["threshold", "discount"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["id", "price"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { threshold, discount } }) => (<div>
             Price: ${element.price > threshold
                     ? element.price * (1 - discount)
