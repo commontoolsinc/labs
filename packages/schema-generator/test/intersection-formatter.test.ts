@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
-import { getTypeFromCode } from "./utils.ts";
+import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
 describe("IntersectionFormatter", () => {
   const transformer = createSchemaTransformerV2();
@@ -20,7 +20,7 @@ describe("IntersectionFormatter", () => {
         type ItemWithIndex = ItemBase & WithIndex;
       `;
       const { type, checker } = await getTypeFromCode(code, "ItemWithIndex");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.text).toEqual({ type: "string" });
@@ -46,10 +46,11 @@ describe("IntersectionFormatter", () => {
         code,
         "ListStateWithIndex",
       );
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
-      expect(schema.properties?.items?.type).toBe("array");
+      const items = schema.properties?.items as any;
+      expect(items?.type).toBe("array");
       expect(schema.properties?.index).toEqual({ type: "number" });
       expect(schema.required).toEqual(["items", "index"]);
     });
@@ -67,7 +68,7 @@ describe("IntersectionFormatter", () => {
         type Combined = RequiredFields & OptionalFields;
       `;
       const { type, checker } = await getTypeFromCode(code, "Combined");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -94,7 +95,7 @@ describe("IntersectionFormatter", () => {
         code,
         "IntersectionWithCall",
       );
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -120,7 +121,7 @@ describe("IntersectionFormatter", () => {
         code,
         "IntersectionWithConstruct",
       );
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.name).toEqual({ type: "string" });
@@ -144,7 +145,7 @@ describe("IntersectionFormatter", () => {
         type BadIntersection = Base & WithIndex;
       `;
       const { type, checker } = await getTypeFromCode(code, "BadIntersection");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
@@ -160,7 +161,7 @@ describe("IntersectionFormatter", () => {
         type BadIntersection = Base & string;
       `;
       const { type, checker } = await getTypeFromCode(code, "BadIntersection");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
@@ -184,7 +185,7 @@ describe("IntersectionFormatter", () => {
         type Combined = A & B;
       `;
       const { type, checker } = await getTypeFromCode(code, "Combined");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.shared).toEqual({ type: "string" });
@@ -210,7 +211,7 @@ describe("IntersectionFormatter", () => {
         type Triple = A & B & C;
       `;
       const { type, checker } = await getTypeFromCode(code, "Triple");
-      const schema = transformer.generateSchema(type, checker);
+      const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
       expect(schema.type).toBe("object");
       expect(schema.properties?.a).toEqual({ type: "string" });

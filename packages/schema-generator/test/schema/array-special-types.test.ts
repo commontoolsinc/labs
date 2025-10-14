@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Array special types", () => {
   const transformer = createSchemaTransformerV2();
@@ -11,7 +11,7 @@ describe("Schema: Array special types", () => {
       "type AnyArray = any[];",
       "AnyArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(true);
   });
@@ -21,7 +21,7 @@ describe("Schema: Array special types", () => {
       "type AnyArray = Array<any>;",
       "AnyArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(true);
   });
@@ -31,7 +31,7 @@ describe("Schema: Array special types", () => {
       "type NeverArray = never[];",
       "NeverArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(false);
   });
@@ -41,7 +41,7 @@ describe("Schema: Array special types", () => {
       "type NeverArray = Array<never>;",
       "NeverArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(false);
   });
@@ -51,7 +51,7 @@ describe("Schema: Array special types", () => {
       "type UnknownArray = unknown[];",
       "UnknownArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(true);
   });
@@ -61,7 +61,7 @@ describe("Schema: Array special types", () => {
       "type UnknownArray = Array<unknown>;",
       "UnknownArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toBe(true);
   });
@@ -71,7 +71,7 @@ describe("Schema: Array special types", () => {
       "type StringArray = string[];",
       "StringArray",
     );
-    const schema = transformer.generateSchema(type, checker, typeNode);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker, typeNode));
     expect(schema.type).toBe("array");
     expect(schema.items).toEqual({ type: "string" });
   });

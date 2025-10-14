@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: type-to-schema parity", () => {
   it("generates schemas for inputs/outputs structures", async () => {
@@ -20,20 +20,23 @@ describe("Schema: type-to-schema parity", () => {
     const { type: oType, checker: oChecker, typeNode: oNode } =
       await getTypeFromCode(code, "RecipeOutput");
     const gen = createSchemaTransformerV2();
-    const u = gen.generateSchema(uType, uChecker, uNode);
-    const i = gen.generateSchema(iType, iChecker, iNode);
-    const o = gen.generateSchema(oType, oChecker, oNode);
+    const u = asObjectSchema(gen.generateSchema(uType, uChecker, uNode));
+    const i = asObjectSchema(gen.generateSchema(iType, iChecker, iNode));
+    const o = asObjectSchema(gen.generateSchema(oType, oChecker, oNode));
     // UpdaterInput
     expect(u.type).toBe("object");
-    expect(u.properties?.newValues?.type).toBe("array");
-    expect(u.properties?.newValues?.items?.type).toBe("string");
+    const uNewValues = u.properties?.newValues as any;
+    expect(uNewValues?.type).toBe("array");
+    expect(uNewValues?.items?.type).toBe("string");
     // RecipeInput
-    expect(i.properties?.values?.asCell).toBe(true);
-    expect(i.properties?.values?.type).toBe("array");
-    expect(i.properties?.values?.items?.type).toBe("string");
+    const iValues = i.properties?.values as any;
+    expect(iValues?.asCell).toBe(true);
+    expect(iValues?.type).toBe("array");
+    expect(iValues?.items?.type).toBe("string");
     // RecipeOutput
-    expect(o.properties?.values?.type).toBe("array");
-    expect(o.properties?.values?.items?.type).toBe("string");
+    const oValues = o.properties?.values as any;
+    expect(oValues?.type).toBe("array");
+    expect(oValues?.items?.type).toBe("string");
     const upd = o.properties?.updater as any;
     expect(upd.asStream).toBe(true);
     expect(upd.$ref).toBe("#/$defs/UpdaterInput");
@@ -56,7 +59,7 @@ describe("Schema: type-to-schema parity", () => {
     `;
 
     const { type, checker } = await getTypeFromCode(code, "UserInfo");
-    const schema = createSchemaTransformerV2().generateSchema(type, checker);
+    const schema = asObjectSchema(createSchemaTransformerV2().generateSchema(type, checker));
 
     expect(schema.type).toBe("object");
     const profile = schema.properties?.profile as Record<string, any>;
