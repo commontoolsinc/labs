@@ -322,10 +322,20 @@ const listen = (
 };
 
 const setProp = <T>(target: T, key: string, value: unknown) => {
-  // @ts-ignore - we've validated these via runtime checks
-  if (target[key] !== value) {
+  // Handle data-* attributes specially - they need to be set as HTML attributes
+  // to populate the dataset property correctly
+  if (key.startsWith("data-") && target instanceof Element) {
+    const currentValue = target.getAttribute(key);
+    const newValue = String(value);
+    if (currentValue !== newValue) {
+      target.setAttribute(key, newValue);
+    }
+  } else {
     // @ts-ignore - we've validated these via runtime checks
-    target[key] = value;
+    if (target[key] !== value) {
+      // @ts-ignore - we've validated these via runtime checks
+      target[key] = value;
+    }
   }
 };
 
@@ -415,6 +425,17 @@ export function serializableEvent<T>(event: Event): T {
       );
   }
 
+  // Copy dataset as a plain object for serialization
+  if (isHTMLElement(target) && target.dataset) {
+    const dataset: Record<string, string> = {};
+    for (const key in target.dataset) {
+      dataset[key] = target.dataset[key]!;
+    }
+    if (Object.keys(dataset).length > 0) {
+      targetObject.dataset = dataset;
+    }
+  }
+
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
 
   if ((event as CustomEvent).detail !== undefined) {
@@ -436,4 +457,8 @@ function isSelectElement(value: unknown): value is HTMLSelectElement {
   return !!(value && typeof value === "object" && ("tagName" in value) &&
     typeof value.tagName === "string" &&
     value.tagName.toUpperCase() === "SELECT");
+}
+
+function isHTMLElement(value: unknown): value is HTMLElement {
+  return !!(value && typeof value === "object" && ("dataset" in value));
 }
