@@ -112,10 +112,10 @@ const spawnNote = handler<
   }));
 });
 
-// This wrapping layer will go away post DX1
 function getAllCharms() {
   const allCharms = wish<MentionableCharm[]>("#/allCharms", []);
-  return derive(allCharms, (c) => c);
+  // ensure schema is added to return type
+  return derive<MentionableCharm[], MentionableCharm[]>(allCharms, (c) => c);
 }
 
 export default recipe<CharmsListInput, CharmsListOutput>(
