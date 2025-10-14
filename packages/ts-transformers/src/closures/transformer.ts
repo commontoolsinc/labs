@@ -1,6 +1,5 @@
 import ts from "typescript";
 import {
-  hasCtsEnableDirective,
   TransformationContext,
   Transformer,
 } from "../core/mod.ts";
@@ -8,12 +7,11 @@ import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return hasCtsEnableDirective(context.sourceFile);
+    return context.ctHelpers.sourceHasHelpers();
   }
 
   transform(context: TransformationContext): ts.SourceFile {
-    const out = transformClosures(context);
-    return context.imports.apply(out, context.factory);
+    return transformClosures(context);
   }
 }
 
@@ -891,12 +889,9 @@ function createRecipeCallWithParams(
   );
 
   // Wrap in recipe<T>() using type argument
-  const recipeIdentifier = context.imports.getIdentifier(context, {
-    name: "recipe",
-    module: "commontools",
-  });
+  const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
   const recipeCall = factory.createCallExpression(
-    recipeIdentifier,
+    recipeExpr,
     [callbackParamTypeNode], // Type argument
     [newCallback],
   );
@@ -938,7 +933,7 @@ function transformMapCallback(
   captures: Map<string, ts.Expression>,
   context: TransformationContext,
 ): ts.CallExpression {
-  const { factory, imports } = context;
+  const { factory } = context;
 
   // Build set of captured variable names
   const capturedVarNames = new Set<string>();
@@ -950,9 +945,6 @@ function transformMapCallback(
   if (capturedVarNames.size === 0) {
     return mapCall;
   }
-
-  // Require recipe import
-  imports.require({ module: "commontools", name: "recipe" });
 
   // Get callback parameters
   const originalParams = callback.parameters;

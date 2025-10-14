@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { recipe, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -53,16 +53,19 @@ export default recipe({
             required: ["id", "name", "price", "active"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
         <p>Total items: {state.items.length}</p>
-        <p>Filtered count: {derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter(i => i.name.includes(_v2)).length)}</p>
-        
+        <p>
+          Filtered count:{" "}
+          {__ctHelpers.derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter((i) => i.name.includes(_v2)).length)}
+        </p>
+
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.mapWithPattern(recipe({
+          {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -105,31 +108,44 @@ export default recipe({
                         required: ["id", "name", "price", "active"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, params: { discount, taxRate } }) => (<li key={element.id}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount, taxRate } }) => (<li key={element.id}>
               <span>{element.name}</span>
-              <span> - Original: ${element.price}</span>
-              <span> - Discounted: ${(element.price * (1 - discount)).toFixed(2)}</span>
-              <span> - With tax: ${(element.price * (1 - discount) * (1 + taxRate)).toFixed(2)}</span>
+              <span>- Original: ${element.price}</span>
+              <span>
+                - Discounted: ${(element.price * (1 - discount)).toFixed(2)}
+              </span>
+              <span>
+                - With tax:
+                ${(element.price * (1 - discount) * (1 + taxRate))
+                    .toFixed(2)}
+              </span>
             </li>)), { discount: state.discount, taxRate: state.taxRate })}
         </ul>
-        
+
         <h3>Array Methods</h3>
         <p>Item count: {state.items.length}</p>
-        <p>Active items: {derive(state.items, _v1 => _v1.filter(i => i.active).length)}</p>
-        
+        <p>Active items: {__ctHelpers.derive(state.items, _v1 => _v1.filter((i) => i.active).length)}</p>
+
         <h3>Simple Operations</h3>
-        <p>Discount percent: {derive(state.discount, _v1 => _v1 * 100)}%</p>
-        <p>Tax percent: {derive(state.taxRate, _v1 => _v1 * 100)}%</p>
-        
+        <p>Discount percent: {__ctHelpers.derive(state.discount, _v1 => _v1 * 100)}%</p>
+        <p>Tax percent: {__ctHelpers.derive(state.taxRate, _v1 => _v1 * 100)}%</p>
+
         <h3>Array Predicates</h3>
-        <p>All active: {ifElse(derive(state.items, _v1 => _v1.every(i => i.active)), "Yes", "No")}</p>
-        <p>Any active: {ifElse(derive(state.items, _v1 => _v1.some(i => i.active)), "Yes", "No")}</p>
-        <p>Has expensive (gt 100): {ifElse(derive(state.items, _v1 => _v1.some(i => i.price > 100)), "Yes", "No")}</p>
-        
+        <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive(state.items, _v1 => _v1.every((i) => i.active)), "Yes", "No")}</p>
+        <p>Any active: {__ctHelpers.ifElse(__ctHelpers.derive(state.items, _v1 => _v1.some((i) => i.active)), "Yes", "No")}</p>
+        <p>
+          Has expensive (gt 100):{" "}
+          {__ctHelpers.ifElse(__ctHelpers.derive(state.items, _v1 => _v1.some((i) => i.price > 100)), "Yes", "No")}
+        </p>
+
         <h3>Object Operations</h3>
-        <div data-item-count={state.items.length} data-has-filter={derive(state.filter.length, _v1 => _v1 > 0)} data-discount={state.discount}>
+        <div data-item-count={state.items.length} data-has-filter={__ctHelpers.derive(state.filter.length, _v1 => _v1 > 0)} data-discount={state.discount}>
           Object attributes
         </div>
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

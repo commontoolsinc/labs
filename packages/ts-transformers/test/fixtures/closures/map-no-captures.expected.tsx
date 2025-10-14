@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 interface Item {
     id: number;
     price: number;
@@ -33,7 +33,7 @@ export default recipe({
             required: ["id", "price"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* No captures - just uses the callback parameter */}
@@ -41,3 +41,7 @@ export default recipe({
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

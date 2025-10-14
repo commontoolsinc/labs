@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, handler, Cell, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI, handler, Cell } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -8,7 +8,7 @@ declare global {
     }
 }
 // Event handler defined at module scope
-const handleClick = handler(true as const satisfies JSONSchema, {
+const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         count: {
@@ -17,7 +17,7 @@ const handleClick = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["count"]
-} as const satisfies JSONSchema, (_, { count }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
 interface Item {
@@ -58,11 +58,11 @@ export default recipe({
             required: ["id", "name"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.mapWithPattern(recipe({
+        {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -96,9 +96,13 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
             {element.name}
           </ct-button>)), { count: state.count })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

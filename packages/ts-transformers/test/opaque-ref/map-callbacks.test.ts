@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertStringIncludes } from "@std/assert";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
 import { transformSource } from "../utils.ts";
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
 const SOURCE = `/// <cts-enable />
@@ -48,7 +48,7 @@ describe("OpaqueRef map callbacks", () => {
     // Map callback should be transformed to recipe with schema for captured defaultName
     assertStringIncludes(
       output,
-      "recipe({",
+      "__ctHelpers.recipe({",
     );
     assertStringIncludes(
       output,
@@ -61,7 +61,7 @@ describe("OpaqueRef map callbacks", () => {
     // Index parameter still gets derive wrapping for the arithmetic operation
     assertStringIncludes(
       output,
-      "derive(index, index => index + 1)",
+      "__ctHelpers.derive(index, index => index + 1)",
     );
     // element[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
@@ -71,7 +71,7 @@ describe("OpaqueRef map callbacks", () => {
     // ifElse still gets derive for the negation
     assertStringIncludes(
       output,
-      "ifElse(derive(state.charms.length, _v1 => !_v1)",
+      "ifElse(__ctHelpers.derive(state.charms.length, _v1 => !_v1)",
     );
   });
 });

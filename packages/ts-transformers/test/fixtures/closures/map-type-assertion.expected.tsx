@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, OpaqueRef, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI, OpaqueRef } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -17,13 +17,13 @@ export default recipe({
         }
     },
     required: ["items", "prefix"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     // Type assertion to OpaqueRef<Item[]>
     const typedItems = state.items as OpaqueRef<Item[]>;
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.mapWithPattern(recipe({
+        {typedItems.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -56,9 +56,13 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, params: { prefix } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { prefix } }) => (<div>
             {prefix}: {element.name}
           </div>)), { prefix: state.prefix })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
