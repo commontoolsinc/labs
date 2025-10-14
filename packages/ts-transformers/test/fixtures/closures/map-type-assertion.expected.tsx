@@ -24,19 +24,11 @@ export default recipe({
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
         {typedItems.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -49,7 +41,21 @@ export default recipe({
                         required: ["prefix"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { prefix } }) => (<div>
             {prefix}: {element.name}
           </div>)), { prefix: state.prefix })}

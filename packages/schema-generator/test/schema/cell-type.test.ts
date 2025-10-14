@@ -11,7 +11,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = gen.generateSchema(type, checker);
     const name = result.properties?.name as Record<string, unknown>;
     expect(name).toBeDefined();
     expect(name.type).toBe("string");
@@ -26,7 +26,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = gen.generateSchema(type, checker);
     const users = result.properties?.users as Record<string, any>;
     expect(users).toBeDefined();
     expect(users.type).toBe("array");
@@ -43,7 +43,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = gen.generateSchema(type, checker);
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("number");
@@ -60,7 +60,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    expect(() => gen(type, checker)).toThrow(
+    expect(() => gen.generateSchema(type, checker)).toThrow(
       "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>",
     );
   });

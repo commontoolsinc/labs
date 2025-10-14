@@ -20,9 +20,9 @@ describe("Schema: type-to-schema parity", () => {
     const { type: oType, checker: oChecker, typeNode: oNode } =
       await getTypeFromCode(code, "RecipeOutput");
     const gen = createSchemaTransformerV2();
-    const u = gen(uType, uChecker, uNode);
-    const i = gen(iType, iChecker, iNode);
-    const o = gen(oType, oChecker, oNode);
+    const u = gen.generateSchema(uType, uChecker, uNode);
+    const i = gen.generateSchema(iType, iChecker, iNode);
+    const o = gen.generateSchema(oType, oChecker, oNode);
     // UpdaterInput
     expect(u.type).toBe("object");
     expect(u.properties?.newValues?.type).toBe("array");
@@ -56,7 +56,7 @@ describe("Schema: type-to-schema parity", () => {
     `;
 
     const { type, checker } = await getTypeFromCode(code, "UserInfo");
-    const schema = createSchemaTransformerV2()(type, checker);
+    const schema = createSchemaTransformerV2().generateSchema(type, checker);
 
     expect(schema.type).toBe("object");
     const profile = schema.properties?.profile as Record<string, any>;

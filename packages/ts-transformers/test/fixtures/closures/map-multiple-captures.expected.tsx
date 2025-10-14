@@ -47,19 +47,11 @@ export default recipe({
     return {
         [UI]: (<div>
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            },
-                            quantity: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price", "quantity"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -80,7 +72,21 @@ export default recipe({
                         required: ["discount", "taxRate", "multiplier"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            },
+                            quantity: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price", "quantity"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { discount, taxRate, multiplier } }) => (<span>
             Total: {element.price * element.quantity * discount * taxRate * multiplier + shippingCost}
           </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier })}

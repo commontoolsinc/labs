@@ -27,7 +27,7 @@ describe("Schema: Type aliases and shared types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "TypeAliasTest");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     expect(s.properties?.genericCell?.type).toBe("string");
     expect(s.properties?.genericCell?.asCell).toBe(true);
     expect(s.properties?.specificCell?.type).toBe("string");
@@ -56,7 +56,7 @@ describe("Schema: Type aliases and shared types", () => {
       interface A { b1: B; b2: B; }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;
     expect(b1.$ref).toBe("#/$defs/B");
