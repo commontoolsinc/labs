@@ -15,8 +15,8 @@ async function setupTestRuntime() {
   const storageManager = StorageManager.emulate({ as: signer });
 
   const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
     storageManager,
-    blobbyServerUrl: import.meta.url,
   });
 
   return { runtime, space };

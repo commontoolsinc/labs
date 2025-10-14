@@ -32,7 +32,7 @@ describe("Cell", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
 
@@ -301,7 +301,7 @@ describe("Cell utility functions", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -361,7 +361,7 @@ describe("createProxy", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -714,7 +714,7 @@ describe("Proxy", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -829,7 +829,7 @@ describe("asCell", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -974,7 +974,7 @@ describe("asCell with schema", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -2053,7 +2053,7 @@ describe("getAsLink method", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -2310,7 +2310,7 @@ describe("getAsWriteRedirectLink method", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -2393,7 +2393,7 @@ describe("getImmutableCell", () => {
       storageManager = StorageManager.emulate({ as: signer });
 
       runtime = new Runtime({
-        blobbyServerUrl: import.meta.url,
+        apiUrl: new URL(import.meta.url),
         storageManager,
       });
       tx = runtime.edit();
@@ -2425,7 +2425,7 @@ describe("toCell and toOpaqueRef hooks", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -3141,7 +3141,7 @@ describe("Cell success callbacks", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();

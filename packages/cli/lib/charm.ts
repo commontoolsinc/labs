@@ -76,11 +76,11 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
   // Use a const ref object so we can assign later while keeping const binding
   const charmManagerRef: { current?: CharmManager } = {};
   const runtime = new Runtime({
+    apiUrl: new URL(config.apiUrl),
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
     }),
-    blobbyServerUrl: config.apiUrl,
     navigateCallback: (target) => {
       try {
         const id = charmId(target);
@@ -110,6 +110,11 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
       }
     },
   });
+
+  if (!(await runtime.healthCheck())) {
+    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+  }
+
   const charmManager = new CharmManager(session, runtime);
   charmManagerRef.current = charmManager;
   await charmManager.synced();

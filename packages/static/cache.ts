@@ -9,25 +9,9 @@ import { toFileUrl } from "@std/path/posix/to-file-url";
 import { join } from "@std/path/posix/join";
 import { generateETag } from "./etag.ts";
 
-const DEFAULT_BASE: URL = (() => {
-  // Deno base URL is an absolute path to the `./assets/` directory
-  if (isDeno()) {
-    if (!import.meta.dirname) {
-      throw new Error("Must be executed from local file.");
-    }
-    return toFileUrl(join(import.meta.dirname, "assets"));
-  } // Browser base URL is server root with "static" pathname.
-  else if (isBrowser()) {
-    const url = new URL(globalThis.location.origin);
-    url.pathname = "static";
-    return url;
-  }
-  throw new Error("Unsupported environment.");
-})();
-
-export interface StaticCacheConfig {
-  baseUrl: URL;
-}
+export const FS_URL = (import.meta.dirname && isDeno())
+  ? toFileUrl(join(import.meta.dirname, "assets"))
+  : undefined;
 
 /**
  * Represents a cached static asset with its content and ETag.
@@ -37,13 +21,18 @@ export interface CachedAsset {
   etag: string;
 }
 
-export class StaticCache {
+export interface StaticCache {
+  get(assetName: string): Promise<Uint8Array>;
+  getText(assetName: string): Promise<string>;
+  getUrl(assetName: string): URL;
+  getWithETag(assetName: string): Promise<CachedAsset>;
+}
+
+export class InnerCache {
   private cache: Map<string, Promise<CachedAsset>> = new Map();
-  private config: StaticCacheConfig;
-  constructor(config: StaticCacheConfig = {
-    baseUrl: new URL(DEFAULT_BASE),
-  }) {
-    this.config = config;
+  private baseUrl: URL;
+  constructor(baseUrl: URL) {
+    this.baseUrl = baseUrl;
   }
 
   /**
@@ -84,7 +73,7 @@ export class StaticCache {
   }
 
   getBaseUrl(): URL {
-    return new URL(this.config.baseUrl);
+    return new URL(this.baseUrl);
   }
 
   /**
@@ -112,5 +101,20 @@ export class StaticCache {
 
     const etag = await generateETag(buffer);
     return { buffer, etag };
+  }
+}
+
+export class StaticCacheHTTP extends InnerCache implements StaticCache {
+  constructor(baseUrl: URL) {
+    super(baseUrl);
+  }
+}
+
+export class StaticCacheFS extends InnerCache implements StaticCache {
+  constructor() {
+    if (!FS_URL) {
+      throw new Error("FsCache only available in Deno.");
+    }
+    super(new URL(FS_URL));
   }
 }

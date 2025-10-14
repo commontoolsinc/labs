@@ -101,11 +101,11 @@ async function initialize(
 
   // Initialize runtime and charm manager
   runtime = new Runtime({
+    apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", toolshedUrl),
     }),
-    blobbyServerUrl: toolshedUrl,
     recipeEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],

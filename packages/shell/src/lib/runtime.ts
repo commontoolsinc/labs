@@ -8,7 +8,6 @@ import {
 import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
-import { API_URL } from "./env.ts";
 import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import { setupIframe } from "./iframe-ctx.ts";
@@ -105,10 +104,6 @@ export class RuntimeInternals extends EventTarget {
     },
   ): Promise<RuntimeInternals> {
     const session = await createSession(identity, spaceName);
-    const url = apiUrl.toString();
-
-    const staticAssetUrl = new URL(API_URL);
-    staticAssetUrl.pathname = "/static";
 
     // We're hoisting CharmManager so that
     // we can create it after the runtime, but still reference
@@ -118,12 +113,11 @@ export class RuntimeInternals extends EventTarget {
 
     const telemetry = new RuntimeTelemetry();
     const runtime = new Runtime({
+      apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
-        address: new URL("/api/storage/memory", url),
+        address: new URL("/api/storage/memory", apiUrl),
       }),
-      blobbyServerUrl: url,
-      staticAssetServerUrl: staticAssetUrl,
       errorHandlers: [(error) => {
         console.error(error);
         //Sentry.captureException(error);
@@ -188,6 +182,17 @@ export class RuntimeInternals extends EventTarget {
         });
       },
     });
+
+    if (!(await runtime.healthCheck())) {
+      const message =
+        `Runtime failed health check: could not connect to "${apiUrl.toString()}".`;
+
+      // Throw an error for good measure, but this is typically called
+      // in a Lit task where the error is not displayed, so mostly
+      // relying on console error here for DX.
+      console.error(message);
+      throw new Error(message);
+    }
 
     // Set up iframe context handler
     setupIframe(runtime);
