@@ -66,8 +66,11 @@ export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
   // Get todos for the clicked date using the same lifted function
   const clickedDateTodos = getTodosForDate({ todos, date: clickedDate });
 
-  // Create the CalendarTodo subrecipe with todos and selected date
-  const todoView = CalendarTodo({ todos, date: clickedDate });
+  // Create the CalendarTodo subrecipe with todos and date
+  const todoView = CalendarTodo({
+    todos,
+    date: clickedDate,
+  });
 
   return {
     [UI]: (
