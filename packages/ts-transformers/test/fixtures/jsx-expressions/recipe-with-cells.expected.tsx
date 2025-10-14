@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, derive, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { recipe, UI } from "commontools";
 export default recipe({
     type: "object",
     properties: {
@@ -8,13 +8,17 @@ export default recipe({
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (cell) => {
+} as const satisfies __ctHelpers.JSONSchema, (cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.value}</p>
-        <p>Next value: {derive(cell.value, _v1 => _v1 + 1)}</p>
-        <p>Double: {derive(cell.value, _v1 => _v1 * 2)}</p>
+        <p>Next value: {__ctHelpers.derive(cell.value, _v1 => _v1 + 1)}</p>
+        <p>Double: {__ctHelpers.derive(cell.value, _v1 => _v1 * 2)}</p>
       </div>),
         value: cell.value,
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

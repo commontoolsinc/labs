@@ -26,11 +26,11 @@ const workerTimeoutMs = (() => {
 
 const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
 const runtime = new Runtime({
+  apiUrl: new URL(env.API_URL),
   storageManager: StorageManager.open({
     as: identity,
     address: new URL("/api/storage/memory", env.API_URL),
   }),
-  blobbyServerUrl: env.API_URL,
 });
 const service = new BackgroundCharmService({
   identity,

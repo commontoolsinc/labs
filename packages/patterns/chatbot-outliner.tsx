@@ -2,25 +2,14 @@
 import {
   BuiltInLLMMessage,
   Cell,
-  cell,
   Default,
-  derive,
-  fetchData,
-  getRecipeEnvironment,
-  h,
   handler,
-  ID,
   ifElse,
   JSONSchema,
-  lift,
-  llm,
-  llmDialog,
   NAME,
   navigateTo,
   OpaqueRef,
   recipe,
-  str,
-  Stream,
   UI,
 } from "commontools";
 
@@ -141,7 +130,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
     };
 
     const chat = Chat({ messages, tools, mentionable: allCharms });
-    const { addMessage, cancelGeneration, pending } = chat;
 
     return {
       [NAME]: title,

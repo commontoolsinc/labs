@@ -1,9 +1,6 @@
 import type {
   EditingKeyboardContext,
-  KeyboardCommand,
   KeyboardContext,
-  PathBasedEditingKeyboardContext,
-  PathBasedKeyboardCommand,
   PathBasedKeyboardContext,
 } from "./types.ts";
 import { getNodeByPath, getNodePath } from "./node-path.ts";

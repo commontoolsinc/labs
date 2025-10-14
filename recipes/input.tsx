@@ -1,4 +1,5 @@
-import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
+/// <cts-enable />
+import { JSONSchema, NAME, recipe, UI } from "commontools";
 
 const InputSchema = {
   type: "object",
@@ -12,15 +13,6 @@ const InputSchema = {
 } as const satisfies JSONSchema;
 
 const OutputSchema = InputSchema;
-
-const updateContent = handler<
-  { detail: { value: string } },
-  { content: string }
->(
-  (event, state) => {
-    state.content = event.detail?.value ?? "";
-  },
-);
 
 export default recipe(
   InputSchema,

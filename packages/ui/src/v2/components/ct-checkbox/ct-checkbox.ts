@@ -176,7 +176,7 @@ export class CTCheckbox extends BaseElement {
         strategy: "immediate",
         delay: 0,
       },
-      onChange: (newValue: boolean, oldValue: boolean) => {
+      onChange: (newValue: boolean, _oldValue: boolean) => {
         this.emit("ct-change", {
           checked: newValue,
           indeterminate: this.indeterminate,

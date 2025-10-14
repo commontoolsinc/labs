@@ -17,20 +17,16 @@ describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
-  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder(runtime);
-    ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
@@ -272,7 +268,7 @@ describe("Schema propagation end-to-end example", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();

@@ -159,8 +159,14 @@ import { ContextualFlowControl } from "./cfc.ts";
 declare module "@commontools/api" {
   interface Cell<T> {
     get(): Readonly<T>;
-    set(value: Cellify<T> | T): void;
-    send(value: Cellify<T> | T): void;
+    set(
+      value: Cellify<T> | T,
+      onCommit?: (tx: IExtendedStorageTransaction) => void,
+    ): void;
+    send(
+      value: Cellify<T> | T,
+      onCommit?: (tx: IExtendedStorageTransaction) => void,
+    ): void;
     update<V extends Cellify<Partial<T> | Partial<T>>>(
       values: V extends object ? V : never,
     ): void;
@@ -249,7 +255,7 @@ declare module "@commontools/api" {
   }
 
   interface Stream<T> {
-    send(event: T): void;
+    send(event: T, onCommit?: (tx: IExtendedStorageTransaction) => void): void;
     sink(callback: (event: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
@@ -350,11 +356,11 @@ class StreamCell<T> implements Stream<T> {
     return this.link.rootSchema;
   }
 
-  send(event: T): void {
+  send(event: T, onCommit?: (tx: IExtendedStorageTransaction) => void): void {
     event = convertCellsToLinks(event) as T;
 
     // Use runtime from doc if available
-    this.runtime.scheduler.queueEvent(this.link, event);
+    this.runtime.scheduler.queueEvent(this.link, event, undefined, onCommit);
 
     this.cleanup?.();
     const [cancel, addCancel] = useCancelGroup();
@@ -432,7 +438,10 @@ export class RegularCell<T> implements Cell<T> {
     return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
   }
 
-  set(newValue: Cellify<T> | T): void {
+  set(
+    newValue: Cellify<T> | T,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): void {
     if (!this.tx) throw new Error("Transaction required for set");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -447,10 +456,18 @@ export class RegularCell<T> implements Cell<T> {
       newValue,
       getTopFrame()?.cause,
     );
+
+    // Register commit callback if provided
+    if (onCommit) {
+      this.tx.addCommitCallback(onCommit);
+    }
   }
 
-  send(newValue: Cellify<T> | T): void {
-    this.set(newValue);
+  send(
+    newValue: Cellify<T> | T,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): void {
+    this.set(newValue, onCommit);
   }
 
   update<V extends Cellify<Partial<T> | Partial<T>>>(

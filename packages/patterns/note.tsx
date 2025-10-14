@@ -4,16 +4,15 @@ import {
   cell,
   Default,
   derive,
-  h,
   handler,
   lift,
   NAME,
   navigateTo,
   OpaqueRef,
   recipe,
-  toSchema,
   UI,
 } from "commontools";
+import { type BacklinksMap } from "./backlinks-index.tsx";
 
 export type MentionableCharm = {
   [NAME]: string;
@@ -24,7 +23,11 @@ export type MentionableCharm = {
 type Input = {
   title: Default<string, "Untitled Note">;
   content: Default<string, "">;
-  allCharms: Cell<MentionableCharm[]>;
+  // Backlinks index handle to avoid per-note backlink computation
+  index: {
+    backlinks: BacklinksMap;
+    mentionable: Cell<MentionableCharm[]>;
+  };
 };
 
 type Output = {
@@ -33,7 +36,7 @@ type Output = {
   backlinks: Default<Array<MentionableCharm>, []>;
 };
 
-const updateTitle = handler<
+const _updateTitle = handler<
   { detail: { value: string } },
   { title: Cell<string> }
 >(
@@ -42,7 +45,7 @@ const updateTitle = handler<
   },
 );
 
-const updateContent = handler<
+const _updateContent = handler<
   { detail: { value: string } },
   { content: Cell<string> }
 >(
@@ -72,19 +75,19 @@ const handleNewBacklink = handler<
     };
   },
   {
-    allCharms: Cell<MentionableCharm[]>;
+    mentionable: Cell<MentionableCharm[]>;
   }
->(({ detail }, { allCharms }) => {
+>(({ detail }, { mentionable }) => {
   console.log("new charm", detail.text, detail.charmId);
 
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
-    allCharms.push(detail.charm as unknown as MentionableCharm);
+    mentionable.push(detail.charm as unknown as MentionableCharm);
   }
 });
 
-const handleCharmLinkClicked = handler(
+const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },
@@ -92,33 +95,21 @@ const handleCharmLinkClicked = handler(
 
 const Note = recipe<Input, Output>(
   "Note",
-  ({ title, content, allCharms }) => {
+  ({ title, content, index }) => {
     const mentioned = cell<MentionableCharm[]>([]);
 
-    const computeBacklinks = lift<
-      { allCharms: Cell<MentionableCharm[]>; content: Cell<string> },
+    // Look up backlinks from the shared index
+    const backlinks: OpaqueRef<MentionableCharm[]> = lift<
+      { index: { backlinks: BacklinksMap }; content: string },
       MentionableCharm[]
-    >(
-      ({ allCharms, content }) => {
-        const cs = allCharms.get();
-        if (!cs) return [];
+    >(({ index, content }) => {
+      const key = content;
+      const map = index.backlinks as BacklinksMap;
+      return map[key] ?? [];
+    })({ index, content });
 
-        const self = cs.find((c) => c.content === content.get());
-
-        const results = self
-          ? cs.filter((c) =>
-            c.mentioned?.some((m) => m.content === self.content) ?? false
-          )
-          : [];
-
-        return results;
-      },
-    );
-
-    const backlinks: OpaqueRef<MentionableCharm[]> = computeBacklinks({
-      allCharms,
-      content: content as unknown as Cell<string>, // TODO(bf): this is valid, but types complain
-    });
+    // Use shared mentionable list from index
+    const mentionableSource = index.mentionable;
 
     // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
@@ -136,12 +127,12 @@ const Note = recipe<Input, Output>(
 
           <ct-code-editor
             $value={content}
-            $mentionable={allCharms}
+            $mentions={index}
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({
-              allCharms: allCharms as unknown as MentionableCharm[],
+              mentionable: mentionableSource as unknown as MentionableCharm[],
             })}
             language="text/markdown"
             theme="light"

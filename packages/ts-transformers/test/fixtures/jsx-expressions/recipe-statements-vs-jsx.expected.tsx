@@ -1,9 +1,9 @@
-/// <cts-enable />
-import { recipe, UI, NAME, str, handler, h, Cell, derive, ifElse, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, handler, NAME, recipe, str, UI } from "commontools";
 interface RecipeState {
     value: number;
 }
-const increment = handler(true as const satisfies JSONSchema, {
+const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -12,12 +12,12 @@ const increment = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (e, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(true as const satisfies JSONSchema, {
+const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -26,7 +26,7 @@ const decrement = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (e, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
@@ -39,12 +39,12 @@ export default recipe({
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     // These should NOT be transformed (statement context)
     const next = state.value + 1;
     const previous = state.value - 1;
     const doubled = state.value * 2;
-    const isHigh = state.value > 10;
+    const _isHigh = state.value > 10;
     // This should NOT be transformed (statement context)
     if (state.value > 100) {
         console.log("Too high!");
@@ -58,13 +58,13 @@ export default recipe({
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
           <br />
-          Next number: {derive(state.value, _v1 => _v1 + 1)}
+          Next number: {__ctHelpers.derive(state.value, _v1 => _v1 + 1)}
           <br />
-          Previous: {derive(state.value, _v1 => _v1 - 1)}
+          Previous: {__ctHelpers.derive(state.value, _v1 => _v1 - 1)}
           <br />
-          Doubled: {derive(state.value, _v1 => _v1 * 2)}
+          Doubled: {__ctHelpers.derive(state.value, _v1 => _v1 * 2)}
           <br />
-          Status: {ifElse(derive(state.value, _v1 => _v1 > 10), "High", "Low")}
+          Status: {__ctHelpers.ifElse(__ctHelpers.derive(state.value, _v1 => _v1 > 10), "High", "Low")}
         </p>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),
@@ -74,7 +74,11 @@ export default recipe({
         metadata: {
             next: next,
             previous: previous,
-            doubled: doubled
-        }
+            doubled: doubled,
+        },
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

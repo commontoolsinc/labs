@@ -1,3 +1,2 @@
-import { StaticCache } from "./cache.ts";
+export { type StaticCache, StaticCacheFS, StaticCacheHTTP } from "./cache.ts";
 export { assets } from "./assets.ts";
-export { StaticCache };

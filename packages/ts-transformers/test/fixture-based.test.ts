@@ -2,7 +2,7 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commontools/test-support/fixture-runner";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 import { resolve } from "@std/path";
 
 import { loadFixture, transformFixture } from "./utils.ts";
@@ -50,7 +50,7 @@ const configs: FixtureConfig[] = [
   },
 ];
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 const FIXTURES_ROOT = "./test/fixtures";
 

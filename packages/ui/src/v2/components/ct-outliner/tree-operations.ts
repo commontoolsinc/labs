@@ -1,11 +1,4 @@
-import type {
-  Attachment,
-  MutableNode,
-  MutableTree,
-  Node,
-  NodeCreationOptions,
-  Tree,
-} from "./types.ts";
+import type { MutableNode, Node, NodeCreationOptions, Tree } from "./types.ts";
 import { Cell, ID } from "@commontools/runner";
 
 /**
@@ -290,7 +283,7 @@ export const TreeOperations = {
   async moveNodeUpCell(
     rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
-    nodePath: number[],
+    _nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
@@ -331,7 +324,7 @@ export const TreeOperations = {
   async moveNodeDownCell(
     rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
-    nodePath: number[],
+    _nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
@@ -698,7 +691,7 @@ export const TreeOperations = {
    * Toggle the checkbox state of a node
    * Cycles: unchecked ([] or [ ]) → checked ([x]) → unchecked ([ ])
    */
-  toggleCheckbox(tree: Tree, targetNode: Node): void {
+  toggleCheckbox(_tree: Tree, targetNode: Node): void {
     const mutableNode = targetNode as MutableNode;
 
     if (TreeOperations.hasCheckbox(targetNode)) {

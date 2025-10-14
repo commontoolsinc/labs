@@ -107,8 +107,6 @@ const stageOrder: readonly DraftStage[] = [
   "published",
 ];
 
-const priorityOrder: readonly DraftPriority[] = ["high", "medium", "low"];
-
 const priorityRank: Record<DraftPriority, number> = {
   high: 0,
   medium: 1,

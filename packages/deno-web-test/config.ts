@@ -45,7 +45,7 @@ export const getConfig = async (projectDir: string): Promise<Config> => {
     try {
       const config = (await import(configPath)).default;
       return applyDefaults(config);
-    } catch (e) {
+    } catch (_) {
       console.error(`Unable to execute deno-web-test.config.ts`);
     }
   }

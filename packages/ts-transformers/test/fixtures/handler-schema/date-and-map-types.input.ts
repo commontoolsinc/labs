@@ -13,7 +13,7 @@ interface TimedState {
 
 const timedHandler = handler<TimedEvent, TimedState>((event, state) => {
   state.lastUpdate = event.timestamp;
-  event.data.forEach((value, key) => {
+  event.data.forEach((_value, key) => {
     state.history.set(key, new Date());
   });
 });

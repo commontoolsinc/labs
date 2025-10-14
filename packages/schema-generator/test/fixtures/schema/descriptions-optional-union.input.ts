@@ -4,4 +4,3 @@ interface SchemaRoot {
   /** maybe flag */
   flag: boolean | undefined;
 }
-

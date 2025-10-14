@@ -1,17 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  derive,
-  h,
-  handler,
-  NAME,
-  Opaque,
-  OpaqueRef,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, NAME, recipe, str, UI } from "commontools";
 
 interface RecipeState {
   value: Default<number, 0>;

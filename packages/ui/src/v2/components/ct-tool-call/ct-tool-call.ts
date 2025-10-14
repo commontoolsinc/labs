@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import type {

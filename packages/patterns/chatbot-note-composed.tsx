@@ -4,30 +4,17 @@ import {
   Cell,
   cell,
   Default,
-  derive,
-  fetchData,
-  getRecipeEnvironment,
-  h,
   handler,
-  ID,
-  ifElse,
-  JSONSchema,
-  lift,
-  llm,
-  llmDialog,
   NAME,
   navigateTo,
   OpaqueRef,
   recipe,
-  str,
-  Stream,
-  toSchema,
-  UI,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
-import Tools, {
+import { type BacklinksMap } from "./backlinks-index.tsx";
+import {
   addListItem,
   calculator,
   ListItem,
@@ -42,43 +29,19 @@ export type MentionableCharm = {
   mentioned?: MentionableCharm[];
 };
 
-// export type ChatbotNoteInput = {
-//   content: Default<string, "">;
-//   allCharms?: Cell<MentionableCharm[]>;
-// };
-
-const handleCharmLinkClick = handler<
-  {
-    detail: {
-      charm: Cell<MentionableCharm>;
-    };
-  },
-  Record<string, never>
->(({ detail }, _) => {
-  return navigateTo(detail.charm);
-});
-
-const handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
-    return navigateTo(charm);
-  },
-);
-
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  content: Default<string, "">;
   allCharms: Cell<MentionableCharm[]>;
+  index: { backlinks: BacklinksMap; mentionable: Cell<MentionableCharm[]> };
 };
 
 type ChatbotNoteResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: Default<Array<MentionableCharm>, []>;
-  content: Default<string, "">;
-  note: any;
   chat: any;
   list: Default<ListItem[], []>;
+  // Optional: expose sub-charms as mentionable targets
+  mentionable?: MentionableCharm[];
 };
 
 const newNote = handler<
@@ -89,60 +52,23 @@ const newNote = handler<
     /** A cell to store the result message indicating success or error */
     result: Cell<string>;
   },
-  { allCharms: Cell<MentionableCharm[]> }
+  { allCharms: Cell<MentionableCharm[]>; index: any }
 >(
   (args, state) => {
     try {
       const n = Note({
         title: args.title,
         content: args.content || "",
-        allCharms: state.allCharms,
+        index: state.index,
       });
 
       args.result.set(
         `Created note ${args.title}!`,
       );
 
-      state.allCharms.push(n as unknown as MentionableCharm);
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
-// put a note at the end of the outline (by appending to root.children)
-const editNote = handler<
-  {
-    /** The text content of the note */
-    body: string;
-    /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
-  },
-  { content: Cell<string> }
->(
-  (args, state) => {
-    try {
-      state.content.set(args.body);
-
-      args.result.set(
-        `Updated note!`,
-      );
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
-const readNote = handler<
-  {
-    /** A cell to store the result text */
-    result: Cell<string>;
-  },
-  { content: string }
->(
-  (args, state) => {
-    try {
-      args.result.set(state.content);
+      // TODO(bf): we have to navigate here until DX1 lands
+      // then we go back to pushing to allCharms
+      return navigateTo(n);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
@@ -241,7 +167,7 @@ const navigateToNote = handler<
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages, content, allCharms }) => {
+  ({ title, messages, allCharms, index }) => {
     const list = cell<ListItem[]>([]);
 
     const tools = {
@@ -259,14 +185,6 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
       readListItems: {
         handler: readListItems({ list }),
-      },
-      editActiveNote: {
-        description: "Modify the shared note.",
-        handler: editNote({ content }),
-      },
-      readActiveNote: {
-        description: "Read the currently focused note.",
-        handler: readNote({ content }),
       },
       listNotes: {
         description:
@@ -299,22 +217,20 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
         description: "Create a new note instance",
         handler: newNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+          index: index as unknown as OpaqueRef<any>,
         }),
       },
     };
 
     const chat = Chat({ messages, tools, mentionable: allCharms });
-    const note = Note({ title, content, allCharms });
 
     return {
       [NAME]: title,
       chat,
-      note,
-      content,
       messages,
-      mentioned: note.mentioned,
-      backlinks: note.backlinks,
       list,
+      // Expose sub-charms as mentionable targets
+      mentionable: [chat as unknown as MentionableCharm],
     };
   },
 );

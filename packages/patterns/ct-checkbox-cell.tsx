@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  h,
-  handler,
-  ifElse,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, ifElse, NAME, recipe, UI } from "commontools";
 
 interface CheckboxSimpleInput {
   enabled: Default<boolean, false>;
@@ -29,7 +20,7 @@ export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
       },
     );
 
-    const toggleHandler = toggle({ enabled });
+    const _toggleHandler = toggle({ enabled });
 
     return {
       [NAME]: "Checkbox Demo",

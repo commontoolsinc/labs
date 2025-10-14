@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { derive, h } from "commontools";
+import * as __ctHelpers from "commontools";
+import { derive } from "commontools";
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))
 export default function TestComponent({ items, cellRef }) {
@@ -20,3 +20,7 @@ export default function TestComponent({ items, cellRef }) {
       <span>Direct access: {cellRef.value}</span>
     </div>);
 }
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

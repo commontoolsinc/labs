@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { Default, h, NAME, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 interface RecipeState {
     count: Default<number, 0>;
     label: Default<string, "">;
@@ -17,11 +17,15 @@ export default recipe({
         }
     },
     required: ["count", "label"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [NAME]: state.label,
         [UI]: (<section>
-        {ifElse(derive({ state, state_count: state.count }, ({ state: state, state_count: _v2 }) => state && _v2 > 0), <p>Positive</p>, <p>Non-positive</p>)}
+        {__ctHelpers.ifElse(__ctHelpers.derive({ state, state_count: state.count }, ({ state: state, state_count: _v2 }) => state && _v2 > 0), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

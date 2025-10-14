@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 
-import { type Cell, isCell } from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -21,7 +21,7 @@ describe("Nested Cell Array", () => {
     storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();

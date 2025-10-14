@@ -11,7 +11,10 @@ async function createRuntime() {
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
-  return new Runtime({ storageManager, blobbyServerUrl: import.meta.url });
+  return new Runtime({
+    storageManager,
+    apiUrl: new URL(import.meta.url),
+  });
 }
 
 export interface ProcessOptions {
@@ -21,6 +24,7 @@ export interface ProcessOptions {
   output?: string;
   filename?: string;
   showTransformed?: boolean;
+  mainExport?: string;
 }
 
 export async function process(
@@ -35,6 +39,9 @@ export async function process(
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main),
   );
+  if (options.mainExport) {
+    program.mainExport = options.mainExport;
+  }
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;

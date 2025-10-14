@@ -19,7 +19,10 @@ import { type BuiltInLLMMessage } from "@commontools/api";
 const removeNonCacheableFields = (
   obj: object,
 ): CacheItem => {
-  const { cache, metadata, ...rest } = obj as Record<string, unknown>;
+  const { cache: _cache, metadata: _metadata, ...rest } = obj as Record<
+    string,
+    unknown
+  >;
   // FIXME: typing
   // No guarantee that `messages` exists here.
   return rest as unknown as CacheItem;

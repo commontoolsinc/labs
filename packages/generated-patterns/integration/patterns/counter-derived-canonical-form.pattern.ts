@@ -144,7 +144,7 @@ const sanitizeStringList = (input: unknown): string[] => {
   );
 };
 
-const safeKey = (group: string, entry: string): string => {
+const _safeKey = (group: string, entry: string): string => {
   const compactGroup = group.replace(/\W+/g, "-");
   const compactEntry = entry.replace(/\W+/g, "-");
   return `canonical-${compactGroup}-${compactEntry}`;

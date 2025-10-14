@@ -3,8 +3,6 @@ import {
   Cell,
   cell,
   Default,
-  derive,
-  h,
   handler,
   ID,
   ifElse,
@@ -18,6 +16,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import _BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
@@ -36,6 +35,7 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   allCharms: Cell<any[]>;
+  index: BacklinksMap;
   theme?: {
     accentColor: Default<string, "#3b82f6">;
     fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -45,6 +45,10 @@ type Input = {
 
 type Output = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
+  // Expose a mentionable list aggregated from local chat entries
+  // Returned as an opaque ref to an array (not a Cell), suitable for
+  // upstream aggregators that read exported mentionables.
+  mentionable?: MentionableCharm[];
 };
 
 const removeChat = handler<
@@ -89,7 +93,7 @@ const storeCharm = lift(
     charm: any;
     selectedCharm: Cell<Default<{ charm: any }, { charm: undefined }>>;
     charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<any[]>;
+    allCharms: Cell<MentionableCharm[]>;
     theme?: {
       accentColor: Default<string, "#3b82f6">;
       fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -98,7 +102,7 @@ const storeCharm = lift(
     isInitialized: Cell<boolean>;
   }>(),
   undefined,
-  ({ charm, selectedCharm, charmsList, isInitialized, allCharms }) => { // Not including `allCharms` is a compile error...
+  ({ charm, selectedCharm, charmsList, isInitialized, allCharms: _ }) => { // Not including `allCharms` is a compile error...
     if (!isInitialized.get()) {
       console.log(
         "storeCharm storing charm:",
@@ -124,10 +128,11 @@ const populateChatList = lift(
     charmsList: CharmEntry[];
     allCharms: Cell<any[]>;
     selectedCharm: Cell<{ charm: any }>;
+    index: any;
   }>(),
   undefined,
   (
-    { charmsList, allCharms, selectedCharm },
+    { charmsList, allCharms, selectedCharm, index },
   ) => {
     if (charmsList.length === 0) {
       const isInitialized = cell(false);
@@ -135,8 +140,8 @@ const populateChatList = lift(
         charm: Chat({
           title: "New Chat",
           messages: [],
-          content: "",
           allCharms,
+          index,
         }),
         selectedCharm,
         charmsList,
@@ -155,16 +160,17 @@ const createChatRecipe = handler<
     selectedCharm: Cell<{ charm: any }>;
     charmsList: Cell<CharmEntry[]>;
     allCharms: Cell<any[]>;
+    index: any;
   }
 >(
-  (_, { selectedCharm, charmsList, allCharms }) => {
+  (_, { selectedCharm, charmsList, allCharms, index }) => {
     const isInitialized = cell(false);
 
     const charm = Chat({
       title: "New Chat",
       messages: [],
-      content: "",
       allCharms,
+      index,
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
@@ -198,7 +204,7 @@ const logCharmsList = lift<
   },
 );
 
-const handleCharmLinkClicked = handler(
+const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },
@@ -216,10 +222,7 @@ const getSelectedCharm = lift<
   { entry: { charm: any | undefined } },
   {
     chat: unknown;
-    note: unknown;
     list: ListItem[];
-    backlinks: MentionableCharm[];
-    mentioned: MentionableCharm[];
   } | undefined
 >(
   ({ entry }) => {
@@ -234,8 +237,13 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
-  ({ selectedCharm, charmsList, allCharms, theme }) => {
+  ({ selectedCharm, charmsList, allCharms, index, theme }) => {
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+
+    const combined = combineLists({
+      allCharms: allCharms as unknown as MentionableCharm[],
+      charmsList,
+    });
 
     populateChatList({
       selectedCharm: selectedCharm as unknown as Cell<
@@ -243,14 +251,24 @@ export default recipe<Input, Output>(
       >,
       charmsList,
       allCharms,
-    });
-
-    const combined = combineLists({
-      allCharms: allCharms as unknown as any[],
-      charmsList,
+      index,
     });
 
     const selected = getSelectedCharm({ entry: selectedCharm });
+
+    // Aggregate mentionables from the local charms list so that this
+    // container exposes its child chat charms as mention targets.
+    const localMentionable = lift<
+      { list: CharmEntry[] },
+      MentionableCharm[]
+    >(({ list }) => {
+      const out: MentionableCharm[] = [];
+      for (const entry of list) {
+        const c = entry.charm;
+        out.push(c.chat);
+      }
+      return out;
+    })({ list: charmsList });
 
     const localTheme = theme ?? {
       accentColor: cell("#3b82f6"),
@@ -272,6 +290,7 @@ export default recipe<Input, Output>(
                       selectedCharm,
                       charmsList,
                       allCharms: combined as unknown as any,
+                      index,
                     })}
                   >
                     Create New Chat
@@ -289,21 +308,18 @@ export default recipe<Input, Output>(
                   selectedCharm,
                   charmsList,
                   allCharms: combined as unknown as any,
+                  index,
                 })}
               />
             </div>
             <ct-autolayout
               leftOpen
               rightOpen={false}
-              tabNames={["Chat", "Note"]}
             >
               {/* workaround: this seems to correctly start the sub-recipes on a refresh while directly rendering does not */}
               {/* this should be fixed after the builder-refactor (DX1) */}
               <ct-screen>
                 <ct-render $cell={selected.chat} />
-              </ct-screen>
-              <ct-screen>
-                <ct-render $cell={selected.note} />
               </ct-screen>
 
               <aside slot="left">
@@ -346,46 +362,12 @@ export default recipe<Input, Output>(
                 {ifElse(
                   selected,
                   <>
-                    <div>
-                      <ct-heading level={4}>Backlinks</ct-heading>
-                      <ct-vstack>
-                        {selected?.backlinks?.map((
-                          charm: MentionableCharm,
-                        ) => (
-                          <ct-button
-                            onClick={handleCharmLinkClicked({ charm })}
-                          >
-                            {charm?.[NAME]}
-                          </ct-button>
-                        ))}
-                      </ct-vstack>
-                    </div>
                     <ct-ct-collapsible>
                       <ct-heading slot="trigger" level={5} no-margin>
                         List
                       </ct-heading>
                       <ct-list $value={selected.list} />
                     </ct-ct-collapsible>
-                    <ct-collapsible>
-                      <ct-heading slot="trigger" level={5} no-margin>
-                        Mentioned Charms
-                      </ct-heading>
-                      <ct-vstack>
-                        {selected?.mentioned?.map((
-                          charm: MentionableCharm,
-                        ) => (
-                          charm
-                            ? (
-                              <ct-button
-                                onClick={handleCharmLinkClicked({ charm })}
-                              >
-                                {charm[NAME]}
-                              </ct-button>
-                            )
-                            : null
-                        ))}
-                      </ct-vstack>
-                    </ct-collapsible>
                   </>,
                   null,
                 )}
@@ -459,6 +441,8 @@ export default recipe<Input, Output>(
       ),
       selectedCharm,
       charmsList,
+      // Expose the aggregated mentionables for parent-level indexing.
+      mentionable: localMentionable,
     };
   },
 );

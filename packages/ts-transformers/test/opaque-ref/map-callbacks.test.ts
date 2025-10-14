@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertStringIncludes } from "@std/assert";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
 import { transformSource } from "../utils.ts";
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
 const SOURCE = `/// <cts-enable />
@@ -46,15 +46,15 @@ describe("OpaqueRef map callbacks", () => {
 
     assertStringIncludes(
       output,
-      "derive(index, index => index + 1)",
+      "__ctHelpers.derive(index, index => index + 1)",
     );
     assertStringIncludes(
       output,
-      'derive(charm, charm => charm[NAME] || "Unnamed")',
+      '__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")',
     );
     assertStringIncludes(
       output,
-      "ifElse(derive(state.charms.length, _v1 => !_v1)",
+      "ifElse(__ctHelpers.derive(state.charms.length, _v1 => !_v1)",
     );
   });
 });

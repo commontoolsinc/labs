@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { OpaqueRef, recipe, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { recipe } from "commontools";
 interface TodoItem {
     title: string;
     done: boolean;
@@ -30,7 +30,7 @@ export default recipe({
             required: ["title", "done"]
         }
     }
-} as const satisfies JSONSchema, ({ items }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     // This should NOT be transformed to items.get().map()
     // because OpaqueRef has its own map method
     const mapped = items.map((item) => item.title);
@@ -42,3 +42,7 @@ export default recipe({
     }));
     return { mapped, filtered };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

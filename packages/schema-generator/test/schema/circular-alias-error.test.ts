@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { createTestProgram } from "../utils.ts";
+import ts from "typescript";
 
 describe("Circular alias error handling", () => {
   it("should throw descriptive error for circular Default aliases", async () => {
@@ -14,15 +15,18 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
-      stmt.kind === 264 && // InterfaceDeclaration
-      (stmt as any).name.text === "SchemaRoot"
-    ) as any;
+      ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"
+    );
 
-    const circularProperty = rootInterface.members[0];
-    const type = checker.getTypeFromTypeNode(circularProperty.type);
+    if (!rootInterface || !ts.isInterfaceDeclaration(rootInterface)) {
+      throw new Error("SchemaRoot interface not found");
+    }
+
+    const circularProperty = rootInterface.members[0] as ts.PropertySignature;
+    const type = checker.getTypeFromTypeNode(circularProperty.type!);
 
     const generator = new SchemaGenerator();
 
@@ -42,15 +46,18 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
-      stmt.kind === 264 && // InterfaceDeclaration
-      (stmt as any).name.text === "SchemaRoot"
-    ) as any;
+      ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"
+    );
 
-    const circularProperty = rootInterface.members[0];
-    const type = checker.getTypeFromTypeNode(circularProperty.type);
+    if (!rootInterface || !ts.isInterfaceDeclaration(rootInterface)) {
+      throw new Error("SchemaRoot interface not found");
+    }
+
+    const circularProperty = rootInterface.members[0] as ts.PropertySignature;
+    const type = checker.getTypeFromTypeNode(circularProperty.type!);
 
     const generator = new SchemaGenerator();
 

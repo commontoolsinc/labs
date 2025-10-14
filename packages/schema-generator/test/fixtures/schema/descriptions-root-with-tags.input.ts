@@ -9,4 +9,3 @@ interface SchemaRoot {
   /** A value */
   value: number;
 }
-

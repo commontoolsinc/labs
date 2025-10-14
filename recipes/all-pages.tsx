@@ -1,4 +1,4 @@
-import { h } from "@commontools/html";
+/// <cts-enable />
 import { derive, JSONSchema, NAME, recipe } from "commontools";
 
 const ExtractPagesInputSchema = {
@@ -33,7 +33,7 @@ export default recipe(
         (
           acc: { path: (string | number)[]; node: any }[],
           charm: any,
-          charmIndex: number,
+          _charmIndex: number,
         ) => {
           if (charm && typeof charm === "object") {
             if (

@@ -1,9 +1,5 @@
 import { context, diag, trace } from "@opentelemetry/api";
-import {
-  BasicTracerProvider,
-  BatchSpanProcessor,
-  ReadableSpan,
-} from "@opentelemetry/sdk-trace-base";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { Resource } from "@opentelemetry/resources";
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";

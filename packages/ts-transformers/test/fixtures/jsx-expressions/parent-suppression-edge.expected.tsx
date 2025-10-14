@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, derive, ifElse, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { recipe, UI } from "commontools";
 interface State {
     user: {
         name: string;
@@ -314,81 +314,148 @@ export default recipe({
         }
     },
     required: ["user", "config", "data", "deeply", "arrays"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         <h3>Same Base, Different Properties</h3>
         {/* Multiple accesses to same object in one expression */}
-        <p>User info: {state.user.name} (age: {state.user.age}, email: {state.user.email})</p>
+        <p>
+          User info: {state.user.name} (age: {state.user.age}, email:{" "}
+          {state.user.email})
+        </p>
 
         {/* String concatenation with multiple property accesses */}
-        <p>Full profile: {derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location, state_user_profile_bio: state.user.profile.bio }, ({ state_user_name: _v1, state_user_profile_location: _v2, state_user_profile_bio: _v3 }) => _v1 + " from " + _v2 + " - " + _v3)}</p>
+        <p>
+          Full profile:{" "}
+          {__ctHelpers.derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location, state_user_profile_bio: state.user.profile.bio }, ({ state_user_name: _v1, state_user_profile_location: _v2, state_user_profile_bio: _v3 }) => _v1 + " from " + _v2 + " - " + _v3)}
+        </p>
 
         {/* Arithmetic with multiple properties from same base */}
-        <p>Age calculation: {derive(state.user.age, _v1 => _v1 * 12)} months, or {derive(state.user.age, _v1 => _v1 * 365)} days</p>
+        <p>
+          Age calculation: {__ctHelpers.derive(state.user.age, _v1 => _v1 * 12)} months, or{" "}
+          {__ctHelpers.derive(state.user.age, _v1 => _v1 * 365)} days
+        </p>
 
         <h3>Deeply Nested Property Chains</h3>
         {/* Multiple references to deeply nested object */}
-        <p>Theme: {state.config.theme.colors.primary} / {state.config.theme.colors.secondary} on {state.config.theme.colors.background}</p>
+        <p>
+          Theme: {state.config.theme.colors.primary} /{" "}
+          {state.config.theme.colors.secondary} on{" "}
+          {state.config.theme.colors.background}
+        </p>
 
         {/* Fonts from same nested structure */}
-        <p>Typography: Headings in {state.config.theme.fonts.heading}, body in {state.config.theme.fonts.body}, code in {state.config.theme.fonts.mono}</p>
+        <p>
+          Typography: Headings in {state.config.theme.fonts.heading}, body in
+          {" "}
+          {state.config.theme.fonts.body}, code in{" "}
+          {state.config.theme.fonts.mono}
+        </p>
 
         {/* Mixed depth accesses */}
-        <p>Config summary: Dark mode {ifElse(state.config.features.darkMode, "enabled", "disabled")} with {state.config.theme.colors.primary} primary color</p>
+        <p>
+          Config summary: Dark mode{" "}
+          {__ctHelpers.ifElse(state.config.features.darkMode, "enabled", "disabled")} with{" "}
+          {state.config.theme.colors.primary} primary color
+        </p>
 
         <h3>Very Deep Nesting with Multiple References</h3>
         {/* Accessing different properties at same deep level */}
-        <p>Deep value: {state.deeply.nested.structure.with.many.levels.value} (count: {state.deeply.nested.structure.with.many.levels.count})</p>
+        <p>
+          Deep value: {state.deeply.nested.structure.with.many.levels.value}
+          {" "}
+          (count: {state.deeply.nested.structure.with.many.levels.count})
+        </p>
 
         {/* Mixed depth from same root */}
-        <p>Mixed depths: {state.deeply.nested.structure.with.many.levels.value} in {state.deeply.nested.structure.with.many.levels.count} items</p>
+        <p>
+          Mixed depths: {state.deeply.nested.structure.with.many.levels.value}
+          {" "}
+          in {state.deeply.nested.structure.with.many.levels.count} items
+        </p>
 
         <h3>Arrays with Shared Base</h3>
         {/* Multiple array properties */}
-        <p>Array info: First has {state.arrays.first.length} items, second has {state.arrays.second.length} items</p>
+        <p>
+          Array info: First has {state.arrays.first.length} items, second has
+          {" "}
+          {state.arrays.second.length} items
+        </p>
 
         {/* Nested array access with shared base */}
-        <p>Nested: {state.arrays.nested[0].items.length} items in first, count is {state.arrays.nested[0].count}</p>
+        <p>
+          Nested: {state.arrays.nested[0].items.length} items in first, count is
+          {" "}
+          {state.arrays.nested[0].count}
+        </p>
 
         {/* Array and property access mixed */}
-        <p>First item: {state.arrays.first[0]} (total: {state.arrays.first.length})</p>
+        <p>
+          First item: {state.arrays.first[0]} (total:{" "}
+          {state.arrays.first.length})
+        </p>
 
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
-        <p>Status: {ifElse(state.user.settings.notifications, derive({ state_user_name: state.user.name, state_user_settings_theme: state.user.settings.theme }, ({ state_user_name: _v1, state_user_settings_theme: _v2 }) => _v1 + " has notifications on with " + _v2 + " theme"), derive(state.user.name, _v1 => _v1 + " has notifications off"))}</p>
+        <p>
+          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({ state_user_name: state.user.name, state_user_settings_theme: state.user.settings.theme }, ({ state_user_name: _v1, state_user_settings_theme: _v2 }) => _v1 + " has notifications on with " + _v2 + " theme"), __ctHelpers.derive(state.user.name, _v1 => _v1 + " has notifications off"))}
+        </p>
 
         {/* Computed expression with shared base */}
-        <p>Spacing calc: {derive({ state_config_theme_spacing_small: state.config.theme.spacing.small, state_config_theme_spacing_medium: state.config.theme.spacing.medium, state_config_theme_spacing_large: state.config.theme.spacing.large }, ({ state_config_theme_spacing_small: _v1, state_config_theme_spacing_medium: _v2, state_config_theme_spacing_large: _v3 }) => _v1 + _v2 + _v3)} total</p>
+        <p>
+          Spacing calc: {__ctHelpers.derive({ state_config_theme_spacing_small: state.config.theme.spacing.small, state_config_theme_spacing_medium: state.config.theme.spacing.medium, state_config_theme_spacing_large: state.config.theme.spacing.large }, ({ state_config_theme_spacing_small: _v1, state_config_theme_spacing_medium: _v2, state_config_theme_spacing_large: _v3 }) => _v1 + _v2 + _v3)} total
+        </p>
 
         {/* Boolean expressions with multiple properties */}
-        <p>Features: {ifElse(derive({ state_config_features_darkMode: state.config.features.darkMode, state_config_features_animations: state.config.features.animations }, ({ state_config_features_darkMode: _v1, state_config_features_animations: _v2 }) => _v1 && _v2), "Full features", "Limited features")}</p>
+        <p>
+          Features:{" "}
+          {__ctHelpers.ifElse(__ctHelpers.derive({ state_config_features_darkMode: state.config.features.darkMode, state_config_features_animations: state.config.features.animations }, ({ state_config_features_darkMode: _v1, state_config_features_animations: _v2 }) => _v1 && _v2), "Full features", "Limited features")}
+        </p>
 
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
-        <p>Formatted: {derive(state.user.name, _v1 => _v1.toUpperCase())} - {derive(state.user.email, _v1 => _v1.toLowerCase())}</p>
+        <p>
+          Formatted: {__ctHelpers.derive(state.user.name, _v1 => _v1.toUpperCase())} -{" "}
+          {__ctHelpers.derive(state.user.email, _v1 => _v1.toLowerCase())}
+        </p>
 
         {/* Property access and method calls mixed */}
-        <p>Profile length: {state.user.profile.bio.length} chars in bio, {state.user.profile.location.length} chars in location</p>
+        <p>
+          Profile length: {state.user.profile.bio.length} chars in bio,{" "}
+          {state.user.profile.location.length} chars in location
+        </p>
 
         <h3>Edge Cases for Parent Suppression</h3>
         {/* Same intermediate parent used differently */}
-        <p>User settings: Theme is {state.user.settings.theme} with privacy {state.user.settings.privacy}</p>
+        <p>
+          User settings: Theme is {state.user.settings.theme} with privacy{" "}
+          {state.user.settings.privacy}
+        </p>
 
         {/* Parent and child both used */}
-        <p>Data summary: {state.data.items.length} items with average {state.data.totals.average}</p>
+        <p>
+          Data summary: {state.data.items.length} items with average{" "}
+          {state.data.totals.average}
+        </p>
 
         {/* Multiple levels of the same chain */}
-        <p>Nested refs: {state.config.theme.colors.primary} in {state.config.theme.fonts.body} with {ifElse(state.config.features.animations, "animations", "no animations")}</p>
+        <p>
+          Nested refs: {state.config.theme.colors.primary} in{" "}
+          {state.config.theme.fonts.body} with{" "}
+          {__ctHelpers.ifElse(state.config.features.animations, "animations", "no animations")}
+        </p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
-        <p>All levels:
-          Root: {ifElse(state.deeply, "exists", "missing")},
-          Nested: {ifElse(state.deeply.nested, "exists", "missing")},
-          Value: {state.deeply.nested.structure.with.many.levels.value}
+        <p>
+          All levels: Root: {__ctHelpers.ifElse(state.deeply, "exists", "missing")}, Nested:{" "}
+          {__ctHelpers.ifElse(state.deeply.nested, "exists", "missing")}, Value:{" "}
+          {state.deeply.nested.structure.with.many.levels.value}
         </p>
       </div>),
     };
 });
-
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

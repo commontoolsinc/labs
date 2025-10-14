@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
-import { navigate, NavigationCommandType } from "../lib/navigate.ts";
+import { navigate } from "../lib/navigate.ts";
 
 export class CharmLinkElement extends LitElement {
   static override styles = css`

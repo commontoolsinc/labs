@@ -287,7 +287,7 @@ export async function classifyWorkflow(
         extractTextFromLLMResponse(response),
         "enhanced_prompt",
       );
-    } catch (e) {
+    } catch (_) {
       // Enhanced prompt is optional
     }
 
@@ -396,7 +396,7 @@ export async function generateWorkflowPlan(
         extractTextFromLLMResponse(response),
         "autocomplete",
       );
-    } catch (e) {
+    } catch (_) {
       // Specification might not be available
     }
 
@@ -406,7 +406,7 @@ export async function generateWorkflowPlan(
         "features",
       );
       features = parseTagListFromResponse(body, "feature");
-    } catch (e) {
+    } catch (_) {
       // Specification might not be available
     }
 

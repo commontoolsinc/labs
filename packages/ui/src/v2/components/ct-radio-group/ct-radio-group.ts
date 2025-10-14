@@ -52,7 +52,7 @@
  * - clear() - Clear the selection
  */
 
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { radioGroupStyles } from "./styles.ts";
 

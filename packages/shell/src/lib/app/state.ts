@@ -77,7 +77,7 @@ export function serialize(
   out.identity = identity
     ? serializeKeyPairRaw(identity.serialize())
     : undefined;
-  out.apiUrl = state.apiUrl.toString();
+  out.apiUrl = apiUrl.toString();
   return out;
 }
 
@@ -89,6 +89,6 @@ export async function deserialize(
   out.identity = identity
     ? await Identity.fromRaw(deserializeKeyPairRaw(identity).privateKey)
     : undefined;
-  out.apiUrl = new URL(state.apiUrl);
+  out.apiUrl = new URL(apiUrl);
   return out;
 }

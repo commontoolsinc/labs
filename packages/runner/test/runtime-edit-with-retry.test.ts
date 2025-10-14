@@ -15,7 +15,10 @@ describe("Runtime.editWithRetry", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({ blobbyServerUrl: import.meta.url, storageManager });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
     tx = runtime.edit();
   });
 

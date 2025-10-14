@@ -235,7 +235,7 @@ import {
   scenarios as workoutRoutinePlannerScenarios,
 } from "./patterns/workout-routine-planner.ts";
 import {
-  scenarios as workflowStateMachineScenarios,
+  scenarios as _workflowStateMachineScenarios,
 } from "./patterns/workflow-state-machine.ts";
 import { scenarios as moodDiaryScenarios } from "./patterns/mood-diary.ts";
 import {
@@ -245,7 +245,7 @@ import {
   scenarios as patientVitalsDashboardScenarios,
 } from "./patterns/patient-vitals-dashboard.ts";
 import {
-  scenarios as podcastEpisodePlannerScenarios,
+  scenarios as _podcastEpisodePlannerScenarios,
 } from "./patterns/podcast-episode-planner.ts";
 import {
   scenarios as procurementRequestScenarios,
@@ -282,7 +282,7 @@ import {
   scenarios as savedSearchSubscriptionScenarios,
 } from "./patterns/saved-search-subscription.ts";
 import {
-  scenarios as shoppingCartAggregationScenarios,
+  scenarios as _shoppingCartAggregationScenarios,
 } from "./patterns/shopping-cart-aggregation.ts";
 import {
   scenarios as budgetPlannerScenarios,
@@ -291,7 +291,7 @@ import {
   scenarios as expenseReimbursementScenarios,
 } from "./patterns/expense-reimbursement.ts";
 import {
-  scenarios as invoiceGeneratorScenarios,
+  scenarios as _invoiceGeneratorScenarios,
 } from "./patterns/invoice-generator.ts";
 import {
   scenarios as subscriptionBillingScenarios,

@@ -1,15 +1,15 @@
 /// <cts-enable />
-import { recipe, UI, NAME, str, handler, h, Cell } from "commontools";
+import { Cell, handler, NAME, recipe, str, UI } from "commontools";
 
 interface RecipeState {
   value: number;
 }
 
-const increment = handler((e, state: { value: Cell<number> }) => {
+const increment = handler((_e, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() + 1);
 });
 
-const decrement = handler((e, state: { value: Cell<number> }) => {
+const decrement = handler((_e, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
@@ -18,17 +18,17 @@ export default recipe<RecipeState>("Counter", (state) => {
   const next = state.value + 1;
   const previous = state.value - 1;
   const doubled = state.value * 2;
-  const isHigh = state.value > 10;
-  
+  const _isHigh = state.value > 10;
+
   // This should NOT be transformed (statement context)
   if (state.value > 100) {
     console.log("Too high!");
   }
-  
+
   return {
     // This template literal SHOULD be transformed (builder function context)
     [NAME]: str`Simple counter: ${state.value}`,
-    
+
     [UI]: (
       <div>
         <ct-button onClick={decrement(state)}>-</ct-button>
@@ -47,15 +47,15 @@ export default recipe<RecipeState>("Counter", (state) => {
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>
     ),
-    
+
     // Direct property access - no transformation needed
     value: state.value,
-    
+
     // These should NOT be transformed (object literal in statement context)
     metadata: {
       next: next,
       previous: previous,
-      doubled: doubled
-    }
+      doubled: doubled,
+    },
   };
 });

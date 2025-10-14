@@ -27,7 +27,7 @@ async function mergeFiles(
   try {
     // Read both files
     const scenarioContent = await Deno.readTextFile(scenarioFile);
-    const testContent = await Deno.readTextFile(testFile);
+    const _testContent = await Deno.readTextFile(testFile);
 
     // Extract everything except the first import line from the scenario file
     // (remove the PatternIntegrationScenario import since it will be in the merged file)

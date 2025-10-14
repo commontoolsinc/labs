@@ -1,43 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
 import { transformSource } from "../utils.ts";
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
 describe("OpaqueRef transformer (runtime-style API)", () => {
   const types = { "commontools.d.ts": commontools };
-
-  describe("import management", () => {
-    it("adds derive import when needed", async () => {
-      const source = `/// <cts-enable />
-import { OpaqueRef, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const el = <div>{count + 1}</div>;
-`;
-      const transformed = await transformSource(source, { types });
-      expect(transformed).toContain(
-        'import { OpaqueRef, h, derive } from "commontools"',
-      );
-    });
-
-    it("does not duplicate existing imports", async () => {
-      const source = `/// <cts-enable />
-import { OpaqueRef, derive, ifElse, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const isActive: OpaqueRef<boolean> = {} as any;
-const el = <div>{count + 1} {isActive ? 1 : 0}</div>;
-`;
-      const transformed = await transformSource(source, { types });
-      const importMatches = transformed.match(/import.*from "commontools"/g);
-      expect(importMatches).toHaveLength(1);
-      expect(transformed).toContain(
-        'import { OpaqueRef, derive, ifElse, h } from "commontools"',
-      );
-    });
-  });
 
   describe("error mode", () => {
     it("reports errors instead of transforming", async () => {

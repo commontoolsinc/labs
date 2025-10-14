@@ -7,9 +7,9 @@ import {
   TypeScriptCompiler,
   UnsafeEvalRuntime,
 } from "../mod.ts";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
-const types = await getTypeScriptEnvironmentTypes(new StaticCache());
+const types = await getTypeScriptEnvironmentTypes(new StaticCacheFS());
 
 describe("Runtime", () => {
   it("Compiles and executes a set of typescript files", async () => {

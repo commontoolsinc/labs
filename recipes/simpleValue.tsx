@@ -2,7 +2,6 @@
 import {
   Cell,
   derive,
-  h,
   handler,
   type JSONSchema,
   NAME,

@@ -72,17 +72,118 @@ export function safeGetPropertyType(
   checker: ts.TypeChecker,
   fallbackNode?: ts.TypeNode,
 ): ts.Type {
-  // Prefer declared type node when available
   const decl = prop.valueDeclaration;
+  const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+
+  // Get type from the resolved parent type (for generic instantiation and mapped types)
+  // We'll use this to validate/override the declaration-based type if needed
+  let typeFromParent: ts.Type | undefined;
+  try {
+    const propName = prop.getName();
+    const propSymbol = checker.getPropertyOfType(parentType, propName);
+    if (propSymbol) {
+      typeFromParent = checker.getTypeOfSymbol(propSymbol);
+      const typeStr = typeFromParent
+        ? checker.typeToString(typeFromParent)
+        : undefined;
+      // If we got 'any', treat it as if we didn't get a type
+      if (typeStr === "any") {
+        typeFromParent = undefined;
+      }
+    }
+  } catch (error) {
+    // Type resolution can fail for some edge cases - fall back to declaration type
+    console.warn(
+      `Failed to resolve property type from parent for "${prop.getName()}":`,
+      error,
+    );
+  }
+
+  // Try to get type from declaration
+  let typeFromDecl: ts.Type | undefined;
   if (decl && ts.isPropertySignature(decl) && decl.type) {
-    const typeFromNode = safeGetTypeFromTypeNode(
+    typeFromDecl = safeGetTypeFromTypeNode(
       checker,
       decl.type,
       "property signature",
     );
-    if (typeFromNode) return typeFromNode;
   }
 
+  // If we have both, and they differ, prefer parent (handles generic instantiation)
+  // Example: Box<number> where property is declared as `value: T` but should resolve to `number`
+  if (typeFromParent && typeFromDecl) {
+    const parentStr = checker.typeToString(typeFromParent);
+    const declStr = checker.typeToString(typeFromDecl);
+
+    if (parentStr !== declStr) {
+      // For optional properties, the parent type may include "| undefined" which we don't want
+      // The optionality is tracked separately in the schema via the required array
+      // Check if parent is a union that contains undefined, and if removing it gives us the decl type
+      if (isOptional && typeFromParent.isUnion()) {
+        const parentUnion = typeFromParent as ts.UnionType;
+        const hasUndefined = parentUnion.types.some((t) =>
+          !!(t.flags & ts.TypeFlags.Undefined)
+        );
+
+        if (hasUndefined) {
+          const nonUndefinedTypes = parentUnion.types.filter(
+            (t) => !(t.flags & ts.TypeFlags.Undefined),
+          );
+
+          // Compare the non-undefined part with the declaration type
+          // Handle both single types and remaining unions
+          if (nonUndefinedTypes.length === 1 && nonUndefinedTypes[0]) {
+            const withoutUndefined = checker.typeToString(nonUndefinedTypes[0]);
+            if (withoutUndefined === declStr) {
+              // Parent only differs by the added | undefined, use decl
+              return typeFromDecl;
+            }
+          } else if (nonUndefinedTypes.length > 1) {
+            // Multiple non-undefined types - check if decl is also a union with the same types
+            // For now, just check string equality which should work for most cases
+            const withoutUndefinedStr = nonUndefinedTypes.map((t) =>
+              checker.typeToString(t)
+            ).join(" | ");
+            if (
+              withoutUndefinedStr === declStr || declStr === withoutUndefinedStr
+            ) {
+              return typeFromDecl;
+            }
+          }
+        }
+      }
+
+      // Types differ - parent has the instantiated/resolved version (e.g., T -> number)
+      return typeFromParent;
+    }
+  }
+
+  // If only parent type available (e.g., mapped types with no declaration), use it
+  if (typeFromParent && !typeFromDecl) {
+    // For optional properties from mapped types (like Partial<T>), the parent type
+    // includes "| undefined", but we want just the base type since optionality
+    // is tracked separately in the required array
+    if (isOptional && typeFromParent.isUnion()) {
+      const unionType = typeFromParent as ts.UnionType;
+      const nonUndefinedTypes = unionType.types.filter(
+        (t) => !(t.flags & ts.TypeFlags.Undefined),
+      );
+      if (nonUndefinedTypes.length === 1 && nonUndefinedTypes[0]) {
+        return nonUndefinedTypes[0];
+      }
+      // If multiple non-undefined types, just use parent as-is
+      // The schema generator will handle the union properly
+    }
+
+    return typeFromParent;
+  }
+
+  // Otherwise use declaration type
+  if (typeFromDecl) {
+    return typeFromDecl;
+  }
+
+  // Fallback to provided node
   if (fallbackNode) {
     const typeFromFallback = safeGetTypeFromTypeNode(
       checker,
@@ -92,7 +193,7 @@ export function safeGetPropertyType(
     if (typeFromFallback) return typeFromFallback;
   }
 
-  // Last resort: use symbol location
+  // Try symbol location as last resort before giving up
   if (decl) {
     const typeFromSymbol = safeGetTypeOfSymbolAtLocation(
       checker,
@@ -103,7 +204,7 @@ export function safeGetPropertyType(
     if (typeFromSymbol) return typeFromSymbol;
   }
 
-  // If all else fails, return any
+  // Absolute last resort - return 'any' type
   return checker.getAnyType();
 }
 
@@ -203,7 +304,6 @@ export function getNativeTypeSchema(
 
   return resolve(type);
 }
-
 /**
  * Return a public/stable named key for a type if and only if it has a useful
  * symbol name. Filters out anonymous ("__type") and wrapper/container names
@@ -280,6 +380,19 @@ export function getNamedTypeKey(
     return undefined;
   }
   if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
+
+  // Don't hoist generic type instantiations (Record<K,V>, Partial<T>, Box<T>, etc.)
+  // These have aliasTypeArguments, meaning they're a generic type applied to specific type arguments
+  // The name "Record" or "Box" is meaningless without the type parameters - what matters is the
+  // resolved/instantiated type structure
+  const typeWithAlias = type as TypeWithInternals;
+  if (
+    typeWithAlias.aliasTypeArguments &&
+    typeWithAlias.aliasTypeArguments.length > 0
+  ) {
+    return undefined;
+  }
+
   return name;
 }
 

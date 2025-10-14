@@ -1,18 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  derive,
-  fetchData,
-  h,
-  handler,
-  ifElse,
-  lift,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { fetchData, lift, NAME, recipe, UI } from "commontools";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
@@ -98,7 +85,7 @@ const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
 export default recipe("Cheeseboard", () => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
-  const { result, pending, error } = fetchData<WebReadResult>({
+  const { result } = fetchData<WebReadResult>({
     url: "/api/agent-tools/web-read",
     mode: "json",
     options: {

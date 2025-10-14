@@ -5,7 +5,6 @@ import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
 
 export interface EventSpec {
   stream: string;
@@ -44,26 +43,6 @@ function splitPath(path: string): (string | number)[] {
     });
 }
 
-function getValueByPath(data: unknown, segments: (string | number)[]): unknown {
-  let current: any = data;
-  for (const segment of segments) {
-    if (current === undefined || current === null) return undefined;
-    current = current[segment as keyof typeof current];
-  }
-  return current;
-}
-
-function getCellByPath(
-  result: Cell<any>,
-  segments: (string | number)[],
-): Cell<any> {
-  let current = result;
-  for (const segment of segments) {
-    current = current.key(segment as PropertyKey);
-  }
-  return current;
-}
-
 function resolveModulePath(moduleRef: string | URL): string {
   if (moduleRef instanceof URL) {
     if (moduleRef.protocol === "file:") {
@@ -82,7 +61,7 @@ function resolveModulePath(moduleRef: string | URL): string {
 export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
 

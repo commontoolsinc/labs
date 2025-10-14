@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { lift, Cell, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, lift } from "commontools";
 interface CharmEntry {
     id: string;
     name: string;
@@ -33,7 +33,7 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "array",
     items: {
@@ -54,8 +54,12 @@ const logCharmsList = lift({
             required: ["id", "name"]
         }
     }
-} as const satisfies JSONSchema, ({ charmsList }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ charmsList }) => {
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
 });
 export default logCharmsList;
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

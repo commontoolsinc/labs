@@ -175,7 +175,7 @@ describe("Journal", () => {
         {}, // empty metadata
       ];
 
-      metadataVariants.forEach((meta, index) => {
+      metadataVariants.forEach((meta, _index) => {
         const result = reader!.read(address, { meta });
         expect(result.ok).toBeDefined();
         expect(result.ok?.value).toBeUndefined(); // No data written

@@ -332,7 +332,7 @@ export class CTTags extends BaseElement {
           `
           : ""} ${repeat(
             this.tags,
-            (tag, index) => index,
+            (_, index) => index,
             (tag, index) => this.renderTag(tag, index),
           )} ${!this.readonly ? this.renderAddTag() : ""}
       </div>

@@ -27,9 +27,7 @@ export const space = await Identity.fromString(
   "MCl6B1cu1ZOP0I3BBovjAqo57VImrMVyfLiSmNKoddXs=",
 );
 
-const toJSON = <T>(source: T) => JSON.parse(JSON.stringify(source));
-
-Deno.test("test transaction", async (t) => {
+Deno.test("test transaction", async () => {
   const server = Deno.serve({ port: 9000 }, app.fetch);
   const address = new URL(
     `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -74,7 +72,7 @@ Deno.test("test transaction", async (t) => {
   }
 });
 
-Deno.test("test consumer", async (t) => {
+Deno.test("test consumer", async () => {
   const server = Deno.serve({ port: 9000 }, app.fetch);
   const address = new URL(
     `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,

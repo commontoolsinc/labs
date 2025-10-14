@@ -134,7 +134,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     return VFS_TYPES_DIR;
   }
 
-  getEnvironmentVariable(name: string): string | undefined {
+  getEnvironmentVariable(_name: string): string | undefined {
     return undefined;
   }
 
@@ -313,7 +313,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       inputOptions,
     );
 
-    const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
+    const { diagnostics, emittedFiles: _, emitSkipped } = tsProgram.emit(
       mainSource,
       undefined,
       undefined,

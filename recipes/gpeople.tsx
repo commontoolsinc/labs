@@ -1,9 +1,9 @@
+/// <cts-enable />
 import {
   Cell,
   cell,
   derive,
   getRecipeEnvironment,
-  h,
   handler,
   ID,
   JSONSchema,

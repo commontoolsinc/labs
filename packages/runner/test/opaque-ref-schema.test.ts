@@ -8,7 +8,6 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
 
 describe("OpaqueRef Schema Support", () => {
   let frame: Frame;
@@ -25,7 +24,7 @@ describe("OpaqueRef Schema Support", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     const { commontools } = createBuilder(runtime);

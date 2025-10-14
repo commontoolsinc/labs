@@ -1211,12 +1211,12 @@ export class Runner implements IRunner {
 
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
-    module: Module,
+    _module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
     processCell: Cell<any>,
-    addCancel: AddCancel,
-    recipe: Recipe,
+    _addCancel: AddCancel,
+    _recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
 
@@ -1230,7 +1230,7 @@ export class Runner implements IRunner {
     outputBindings: JSONValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
-    recipe: Recipe,
+    _recipe: Recipe,
   ) {
     if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
     const recipeImpl = unwrapOneLevelAndBindtoDoc(

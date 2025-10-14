@@ -4,7 +4,6 @@ import {
   cell,
   Default,
   derive,
-  h,
   handler,
   ID,
   ifElse,
@@ -58,28 +57,6 @@ function formatTime(ts: number): string {
   });
 }
 
-// Handler to send a new chat message (not used anymore since we create messages by clicking)
-const sendMessage = handler<
-  InputEventType,
-  {
-    messages: Cell<ChatMessage[]>;
-    user: Cell<User>;
-  }
->((event, { messages, user }) => {
-  const text = event.detail?.message?.trim();
-  if (!text) return;
-
-  const currentMessages = messages.get();
-  messages.push({
-    [ID]: currentMessages.length,
-    author: user.get(),
-    message: text,
-    timestamp: Date.now(),
-    x: 100, // Default position if this handler is ever used
-    y: 100,
-  });
-});
-
 const handleCanvasClick = handler<
   { detail: { x: number; y: number } },
   {
@@ -127,7 +104,7 @@ const deleteMessage = handler<
     messages: Cell<ChatMessage[]>;
     index: number;
   }
->((event, { messages, index }) => {
+>((_, { messages, index }) => {
   // Set hidden flag instead of removing
   messages.key(index).key("hidden").set(true);
 });

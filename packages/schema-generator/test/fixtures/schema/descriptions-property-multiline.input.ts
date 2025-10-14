@@ -8,4 +8,3 @@ interface SchemaRoot {
    */
   doc: string;
 }
-

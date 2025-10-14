@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { type Cell, Default, handler, recipe, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { type Cell, Default, handler, recipe } from "commontools";
 interface OptionalBranch {
     counter?: number;
     label?: string;
@@ -14,7 +14,7 @@ interface NestedOptionalArgs {
     // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
-const increment = handler(true as const satisfies JSONSchema, {
+const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
@@ -53,7 +53,7 @@ const increment = handler(true as const satisfies JSONSchema, {
             }
         }
     }
-} as const satisfies JSONSchema, (_, context: {
+} as const satisfies __ctHelpers.JSONSchema, (_, context: {
     state: Cell<NestedOptionalState>;
 }) => {
     const current = context.state.get() ?? {};
@@ -100,9 +100,13 @@ export default recipe({
             }
         }
     }
-} as const satisfies JSONSchema, ({ state }) => {
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => {
     return {
         state,
         increment: increment({ state }),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

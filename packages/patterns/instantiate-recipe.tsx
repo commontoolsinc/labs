@@ -2,8 +2,6 @@
 import {
   Cell,
   Default,
-  derive,
-  h,
   handler,
   NAME,
   navigateTo,

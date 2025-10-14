@@ -1,25 +1,10 @@
-import {
-  CoreMessage,
-  jsonSchema,
-  ModelMessage,
-  stepCountIs,
-  streamText,
-  tool,
-} from "ai";
+import { jsonSchema, ModelMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
-import { type LLMRequest, type LLMTool } from "@commontools/llm/types";
-import {
-  type BuiltInLLMMessage,
-  type BuiltInLLMTextPart,
-  type BuiltInLLMToolCallPart,
-  type BuiltInLLMToolResultPart,
-} from "@commontools/api";
+import { type LLMRequest } from "@commontools/llm/types";
+import { type BuiltInLLMMessage } from "@commontools/api";
 import { findModel } from "./models.ts";
-
 import { provider as otelProvider } from "@/lib/otel.ts";
-
 import env from "@/env.ts";
-import type { JSONSchema } from "@commontools/api";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {

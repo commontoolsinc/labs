@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { handler, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { handler } from "commontools";
 interface TimedEvent {
     timestamp: Date;
     data: Map<string, number>;
@@ -32,7 +32,7 @@ const timedHandler = handler({
             required: ["size"]
         }
     }
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
@@ -56,10 +56,14 @@ const timedHandler = handler({
             required: ["size"]
         }
     }
-} as const satisfies JSONSchema, (event, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.lastUpdate = event.timestamp;
-    event.data.forEach((value, key) => {
+    event.data.forEach((_value, key) => {
         state.history.set(key, new Date());
     });
 });
 export { timedHandler };
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

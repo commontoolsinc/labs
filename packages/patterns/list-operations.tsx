@@ -3,15 +3,11 @@ import {
   Cell,
   Default,
   derive,
-  h,
   handler,
   ID,
   lift,
   NAME,
-  Opaque,
   recipe,
-  str,
-  toSchema,
   UI,
 } from "commontools";
 
@@ -120,7 +116,7 @@ export default recipe<ListInput, ListOutput>(
     );
 
     // Notice that you can bind the same cell to many types
-    const x = typeTest({ a: items, b: items, c: items, d: items });
+    const _x = typeTest({ a: items, b: items, c: items, d: items });
 
     return {
       [NAME]: "List demo",

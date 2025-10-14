@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  h,
-  handler,
-  NAME,
-  recipe,
-  toSchema,
-  UI,
-} from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 
 interface Item {
   title: string;

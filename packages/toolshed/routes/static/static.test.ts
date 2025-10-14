@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { assert } from "@std/assert";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/static/static.index.ts";

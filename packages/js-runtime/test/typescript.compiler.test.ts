@@ -6,7 +6,7 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -41,7 +41,7 @@ const TESTS: TestDef[] = [
   },
 ];
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commontools.d.ts"] = await staticCache.getText(
   "types/commontools.d.ts",

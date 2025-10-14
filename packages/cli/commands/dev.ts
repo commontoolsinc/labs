@@ -33,6 +33,10 @@ export const dev = new Command()
     "--show-transformed",
     "Show only the transformed TypeScript source code without executing the recipe.",
   )
+  .option(
+    "--main-export <export:string>",
+    'Named export from entry for recipe definition. Defaults to "default".',
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
     const { main: exports } = await process({
@@ -42,11 +46,15 @@ export const dev = new Command()
       output: options.output,
       filename: options.filename,
       showTransformed: options.showTransformed,
+      mainExport: options.mainExport,
     });
     // If --show-transformed is used, the transformed source is already printed to stdout
     // and we don't want to print the JSON output
     if (!options.showTransformed && exports) {
-      const mainExport = "default" in exports ? exports.default : exports;
+      // Select the export to render. If no --main-export specified, use "default".
+      // This mirrors the logic in Engine.run() which uses program.mainExport ?? "default"
+      const exportName = options.mainExport ?? "default";
+      const mainExport = exportName in exports ? exports[exportName] : exports;
       try {
         // Stringify before rendering, as the exported
         // recipe is a function with extra properties via Object.assign

@@ -7,16 +7,10 @@ import {
   derive,
   fetchData,
   generateObject,
-  h,
   handler,
-  ifElse,
-  JSONSchema,
-  lift,
-  llm,
   llmDialog,
   NAME,
   recipe,
-  str,
   Stream,
   UI,
 } from "commontools";
@@ -75,7 +69,7 @@ const sendMessage = handler<
   const attachments = allAttachments.get() || [];
 
   // Compute mentions from mention attachments so they are available to consumers
-  const mentions = attachments
+  const _mentions = attachments
     .filter((a) => a.type === "mention" && a.charm)
     .map((a) => a.charm);
 
@@ -104,7 +98,7 @@ const sendMessage = handler<
   });
 });
 
-const clearChat = handler(
+const _clearChat = handler(
   (
     _: never,
     { messages, pending }: {

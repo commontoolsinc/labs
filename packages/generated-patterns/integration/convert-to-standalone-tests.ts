@@ -13,7 +13,6 @@
  */
 
 import { dirname, join } from "@std/path";
-import { exists } from "@std/fs";
 
 interface ConversionResult {
   source: string;

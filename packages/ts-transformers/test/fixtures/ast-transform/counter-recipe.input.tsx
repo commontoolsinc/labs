@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, h, handler, NAME, recipe, str, UI } from "commontools";
+import { Cell, Default, handler, NAME, recipe, str, UI } from "commontools";
 
 interface CounterState {
   value: Cell<number>;
@@ -9,7 +9,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-const increment = handler<unknown, CounterState>((e, state) => {
+const increment = handler<unknown, CounterState>((_e, state) => {
   state.value.set(state.value.get() + 1);
 });
 

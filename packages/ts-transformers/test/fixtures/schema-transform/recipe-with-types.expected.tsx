@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { recipe, h, UI, NAME, Cell, Default, handler, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, Default, handler, NAME, recipe, toSchema, UI, } from "commontools";
 interface Item {
     text: Default<string, "">;
 }
@@ -45,7 +45,7 @@ const inputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies JSONSchema;
+} as const satisfies __ctHelpers.JSONSchema;
 const outputSchema = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -78,9 +78,10 @@ const outputSchema = {
             required: ["text"]
         }
     }
-} as const satisfies JSONSchema;
+} as const satisfies __ctHelpers.JSONSchema;
 // Handler that logs the message event
-const addItem = handler({
+const addItem = handler // <
+({
     type: "object",
     properties: {
         detail: {
@@ -94,7 +95,7 @@ const addItem = handler({
         }
     },
     required: ["detail"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
@@ -119,7 +120,7 @@ const addItem = handler({
             required: ["text"]
         }
     }
-} as const satisfies JSONSchema, (event: InputEventType, { items }: {
+} as const satisfies __ctHelpers.JSONSchema, (event: InputEventType, { items }: {
     items: Cell<Item[]>;
 }) => {
     items.push({ text: event.detail.message });
@@ -139,6 +140,10 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
       </div>),
         title,
         items,
-        items_count
+        items_count,
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

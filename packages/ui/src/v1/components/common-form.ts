@@ -1,5 +1,4 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 import { fromString } from "merkle-reference";

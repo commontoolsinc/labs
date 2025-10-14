@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { lift, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { lift } from "commontools";
 type LiftArgs = {
     value: number;
 };
@@ -14,7 +14,7 @@ export const doubleValue = lift({
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, {
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         doubled: {
@@ -22,6 +22,10 @@ export const doubleValue = lift({
         }
     },
     required: ["doubled"]
-} as const satisfies JSONSchema, (args: LiftArgs): LiftResult => ({
+} as const satisfies __ctHelpers.JSONSchema, (args: LiftArgs): LiftResult => ({
     doubled: args.value * 2,
 }));
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

@@ -5,12 +5,10 @@ import {
   cell,
   Default,
   derive,
-  h,
   handler,
   llm,
   NAME,
   recipe,
-  str,
   UI,
 } from "commontools";
 

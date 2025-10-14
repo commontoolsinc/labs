@@ -283,9 +283,8 @@ export function createDeriveCallForExpression(
 
   const deriveCall = createDeriveCall(expression, refs, {
     factory: context.factory,
-    sourceFile: context.sourceFile,
     tsContext: context.tsContext,
-    imports: context.imports,
+    ctHelpers: context.ctHelpers,
   });
 
   return deriveCall;

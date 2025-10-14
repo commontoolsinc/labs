@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import type { EmitterContext, OpaqueRefHelperName } from "../types.ts";
+import type { EmitterContext } from "../types.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,

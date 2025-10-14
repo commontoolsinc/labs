@@ -4,8 +4,8 @@ import {
   createCacheHeaders,
   generateETag,
 } from "@commontools/static/etag";
-import { StaticCache } from "@commontools/static";
 import { decode } from "@commontools/utils/encoding";
+import { TestStaticCache } from "../utils.ts";
 
 Deno.test("ETag Generation - generates same ETag for same content", async () => {
   const content = new TextEncoder().encode("Hello, World!");
@@ -133,7 +133,7 @@ Deno.test("Cache Headers - respects both options together", () => {
 });
 
 Deno.test("StaticCache ETag - getWithETag returns both buffer and ETag", async () => {
-  const cache = new StaticCache();
+  const cache = new TestStaticCache();
   const result = await cache.getWithETag("prompts/system.md");
 
   assert(result.buffer instanceof Uint8Array);
@@ -142,7 +142,7 @@ Deno.test("StaticCache ETag - getWithETag returns both buffer and ETag", async (
 });
 
 Deno.test("StaticCache ETag - returns same ETag for same asset (caching works)", async () => {
-  const cache = new StaticCache();
+  const cache = new TestStaticCache();
   const result1 = await cache.getWithETag("prompts/system.md");
   const result2 = await cache.getWithETag("prompts/system.md");
 
@@ -152,7 +152,7 @@ Deno.test("StaticCache ETag - returns same ETag for same asset (caching works)",
 });
 
 Deno.test("StaticCache ETag - get() method still works (backward compatibility)", async () => {
-  const cache = new StaticCache();
+  const cache = new TestStaticCache();
   const buffer = await cache.get("prompts/system.md");
 
   assert(buffer instanceof Uint8Array);
@@ -161,7 +161,7 @@ Deno.test("StaticCache ETag - get() method still works (backward compatibility)"
 });
 
 Deno.test("StaticCache ETag - ETag is consistent for same content", async () => {
-  const cache = new StaticCache();
+  const cache = new TestStaticCache();
   const result = await cache.getWithETag("prompts/system.md");
 
   // Generate ETag directly from the buffer
@@ -170,7 +170,7 @@ Deno.test("StaticCache ETag - ETag is consistent for same content", async () => 
 });
 
 Deno.test("StaticCache ETag - different assets have different ETags", async () => {
-  const cache = new StaticCache();
+  const cache = new TestStaticCache();
   const result1 = await cache.getWithETag("prompts/system.md");
   const result2 = await cache.getWithETag("types/es2023.d.ts");
 

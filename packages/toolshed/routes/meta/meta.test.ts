@@ -1,8 +1,6 @@
-import { Identity } from "@commontools/identity";
 import { assertEquals } from "@std/assert";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
-import type { MetaResponse } from "./meta.handlers.ts";
 import router from "@/routes/meta/meta.index.ts";
 
 if (env.ENV !== "test") {

@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     unzip \
     sudo \
-    software-properties-common
+    software-properties-common \
+    less
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
@@ -64,8 +65,8 @@ USER ralph
 # Configure npm to install global packages in user directory
 RUN npm config set prefix ~/.npm-global
 
-# Add npm-global bin to PATH
-ENV PATH="/home/ralph/.npm-global/bin:$PATH"
+# Add npm-global bin and ralph scripts to PATH
+ENV PATH="/home/ralph/.npm-global/bin:/app/labs/tools/ralph/bin:$PATH"
 
 # Install Claude CLI and Codex as ralph user (can auto-update)
 RUN npm install -g @anthropic-ai/claude-code && \

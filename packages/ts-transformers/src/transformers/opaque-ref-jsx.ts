@@ -1,29 +1,19 @@
 import ts from "typescript";
-import {
-  hasCtsEnableDirective,
-  TransformationContext,
-  Transformer,
-} from "../core/mod.ts";
+import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
   detectCallKind,
   isEventHandlerJsxAttribute,
 } from "../ast/mod.ts";
-import { OpaqueRefHelperName, rewriteExpression } from "./opaque-ref/mod.ts";
+import { rewriteExpression } from "./opaque-ref/mod.ts";
 
 export class OpaqueRefJSXTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return hasCtsEnableDirective(context.sourceFile);
+    return context.ctHelpers.sourceHasHelpers();
   }
 
   transform(context: TransformationContext): ts.SourceFile {
-    const { tsContext: transformation } = context;
-
-    const out = transform(context);
-    return context.imports.apply(
-      out,
-      transformation.factory,
-    );
+    return transform(context);
   }
 }
 

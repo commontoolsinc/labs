@@ -1,10 +1,10 @@
-/// <cts-enable />
-import { Cell, handler, recipe, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, handler, recipe } from "commontools";
 interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler(true as const satisfies JSONSchema, {
+const myHandler = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,10 +17,13 @@ const myHandler = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies JSONSchema, (_, state: State) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
-export default recipe({ type: "object", properties: { value: { type: "number" }, name: { type: "string" } } }, (state) => {
+export default recipe({
+    type: "object",
+    properties: { value: { type: "number" }, name: { type: "string" } },
+}, (state) => {
     return {
         // Test case 1: Object literal with all properties from state
         onClick1: myHandler({ value: state.value, name: state.name }),
@@ -30,3 +33,7 @@ export default recipe({ type: "object", properties: { value: { type: "number" },
         onClick3: myHandler(state),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

@@ -23,7 +23,37 @@ $ docker exec -it -u ralph ralph bash  # Connect as ralph user (recommended)
 $ docker exec -it ralph bash           # Connect as root (if needed for admin tasks)
 ```
 
-### Building locally
+Once connected to the container, to use Ralph for automated pattern development:
+
+```bash
+# Navigate to labs directory
+$ cd labs
+
+# run claude once to set up to authenticate
+$ claude
+
+# Get latest changes
+$ git pull
+
+# Create a branch for your work
+$ git checkout -b my-ralph-patterns
+```
+
+Edit `./tools/ralph/TASKS.md` with your tasks. Use indentation to show task
+dependencies (children require parent completion). Add [UI] to indicate
+UI-related tasks.
+
+# Run Ralph to automatically implement the patterns
+
+```bash
+$ ralph-claude.sh
+```
+
+Ralph will work through eligible tasks, creating patterns in
+`./tools/ralph/patterns/`. It commits working implementations and uses git stash
+for anything that fails tests. Progress is logged to `./tools/ralph/logs/`.
+
+## Building locally
 
 If you want to build the image yourself with local modifications:
 
@@ -58,7 +88,7 @@ Running Claude Code with all permissions:
 $ claude --dangerously-skip-permissions
 ```
 
-## Removing ralph
+## Removing ralph container
 
 You must remove the existing version if you want to run a newer build:
 
@@ -79,17 +109,3 @@ $ docker push <user_name>/ralph
 - add playwright to codex
 - figure out how LLM tokens should be set for toolshed
 - sandbox the container (network config)
-- make ralph easy to run
-- DONE - update README to use image from dockerhub
-- DONE - push a working image to a docker hub
-- DONE - change permissions so claude auto updater will work
-- DONE - move ralph script into ./tools/ralph
-- DONE - Add codex and claude packages
-- DONE - write section how to run ralph in this file
-- DONE - git clone the common tools repositories
-- DONE - start up toolshed server
-- DONE - start up shell server
-- DONE - add playwright mcp to claude
-  - created ralph user since chrome doesnt like to run as root, probably better
-    this way anyway
-  - made ralph sudoer

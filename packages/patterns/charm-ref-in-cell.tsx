@@ -2,10 +2,8 @@
 import {
   Cell,
   cell,
-  createCell,
   Default,
   derive,
-  h,
   handler,
   ifElse,
   lift,

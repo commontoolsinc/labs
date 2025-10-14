@@ -2,8 +2,6 @@ import { assert } from "@std/assert";
 import { decode } from "@commontools/utils/encoding";
 import { runDenoWebTest } from "./utils.ts";
 
-const dirname = import.meta.dirname as string;
-
 Deno.test("smoke test", async function () {
   const { success, stdout, stderr } = await runDenoWebTest("success-project");
   const stdoutText = decode(stdout);

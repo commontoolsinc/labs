@@ -1,24 +1,6 @@
 /// <cts-enable />
 
-import {
-  Cell,
-  cell,
-  compileAndRun,
-  Default,
-  derive,
-  h,
-  handler,
-  ifElse,
-  Mutable,
-  NAME,
-  navigateTo,
-  Opaque,
-  OpaqueRef,
-  recipe,
-  render,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
 
 type Input = {
   tags: string[];

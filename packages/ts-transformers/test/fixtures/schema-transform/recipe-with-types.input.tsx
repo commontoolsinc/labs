@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { recipe, h, UI, NAME, toSchema, Cell, Default, handler } from "commontools";
+import {
+  Cell,
+  Default,
+  handler,
+  NAME,
+  recipe,
+  toSchema,
+  UI,
+} from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -16,28 +24,27 @@ interface OutputSchemaInterface extends InputSchemaInterface {
 
 type InputEventType = {
   detail: {
-    message: string
-  }
+    message: string;
+  };
 };
 
 const inputSchema = toSchema<InputSchemaInterface>();
 const outputSchema = toSchema<OutputSchemaInterface>();
 
 // Handler that logs the message event
-const addItem = handler
-// <
+const addItem = handler // <
 //   { detail: { message: string } },
 //   { items: Item[] }
 // >
 (
-  (event: InputEventType, { items }: {items: Cell<Item[]>}) => {
-    items.push({text: event.detail.message});
-  }
+  (event: InputEventType, { items }: { items: Cell<Item[]> }) => {
+    items.push({ text: event.detail.message });
+  },
 );
 
 export default recipe(inputSchema, outputSchema, ({ title, items }) => {
   const items_count = items.length;
-  
+
   return {
     [NAME]: title,
     [UI]: (
@@ -60,6 +67,6 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
     ),
     title,
     items,
-    items_count
+    items_count,
   };
 });

@@ -10,7 +10,7 @@ import type {
 } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { getNodeByPath } from "./node-path.ts";
-import { type Cell, Runtime, toOpaqueRef } from "@commontools/runner";
+import { type Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -27,7 +27,7 @@ export const createMockTreeCellAsync = async (
 
   const runtime = new Runtime({
     storageManager,
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
   });
 
   const tx = runtime.edit();
@@ -264,7 +264,7 @@ export const waitForCellUpdate = async (): Promise<void> => {
  * This waits for the outliner's Cell to actually update and trigger the sink
  */
 export const waitForOutlinerUpdate = async (
-  outliner: CTOutliner,
+  _outliner: CTOutliner,
 ): Promise<void> => {
   // Since tree operations use transactions and await tx.commit(),
   // they should be synchronous by the time they return.

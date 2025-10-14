@@ -1,5 +1,3 @@
-const trueConsole = globalThis.console;
-
 export enum ConsoleMethod {
   Assert = "assert",
   Clear = "clear",

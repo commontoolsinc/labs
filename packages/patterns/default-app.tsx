@@ -3,11 +3,9 @@ import {
   Cell,
   Default,
   derive,
-  h,
   handler,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
   str,
@@ -19,6 +17,9 @@ import Chatbot from "./chatbot.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { type MentionableCharm } from "./chatbot-note-composed.tsx";
 import { default as Note } from "./note.tsx";
+import BacklinksIndex, {
+  type BacklinksMap as _BacklinksMap,
+} from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 
 export type Charm = {
@@ -28,7 +29,7 @@ export type Charm = {
 };
 
 type CharmsListInput = {
-  allCharms: Default<Charm[], []>;
+  allCharms: Default<MentionableCharm[], []>;
 };
 
 // Recipe returns only UI, no data outputs (only symbol properties)
@@ -65,12 +66,13 @@ const removeCharm = handler<
 
 const spawnChatList = handler<
   Record<string, never>,
-  { allCharms: Cell<Charm[]> }
+  { allCharms: Cell<Charm[]>; index: any }
 >((_, state) => {
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
     charmsList: [],
     allCharms: state.allCharms, // we should handle empty here
+    index: state.index,
   }));
 });
 
@@ -102,18 +104,19 @@ const spawnChatbotOutliner = handler<
 
 const spawnNote = handler<
   Record<string, never>,
-  { allCharms: Cell<MentionableCharm[]> }
+  { index: any }
 >((_, state) => {
   return navigateTo(Note({
     title: "New Note",
     content: "",
-    allCharms: state.allCharms,
+    index: state.index,
   }));
 });
 
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   ({ allCharms }) => {
+    const index = BacklinksIndex({ allCharms });
     return {
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
@@ -124,6 +127,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             preventDefault
             onct-keybind={spawnChatList({
               allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+              index: index as unknown as OpaqueRef<any>,
             })}
           />
 
@@ -136,6 +140,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                   allCharms: allCharms as unknown as OpaqueRef<
                     MentionableCharm[]
                   >,
+                  index: index as unknown as OpaqueRef<any>,
                 })}
               >
                 📂 Chat List
@@ -155,10 +160,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 📝 Chatbot Outliner
               </ct-button>
               <ct-button
-                onClick={spawnNote({ // slight disagreement between Charm types but they are compatible
-                  allCharms: allCharms as unknown as OpaqueRef<
-                    MentionableCharm[]
-                  >,
+                onClick={spawnNote({
+                  index: index as unknown as OpaqueRef<any>,
                 })}
               >
                 📄 Note

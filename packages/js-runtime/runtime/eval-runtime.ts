@@ -81,7 +81,7 @@ export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
     super();
   }
 
-  getIsolate(key: string): UnsafeEvalIsolate {
+  getIsolate(_key: string): UnsafeEvalIsolate {
     return this.isolateSingleton;
   }
 }

@@ -103,7 +103,7 @@ function attachCfcToOutputs<T, R>(
     return;
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
-    for (const [key, value] of Object.entries(outputs)) {
+    for (const [_, value] of Object.entries(outputs)) {
       attachCfcToOutputs(value, cfc, lubClassification);
     }
   }

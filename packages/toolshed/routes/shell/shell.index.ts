@@ -131,7 +131,7 @@ if (COMPILED) {
   // Development mode with proxy
 
   // Handle root-level resources that shell app requests
-  router.get("/DEV_SOCKET.js", async (c) => {
+  router.get("/DEV_SOCKET.js", async (_) => {
     const response = await fetch(`${SHELL_URL}/DEV_SOCKET.js`);
     return response;
   });
@@ -162,7 +162,7 @@ if (COMPILED) {
       });
 
       return response;
-    } catch (error) {
+    } catch (_) {
       return c.text(
         `Failed to proxy to ${targetUrl}. Is the shell dev server running?`,
         502,
