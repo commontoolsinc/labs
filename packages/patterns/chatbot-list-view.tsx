@@ -140,7 +140,6 @@ const populateChatList = lift(
         charm: Chat({
           title: "New Chat",
           messages: [],
-          content: "",
           allCharms,
           index,
         }),
@@ -170,7 +169,6 @@ const createChatRecipe = handler<
     const charm = Chat({
       title: "New Chat",
       messages: [],
-      content: "",
       allCharms,
       index,
     });
@@ -224,10 +222,7 @@ const getSelectedCharm = lift<
   { entry: { charm: any | undefined } },
   {
     chat: unknown;
-    note: unknown;
     list: ListItem[];
-    backlinks: MentionableCharm[];
-    mentioned: MentionableCharm[];
   } | undefined
 >(
   ({ entry }) => {
@@ -262,7 +257,7 @@ export default recipe<Input, Output>(
     const selected = getSelectedCharm({ entry: selectedCharm });
 
     // Aggregate mentionables from the local charms list so that this
-    // container exposes its child chat/note charms as mention targets.
+    // container exposes its child chat charms as mention targets.
     const localMentionable = lift<
       { list: CharmEntry[] },
       MentionableCharm[]
@@ -270,7 +265,6 @@ export default recipe<Input, Output>(
       const out: MentionableCharm[] = [];
       for (const entry of list) {
         const c = entry.charm;
-        out.push(c.note);
         out.push(c.chat);
       }
       return out;
@@ -321,15 +315,11 @@ export default recipe<Input, Output>(
             <ct-autolayout
               leftOpen
               rightOpen={false}
-              tabNames={["Chat", "Note"]}
             >
               {/* workaround: this seems to correctly start the sub-recipes on a refresh while directly rendering does not */}
               {/* this should be fixed after the builder-refactor (DX1) */}
               <ct-screen>
                 <ct-render $cell={selected.chat} />
-              </ct-screen>
-              <ct-screen>
-                <ct-render $cell={selected.note} />
               </ct-screen>
 
               <aside slot="left">
@@ -372,46 +362,12 @@ export default recipe<Input, Output>(
                 {ifElse(
                   selected,
                   <>
-                    <div>
-                      <ct-heading level={4}>Backlinks</ct-heading>
-                      <ct-vstack>
-                        {selected?.backlinks?.map((
-                          charm: MentionableCharm,
-                        ) => (
-                          <ct-button
-                            onClick={handleCharmLinkClicked({ charm })}
-                          >
-                            {charm?.[NAME]}
-                          </ct-button>
-                        ))}
-                      </ct-vstack>
-                    </div>
                     <ct-ct-collapsible>
                       <ct-heading slot="trigger" level={5} no-margin>
                         List
                       </ct-heading>
                       <ct-list $value={selected.list} />
                     </ct-ct-collapsible>
-                    <ct-collapsible>
-                      <ct-heading slot="trigger" level={5} no-margin>
-                        Mentioned Charms
-                      </ct-heading>
-                      <ct-vstack>
-                        {selected?.mentioned?.map((
-                          charm: MentionableCharm,
-                        ) => (
-                          charm
-                            ? (
-                              <ct-button
-                                onClick={handleCharmLinkClicked({ charm })}
-                              >
-                                {charm[NAME]}
-                              </ct-button>
-                            )
-                            : null
-                        ))}
-                      </ct-vstack>
-                    </ct-collapsible>
                   </>,
                   null,
                 )}
