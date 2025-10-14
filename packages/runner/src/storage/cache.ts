@@ -1,5 +1,6 @@
 import { fromString, refer } from "merkle-reference";
 import type {
+  CauseString,
   Changes as MemoryChanges,
   Commit,
   ConsumerCommandInvocation,
@@ -9,6 +10,7 @@ import type {
   Invariant,
   JSONValue,
   MemorySpace,
+  MIME,
   Protocol,
   ProviderCommand,
   Result,
@@ -139,7 +141,7 @@ const fromKey = (key: string): BaseMemoryAddress => {
   }
   const id = key.substring(0, separatorIndex);
   const type = key.substring(separatorIndex + 1);
-  return { id: id as URI, type };
+  return { id: id as URI, type: type as MIME };
 };
 
 export class NoCache<Model extends object, Address>
@@ -1560,7 +1562,7 @@ class ProviderConnection implements IStorageProvider {
 
 export class Provider implements IStorageProvider {
   workspace: Replica;
-  the: string;
+  the: MIME;
   session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: IRemoteStorageProviderSettings;
@@ -1589,7 +1591,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
   }: RemoteStorageProviderOptions) {
-    this.the = the;
+    this.the = the as MIME;
     this.settings = settings;
     this.session = session;
     this.spaces = new Map();
@@ -1961,11 +1963,11 @@ export const getChanges = (
   const changes = {} as MemoryChanges;
   for (const statement of statements) {
     if (statement.cause) {
-      const cause = statement.cause.toString();
+      const cause = statement.cause.toString() as CauseString;
       const value = statement.is === undefined ? {} : { is: statement.is };
       set(changes, statement.of, statement.the, cause, value);
     } else {
-      const cause = statement.fact.toString();
+      const cause = statement.fact.toString() as CauseString;
       set(changes, statement.of, statement.the, cause, true);
     }
   }

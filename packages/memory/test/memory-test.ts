@@ -282,7 +282,9 @@ test("list excludes retracted facts", memory, async (session) => {
       select: {
         [doc]: {
           [the]: {
-            is: {},
+            "_": {
+              is: {},
+            },
           },
         },
       },
