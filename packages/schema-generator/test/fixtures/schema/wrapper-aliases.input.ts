@@ -1,6 +1,6 @@
 // Test wrapper type aliases - both direct and aliased wrapper types
 // Using proper interface definitions that match actual CommonTools wrappers
-type Default<T, V extends T = T> = T;
+type Default<T, V = T> = T;
 interface Cell<T> {
   get(): T;
   set(v: T): void;
@@ -11,7 +11,7 @@ interface Stream<T> {
 
 // Define wrapper aliases
 type RecursiveItemArray = RecursiveItem[];
-type DefaultRecursiveArray<T extends RecursiveItem[] = RecursiveItem[]> = Default<T, T>;
+type DefaultRecursiveArray<T extends RecursiveItem[] = RecursiveItem[]> = Default<T, []>;
 type CellRecursiveArray<T extends RecursiveItem[] = RecursiveItem[]> = Cell<T>;
 type StreamRecursiveArray<T extends RecursiveItem[] = RecursiveItem[]> = Stream<
   T
@@ -24,7 +24,7 @@ type RecursiveItem = {
 
 interface SchemaRoot {
   // Direct wrapper usage
-  directDefault: Default<RecursiveItem[], RecursiveItem[]>;
+  directDefault: Default<RecursiveItem[], []>;
   directCell: Cell<RecursiveItem[]>;
   directStream: Stream<RecursiveItem[]>;
 
