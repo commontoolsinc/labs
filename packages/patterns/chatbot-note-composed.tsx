@@ -29,42 +29,15 @@ export type MentionableCharm = {
   mentioned?: MentionableCharm[];
 };
 
-// export type ChatbotNoteInput = {
-//   content: Default<string, "">;
-//   allCharms?: Cell<MentionableCharm[]>;
-// };
-
-const handleCharmLinkClick = handler<
-  {
-    detail: {
-      charm: Cell<MentionableCharm>;
-    };
-  },
-  Record<string, never>
->(({ detail }, _) => {
-  return navigateTo(detail.charm);
-});
-
-const handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
-    return navigateTo(charm);
-  },
-);
-
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  content: Default<string, "">;
   allCharms: Cell<MentionableCharm[]>;
   index: { backlinks: BacklinksMap; mentionable: Cell<MentionableCharm[]> };
 };
 
 type ChatbotNoteResult = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: Default<Array<MentionableCharm>, []>;
-  content: Default<string, "">;
-  note: any;
   chat: any;
   list: Default<ListItem[], []>;
   // Optional: expose sub-charms as mentionable targets
@@ -94,45 +67,6 @@ const newNote = handler<
       );
 
       state.allCharms.push(n as unknown as MentionableCharm);
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
-// put a note at the end of the outline (by appending to root.children)
-const editNote = handler<
-  {
-    /** The text content of the note */
-    body: string;
-    /** A cell to store the result message indicating success or error */
-    result: Cell<string>;
-  },
-  { content: Cell<string> }
->(
-  (args, state) => {
-    try {
-      state.content.set(args.body);
-
-      args.result.set(
-        `Updated note!`,
-      );
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
-  },
-);
-
-const readNote = handler<
-  {
-    /** A cell to store the result text */
-    result: Cell<string>;
-  },
-  { content: string }
->(
-  (args, state) => {
-    try {
-      args.result.set(state.content);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
@@ -231,7 +165,7 @@ const navigateToNote = handler<
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages, content, allCharms, index }) => {
+  ({ title, messages, allCharms, index }) => {
     const list = cell<ListItem[]>([]);
 
     const tools = {
@@ -249,14 +183,6 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
       readListItems: {
         handler: readListItems({ list }),
-      },
-      editActiveNote: {
-        description: "Modify the shared note.",
-        handler: editNote({ content }),
-      },
-      readActiveNote: {
-        description: "Read the currently focused note.",
-        handler: readNote({ content }),
       },
       listNotes: {
         description:
@@ -295,22 +221,14 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
     };
 
     const chat = Chat({ messages, tools, mentionable: allCharms });
-    const note = Note({ title, content, index });
 
     return {
       [NAME]: title,
       chat,
-      note,
-      content,
       messages,
-      mentioned: note.mentioned,
-      backlinks: note.backlinks,
       list,
-      // Expose both child charms for mention systems that scan charm exports.
-      mentionable: [
-        chat as unknown as MentionableCharm,
-        note as unknown as MentionableCharm,
-      ],
+      // Expose sub-charms as mentionable targets
+      mentionable: [chat as unknown as MentionableCharm],
     };
   },
 );
