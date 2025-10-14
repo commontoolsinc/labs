@@ -42,19 +42,11 @@ export default recipe({
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
+                        $ref: "#/$defs/Item"
                     },
                     index: {
                         type: "number"
@@ -70,7 +62,21 @@ export default recipe({
                         required: ["offset"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, index, params: { offset } }) => (<div>
             Item #{index + offset}: {element.name}
           </div>)), { offset: state.offset })}

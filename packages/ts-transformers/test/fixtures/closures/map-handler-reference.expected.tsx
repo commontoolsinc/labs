@@ -63,19 +63,11 @@ export default recipe({
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -89,7 +81,21 @@ export default recipe({
                         required: ["count"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
             {element.name}
           </ct-button>)), { count: state.count })}

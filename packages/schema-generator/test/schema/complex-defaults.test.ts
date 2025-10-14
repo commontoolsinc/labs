@@ -15,7 +15,7 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithArrayDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
 
     // Validate root schema required fields
     expect(s.required).toEqual(["emptyItems", "prefilledItems", "matrix"]);
@@ -57,7 +57,7 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithObjectDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
 
     // Validate root schema required fields
     expect(s.required).toEqual(["config", "user"]);
@@ -93,7 +93,7 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithNullDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
 
     // Validate root schema required fields
     expect(s.required).toEqual(["nullable", "undefinable"]);
@@ -129,7 +129,7 @@ describe("Schema: Complex defaults", () => {
       code,
       "WithBooleanSchemas",
     );
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = createSchemaTransformerV2().generateSchema(type, checker);
 
     // Validate root schema required fields
     expect(s.required).toEqual(["anyWithDefault", "neverWithDefault"]);

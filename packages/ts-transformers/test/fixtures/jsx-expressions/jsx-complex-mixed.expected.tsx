@@ -63,25 +63,11 @@ export default recipe({
         <h3>Array with Complex Expressions</h3>
         <ul>
           {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "name", "price", "active"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -98,7 +84,27 @@ export default recipe({
                         required: ["discount", "taxRate"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            price: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "name", "price", "active"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, params: { discount, taxRate } }) => (<li key={element.id}>
               <span>{element.name}</span>
               <span> - Original: ${element.price}</span>
