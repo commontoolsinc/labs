@@ -20,7 +20,10 @@ export default recipe<FriendListState>("making lists - simple", (state) => {
       <div>
         <h2>My Friends</h2>
         <ul>
-          {state.names.map((friend) => <li>{friend.name}</li>)}
+          {/* Note: key is not needed for Common Tools but linters require it */}
+          {state.names.map((friend, index) => (
+            <li key={index}>{friend.name}</li>
+          ))}
         </ul>
       </div>
     ),

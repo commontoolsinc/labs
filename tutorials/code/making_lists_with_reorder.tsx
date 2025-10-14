@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  type Cell,
-  Default,
-  h,
-  handler,
-  recipe,
-  UI,
-} from "commontools";
+import { type Cell, Default, h, handler, recipe, UI } from "commontools";
 
 interface FriendListState {
   names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
@@ -94,8 +87,10 @@ export default recipe<FriendListState>(
           />
 
           <ul>
+            {/* Note: key is not needed for Common Tools but linters require it */}
             {state.names.map((name, index) => (
               <li
+                key={index}
                 onclick={selectItem({
                   selectedIndex: state.selectedIndex,
                   index,

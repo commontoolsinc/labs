@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  type Cell,
-  Default,
-  h,
-  handler,
-  recipe,
-  UI,
-} from "commontools";
+import { type Cell, Default, h, handler, recipe, UI } from "commontools";
 
 interface FriendListsState {
   personalFriends: Default<
@@ -78,8 +71,9 @@ const moveItem = handler<
   const selected = selectedItem.get();
   if (selected === null) return;
 
-  const targetList =
-    selected.which_list === "personal" ? personalFriends : workFriends;
+  const targetList = selected.which_list === "personal"
+    ? personalFriends
+    : workFriends;
   const currentNames = targetList.get();
   const offset = direction === "UP" ? -1 : 1;
   const newIndex = selected.index + offset;
@@ -125,8 +119,9 @@ const moveToList = handler<
     // Don't move if already in target list
     if (selected.which_list === target) return;
 
-    const sourceList =
-      selected.which_list === "personal" ? personalFriends : workFriends;
+    const sourceList = selected.which_list === "personal"
+      ? personalFriends
+      : workFriends;
     const destList = target === "personal" ? personalFriends : workFriends;
 
     const sourceNames = sourceList.get();
@@ -243,8 +238,10 @@ export default recipe<FriendListsState>(
             <div>
               <h3>Personal Friends</h3>
               <ul>
+                {/* Note: key is not needed for Common Tools but linters require it */}
                 {state.personalFriends.map((friend, index) => (
                   <li
+                    key={index}
                     onclick={selectItem({
                       selectedItem: state.selectedItem,
                       which_list: "personal",
@@ -259,8 +256,10 @@ export default recipe<FriendListsState>(
             <div>
               <h3>Work Friends</h3>
               <ul>
+                {/* Note: key is not needed for Common Tools but linters require it */}
                 {state.workFriends.map((friend, index) => (
                   <li
+                    key={index}
                     onclick={selectItem({
                       selectedItem: state.selectedItem,
                       which_list: "work",

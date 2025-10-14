@@ -48,8 +48,12 @@ export default recipe<FriendListState>(
         <div>
           <h2>My Friends</h2>
           <ul>
-            {state.names.map((friend) => (
-              <li onclick={removeItem({ names: state.names, friend })}>
+            {/* Note: key is not needed for Common Tools but linters require it */}
+            {state.names.map((friend, index) => (
+              <li
+                key={index}
+                onclick={removeItem({ names: state.names, friend })}
+              >
                 {friend.name}
               </li>
             ))}

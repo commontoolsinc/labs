@@ -29,7 +29,8 @@ export default recipe<TodoListState>("Todo List with Default", (state) => {
           onmessagesend={addItem({ items: state.items })}
         />
         <ul>
-          {state.items.map((item) => <li>{item}</li>)}
+          {/* Note: key is not needed for Common Tools but linters require it */}
+          {state.items.map((item, index) => <li key={index}>{item}</li>)}
         </ul>
       </div>
     ),
