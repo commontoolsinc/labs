@@ -66,7 +66,9 @@ const newNote = handler<
         `Created note ${args.title}!`,
       );
 
-      state.allCharms.push(n as unknown as MentionableCharm);
+      // TODO(bf): we have to navigate here until DX1 lands
+      // then we go back to pushing to allCharms
+      return navigateTo(n);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
