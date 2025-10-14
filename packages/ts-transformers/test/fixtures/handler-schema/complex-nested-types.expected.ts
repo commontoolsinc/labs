@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { handler, Cell, recipe } from "commontools";
+import { Cell, handler, recipe } from "commontools";
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
 interface UserEvent {
@@ -79,13 +79,13 @@ const userHandler = handler({
         state.users.push({
             id: Date.now().toString(),
             name: event.user.name,
-            email: event.user.email
+            email: event.user.email,
         });
         state.count.set(state.count.get() + 1);
     }
     state.lastAction.set(event.action);
 });
-const updateTags = handler({
+const _updateTags = handler({
     type: "object",
     properties: {
         detail: {

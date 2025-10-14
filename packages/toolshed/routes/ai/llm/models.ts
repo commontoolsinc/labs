@@ -46,7 +46,7 @@ const addModel = ({
   name,
   aliases,
   capabilities,
-  providerOptions,
+  providerOptions: _,
 }: {
   provider:
     | typeof anthropic

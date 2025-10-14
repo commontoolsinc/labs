@@ -24,7 +24,7 @@ const rejected = lift({
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __ctHelpers.JSONSchema, (count: number) => count)(rejectedCount);
-const summary = derive({
+const _summary = derive({
     type: "object",
     properties: {
         stage: {

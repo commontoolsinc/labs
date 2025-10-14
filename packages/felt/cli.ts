@@ -41,7 +41,7 @@ async function getConfig(projectDir: string): Promise<Config> {
   if (await exists(configTsPath, { isFile: true })) {
     try {
       return (await import(configTsPath)).default as Config;
-    } catch (e) {
+    } catch (_) {
       console.error(`Unable to execute felt.config.ts`);
     }
   }

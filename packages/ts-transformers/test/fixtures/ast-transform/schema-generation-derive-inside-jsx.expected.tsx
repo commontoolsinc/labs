@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { derive, h } from "commontools";
+import { derive } from "commontools";
 declare const value: number;
 export const result = (<div>
     {derive({

@@ -1,8 +1,7 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
-import { Task } from "@lit/task";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/Flex.ts";
 

@@ -66,7 +66,7 @@ export function inferParameterType(
  * Returns undefined if the type cannot be inferred
  */
 export function inferReturnType(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  _fn: ts.ArrowFunction | ts.FunctionExpression,
   signature: ts.Signature,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {

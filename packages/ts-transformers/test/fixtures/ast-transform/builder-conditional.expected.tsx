@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Default, h, NAME, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 interface RecipeState {
     count: Default<number, 0>;
     label: Default<string, "">;

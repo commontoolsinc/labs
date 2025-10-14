@@ -53,7 +53,7 @@ async function test() {
   let s1Count = 0;
   provider1.replica.heap.subscribe(
     { id: uri, type: "application/json" },
-    (v) => {
+    (_) => {
       s1Count++;
     },
   );
@@ -125,8 +125,6 @@ async function test() {
   // reset our subscribe callback counters
   s1Count = 0;
   s2Count = 0;
-
-  const cell2Contents = JSON.parse(JSON.stringify(cell2.get()));
 
   const tx2a = runtime2.edit();
   cell2.withTx(tx2a).set({ message: "Hello World", count: 46 });

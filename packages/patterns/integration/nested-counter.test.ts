@@ -13,7 +13,6 @@ describe("nested counter integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;
@@ -86,7 +85,6 @@ describe("nested counter integration test", () => {
 
   it("should update counter value via direct operations and verify UI", async () => {
     const page = shell.page();
-    const manager = cc!.manager();
 
     // Set value to 5 via direct operation
     await charm.result.set(5, ["value"]);

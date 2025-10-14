@@ -1,4 +1,5 @@
-import { h, type JSONSchema, NAME, recipe, UI } from "commontools";
+/// <cts-enable />
+import { type JSONSchema, NAME, recipe, UI } from "commontools";
 
 type IFrameRecipe = {
   src: string;

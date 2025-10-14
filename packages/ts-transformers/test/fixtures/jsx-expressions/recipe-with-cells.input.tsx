@@ -1,5 +1,5 @@
 /// <cts-enable />
-import {  h, recipe, UI } from "commontools";
+import { recipe, UI } from "commontools";
 
 export default recipe<{ value: number }>("simple-recipe", (cell) => {
   return {

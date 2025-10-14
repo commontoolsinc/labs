@@ -5,4 +5,3 @@ interface BaseRoot {
 }
 
 type SchemaRoot = BaseRoot;
-

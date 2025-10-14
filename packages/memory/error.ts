@@ -65,7 +65,7 @@ export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
   conflict: Conflict;
   constructor(public transaction: Transaction, conflict: Conflict) {
-    const { since, ...actual } = conflict.actual
+    const { since: _, ...actual } = conflict.actual
       ? conflict.actual
       : { actual: null };
     super(

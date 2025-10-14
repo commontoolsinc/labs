@@ -67,24 +67,6 @@ interface RetagCitationEvent {
   style?: unknown;
 }
 
-const bibliographyEntrySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "title", "topic", "style", "year", "authors", "summary"],
-  properties: {
-    id: { type: "string" },
-    title: { type: "string" },
-    topic: { type: "string" },
-    style: { type: "string" },
-    year: { type: "number" },
-    authors: {
-      type: "array",
-      items: { type: "string" },
-    },
-    summary: { type: "string" },
-  },
-} as const;
-
 const allowedStyles: readonly CitationStyle[] = [
   "APA",
   "MLA",

@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
-import { JSONSchema, JSONValue, SchemaContext } from "@commontools/runner";
+import { JSONSchema, SchemaContext } from "@commontools/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";
@@ -8,7 +8,7 @@ import * as Selection from "../selection.ts";
 import * as Space from "../space.ts";
 import * as Transaction from "../transaction.ts";
 import { createTemporaryDirectory } from "../util.ts";
-import { AssertFact, Conflict } from "../interface.ts";
+import { Conflict } from "../interface.ts";
 import { SchemaSelector } from "../space.ts";
 import { alice, space } from "./principal.ts";
 
@@ -22,7 +22,7 @@ function assertConflictEquals(
   conflict1: Conflict,
   conflict2: Omit<Conflict, "history">,
 ) {
-  const { history, ...baseConflict } = conflict1;
+  const { history: _, ...baseConflict } = conflict1;
   assertEquals(baseConflict, conflict2);
 }
 
@@ -330,7 +330,7 @@ test("fails updating non-existing memory", DB, async (session) => {
 });
 
 test("create memory fails if already exists", DB, async (session) => {
-  const base = refer(Fact.unclaimed({ the, of: doc }));
+  const _base = refer(Fact.unclaimed({ the, of: doc }));
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
 
   const create = Transaction.create({
@@ -1116,7 +1116,7 @@ test("list excludes retracted facts", DB, async (session) => {
   const fact = await session.transact(tr);
 
   assert(fact.ok);
-  const c1 = Commit.toRevision(fact.ok);
+  const _c1 = Commit.toRevision(fact.ok);
 
   const v2 = Fact.retract(v1);
   const tr2 = Transaction.create({
@@ -1295,7 +1295,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
-    const c1 = Commit.toRevision(write1.ok);
+    const _c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1303,7 +1303,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
-    const c2 = Commit.toRevision(write2.ok);
+    const _c2 = Commit.toRevision(write2.ok);
     const tr3 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1311,7 +1311,7 @@ test(
     });
     const write3 = await session.transact(tr3);
     assert(write3.ok);
-    const c3 = Commit.toRevision(write3.ok);
+    const _c3 = Commit.toRevision(write3.ok);
 
     const schemaSelector: SchemaSelector = {
       [doc3]: {
@@ -1430,7 +1430,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
-    const c1 = Commit.toRevision(write1.ok);
+    const _c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1438,7 +1438,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
-    const c2 = Commit.toRevision(write2.ok);
+    const _c2 = Commit.toRevision(write2.ok);
     const tr3 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1446,7 +1446,7 @@ test(
     });
     const write3 = await session.transact(tr3);
     assert(write3.ok);
-    const c3 = Commit.toRevision(write3.ok);
+    const _c3 = Commit.toRevision(write3.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that.
     // This should prevent us from following the name alias of the home address into doc1.
@@ -1578,7 +1578,7 @@ test(
       changes: Changes.from([v1]),
     }));
     assert(tr1.ok);
-    const c1 = Commit.toRevision(tr1.ok);
+    const _c1 = Commit.toRevision(tr1.ok);
 
     const tr2 = session.transact(Transaction.create({
       issuer: alice.did(),
@@ -1586,7 +1586,7 @@ test(
       changes: Changes.from([v2]),
     }));
     assert(tr2.ok);
-    const c2 = Commit.toRevision(tr2.ok);
+    const _c2 = Commit.toRevision(tr2.ok);
 
     const tr3 = session.transact(Transaction.create({
       issuer: alice.did(),
@@ -1594,7 +1594,7 @@ test(
       changes: Changes.from([v3]),
     }));
     assert(tr3.ok);
-    const c3 = Commit.toRevision(tr3.ok);
+    const _c3 = Commit.toRevision(tr3.ok);
 
     // We'll use a schema selector to exclude the name from the address, since we already have that
     const schemaSelector: SchemaSelector = {
@@ -1680,7 +1680,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
-    const c1 = Commit.toRevision(write1.ok);
+    const _c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1688,7 +1688,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
-    const c2 = Commit.toRevision(write2.ok);
+    const _c2 = Commit.toRevision(write2.ok);
 
     const rootSchema: JSONSchema = {
       "type": "object",
@@ -1766,7 +1766,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
-    const c1 = Commit.toRevision(write1.ok);
+    const _c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -1774,7 +1774,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
-    const c2 = Commit.toRevision(write2.ok);
+    const _c2 = Commit.toRevision(write2.ok);
 
     const rootSchema: JSONSchema = {
       "definitions": {
@@ -2036,7 +2036,7 @@ test(
     });
     const write1 = await session.transact(tr1);
     assert(write1.ok);
-    const c1 = Commit.toRevision(write1.ok);
+    const _c1 = Commit.toRevision(write1.ok);
     const tr2 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -2044,7 +2044,7 @@ test(
     });
     const write2 = await session.transact(tr2);
     assert(write2.ok);
-    const c2 = Commit.toRevision(write2.ok);
+    const _c2 = Commit.toRevision(write2.ok);
     const tr3 = Transaction.create({
       issuer: alice.did(),
       subject: space.did(),
@@ -2052,7 +2052,7 @@ test(
     });
     const write3 = await session.transact(tr3);
     assert(write3.ok);
-    const c3 = Commit.toRevision(write3.ok);
+    const _c3 = Commit.toRevision(write3.ok);
 
     // Check that with object, but no additionalProperties,
     // we should not include doc2

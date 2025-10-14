@@ -20,7 +20,7 @@ export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
       },
     );
 
-    const toggleHandler = toggle({ enabled });
+    const _toggleHandler = toggle({ enabled });
 
     return {
       [NAME]: "Checkbox Demo",

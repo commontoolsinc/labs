@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, recipe, UI } from "commontools";
+import { Default, recipe, UI } from "commontools";
 
 interface FriendListState {
   names: Default<

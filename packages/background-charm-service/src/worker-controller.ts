@@ -3,13 +3,9 @@ import { Cell } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { defer, type Deferred } from "@commontools/utils/defer";
 import {
-  InitializationData,
   isWorkerIPCRequest,
   isWorkerIPCResponse,
-  RunData,
   WorkerIPCMessageType,
-  WorkerIPCRequest,
-  WorkerIPCResponse,
 } from "./worker-ipc.ts";
 
 const DEFAULT_TASK_TIMEOUT = 60_000;
@@ -122,7 +118,7 @@ export class WorkerController extends EventTarget {
     }
     this.state = WorkerState.Terminating;
 
-    for (const [msgId, task] of this.pending.entries()) {
+    for (const [_, task] of this.pending.entries()) {
       task.deferred.reject(new Error("Worker shutting down."));
     }
     this.pending.clear();

@@ -1,7 +1,6 @@
 import { fal } from "@fal-ai/client";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
-  ErrorResponseSchema,
   SuccessResponseSchema,
   TranscribeVoiceRoute,
   TranscriptionChunk,

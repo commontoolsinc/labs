@@ -85,7 +85,7 @@ const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
 export default recipe("Cheeseboard", () => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
-  const { result, pending, error } = fetchData<WebReadResult>({
+  const { result } = fetchData<WebReadResult>({
     url: "/api/agent-tools/web-read",
     mode: "json",
     options: {

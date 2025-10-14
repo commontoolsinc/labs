@@ -5,7 +5,6 @@ import { FileSystemProgramResolver } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../../../packages/runner/src/storage/cache.deno.ts";
 import { Runtime } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
 
 export interface EventSpec {
   stream: string;
@@ -42,26 +41,6 @@ function splitPath(path: string): (string | number)[] {
         ? index
         : segment;
     });
-}
-
-function getValueByPath(data: unknown, segments: (string | number)[]): unknown {
-  let current: any = data;
-  for (const segment of segments) {
-    if (current === undefined || current === null) return undefined;
-    current = current[segment as keyof typeof current];
-  }
-  return current;
-}
-
-function getCellByPath(
-  result: Cell<any>,
-  segments: (string | number)[],
-): Cell<any> {
-  let current = result;
-  for (const segment of segments) {
-    current = current.key(segment as PropertyKey);
-  }
-  return current;
 }
 
 function resolveModulePath(moduleRef: string | URL): string {

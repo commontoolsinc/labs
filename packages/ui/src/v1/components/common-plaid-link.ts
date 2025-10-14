@@ -179,7 +179,7 @@ export class CommonPlaidLinkElement extends LitElement {
 
     const config = {
       token: linkToken,
-      onSuccess: async (publicToken: string, metadata: any) => {
+      onSuccess: async (publicToken: string, _metadata: any) => {
         this.authStatus = "Processing authentication...";
         await this.handlePublicToken(
           publicToken,
@@ -187,7 +187,7 @@ export class CommonPlaidLinkElement extends LitElement {
           integrationCharmId,
         );
       },
-      onExit: (error: any, metadata: any) => {
+      onExit: (error: any, _metadata: any) => {
         if (error) {
           this.authStatus = `Authentication failed: ${
             error.error_message || error.display_message || "Unknown error"
@@ -245,7 +245,7 @@ export class CommonPlaidLinkElement extends LitElement {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      const _result = await response.json();
       this.authStatus = "Bank account connected successfully!";
       this.isLoading = false;
 

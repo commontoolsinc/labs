@@ -4,11 +4,10 @@ import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
 import {
   createMockTreeCell,
-  createNestedTestTree,
   createTestTree,
   waitForCellUpdate,
 } from "./test-utils.ts";
-import type { Node, Tree } from "./types.ts";
+import type { Tree } from "./types.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {

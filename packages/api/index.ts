@@ -596,7 +596,7 @@ export const schema = <T extends JSONSchema>(schema: T) => schema;
 
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
-export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+export const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
   return {} as JSONSchema;
 };
 

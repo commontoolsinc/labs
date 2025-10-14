@@ -72,7 +72,7 @@
         "no-external-import"
       ],
       "exclude": [
-        "no-unused-vars",
+        "jsx-no-useless-fragment",
         "no-explicit-any",
         "require-yield"
       ]

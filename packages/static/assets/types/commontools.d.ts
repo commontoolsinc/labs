@@ -343,7 +343,7 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
     -readonly [P in keyof T]: Mutable<T[P]>;
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
-export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
+export declare const toSchema: <T>(_options?: Partial<JSONSchema>) => JSONSchema;
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
     [K in keyof T]: StripCell<T[K]>;
 } : T;

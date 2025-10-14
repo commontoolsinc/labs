@@ -1,6 +1,5 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { ifDefined } from "lit/directives/if-defined.js";
 import { ref } from "lit/directives/ref.js";
 import { consume } from "@lit/context";
 import { type Cell, NAME } from "@commontools/runner";
@@ -530,7 +529,7 @@ export class CTPromptInput extends BaseElement {
        * Insert mention at cursor position
        */
       private _insertMentionAtCursor(
-        markdown: string,
+        _markdown: string,
         mention: Mentionable,
       ): void {
         const textarea = this._textareaElement as HTMLTextAreaElement;

@@ -161,7 +161,7 @@ export class SpaceManager {
         continue;
       }
 
-      const { charmId, entry, timestamp } = this.pendingTasks.shift()!;
+      const { charmId, entry, timestamp: _ } = this.pendingTasks.shift()!;
 
       this.processCharm(charmId, entry);
     }

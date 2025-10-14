@@ -110,7 +110,7 @@ export async function iterate(
   options?: GenerationOptions,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
-  const { model, cache, space, generationId } = optionsWithDefaults;
+  const { generationId } = optionsWithDefaults;
   const { iframe } = getIframeRecipe(charm, charmManager.runtime);
 
   const prevSpec = iframe?.spec;

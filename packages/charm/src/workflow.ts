@@ -164,7 +164,7 @@ export async function classifyIntent(
   // Extract context from the current charm if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
-  let existingCode: string | undefined;
+  let _existingCode: string | undefined;
 
   if (form.input.existingCharm) {
     const { spec, schema, code } = extractContext(
@@ -173,7 +173,7 @@ export async function classifyIntent(
     );
     existingSpec = spec;
     existingSchema = schema;
-    existingCode = code;
+    _existingCode = code;
   }
 
   // Keyword detection for casting a spell
@@ -773,7 +773,7 @@ export async function processWorkflow(
           }),
         );
 
-        for (const [key, charm] of Object.entries(form.input.references)) {
+        for (const [_key, charm] of Object.entries(form.input.references)) {
           // if we have a boolean schema, we can't really search with it, so
           // just treat that the same as undefined
           // I'm just passing the properties, since that's how it was built,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, ifElse } from "commontools";
+import { ifElse, recipe, UI } from "commontools";
 
 interface State {
   matrix: number[][];
@@ -32,7 +32,10 @@ export default recipe<State>("ElementAccessComplex", (state) => {
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
-        <p>First and last: {state.items[0]} and {state.items[state.items.length - 1]}</p>
+        <p>
+          First and last: {state.items[0]} and{" "}
+          {state.items[state.items.length - 1]}
+        </p>
 
         {/* Array used in computation and access */}
         <p>Sum of ends: {state.arr[0] + state.arr[state.arr.length - 1]}</p>
@@ -49,7 +52,10 @@ export default recipe<State>("ElementAccessComplex", (state) => {
 
         <h3>Chained Element Access</h3>
         {/* Element access returning array, then accessing that */}
-        <p>User score: {state.users[state.selectedUser].scores[state.selectedScore]}</p>
+        <p>
+          User score:{" "}
+          {state.users[state.selectedUser].scores[state.selectedScore]}
+        </p>
 
         {/* Using one array element as index for another */}
         <p>Indirect: {state.items[state.indices[0]]}</p>
@@ -66,10 +72,19 @@ export default recipe<State>("ElementAccessComplex", (state) => {
 
         <h3>Element Access in Conditions</h3>
         {/* Element access in ternary */}
-        <p>Conditional: {state.arr[state.a] > 10 ? state.items[state.b] : state.items[0]}</p>
+        <p>
+          Conditional:{" "}
+          {state.arr[state.a] > 10 ? state.items[state.b] : state.items[0]}
+        </p>
 
         {/* Element access in boolean expression */}
-        <p>Has value: {ifElse(state.matrix[state.row][state.col] > 0, "positive", "non-positive")}</p>
+        <p>
+          Has value: {ifElse(
+            state.matrix[state.row][state.col] > 0,
+            "positive",
+            "non-positive",
+          )}
+        </p>
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}

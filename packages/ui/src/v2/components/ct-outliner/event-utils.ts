@@ -4,7 +4,6 @@ import type {
   Node,
   OutlinerOperations,
 } from "./types.ts";
-import { NodeUtils } from "./node-utils.ts";
 
 /**
  * Pure utility functions for event handling

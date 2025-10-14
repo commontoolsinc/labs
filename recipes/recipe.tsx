@@ -1,4 +1,5 @@
-import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
+/// <cts-enable />
+import { handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const InputSchema = {
   type: "object",

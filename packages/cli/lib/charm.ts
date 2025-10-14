@@ -1,13 +1,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import {
-  Cell,
-  isStream,
-  Runtime,
-  RuntimeProgram,
-  UI,
-} from "@commontools/runner";
+import { isStream, Runtime, RuntimeProgram, UI } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
@@ -28,30 +22,6 @@ export interface SpaceConfig {
 
 export interface CharmConfig extends SpaceConfig {
   charm: string;
-}
-
-function parseSpace(
-  space: string,
-): string {
-  if (space.startsWith("did:key:")) {
-    // Need to be able to resolve a did key to a name, based
-    // on current Session requirements.
-    throw new Error("`space` as a DID key is not yet supported.");
-  }
-  if (space.startsWith("~")) {
-    // Need to be able to resolve a private space to a did key, based
-    // on current Session requirements.
-    throw new Error("`space` must not be a private space.");
-  }
-  return space;
-}
-
-function getCharmIdSafe(charm: Cell<unknown>): string {
-  const id = charmId(charm);
-  if (!id) {
-    throw new Error("Could not get an ID from a Cell<Charm>");
-  }
-  return id;
 }
 
 async function makeSession(config: SpaceConfig): Promise<Session> {

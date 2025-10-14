@@ -16,7 +16,7 @@ import {
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
-import BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
+import _BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
 export type MentionableCharm = {
@@ -102,7 +102,7 @@ const storeCharm = lift(
     isInitialized: Cell<boolean>;
   }>(),
   undefined,
-  ({ charm, selectedCharm, charmsList, isInitialized, allCharms }) => { // Not including `allCharms` is a compile error...
+  ({ charm, selectedCharm, charmsList, isInitialized, allCharms: _ }) => { // Not including `allCharms` is a compile error...
     if (!isInitialized.get()) {
       console.log(
         "storeCharm storing charm:",
@@ -204,7 +204,7 @@ const logCharmsList = lift<
   },
 );
 
-const handleCharmLinkClicked = handler(
+const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },

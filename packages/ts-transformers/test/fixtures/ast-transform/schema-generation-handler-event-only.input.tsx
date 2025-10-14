@@ -6,6 +6,6 @@ interface IncrementEvent {
 }
 
 // Only event is typed, state should get unknown schema
-export const incrementer = handler((event: IncrementEvent, state) => {
+export const incrementer = handler((event: IncrementEvent, _state) => {
   console.log("increment by", event.amount);
 });

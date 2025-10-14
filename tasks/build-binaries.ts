@@ -254,7 +254,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
   // Figure out the full list requested by typescript and
   // friends
   // Globs don't work for compile(?)
-  const envs = [
+  const _envs = [
     "API_URL",
     "TSC_WATCHFILE",
     "TSC_NONPOLLING_WATCHER",

@@ -184,7 +184,7 @@ export const setupIframe = (runtime: Runtime) =>
     onPerform(
       _element: CommonIframeSandboxElement,
       _context: unknown,
-      command: IPC.TaskPerform,
+      _command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.warn("Perform commands not yet implemented in shell");
       return Promise.resolve({

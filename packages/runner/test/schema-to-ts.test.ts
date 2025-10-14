@@ -369,7 +369,6 @@ describe("Schema-to-TS Type Conversion", () => {
       stateSchema,
       (event, state) => {
         // Type checking - this should compile only if types are correctly inferred
-        const eventType = event.type;
         const payload = event.payload || "default";
 
         // Access state properties, including the cell

@@ -15,7 +15,7 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
       ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"
@@ -46,7 +46,7 @@ describe("Circular alias error handling", () => {
       }
     `;
 
-    const { program, checker, sourceFile } = await createTestProgram(code);
+    const { checker, sourceFile } = await createTestProgram(code);
 
     const rootInterface = sourceFile.statements.find((stmt) =>
       ts.isInterfaceDeclaration(stmt) && stmt.name.text === "SchemaRoot"

@@ -386,7 +386,7 @@ describe("Storage Subscription", () => {
     it("should stop receiving notifications when subscription returns done", async () => {
       let notificationCount = 0;
       const subscription: IStorageSubscription = {
-        next(notification) {
+        next(_notification) {
           notificationCount++;
           // Return done after first notification
           return { done: notificationCount >= 1 };
@@ -428,7 +428,7 @@ describe("Storage Subscription", () => {
       let errorThrown = false;
 
       const errorSubscription: IStorageSubscription = {
-        next(notification) {
+        next(_notification) {
           if (!errorThrown) {
             errorThrown = true;
             throw new Error("Subscription error");

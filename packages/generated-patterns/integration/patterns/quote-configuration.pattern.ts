@@ -306,7 +306,7 @@ const configureOption = handler(
     if (!Array.isArray(current) || current.length === 0) {
       return;
     }
-    let changed = false;
+    let _changed = false;
     for (let index = 0; index < current.length; index += 1) {
       const option = current[index];
       if (!optionMatchesId(option, normalizedId, rawId)) {
@@ -324,15 +324,15 @@ const configureOption = handler(
         : option.label;
       if (price !== option.price) {
         context.options.key(index).key("price").set(price);
-        changed = true;
+        _changed = true;
       }
       if (selected !== option.selected) {
         context.options.key(index).key("selected").set(selected);
-        changed = true;
+        _changed = true;
       }
       if (label !== option.label) {
         context.options.key(index).key("label").set(label);
-        changed = true;
+        _changed = true;
       }
     }
   },

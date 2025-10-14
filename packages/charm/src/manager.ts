@@ -772,7 +772,7 @@ export class CharmManager {
             }
           }
         }
-      } catch (error) {
+      } catch (_) {
         // Error checking argument references for charm
       }
     }
@@ -1007,7 +1007,7 @@ export class CharmManager {
     return recipe;
   }
 
-  async sync(entity: Cell<unknown>, waitForStorage: boolean = false) {
+  async sync(entity: Cell<unknown>, _waitForStorage: boolean = false) {
     await entity.sync();
   }
 
@@ -1025,12 +1025,11 @@ export class CharmManager {
     targetPath: (string | number)[],
   ): Promise<void> {
     // Get source cell (charm or arbitrary cell)
-    const { cell: sourceCell, isCharm: sourceIsCharm } =
-      await getCellByIdOrCharm(
-        this,
-        sourceCharmId,
-        "Source",
-      );
+    const { cell: sourceCell, isCharm: _ } = await getCellByIdOrCharm(
+      this,
+      sourceCharmId,
+      "Source",
+    );
 
     // Get target cell (charm or arbitrary cell)
     const { cell: targetCell, isCharm: targetIsCharm } =
@@ -1100,7 +1099,7 @@ async function getCellByIdOrCharm(
       throw new Error(`Charm ${cellId} not found`);
     }
     return { cell: charm, isCharm: true };
-  } catch (error) {
+  } catch (_) {
     // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
     try {
       const cell = await manager.getCellById({ "/": cellId });
@@ -1115,7 +1114,7 @@ async function getCellByIdOrCharm(
       });
 
       return { cell, isCharm: isActuallyCharm };
-    } catch (cellError) {
+    } catch (_) {
       throw new Error(`${label} "${cellId}" not found as charm or cell`);
     }
   }

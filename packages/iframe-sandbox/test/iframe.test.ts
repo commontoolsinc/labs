@@ -1,4 +1,4 @@
-import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
+import { CommonIframeSandboxElement as _ } from "../src/common-iframe-sandbox.ts";
 import {
   assertEquals,
   ContextShim,

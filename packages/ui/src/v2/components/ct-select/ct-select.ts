@@ -314,7 +314,7 @@ export class CTSelect extends BaseElement {
     /* ---------- Events ---------- */
     private _onChange(e: Event) {
       const select = e.target as HTMLSelectElement;
-      const oldValue = this.getCurrentValue();
+      const _oldValue = this.getCurrentValue();
       let newValue: unknown | unknown[];
 
       if (this.multiple) {
@@ -349,7 +349,7 @@ export class CTSelect extends BaseElement {
     }
 
     /* ---------- Internal helpers ---------- */
-    private _makeKey(item: SelectItem, index: number) {
+    private _makeKey(_item: SelectItem, index: number) {
       // Unique deterministic key for each option
       return `${index}`;
     }

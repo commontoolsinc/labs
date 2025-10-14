@@ -1,4 +1,4 @@
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -243,7 +243,7 @@ export class CTInputOTP extends BaseElement {
     }
   }
 
-  private _handleFocus(event: FocusEvent, index: number): void {
+  private _handleFocus(event: FocusEvent, _index: number): void {
     const input = event.target as HTMLInputElement;
     input.select();
   }

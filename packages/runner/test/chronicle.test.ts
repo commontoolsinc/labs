@@ -226,7 +226,7 @@ describe("Chronicle", () => {
     });
 
     it("should accumulate multiple child writes in rebase", async () => {
-      const chronicle = Chronicle.open(replica);
+      const _chronicle = Chronicle.open(replica);
       // Pre-populate replica with initial data
       await replica.commit({
         facts: [

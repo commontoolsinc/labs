@@ -3,7 +3,6 @@ import {
   cell,
   derive,
   getRecipeEnvironment,
-  h,
   handler,
   ID,
   ifElse,
@@ -384,7 +383,7 @@ class PlaidClient {
       : authData.items;
 
     // Create a map of existing transactions for efficient lookup
-    const existingMap = new Map(
+    const _existingMap = new Map(
       existingTransactions.map((t) => [t.transactionId, t]),
     );
 

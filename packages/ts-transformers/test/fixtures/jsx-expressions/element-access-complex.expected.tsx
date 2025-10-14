@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { h, recipe, UI, ifElse } from "commontools";
+import { ifElse, recipe, UI } from "commontools";
 interface State {
     matrix: number[][];
     row: number;
@@ -118,7 +118,10 @@ export default recipe({
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
-        <p>First and last: {state.items[0]} and {__ctHelpers.derive({ state_items: state.items, state_items_length: state.items.length }, ({ state_items: _v1, state_items_length: _v2 }) => _v1[_v2 - 1])}</p>
+        <p>
+          First and last: {state.items[0]} and{" "}
+          {__ctHelpers.derive({ state_items: state.items, state_items_length: state.items.length }, ({ state_items: _v1, state_items_length: _v2 }) => _v1[_v2 - 1])}
+        </p>
 
         {/* Array used in computation and access */}
         <p>Sum of ends: {__ctHelpers.derive({ state_arr: state.arr, state_arr_length: state.arr.length }, ({ state_arr: _v1, state_arr_length: _v2 }) => _v1[0] + _v1[_v2 - 1])}</p>
@@ -135,7 +138,10 @@ export default recipe({
 
         <h3>Chained Element Access</h3>
         {/* Element access returning array, then accessing that */}
-        <p>User score: {__ctHelpers.derive({ state_users: state.users, state_selectedUser: state.selectedUser, state_selectedScore: state.selectedScore }, ({ state_users: _v1, state_selectedUser: _v2, state_selectedScore: _v3 }) => _v1[_v2].scores[_v3])}</p>
+        <p>
+          User score:{" "}
+          {__ctHelpers.derive({ state_users: state.users, state_selectedUser: state.selectedUser, state_selectedScore: state.selectedScore }, ({ state_users: _v1, state_selectedUser: _v2, state_selectedScore: _v3 }) => _v1[_v2].scores[_v3])}
+        </p>
 
         {/* Using one array element as index for another */}
         <p>Indirect: {__ctHelpers.derive({ state_items: state.items, state_indices: state.indices }, ({ state_items: _v1, state_indices: _v2 }) => _v1[_v2[0]])}</p>
@@ -152,10 +158,15 @@ export default recipe({
 
         <h3>Element Access in Conditions</h3>
         {/* Element access in ternary */}
-        <p>Conditional: {__ctHelpers.ifElse(__ctHelpers.derive({ state_arr: state.arr, state_a: state.a }, ({ state_arr: _v1, state_a: _v2 }) => _v1[_v2] > 10), __ctHelpers.derive({ state_items: state.items, state_b: state.b }, ({ state_items: _v1, state_b: _v2 }) => _v1[_v2]), state.items[0])}</p>
+        <p>
+          Conditional:{" "}
+          {__ctHelpers.ifElse(__ctHelpers.derive({ state_arr: state.arr, state_a: state.a }, ({ state_arr: _v1, state_a: _v2 }) => _v1[_v2] > 10), __ctHelpers.derive({ state_items: state.items, state_b: state.b }, ({ state_items: _v1, state_b: _v2 }) => _v1[_v2]), state.items[0])}
+        </p>
 
         {/* Element access in boolean expression */}
-        <p>Has value: {ifElse(__ctHelpers.derive({ state_matrix: state.matrix, state_row: state.row, state_col: state.col }, ({ state_matrix: _v1, state_row: _v2, state_col: _v3 }) => _v1[_v2][_v3] > 0), "positive", "non-positive")}</p>
+        <p>
+          Has value: {ifElse(__ctHelpers.derive({ state_matrix: state.matrix, state_row: state.row, state_col: state.col }, ({ state_matrix: _v1, state_row: _v2, state_col: _v3 }) => _v1[_v2][_v3] > 0), "positive", "non-positive")}
+        </p>
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}

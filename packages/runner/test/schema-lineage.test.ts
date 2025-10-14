@@ -17,8 +17,6 @@ describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
-  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -29,8 +27,6 @@ describe("Schema Lineage", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder(runtime);
-    ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {

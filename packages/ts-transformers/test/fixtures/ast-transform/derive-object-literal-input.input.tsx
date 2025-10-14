@@ -11,7 +11,7 @@ const attempts = lift((count: number) => count)(attemptCount);
 const accepted = lift((count: number) => count)(acceptedCount);
 const rejected = lift((count: number) => count)(rejectedCount);
 
-const summary = derive(
+const _summary = derive(
   {
     stage: normalizedStage,
     attempts: attempts,

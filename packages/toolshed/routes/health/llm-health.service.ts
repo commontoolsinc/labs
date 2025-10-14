@@ -343,7 +343,7 @@ export async function checkLLMHealth(
       models: modelStatuses,
       alertSent,
     };
-  } catch (error) {
+  } catch (_) {
     // If we can't even fetch models, return unhealthy status
     return {
       status: "unhealthy",

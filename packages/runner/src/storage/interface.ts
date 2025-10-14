@@ -11,7 +11,6 @@ import type {
   MemorySpace,
   QueryError as IQueryError,
   Result,
-  SchemaContext,
   SchemaPathSelector,
   Signer,
   State,

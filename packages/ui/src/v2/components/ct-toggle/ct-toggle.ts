@@ -1,4 +1,4 @@
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { toggleStyles } from "./styles.ts";

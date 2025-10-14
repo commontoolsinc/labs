@@ -38,7 +38,7 @@ import type { IRuntime } from "../runtime.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
-const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
   throw new Error(
     "toSchema() should be transformed at compile time. " +
       "Make sure the TypeScript transformer is configured correctly.",

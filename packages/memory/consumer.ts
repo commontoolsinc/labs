@@ -33,7 +33,6 @@ import type {
   Reference,
   Result,
   Revision,
-  SchemaContext,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -479,7 +478,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     return this.source.args;
   }
 
-  perform(effect: ConsumerEffectFor<Ability, Protocol>) {}
+  perform(_effect: ConsumerEffectFor<Ability, Protocol>) {}
 }
 
 class QueryView<

@@ -125,7 +125,7 @@ export async function getTypeFromCode(
   code: string,
   typeName: string,
 ): Promise<{ type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode }> {
-  const { program, checker, sourceFile } = await createTestProgram(code);
+  const { checker, sourceFile } = await createTestProgram(code);
 
   let foundType: ts.Type | undefined;
   let foundTypeNode: ts.TypeNode | undefined;

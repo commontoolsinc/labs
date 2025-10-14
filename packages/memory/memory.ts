@@ -68,7 +68,7 @@ export class Memory implements Session, MemorySession {
    * which seems to cause problems if query and transaction happen concurrently.
    */
   async perform<Out>(task: () => Promise<Out>): Promise<Out> {
-    return await traceAsync("memory.perform", async (span) => {
+    return await traceAsync("memory.perform", async (_span) => {
       const result = this.ready.finally().then(task);
       this.ready = result.finally();
       await this.ready;

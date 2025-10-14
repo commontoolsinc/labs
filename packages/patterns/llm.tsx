@@ -9,7 +9,6 @@ import {
   llm,
   NAME,
   recipe,
-  str,
   UI,
 } from "commontools";
 

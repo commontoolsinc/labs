@@ -268,7 +268,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     rootSchema: SchemaDefinition,
     type: ts.Type,
     context: GenerationContext,
-    typeNode?: ts.TypeNode,
+    _typeNode?: ts.TypeNode,
   ): SchemaDefinition {
     const { definitions, emittedRefs } = context;
 
@@ -372,7 +372,6 @@ export class SchemaGenerator implements ISchemaGenerator {
             visit(mt);
           }
         } else if (flags & ts.TypeFlags.Object) {
-          const obj = t as ts.ObjectType;
           // Traverse properties
           if (checker) {
             for (const prop of checker.getPropertiesOfType(t)) {

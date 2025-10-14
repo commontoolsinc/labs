@@ -379,9 +379,10 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
-      const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
-        redactedData.transaction,
-      );
+      const [_lastId, _maxSince, facts] = await this
+        .getSchemaSubscriptionMatches(
+          redactedData.transaction,
+        );
 
       const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
       for (const [id, channels] of this.channels) {

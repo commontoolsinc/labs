@@ -3,7 +3,6 @@ import {
   Cell,
   compileAndRun,
   Default,
-  h,
   handler,
   ifElse,
   NAME,

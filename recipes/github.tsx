@@ -1,7 +1,7 @@
+/// <cts-enable />
 import {
   cell,
   derive,
-  h,
   handler,
   JSONSchema,
   NAME,

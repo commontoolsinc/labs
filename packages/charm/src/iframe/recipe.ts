@@ -87,7 +87,7 @@ export const getIframeRecipe = (
   }
   try {
     return { recipeId, src, iframe: parseIframeRecipe(src) };
-  } catch (error) {
+  } catch (_) {
     return { recipeId, src };
   }
 };

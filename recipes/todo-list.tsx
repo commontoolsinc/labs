@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  derive,
-  h,
-  handler,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
 
 type TodoItem = {
   title: Default<string, "">;

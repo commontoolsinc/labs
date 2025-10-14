@@ -9,9 +9,7 @@ import {
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
-  BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
-  BuiltInLLMState,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
