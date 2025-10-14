@@ -122,6 +122,7 @@ export default recipe({
         {/* Filter then map */}
         <ul>
           {derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter(x => x > _v2)).mapWithPattern(recipe({
+            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 element: {

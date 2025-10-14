@@ -41,19 +41,11 @@ export default recipe({
     return {
         [UI]: (<div>
         {state.items.mapWithPattern(recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            },
-                            quantity: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price", "quantity"]
+                        $ref: "#/$defs/Item"
                     },
                     index: {
                         type: "number"
@@ -69,7 +61,21 @@ export default recipe({
                         required: ["taxRate"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            },
+                            quantity: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price", "quantity"]
+                    }
+                }
             } as const satisfies JSONSchema, ({ element, index, params: { taxRate } }) => {
                 // Local variable declared inside callback
                 const subtotal = element.price * element.quantity;

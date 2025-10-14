@@ -11,7 +11,7 @@ describe("Schema: Default<T,V>", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker, typeNode);
+    const result = gen.generateSchema(type, checker, typeNode);
     expect(result.type).toBe("number");
     expect(result.default).toBe(5);
   });
@@ -23,7 +23,7 @@ describe("Schema: Default<T,V>", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "T");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker, typeNode);
+    const result = gen.generateSchema(type, checker, typeNode);
     expect(result.type).toBe("array");
     expect(result.items?.type).toBe("string");
     expect(Array.isArray(result.default)).toBe(true);
