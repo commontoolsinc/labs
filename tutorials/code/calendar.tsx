@@ -1,10 +1,9 @@
 /// <cts-enable />
 import {
+  type Cell,
   cell,
   Default,
-  derive,
-  h,
-  ifElse,
+  handler,
   lift,
   recipe,
   UI,
@@ -26,9 +25,19 @@ interface CalendarState {
       "2025-10-31",
     ]
   >;
+  clickedDate: Default<string, "">;
 }
 
-export default recipe<CalendarState>("calendar", ({ dates }) => {
+const clickDate = handler<
+  unknown,
+  { clickedDate: Cell<string>; date: string }
+>(
+  (_, { clickedDate, date }) => {
+    clickedDate.set(date);
+  },
+);
+
+export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
   // Note: We use cell() instead of Default<> for the todos map because
   // Default<> doesn't work reliably with Record/map types
   const todos = cell<Record<string, string[]>>({
@@ -56,11 +65,12 @@ export default recipe<CalendarState>("calendar", ({ dates }) => {
     [UI]: (
       <div>
         <h2>Calendar</h2>
+        <p>Clicked on: {clickedDate}</p>
         {dates.map((date) => {
           const dateTodos = getTodosForDate({ todos, date });
           return (
             <div style="margin-bottom: 1rem;">
-              <h3>{date}</h3>
+              <h3 onclick={clickDate({ clickedDate, date })}>{date}</h3>
               {dateTodos.length > 0
                 ? (
                   <ul>
