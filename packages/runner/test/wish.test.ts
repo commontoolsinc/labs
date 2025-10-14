@@ -20,7 +20,7 @@ describe("wish built-in", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL("https://example.com"),
       storageManager,
     });
 

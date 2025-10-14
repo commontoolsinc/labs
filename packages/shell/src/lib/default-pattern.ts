@@ -1,5 +1,4 @@
 import { CharmController, CharmsController } from "@commontools/charm/ops";
-import { processSchema } from "@commontools/charm";
 import { HttpProgramResolver } from "@commontools/js-runtime";
 import { API_URL } from "./env.ts";
 

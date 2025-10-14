@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  Default,
   derive,
   handler,
   NAME,
@@ -29,7 +28,7 @@ export type Charm = {
   [key: string]: any;
 };
 
-type CharmsListInput = Record<string, never>;
+type CharmsListInput = void;
 
 // Recipe returns only UI, no data outputs (only symbol properties)
 interface CharmsListOutput {

@@ -7,6 +7,7 @@ import type {
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
+import type { JSONSchema } from "../builder/types.ts";
 
 type WishResolution = {
   entityId: EntityId;
@@ -36,23 +37,30 @@ function resolveWishTarget(
   );
 }
 
+const TARGET_SCHEMA = {
+  type: "string",
+  default: "",
+} as const satisfies JSONSchema;
+
 export function wish(
   inputsCell: Cell<[unknown, unknown]>,
   sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  _cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
-    const [targetCandidate, defaultValue] = inputsCell.withTx(tx).get() ??
-      [];
+    const inputsWithTx = inputsCell.withTx(tx);
+    const targetCandidate = inputsWithTx.key(0).asSchema(TARGET_SCHEMA).get();
+    const defaultCell = inputsWithTx.key(1);
+
     const wishTarget = typeof targetCandidate === "string"
       ? targetCandidate.trim()
       : "";
 
     if (wishTarget === "") {
-      sendResult(tx, defaultValue ?? undefined);
+      sendResult(tx, defaultCell);
       return;
     }
 
@@ -65,7 +73,7 @@ export function wish(
 
     if (!resolvedCell) {
       console.error(`Wish target "${wishTarget}" is not recognized.`);
-      sendResult(tx, defaultValue ?? undefined);
+      sendResult(tx, defaultCell);
       return;
     }
 
