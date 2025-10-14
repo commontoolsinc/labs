@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { ALL_CHARMS_ID } from "@commontools/charm";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
+import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();

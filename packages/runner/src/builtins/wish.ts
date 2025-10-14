@@ -1,4 +1,3 @@
-import { ALL_CHARMS_ID } from "@commontools/charm";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -7,6 +6,7 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
+import { ALL_CHARMS_ID } from "./well-known.ts";
 
 type WishResolution = {
   entityId: EntityId;

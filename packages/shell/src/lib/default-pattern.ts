@@ -2,7 +2,6 @@ import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { processSchema } from "@commontools/charm";
 import { HttpProgramResolver } from "@commontools/js-runtime";
 import { API_URL } from "./env.ts";
-import { ALL_CHARMS_ID } from "@commontools/charm";
 
 const DEFAULT_CHARM_NAME = "DefaultCharmList";
 const DEFAULT_APP_URL = `${API_URL}api/patterns/default-app.tsx`;
