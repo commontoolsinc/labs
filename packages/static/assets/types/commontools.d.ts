@@ -301,7 +301,7 @@ export type CompileAndRunFunction = <T = any, S = any>(params: Opaque<BuiltInCom
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
 export type WishFunction = {
     <T = unknown>(target: Opaque<string>): OpaqueRef<T | undefined>;
-    <T = unknown>(target: Opaque<string>, defaultValue: Opaque<T> | T): OpaqueRef<T>;
+    <T = unknown>(target: Opaque<string>, defaultValue: Opaque<T>): OpaqueRef<T>;
 };
 export type CreateNodeFactoryFunction = <T = any, R = any>(moduleSpec: Module) => ModuleFactory<T, R>;
 export type CreateCellFunction = {
