@@ -44,21 +44,7 @@ export function wish(
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  let resultCell: Cell<unknown> | undefined;
-
   return (tx: IExtendedStorageTransaction) => {
-    if (!resultCell) {
-      resultCell = runtime.getCell(
-        parentCell.space,
-        { wish: cause },
-        undefined,
-        tx,
-      );
-      resultCell.setSourceCell(parentCell);
-      sendResult(tx, resultCell);
-    }
-
-    const resultWithLog = resultCell.withTx(tx);
     const [targetCandidate, defaultValue] = inputsCell.withTx(tx).get() ??
       [];
     const wishTarget = typeof targetCandidate === "string"
@@ -66,8 +52,7 @@ export function wish(
       : "";
 
     if (wishTarget === "") {
-      if (defaultValue === undefined) resultWithLog.set(undefined);
-      else resultWithLog.set(defaultValue);
+      sendResult(tx, defaultValue ?? undefined);
       return;
     }
 
@@ -80,12 +65,10 @@ export function wish(
 
     if (!resolvedCell) {
       console.error(`Wish target "${wishTarget}" is not recognized.`);
-      if (defaultValue === undefined) resultWithLog.set(undefined);
-      else resultWithLog.set(defaultValue);
+      sendResult(tx, defaultValue ?? undefined);
       return;
     }
 
-    const resolvedLink = resolvedCell.withTx(tx).getAsWriteRedirectLink();
-    resultWithLog.setRaw(resolvedLink);
+    sendResult(tx, resolvedCell.withTx(tx));
   };
 }

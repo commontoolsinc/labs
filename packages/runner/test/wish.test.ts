@@ -66,15 +66,15 @@ describe("wish built-in", () => {
 
     const readTx = runtime.readTx();
     const actualCell = result.withTx(readTx).key("allCharms");
-    const link = actualCell.withTx(readTx).getAsLink();
-    const linkRoot = link?.["/"] as Record<string, unknown> | undefined;
-    const linkData = linkRoot?.[LINK_V1_TAG] as
+    const rawValue = actualCell.withTx(readTx).getRaw() as
+      | { ["/"]: Record<string, unknown> }
+      | undefined;
+    const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as
       | { id?: string; overwrite?: string }
       | undefined;
 
     expect(result.key("allCharms").get()).toEqual(charmsData);
     expect(linkData?.id).toEqual(`of:${ALL_CHARMS_ID}`);
-    expect(linkData?.overwrite).toEqual("redirect");
   });
 
   it("returns undefined for unknown wishes", async () => {
@@ -102,7 +102,7 @@ describe("wish built-in", () => {
 
       await runtime.idle();
 
-      expect(result.key("missing").get()).toBeNull();
+      expect(result.key("missing").get()).toBeUndefined();
       expect(errors.length).toBeGreaterThan(0);
     } finally {
       console.error = originalError;
