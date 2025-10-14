@@ -59,7 +59,9 @@ describe("Schema: type-to-schema parity", () => {
     `;
 
     const { type, checker } = await getTypeFromCode(code, "UserInfo");
-    const schema = asObjectSchema(createSchemaTransformerV2().generateSchema(type, checker));
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
 
     expect(schema.type).toBe("object");
     const profile = schema.properties?.profile as Record<string, any>;
