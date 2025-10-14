@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
-import { getTypeFromCode } from "./utils.ts";
+import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
 describe("Plugin Interface", () => {
   it("should create a transformer object with the correct methods", () => {
@@ -24,7 +24,7 @@ describe("Plugin Interface", () => {
       "interface MyObject { name: string; age: number; }",
       "MyObject",
     );
-    const schema = transformer.generateSchema(type, checker);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker));
     expect(schema.type).toBe("object");
     expect(schema.properties?.name).toEqual({ type: "string" });
     expect(schema.properties?.age).toEqual({ type: "number" });
