@@ -112,6 +112,7 @@ const spawnNote = handler<
   }));
 });
 
+// This wrapping layer will go away post DX1
 function getAllCharms() {
   const allCharms = wish<MentionableCharm[]>("#/allCharms", []);
   return derive(allCharms, (c) => c);
