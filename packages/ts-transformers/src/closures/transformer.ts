@@ -1,8 +1,5 @@
 import ts from "typescript";
-import {
-  TransformationContext,
-  Transformer,
-} from "../core/mod.ts";
+import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 export class ClosureTransformer extends Transformer {
