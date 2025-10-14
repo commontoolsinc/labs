@@ -77,11 +77,20 @@ function resolveExpressionKind(
     if (kind) return kind;
   }
 
-  if (
-    ts.isPropertyAccessExpression(target) &&
-    (target.name.text === "map" || target.name.text === "mapWithPattern")
-  ) {
-    return { kind: "array-map" };
+  if (ts.isPropertyAccessExpression(target)) {
+    const name = target.name.text;
+    if (name === "map" || name === "mapWithPattern") {
+      return { kind: "array-map" };
+    }
+    if (name === "derive") {
+      return { kind: "derive" };
+    }
+    if (name === "ifElse") {
+      return { kind: "ifElse" };
+    }
+    if (BUILDER_SYMBOL_NAMES.has(name)) {
+      return { kind: "builder", builderName: name };
+    }
   }
 
   const type = checker.getTypeAtLocation(target);

@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, derive, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 interface Item {
     id: number;
     price: number;
@@ -41,11 +41,11 @@ export default recipe({
             required: ["id", "price", "active"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {derive(state.items, _v1 => _v1.filter((item) => item.active)).mapWithPattern(recipe({
+        {__ctHelpers.derive(state.items, _v1 => _v1.filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
@@ -82,9 +82,13 @@ export default recipe({
                     required: ["id", "price", "active"]
                 }
             }
-        } as const satisfies JSONSchema, ({ element, params: { taxRate } }) => (<div>
+        } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { taxRate } }) => (<div>
               Total: ${element.price * (1 + taxRate)}
             </div>)), { taxRate: state.taxRate })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
