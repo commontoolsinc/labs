@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { recipe, UI } from "commontools";
 interface State {
     items: Array<{
         price: number;
@@ -26,10 +26,10 @@ export default recipe({
         }
     },
     required: ["items", "discount"]
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(recipe({
+        {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -54,7 +54,11 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies JSONSchema, ({ element, params: { discount } }) => (<span>{element.price * discount}</span>)), { discount: state.discount })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount } }) => (<span>{element.price * discount}</span>)), { discount: state.discount })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

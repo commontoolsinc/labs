@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 interface Point {
     x: number;
     y: number;
@@ -37,11 +37,11 @@ export default recipe({
             required: ["x", "y"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.mapWithPattern(recipe({
+        {state.points.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -74,9 +74,13 @@ export default recipe({
                         required: ["x", "y"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, params: { scale } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { scale } }) => (<div>
             Point: ({element.x * scale}, {element.y * scale})
           </div>)), { scale: state.scale })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

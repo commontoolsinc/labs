@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { Cell, cell, createCell, derive, h, handler, ifElse, lift, NAME, navigateTo, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
     [NAME]: "Some Simple Recipe",
@@ -57,7 +57,7 @@ const addCharmAndNavigate = lift({
     return undefined;
 });
 // Create a new SimpleRecipe and add it to the array
-const createSimpleRecipe = handler(true as const satisfies JSONSchema, {
+const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -67,7 +67,7 @@ const createSimpleRecipe = handler(true as const satisfies JSONSchema, {
         }
     },
     required: ["cellRef"]
-} as const satisfies JSONSchema, (_, { cellRef }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false);
     // Create the charm
@@ -76,13 +76,13 @@ const createSimpleRecipe = handler(true as const satisfies JSONSchema, {
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler(true as const satisfies JSONSchema, {
+const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         charm: true
     },
     required: ["charm"]
-} as const satisfies JSONSchema, (_, { charm }) => {
+} as const satisfies __ctHelpers.JSONSchema, (_, { charm }) => {
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
@@ -100,12 +100,12 @@ export default recipe("Charms Launcher", () => {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        {ifElse(__ctHelpers.derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {derive(index, index => index + 1)}
+                  Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {derive(index, index => index + 1)}: {derive(charm, charm => charm[NAME] || "Unnamed")}</span>
+                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
               </li>))}
           </ul>)}
 
@@ -116,4 +116,8 @@ export default recipe("Charms Launcher", () => {
         cellRef,
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
 

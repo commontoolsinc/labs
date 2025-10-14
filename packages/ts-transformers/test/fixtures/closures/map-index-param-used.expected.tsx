@@ -1,5 +1,5 @@
-/// <cts-enable />
-import { h, recipe, UI, JSONSchema } from "commontools";
+import * as __ctHelpers from "commontools";
+import { h, recipe, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -37,11 +37,11 @@ export default recipe({
             required: ["id", "name"]
         }
     }
-} as const satisfies JSONSchema, (state) => {
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.items.mapWithPattern(recipe({
+        {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
@@ -77,9 +77,13 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies JSONSchema, ({ element, index, params: { offset } }) => (<div>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: { offset } }) => (<div>
             Item #{index + offset}: {element.name}
           </div>)), { offset: state.offset })}
       </div>),
     };
 });
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
