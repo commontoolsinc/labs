@@ -1,4 +1,4 @@
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Cancel,
   type Cell,
@@ -325,17 +325,20 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
   // Handle data-* attributes specially - they need to be set as HTML attributes
   // to populate the dataset property correctly
   if (key.startsWith("data-") && target instanceof Element) {
-    const currentValue = target.getAttribute(key);
-    const newValue = String(value);
-    if (currentValue !== newValue) {
-      target.setAttribute(key, newValue);
+    // If value is null or undefined, remove the attribute
+    if (value == null) {
+      if (target.hasAttribute(key)) {
+        target.removeAttribute(key);
+      }
+    } else {
+      const currentValue = target.getAttribute(key);
+      const newValue = String(value);
+      if (currentValue !== newValue) {
+        target.setAttribute(key, newValue);
+      }
     }
-  } else {
-    // @ts-ignore - we've validated these via runtime checks
-    if (target[key] !== value) {
-      // @ts-ignore - we've validated these via runtime checks
-      target[key] = value;
-    }
+  } else if (target[key as keyof T] !== value) {
+    target[key as keyof T] = value as T[keyof T];
   }
 };
 
@@ -426,10 +429,11 @@ export function serializableEvent<T>(event: Event): T {
   }
 
   // Copy dataset as a plain object for serialization
-  if (isHTMLElement(target) && target.dataset) {
+  if (isObject(target) && "dataset" in target && isRecord(target.dataset)) {
     const dataset: Record<string, string> = {};
     for (const key in target.dataset) {
-      dataset[key] = target.dataset[key]!;
+      // String() to normalize, just in case
+      dataset[key] = String(target.dataset[key]);
     }
     if (Object.keys(dataset).length > 0) {
       targetObject.dataset = dataset;
@@ -457,8 +461,4 @@ function isSelectElement(value: unknown): value is HTMLSelectElement {
   return !!(value && typeof value === "object" && ("tagName" in value) &&
     typeof value.tagName === "string" &&
     value.tagName.toUpperCase() === "SELECT");
-}
-
-function isHTMLElement(value: unknown): value is HTMLElement {
-  return !!(value && typeof value === "object" && ("dataset" in value));
 }
