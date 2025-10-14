@@ -58,9 +58,7 @@ export function wish(
     const hasDefault = defaultValue !== undefined && defaultValue !== null;
     const defaultCell = hasDefault ? inputsWithTx.key(1) : undefined;
 
-    const wishTarget = typeof target === "string"
-      ? target.trim()
-      : "";
+    const wishTarget = typeof target === "string" ? target.trim() : "";
 
     if (wishTarget === "") {
       sendResult(tx, hasDefault ? defaultCell : undefined);
