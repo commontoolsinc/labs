@@ -207,9 +207,7 @@ function shouldCaptureIdentifier(
   }
 
   // Skip function declarations (can't serialize functions)
-  const isFunction = declarations.some((decl) =>
-    isFunctionDeclaration(decl)
-  );
+  const isFunction = declarations.some((decl) => isFunctionDeclaration(decl));
   if (isFunction) {
     return undefined;
   }
@@ -556,7 +554,10 @@ function inferElementType(
     const unionType = arrayType as ts.UnionType;
     // Look for the OpaqueRef<T[]> member (intersection type)
     for (const member of unionType.types) {
-      if (member.flags & ts.TypeFlags.Intersection || isOpaqueRefType(member, checker)) {
+      if (
+        member.flags & ts.TypeFlags.Intersection ||
+        isOpaqueRefType(member, checker)
+      ) {
         actualArrayType = member;
         break;
       }

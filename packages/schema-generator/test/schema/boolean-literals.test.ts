@@ -36,7 +36,9 @@ describe("Schema: Boolean literals", () => {
       "AlwaysTrue",
     );
     const transformer = createSchemaTransformerV2();
-    const trueSchema = asObjectSchema(transformer.generateSchema(trueType, checker));
+    const trueSchema = asObjectSchema(
+      transformer.generateSchema(trueType, checker),
+    );
 
     expect(trueSchema.type).toBe("boolean");
     expect(trueSchema.enum).toEqual([true]);
@@ -46,7 +48,9 @@ describe("Schema: Boolean literals", () => {
       falseCode,
       "AlwaysFalse",
     );
-    const falseSchema = asObjectSchema(transformer.generateSchema(falseType, falseChecker));
+    const falseSchema = asObjectSchema(
+      transformer.generateSchema(falseType, falseChecker),
+    );
 
     expect(falseSchema.type).toBe("boolean");
     expect(falseSchema.enum).toEqual([false]);

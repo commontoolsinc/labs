@@ -25,7 +25,9 @@ describe("Schema: Recursion variants", () => {
       interface Node { value: string; children?: Node[] }
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
-    const s = asObjectSchema(createSchemaTransformerV2().generateSchema(type, checker));
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/Node");
     const d = s.$defs as any;
     const node = d.Node;
@@ -40,7 +42,9 @@ describe("Schema: Recursion variants", () => {
       interface C { a: A }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = asObjectSchema(createSchemaTransformerV2().generateSchema(type, checker));
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;
     expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
@@ -54,7 +58,9 @@ describe("Schema: Recursion variants", () => {
       interface B { a?: A }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = asObjectSchema(createSchemaTransformerV2().generateSchema(type, checker));
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;
     expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");

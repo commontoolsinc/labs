@@ -122,18 +122,18 @@ export function map(
       // Determine which mode we're in based on presence of params
       const recipeInputs = params !== undefined
         ? {
-            // Closure mode: include params
-            element: inputsCell.key("list").key(initializedUpTo),
-            index: initializedUpTo,
-            array: inputsCell.key("list"),
-            params: inputsCell.key("params"),
-          }
+          // Closure mode: include params
+          element: inputsCell.key("list").key(initializedUpTo),
+          index: initializedUpTo,
+          array: inputsCell.key("list"),
+          params: inputsCell.key("params"),
+        }
         : {
-            // Legacy mode: no params
-            element: inputsCell.key("list").key(initializedUpTo),
-            index: initializedUpTo,
-            array: inputsCell.key("list"),
-          };
+          // Legacy mode: no params
+          element: inputsCell.key("list").key(initializedUpTo),
+          index: initializedUpTo,
+          array: inputsCell.key("list"),
+        };
 
       runtime.runner.run(
         tx,
