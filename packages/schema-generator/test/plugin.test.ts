@@ -12,7 +12,9 @@ describe("Plugin Interface", () => {
 
     // Verify it has the required methods
     expect(typeof transformer.generateSchema).toBe("function");
-    expect(typeof transformer.generateSchemaFromSyntheticTypeNode).toBe("function");
+    expect(typeof transformer.generateSchemaFromSyntheticTypeNode).toBe(
+      "function",
+    );
 
     // Verify generateSchema has the right number of parameters
     expect(transformer.generateSchema.length).toBe(3);

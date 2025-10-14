@@ -2,30 +2,40 @@
 
 ## Problem Statement
 
-When the closure transformer creates synthetic TypeNodes for recipe callback parameters, schema generation fails to properly handle `$refs` and `$defs`. Each property's schema is generated in isolation, causing definitions to be lost.
+When the closure transformer creates synthetic TypeNodes for recipe callback
+parameters, schema generation fails to properly handle `$refs` and `$defs`. Each
+property's schema is generated in isolation, causing definitions to be lost.
 
 ## Root Cause Analysis
 
 ### The Flow
 
-1. Closure transformer creates synthetic TypeLiterals via `factory.createTypeLiteralNode()`
+1. Closure transformer creates synthetic TypeLiterals via
+   `factory.createTypeLiteralNode()`
 2. These synthetic nodes don't have source positions (`pos === -1, end === -1`)
 3. TypeChecker returns `any` when trying to resolve them
-4. Schema transformer detects this and calls `analyzeTypeNodeStructure()` as fallback
-5. `analyzeTypeNodeStructure` iterates properties and calls `generateSchema(propType, checker, member.type, false)` for each
+4. Schema transformer detects this and calls `analyzeTypeNodeStructure()` as
+   fallback
+5. `analyzeTypeNodeStructure` iterates properties and calls
+   `generateSchema(propType, checker, member.type, false)` for each
 6. **Problem**: Each `generateSchema()` call creates a fresh, isolated context
-7. Any `$refs` generated point to `#/$defs/Item` but the definitions are discarded
-8. Result: Orphaned `$refs` with no `$defs` section OR unwanted `$schema` on property schemas
+7. Any `$refs` generated point to `#/$defs/Item` but the definitions are
+   discarded
+8. Result: Orphaned `$refs` with no `$defs` section OR unwanted `$schema` on
+   property schemas
 
 ### Why This Happens
 
 The `analyzeTypeNodeStructure` function is architecturally isolated:
+
 - It's a standalone function in the transformer (not part of SchemaGenerator)
 - It has no access to schema generation context
-- It calls `generateSchema()` which is the **root schema generation entry point**
+- It calls `generateSchema()` which is the **root schema generation entry
+  point**
 - Each call creates and discards a context
 
 Compare to the normal path (`ObjectFormatter`):
+
 - Uses `schemaGenerator.formatChildType()` for properties
 - `formatChildType()` shares the same context across all properties
 - Definitions accumulate in `context.definitions`
@@ -33,7 +43,9 @@ Compare to the normal path (`ObjectFormatter`):
 
 ### The TypeRegistry Bridge
 
-The closure transformer registers synthetic TypeNode → Type mappings in `typeRegistry`:
+The closure transformer registers synthetic TypeNode → Type mappings in
+`typeRegistry`:
+
 ```typescript
 // In closure transformer
 typeRegistry.set(syntheticTypeNode, actualType);
@@ -45,63 +57,78 @@ if (typeRegistry && typeRegistry.has(member.type)) {
 }
 ```
 
-This bridge allows properties to use real Type information, but the context isolation prevents proper `$refs` and `$defs` handling.
+This bridge allows properties to use real Type information, but the context
+isolation prevents proper `$refs` and `$defs` handling.
 
 ## Solution Options Considered
 
 ### Option 1: Shared Context Parameter
+
 Add optional `sharedContext` parameter to `generateSchema()`.
 
 **Pros:**
+
 - Minimal API change
 - Backward compatible
 
 **Cons:**
+
 - Leaky abstraction (context is implementation detail)
 - Complex to use correctly
 - Requires exposing context creation/management
 - Context has many interdependent fields (cyclicTypes, anonymousNames, etc.)
 
 ### Option 2: Move Logic into SchemaGenerator ⭐ **RECOMMENDED**
+
 Create a new method in SchemaGenerator specifically for synthetic TypeNodes.
 
 **Pros:**
+
 - Architecturally consistent with ObjectFormatter pattern
 - Full access to formatChildType and context management
 - Clean separation of concerns
 - Solves the problem completely
 
 **Cons:**
+
 - Requires API change to createSchemaTransformerV2
 - Slightly more complex initially
 
 ### Option 3: Return Definitions with Schema
+
 Change return type to include definitions: `{ schema, definitions }`.
 
 **Pros:**
+
 - Explicit
 - Caller controls merging
 
 **Cons:**
+
 - Breaking change
 - Awkward API
 - Doesn't handle nested contexts well
 
 ### Option 4: Force Inline (No $refs)
-When `isRoot: false`, completely inline all schemas without $refs or definitions.
+
+When `isRoot: false`, completely inline all schemas without $refs or
+definitions.
 
 **Pros:**
+
 - Simple
 - No context sharing needed
 
 **Cons:**
+
 - Duplicates type definitions
 - Inconsistent with user's stated requirement
 - Makes schemas unnecessarily verbose
 
 ## Recommended Solution
 
-**Implement Option 2: Add `generateSchemaFromSyntheticTypeNode` method to SchemaGenerator**
+**Implement Option 2: Add `generateSchemaFromSyntheticTypeNode` method to
+SchemaGenerator**
 
 ### Implementation Plan
 
@@ -222,8 +249,10 @@ const { generateSchema, generateSchemaFromSyntheticTypeNode } =
   createSchemaTransformerV2();
 
 // In visitor:
-if ((type.flags & ts.TypeFlags.Any) &&
-    typeArg.pos === -1 && typeArg.end === -1) {
+if (
+  (type.flags & ts.TypeFlags.Any) &&
+  typeArg.pos === -1 && typeArg.end === -1
+) {
   // Synthetic TypeNode path
   schema = generateSchemaFromSyntheticTypeNode(
     typeArg,
@@ -238,23 +267,31 @@ if ((type.flags & ts.TypeFlags.Any) &&
 
 ### Why This Works
 
-1. **Context sharing**: `formatChildType` is called for properties, sharing the same context across all property generations
-2. **Proper $refs**: Named types like `Item` are stored in `context.definitions` and referenced via `$ref`
+1. **Context sharing**: `formatChildType` is called for properties, sharing the
+   same context across all property generations
+2. **Proper
+   $refs**: Named types like `Item` are stored in `context.definitions` and referenced via `$ref`
 3. **Single $defs**: All definitions accumulate in one place
-4. **Root-level $schema**: Only added by `buildFinalSchema` at the outermost level
-5. **Recursive structure**: Handles nested TypeLiterals correctly by recursing with same context
+4. **Root-level $schema**: Only added by `buildFinalSchema` at the outermost
+   level
+5. **Recursive structure**: Handles nested TypeLiterals correctly by recursing
+   with same context
 
 ### Expected Output
 
 For a callback param type like:
+
 ```typescript
 {
   element: Item;
-  params: { prefix: string };
+  params: {
+    prefix: string;
+  }
 }
 ```
 
 Generated schema:
+
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -273,7 +310,7 @@ Generated schema:
   "$defs": {
     "Item": {
       "type": "object",
-      "properties": { /* ... */ }
+      "properties": {/* ... */}
     }
   }
 }
@@ -291,5 +328,6 @@ Generated schema:
 
 - `packages/schema-generator/src/schema-generator.ts` - Add new method
 - `packages/schema-generator/src/plugin.ts` - Update return type
-- `packages/ts-transformers/src/transformers/schema-generator.ts` - Use new method
+- `packages/ts-transformers/src/transformers/schema-generator.ts` - Use new
+  method
 - `packages/ts-transformers/src/closures/transformer.ts` - TypeRegistry usage
