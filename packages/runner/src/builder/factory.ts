@@ -31,6 +31,7 @@ import {
   navigateTo,
   str,
   streamData,
+  wish,
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
@@ -117,6 +118,7 @@ export const createBuilder = (
       streamData,
       compileAndRun,
       navigateTo,
+      wish,
 
       // Cell creation
       createCell,

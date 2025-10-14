@@ -7,6 +7,7 @@ import { ifElse } from "./if-else.ts";
 import type { IRuntime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { navigateTo } from "./navigate-to.ts";
+import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";
 import type { BuiltInGenerateObjectParams } from "@commontools/api";
 import { llmDialog } from "./llm-dialog.ts";
@@ -34,4 +35,5 @@ export function registerBuiltins(runtime: IRuntime) {
     }>(generateObject),
   );
   moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
+  moduleRegistry.addModuleByRef("wish", raw(wish));
 }

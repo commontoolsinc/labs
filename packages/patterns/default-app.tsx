@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  Default,
   derive,
   handler,
   NAME,
@@ -10,6 +9,7 @@ import {
   recipe,
   str,
   UI,
+  wish,
 } from "commontools";
 
 // Import recipes we want to be launchable from the default app.
@@ -28,9 +28,7 @@ export type Charm = {
   [key: string]: any;
 };
 
-type CharmsListInput = {
-  allCharms: Default<MentionableCharm[], []>;
-};
+type CharmsListInput = void;
 
 // Recipe returns only UI, no data outputs (only symbol properties)
 interface CharmsListOutput {
@@ -113,10 +111,18 @@ const spawnNote = handler<
   }));
 });
 
+function getAllCharms() {
+  const allCharms = wish<MentionableCharm[]>("#/allCharms", []);
+  // ensure schema is added to return type
+  return derive<MentionableCharm[], MentionableCharm[]>(allCharms, (c) => c);
+}
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
-  ({ allCharms }) => {
+  (_) => {
+    const allCharms = getAllCharms();
     const index = BacklinksIndex({ allCharms });
+
     return {
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (

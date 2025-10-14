@@ -21,7 +21,6 @@ It is still a work in progress.
 - **{doc}`making-lists`** - Creating and working with lists
 
 ## TODO items
-
 - pass reference to toggle an item (constant time)
 - How to derive from two state inputs
 - How to read a value
@@ -31,6 +30,7 @@ It is still a work in progress.
   - ifelse
   - fetchdata
   - navigateTo
+  - wish
   - compileAndRun
   - llmDialog
 - sorting shopping list (filter by key such as aisle)

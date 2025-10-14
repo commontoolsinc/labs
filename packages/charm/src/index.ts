@@ -65,4 +65,3 @@ export {
   type WorkflowType,
 } from "./workflow.ts";
 export * from "./spellbook.ts";
-export * from "./well-known.ts";

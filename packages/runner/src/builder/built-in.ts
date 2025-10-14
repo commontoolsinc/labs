@@ -88,6 +88,26 @@ export const navigateTo = createNodeFactory({
   implementation: "navigateTo",
 }) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
 
+let wishFactory: NodeFactory<[unknown, unknown], any> | undefined;
+
+export function wish<T = unknown>(
+  target: Opaque<string>,
+): OpaqueRef<T | undefined>;
+export function wish<T = unknown>(
+  target: Opaque<string>,
+  defaultValue: Opaque<T> | T,
+): OpaqueRef<T>;
+export function wish<T = unknown>(
+  target: Opaque<string>,
+  defaultValue?: Opaque<T> | T,
+): OpaqueRef<T | undefined> {
+  wishFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "wish",
+  });
+  return wishFactory([target, defaultValue]) as OpaqueRef<T | undefined>;
+}
+
 // Example:
 // str`Hello, ${name}!`
 //
