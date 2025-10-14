@@ -4,7 +4,7 @@ import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { TEST_HTTP } from "./flags.ts";
 
@@ -19,7 +19,6 @@ describe("fetch data integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;

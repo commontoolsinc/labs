@@ -1,7 +1,7 @@
+/// <cts-enable />
 import {
   compileAndRun,
   derive,
-  h,
   ifElse,
   JSONSchema,
   lift,

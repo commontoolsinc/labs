@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, Default, h, handler, recipe, UI } from "commontools";
+import { Cell, Default, handler, recipe, UI } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -33,12 +33,12 @@ export default recipe({
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
           <span>Count: {__ctHelpers.derive(count, count => count + 1)}</span>
-          
+
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
           <ct-button onClick={handleClick({ count })}>
             Click me
           </ct-button>
-          
+
           {/* Event handler inside map - should NOT be wrapped in derive */}
           {[1, 2, 3].map((n) => (<ct-button key={n} onClick={handleClick({ count })}>
               Button {n}

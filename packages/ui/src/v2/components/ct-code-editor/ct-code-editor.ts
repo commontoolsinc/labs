@@ -12,7 +12,6 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { Runtime } from "@commontools/runner";
 
 import {
   acceptCompletion,
@@ -26,15 +25,8 @@ import {
   DecorationSet,
   ViewPlugin,
   ViewUpdate,
-  WidgetType,
 } from "@codemirror/view";
-import {
-  type Cell,
-  getEntityId,
-  type JSONSchema,
-  NAME,
-  type Schema,
-} from "@commontools/runner";
+import { type Cell, getEntityId, NAME } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import {
@@ -42,8 +34,6 @@ import {
   MentionableArray,
   mentionableArraySchema,
 } from "../../core/mentionable.ts";
-import { consume } from "@lit/context";
-import { MemorySpace } from "@commontools/runner";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -333,7 +323,7 @@ export class CTCodeEditor extends BaseElement {
    */
   private handleBacklinkActivation(
     view: EditorView,
-    event?: MouseEvent,
+    _event?: MouseEvent,
   ): boolean {
     const state = view.state;
     const pos = state.selection.main.head;

@@ -15,6 +15,12 @@
     "fmt": "deno fmt src/ test/**/*.test.ts",
     "lint": "deno lint src/ test/"
   },
+  "lint": {
+    "exclude": [
+      "./test/fixtures/**/*.expected.ts",
+      "./test/fixtures/**/*.expected.tsx"
+    ]
+  },
   "compilerOptions": {
     "strict": true,
     "noImplicitAny": true,

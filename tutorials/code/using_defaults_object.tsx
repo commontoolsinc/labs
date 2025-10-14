@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, h, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, recipe, UI } from "commontools";
 
 interface Player {
   playerName: string;

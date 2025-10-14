@@ -117,7 +117,7 @@ describe("Provider Reconnection", () => {
       await provider.sync("of:bad-entity", { path: [], schemaContext: schema });
 
       // Make pull fail
-      const originalPull = provider.workspace.pull.bind(provider.workspace);
+      const _originalPull = provider.workspace.pull.bind(provider.workspace);
       let pullCalled = false;
       provider.workspace.pull = function (
         _entries: [BaseMemoryAddress, Memory.SchemaPathSelector?][],

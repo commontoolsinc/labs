@@ -19,12 +19,14 @@ interface NestedOptionalArgs {
   state: Default<NestedOptionalState, {}>;
 }
 
-const increment = handler((_, context: { state: Cell<NestedOptionalState> }) => {
-  const current = context.state.get() ?? {};
-  const branch = current.nested?.branch ?? {};
-  const counter = (branch.counter ?? 0) + 1;
-  context.state.set({ nested: { branch: { counter } } });
-});
+const increment = handler(
+  (_, context: { state: Cell<NestedOptionalState> }) => {
+    const current = context.state.get() ?? {};
+    const branch = current.nested?.branch ?? {};
+    const counter = (branch.counter ?? 0) + 1;
+    context.state.set({ nested: { branch: { counter } } });
+  },
+);
 
 export default recipe<NestedOptionalArgs>(
   "Nested Optional Default",

@@ -1,4 +1,4 @@
-import { css, html, PropertyValues } from "lit";
+import { css, html } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";

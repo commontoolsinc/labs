@@ -1,5 +1,4 @@
 import { css, html } from "lit";
-import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**

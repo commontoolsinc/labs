@@ -1219,7 +1219,7 @@ describe("Stream event success callbacks", () => {
     let callbackTx: IExtendedStorageTransaction | undefined;
 
     runtime.scheduler.addEventHandler(
-      (tx, event) => {
+      (tx, _event) => {
         eventHandlerCalls++;
         // Always fail
         tx.abort("Intentional failure - should exhaust retries");

@@ -722,8 +722,8 @@ export class XDebuggerView extends LitElement {
     const type = marker.type;
 
     // Try to find a matching topic
-    for (const [topicKey, topic] of Object.entries(TOPIC_HIERARCHY)) {
-      for (const [subtopicKey, subtopic] of Object.entries(topic.subtopics)) {
+    for (const [_topicKey, topic] of Object.entries(TOPIC_HIERARCHY)) {
+      for (const [_subtopicKey, subtopic] of Object.entries(topic.subtopics)) {
         if (type.startsWith(subtopic.pattern)) {
           return topic.icon;
         }
@@ -738,8 +738,8 @@ export class XDebuggerView extends LitElement {
     const type = marker.type;
 
     // Try to find a matching topic
-    for (const [topicKey, topic] of Object.entries(TOPIC_HIERARCHY)) {
-      for (const [subtopicKey, subtopic] of Object.entries(topic.subtopics)) {
+    for (const [_topicKey, topic] of Object.entries(TOPIC_HIERARCHY)) {
+      for (const [_subtopicKey, subtopic] of Object.entries(topic.subtopics)) {
         if (type.startsWith(subtopic.pattern)) {
           return topic.color;
         }
@@ -792,7 +792,7 @@ export class XDebuggerView extends LitElement {
     const details = [];
 
     // Extract key-value pairs from the marker (excluding type and timeStamp)
-    const { type, timeStamp, ...rest } = marker;
+    const { type, timeStamp: _, ...rest } = marker;
 
     // Special handling for different event types
     if (type === "scheduler.run" || type === "scheduler.invocation") {

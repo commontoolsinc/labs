@@ -1,4 +1,3 @@
-import { isRecord } from "@commontools/utils/types";
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
 import { sleep } from "@commontools/utils/sleep";
@@ -44,7 +43,7 @@ export class ContextShim {
 
   unsubscribe(_element: CommonIframeSandboxElement, receipt: number) {
     for (let i = 0; i < this.callbacks.length; i++) {
-      const [id, ...rest] = this.callbacks[i];
+      const [id] = this.callbacks[i];
       if (id === receipt) {
         this.callbacks.splice(i, 1);
         return;
@@ -67,15 +66,15 @@ export function setIframeTestHandler() {
     unsubscribe(element, context, receipt) {
       (context as ContextShim).unsubscribe(element, receipt as number);
     },
-    onLLMRequest(element, context, payload) {
+    onLLMRequest(_element, _context, _payload) {
       // Not implemented
       return Promise.resolve({});
     },
-    onReadWebpageRequest(element, context, payload) {
+    onReadWebpageRequest(_element, _context, _payload) {
       // Not implemented
       return Promise.resolve({});
     },
-    async onPerform(element, context, command) {
+    async onPerform(_element, _context, _command) {
       return await { error: new Error(`Not implemented`) };
     },
   });

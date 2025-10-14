@@ -70,7 +70,7 @@ async function main() {
     try {
       const pkcs8Key = await Deno.readFile(flags.key);
       identity = await Identity.fromPkcs8(pkcs8Key);
-    } catch (e) {
+    } catch (_) {
       console.error(
         `Could not read key at ${flags.key}.`,
       );

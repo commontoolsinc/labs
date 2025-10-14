@@ -9,7 +9,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { Cell, Runtime, Stream } from "../src/index.ts";
+import { Runtime } from "../src/index.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;

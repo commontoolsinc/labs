@@ -1,7 +1,7 @@
 import { LLMClient } from "../client.ts";
 import { GenerationOptions, llmPrompt } from "../index.ts";
 import { applyDefaults } from "../options.ts";
-import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
+import { extractTextFromLLMResponse } from "../types.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { recipeGuidePrompt } from "./recipe-guide.ts";
 

@@ -4,7 +4,7 @@ import { TreeOperations } from "./tree-operations.ts";
 import { CTOutliner } from "./ct-outliner.ts";
 import { createMockShadowRoot } from "./test-utils.ts";
 import type { Node, Tree } from "./types.ts";
-import { Cell, ID, Runtime } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -75,7 +75,7 @@ describe("CTOutliner Link Resolution Tests", () => {
       // TEST: Show the difference between .get() and .getAsQueryResult()
 
       // WRONG WAY: Using .get() returns raw cell data (including unresolved links)
-      const wrongWay = parentCell.key("children").get();
+      const _wrongWay = parentCell.key("children").get();
       // wrongWay[1] is a Cell object, NOT the node data!
 
       // CORRECT WAY: Using .getAsQueryResult() resolves links
@@ -289,15 +289,6 @@ describe("CTOutliner Link Resolution Tests", () => {
       });
 
       await tx.commit();
-
-      // Simulate the WRONG approach (what would happen with .get())
-      // This would corrupt the data by storing Cell references
-      const simulateWrongMove = () => {
-        const children = parentCell.key("children").get(); // WRONG!
-        // children[1] is a Cell, not a Node
-        // If we rearrange and set this back, we corrupt the data
-        return [children[2], children[0], children[1]]; // Would store Cell ref!
-      };
 
       // The CORRECT approach using our actual implementation
       const correctMove = () => {

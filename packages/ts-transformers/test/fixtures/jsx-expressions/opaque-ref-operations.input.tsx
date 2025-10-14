@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, h, recipe, UI } from "commontools";
+import { cell, recipe, UI } from "commontools";
 
-export default recipe("OpaqueRefOperations", (state) => {
+export default recipe("OpaqueRefOperations", (_state) => {
   const count = cell(10);
   const price = cell(10);
 
@@ -13,6 +13,6 @@ export default recipe("OpaqueRefOperations", (state) => {
         <p>Double: {count * 2}</p>
         <p>Total: {price * 1.1}</p>
       </div>
-    )
+    ),
   };
 });

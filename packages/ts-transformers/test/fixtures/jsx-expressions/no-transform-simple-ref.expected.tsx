@@ -1,8 +1,8 @@
 import * as __ctHelpers from "commontools";
-import { recipe, NAME, OpaqueRef, h } from "commontools";
+import { NAME, OpaqueRef, recipe } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const element = <div>{count}</div>;
-export default recipe("test", (state) => {
+const _element = <div>{count}</div>;
+export default recipe("test", (_state) => {
     return {
         [NAME]: "test",
     };

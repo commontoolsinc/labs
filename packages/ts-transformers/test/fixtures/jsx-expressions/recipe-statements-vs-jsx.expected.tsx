@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI, NAME, str, handler, h, Cell } from "commontools";
+import { Cell, handler, NAME, recipe, str, UI } from "commontools";
 interface RecipeState {
     value: number;
 }
@@ -12,7 +12,7 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (e, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() + 1);
@@ -26,7 +26,7 @@ const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (e, state: {
+} as const satisfies __ctHelpers.JSONSchema, (_e, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
@@ -44,7 +44,7 @@ export default recipe({
     const next = state.value + 1;
     const previous = state.value - 1;
     const doubled = state.value * 2;
-    const isHigh = state.value > 10;
+    const _isHigh = state.value > 10;
     // This should NOT be transformed (statement context)
     if (state.value > 100) {
         console.log("Too high!");
@@ -74,8 +74,8 @@ export default recipe({
         metadata: {
             next: next,
             previous: previous,
-            doubled: doubled
-        }
+            doubled: doubled,
+        },
     };
 });
 // @ts-ignore: Internals

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, derive, h, handler, NAME, recipe, str, UI } from "commontools";
+import { Cell, derive, handler, NAME, recipe, str, UI } from "commontools";
 const adder = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

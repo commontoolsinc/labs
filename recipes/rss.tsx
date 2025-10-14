@@ -1,10 +1,8 @@
 /// <cts-enable />
-
 import {
   type Cell,
   cell,
   Default,
-  h,
   handler,
   ID,
   NAME,

@@ -63,7 +63,7 @@ Deno.test("Sandbox - environment", async function () {
       let thrown = false;
       try {
         sandbox.loadRaw(testCase).dispose();
-      } catch (e) {
+      } catch (_) {
         thrown = true;
       }
       assert(

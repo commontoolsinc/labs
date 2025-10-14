@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { handler, h } from "commontools";
+import { handler } from "commontools";
 interface ClickEvent {
     x: number;
     y: number;

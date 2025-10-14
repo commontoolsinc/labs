@@ -2,28 +2,21 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   EditingKeyboardCommands,
-  executeKeyboardCommand,
   executePathBasedKeyboardCommand,
   handlePathBasedTypingToEdit,
-  handleTypingToEdit,
-  KeyboardCommands,
   PathBasedKeyboardCommands,
 } from "./keyboard-commands.ts";
 import { CTOutliner } from "./ct-outliner.ts";
 import {
-  createKeyboardContext,
   createMockKeyboardEvent,
   createMockTextarea,
   createMockTreeCell,
-  createNestedTestTree,
   createPathBasedKeyboardContext,
-  getAllVisibleNodePaths,
   setupMockOutliner,
   waitForCellUpdate,
   waitForOutlinerUpdate,
 } from "./test-utils.ts";
 import { TreeOperations } from "./tree-operations.ts";
-import type { KeyboardContext, PathBasedKeyboardContext } from "./types.ts";
 import { getNodeByPath } from "./node-path.ts";
 
 describe("Keyboard Commands", () => {
@@ -69,7 +62,6 @@ describe("Keyboard Commands", () => {
     it("should handle cmd/ctrl+Enter to toggle edit mode", async () => {
       await setupOutliner();
       const nodePath = outliner.focusedNodePath!;
-      const node = getNodeByPath(outliner.tree, nodePath)!;
 
       const event = createMockKeyboardEvent("Enter", { metaKey: true });
       const context = createPathBasedKeyboardContext(event, outliner);

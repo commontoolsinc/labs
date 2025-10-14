@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, h, NAME, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 
 interface RecipeState {
   count: Default<number, 0>;
@@ -11,9 +11,7 @@ export default recipe<RecipeState>("ConditionalRecipe", (state) => {
     [NAME]: state.label,
     [UI]: (
       <section>
-        {state && state.count > 0
-          ? <p>Positive</p>
-          : <p>Non-positive</p>}
+        {state && state.count > 0 ? <p>Positive</p> : <p>Non-positive</p>}
       </section>
     ),
   };

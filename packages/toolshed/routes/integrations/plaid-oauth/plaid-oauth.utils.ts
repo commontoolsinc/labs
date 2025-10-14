@@ -1,7 +1,5 @@
 import { type SigilLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
-import { Context } from "@hono/hono";
-import { StatusCode } from "@hono/hono/utils/http-status";
 import {
   type JSONSchema,
   type Mutable,

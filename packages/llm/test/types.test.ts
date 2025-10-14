@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
-import { DEFAULT_MODEL_NAME, isLLMRequest, LLMRequest } from "../src/types.ts";
+import { DEFAULT_MODEL_NAME, isLLMRequest } from "../src/types.ts";
 
 describe("types", () => {
   describe("isLLMRequest", () => {

@@ -30,12 +30,6 @@ describe("Reference detection core functionality", () => {
 
   // Test finding aliases with different structures
   it("should find aliases in nested objects", () => {
-    // Mock a doc implementation that handles findAllAliasedDocs
-    const mockDoc = {
-      get: () => ({ id: "mock-doc" }),
-      path: [],
-    };
-
     // Create test data with different alias structures
     const testData = {
       directAlias: {

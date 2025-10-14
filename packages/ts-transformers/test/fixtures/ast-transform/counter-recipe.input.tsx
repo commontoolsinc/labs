@@ -9,7 +9,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-const increment = handler<unknown, CounterState>((e, state) => {
+const increment = handler<unknown, CounterState>((_e, state) => {
   state.value.set(state.value.get() + 1);
 });
 

@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import * as Memory from "../memory.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
@@ -142,7 +142,7 @@ test("create memory fails if already exists", memory, async (session) => {
 
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
-  const { history, ...baseConflict } = conflict.error.conflict;
+  const { history: _, ...baseConflict } = conflict.error.conflict;
   assertEquals(baseConflict, {
     space,
     the,

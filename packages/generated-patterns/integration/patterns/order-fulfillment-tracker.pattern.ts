@@ -330,19 +330,6 @@ export const orderFulfillmentTracker = recipe<OrderFulfillmentTrackerArgs>(
       },
     )(ordersView);
 
-    const pendingCount = lift((counts: FulfillmentStatusCounts) =>
-      counts.pending
-    )(statusCounts);
-    const pickingCount = lift((counts: FulfillmentStatusCounts) =>
-      counts.picking
-    )(statusCounts);
-    const packedCount = lift((counts: FulfillmentStatusCounts) =>
-      counts.packed
-    )(statusCounts);
-    const shippedCount = lift((counts: FulfillmentStatusCounts) =>
-      counts.shipped
-    )(statusCounts);
-
     const totalOrders = lift((counts: FulfillmentStatusCounts) => {
       let total = 0;
       for (const status of fulfillmentStatuses) total += counts[status];

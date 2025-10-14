@@ -3,6 +3,7 @@ import { createRoute } from "@hono/zod-openapi";
 import { jsonContent } from "stoker/openapi/helpers";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import * as Codec from "@commontools/memory/codec";
+import { isDID } from "@commontools/identity";
 export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);
@@ -30,7 +31,7 @@ const InvocationTime = UTCUnixTimestampInSeconds.describe(
 export const DID = z
   .string()
   .startsWith("did:")
-  .refine((did): did is `did:${string}:${string}` => true);
+  .refine(isDID);
 
 export const Space = z
   .union([z.string(), DID])

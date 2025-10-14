@@ -29,7 +29,7 @@ const classificationLattice = new Map<string, string[]>([
 // This class lets me sort with strongly connected components.
 // These are not technically a partial order, since they violate antisymmetry.
 // This uses an implementation of Tarjan's algorithm, which is O(V+E).
-class TarjanSCC {
+class _TarjanSCC {
   private index: number = 0;
   private vertexIndices: number[];
   private vertexLowLink: number[];
@@ -650,7 +650,7 @@ export class ContextualFlowControl {
     const nodeIds: Map<T, number> = new Map();
     let nodeCount = 0;
     // First, assign each key an id
-    for (const [from, tos] of graph.entries()) {
+    for (const [from, _tos] of graph.entries()) {
       nodeIds.set(from, nodeCount++);
     }
     // Second pass to build the edges, now that we have ids

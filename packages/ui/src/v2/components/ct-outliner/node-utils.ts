@@ -74,7 +74,7 @@ export const NodeUtils = {
         const __ = node.children;
 
         return true;
-      } catch (error) {
+      } catch (_) {
         return false;
       }
     };

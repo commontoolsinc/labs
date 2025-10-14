@@ -9,7 +9,6 @@ import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type IMemorySpaceAddress } from "./storage/interface.ts";
 import {
   createQueryResultProxy,
   isQueryResultForDereferencing,
@@ -574,7 +573,6 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: IMemorySpaceAddress[] = [];
       for (const { result } of candidates) {
         if (isCell(result)) {
           merged = result;

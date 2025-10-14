@@ -557,7 +557,7 @@ export const backgroundIntegration: AppRouteHandler<
       runtime,
     });
     return c.json({ success: true, message: "success" });
-  } catch (error) {
+  } catch (_) {
     return c.json({
       success: false,
       error: "Failed to process background integration request",

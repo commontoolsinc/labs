@@ -68,7 +68,7 @@ export class Reporter {
     );
   }
 
-  onFileEnd(fileName: string) {}
+  onFileEnd(_fileName: string) {}
 
   onTestCompleted(result: TestResult) {
     if (result.error) {

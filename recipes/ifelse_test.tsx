@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, h, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
 
 const incCounter = handler<undefined, { counter: Cell<number> }>(
   (_, { counter }) => {

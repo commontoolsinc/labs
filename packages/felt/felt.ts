@@ -2,7 +2,7 @@ import { DevServer } from "./dev-server.ts";
 import { Builder } from "./builder.ts";
 import { FeltCommand, ResolvedConfig } from "./interface.ts";
 import { copy } from "@std/fs";
-import { blue, bold, cyan, dim, green, red, yellow } from "@std/fmt/colors";
+import { blue, cyan, dim, green, red, yellow } from "@std/fmt/colors";
 
 export class Felt {
   constructor(

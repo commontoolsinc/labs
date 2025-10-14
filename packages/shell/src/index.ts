@@ -32,4 +32,4 @@ if (ENVIRONMENT !== "production") {
 }
 await app.initializeKeys();
 
-const navigation = new Navigation(app);
+const _navigation = new Navigation(app);

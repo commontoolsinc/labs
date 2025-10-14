@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, h, UI, NAME, toSchema, Cell, Default, handler } from "commontools";
+import { Cell, Default, handler, NAME, recipe, toSchema, UI, } from "commontools";
 interface Item {
     text: Default<string, "">;
 }
@@ -80,7 +80,8 @@ const outputSchema = {
     }
 } as const satisfies __ctHelpers.JSONSchema;
 // Handler that logs the message event
-const addItem = handler({
+const addItem = handler // <
+({
     type: "object",
     properties: {
         detail: {
@@ -139,7 +140,7 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
       </div>),
         title,
         items,
-        items_count
+        items_count,
     };
 });
 // @ts-ignore: Internals

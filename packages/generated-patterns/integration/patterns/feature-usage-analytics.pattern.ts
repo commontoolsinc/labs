@@ -160,27 +160,6 @@ const pickTopEntry = (totals: Record<string, number>): TopEntry => {
   return { name: best, count: totals[best] ?? 0 };
 };
 
-const buildMetricsSnapshot = (
-  buckets: readonly FeatureUsageBucket[],
-): UsageMetricsSnapshot => {
-  const featureTotals = computeFeatureTotals(buckets);
-  const cohortTotals = computeCohortTotals(buckets);
-  const total = buckets.reduce((sum, entry) => sum + entry.count, 0);
-  const topFeature = pickTopEntry(featureTotals);
-  const topCohort = pickTopEntry(cohortTotals);
-  return {
-    total,
-    features: featureTotals,
-    cohorts: cohortTotals,
-    featureCount: Object.keys(featureTotals).length,
-    cohortCount: Object.keys(cohortTotals).length,
-    topFeature: topFeature.name,
-    topFeatureCount: topFeature.count,
-    topCohort: topCohort.name,
-    topCohortCount: topCohort.count,
-  };
-};
-
 const formatTopFeature = (entry: TopEntry): string => {
   const name = entry.name;
   const count = entry.count;

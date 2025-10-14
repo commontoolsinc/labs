@@ -7,7 +7,6 @@ import type {
   MemorySpace,
 } from "../src/storage/interface.ts";
 import { Cell } from "../src/cell.ts";
-import { SchemaContext } from "../src/builder/types.ts";
 
 // Mock replica that simulates non-existent documents
 class MockReplica implements ISpaceReplica {

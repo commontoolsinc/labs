@@ -36,7 +36,7 @@ type Output = {
   backlinks: Default<Array<MentionableCharm>, []>;
 };
 
-const updateTitle = handler<
+const _updateTitle = handler<
   { detail: { value: string } },
   { title: Cell<string> }
 >(
@@ -45,7 +45,7 @@ const updateTitle = handler<
   },
 );
 
-const updateContent = handler<
+const _updateContent = handler<
   { detail: { value: string } },
   { content: Cell<string> }
 >(
@@ -87,7 +87,7 @@ const handleNewBacklink = handler<
   }
 });
 
-const handleCharmLinkClicked = handler(
+const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },

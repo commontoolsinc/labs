@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, h } from "commontools";
+import { handler } from "commontools";
 
 interface ClickEvent {
   x: number;

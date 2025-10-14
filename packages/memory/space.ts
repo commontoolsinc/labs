@@ -450,7 +450,7 @@ type CauseRow = {
  * @param excludeFact fact to exclude from the chain
  * @returns an array of Revisions constructed from the associated facts
  */
-const causeChain = <Space extends MemorySpace>(
+const _causeChain = <Space extends MemorySpace>(
   session: Session<Space>,
   { the, of }: { the: The; of: Entity },
   excludeFact: string | undefined,
@@ -720,7 +720,7 @@ const swap = <Space extends MemorySpace>(
   // the record and comparing it to desired state.
   if (updated === 0) {
     const revision = recall(session, { the, of });
-    const { since, ...actual } = revision ? revision : { actual: null };
+    const { since: _, ...actual } = revision ? revision : { actual: null };
 
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat

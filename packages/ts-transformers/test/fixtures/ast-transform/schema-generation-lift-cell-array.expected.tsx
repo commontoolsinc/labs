@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { lift, Cell } from "commontools";
+import { Cell, lift } from "commontools";
 interface CharmEntry {
     id: string;
     name: string;

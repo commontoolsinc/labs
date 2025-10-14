@@ -1,13 +1,5 @@
-import {
-  derive,
-  h,
-  ifElse,
-  JSONSchema,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+/// <cts-enable />
+import { derive, JSONSchema, NAME, recipe, str, UI } from "commontools";
 
 // Reuse calendar event schema from gcal.tsx
 const CalendarEventSchema = {
@@ -100,40 +92,6 @@ const CalendarListOutputSchema = {
   },
   required: ["title", "items"],
 } as const satisfies JSONSchema;
-
-// Helper function to format date/time
-function formatDateTime(
-  dateStr: string,
-  format: string,
-  includeTime: boolean,
-): string {
-  if (!dateStr) return "";
-
-  try {
-    const date = new Date(dateStr);
-
-    if (format === "iso") {
-      return includeTime
-        ? date.toISOString()
-        : date.toISOString().split("T")[0];
-    }
-
-    const options: Intl.DateTimeFormatOptions = {
-      year: format === "long" ? "numeric" : "2-digit",
-      month: format === "long" ? "long" : "short",
-      day: "numeric",
-    };
-
-    if (includeTime) {
-      options.hour = "numeric";
-      options.minute = "2-digit";
-    }
-
-    return date.toLocaleString("en-US", options);
-  } catch {
-    return dateStr;
-  }
-}
 
 export default recipe(
   CalendarListInputSchema,

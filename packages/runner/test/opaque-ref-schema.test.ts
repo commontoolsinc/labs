@@ -8,7 +8,6 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
 
 describe("OpaqueRef Schema Support", () => {
   let frame: Frame;

@@ -19,10 +19,6 @@ const libraries = {
   },
 };
 
-const jsonRegex = new RegExp(
-  "```(?:json)?\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*\})",
-);
-
 // The HTML template that wraps the developer's code
 export const prefillHtml = `<html>
 <head>

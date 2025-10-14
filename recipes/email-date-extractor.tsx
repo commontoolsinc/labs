@@ -1,6 +1,6 @@
+/// <cts-enable />
 import {
   derive,
-  h,
   handler,
   ifElse,
   JSONSchema,
@@ -416,7 +416,7 @@ export default recipe(
               : result.result;
 
             return parsed?.dates || [];
-          } catch (e) {
+          } catch (_) {
             // Return empty array if parsing fails
             return [];
           }

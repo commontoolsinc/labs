@@ -1,6 +1,6 @@
 import { assets } from "./assets.ts";
 import { decode } from "@commontools/utils/encoding";
-import { isBrowser, isDeno } from "@commontools/utils/env";
+import { isDeno } from "@commontools/utils/env";
 // Use `posix` path utils specifically so that the path lib
 // does not check `Deno?.build.os` for Windows, which will
 // be true in the `deno-web-test` environment as `Deno.test`

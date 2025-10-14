@@ -30,7 +30,6 @@ interface DeriveEntry {
 
 export interface DeriveCallOptions {
   readonly factory: ts.NodeFactory;
-  readonly sourceFile: ts.SourceFile;
   readonly tsContext: ts.TransformationContext;
   readonly ctHelpers: CTHelpers;
 }
@@ -140,7 +139,7 @@ export function createDeriveCall(
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
-  const { factory, tsContext, ctHelpers, sourceFile } = options;
+  const { factory, tsContext, ctHelpers } = options;
   const { entries, refToParamName } = planDeriveEntries(refs);
   if (entries.length === 0) return undefined;
 

@@ -201,7 +201,7 @@ export function fetchData(
       // Since we're aborting, don't retry. If the above fails, it's because the
       // requestId was already changing under us.
       tx.commit();
-    } catch (e) {
+    } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
       tx.abort();
     }

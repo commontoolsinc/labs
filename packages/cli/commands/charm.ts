@@ -593,7 +593,7 @@ export function parseSpaceOptions(
 
 export function parseLink(
   ref: string,
-  options?: { allowWellKnown?: boolean },
+  _options?: { allowWellKnown?: boolean },
 ): { charmId: string; path?: (string | number)[] } {
   const parts = ref.split("/");
   if (parts.length < 1) {
@@ -646,7 +646,7 @@ async function drainStdin(): Promise<object> {
   }
   try {
     return JSON.parse(out);
-  } catch (e) {
+  } catch (_e) {
     throw new Error(`Could not parse STDIN as JSON: "${out}".`);
   }
 }

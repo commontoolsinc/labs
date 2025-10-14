@@ -18,4 +18,3 @@ type SchemaRoot = {
   /** Version of document */
   version: number;
 };
-

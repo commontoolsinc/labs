@@ -166,7 +166,7 @@ export const isNativeEd25519Supported = (() => {
     try {
       globalThis.structuredClone(key);
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -177,7 +177,7 @@ export const isNativeEd25519Supported = (() => {
       key = await crypto.subtle.generateKey("ed25519", false, [
         "sign",
       ]) as CryptoKeyPair;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
 

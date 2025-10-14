@@ -1,4 +1,4 @@
-import { css, html, unsafeCSS } from "lit";
+import { html, unsafeCSS } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { aspectRatioStyles } from "./styles.ts";

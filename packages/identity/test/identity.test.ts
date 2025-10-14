@@ -19,8 +19,8 @@ Deno.test("Can generate into/read from PKCS8", async () => {
   pkcs8[1] = 0;
   let throws = false;
   try {
-    const identity = await Identity.fromPkcs8(pkcs8);
-  } catch (e) {
+    await Identity.fromPkcs8(pkcs8);
+  } catch (_) {
     throws = true;
   }
   assert(throws, "Identity.fromPkcs8() throws with invalid pkcs8");

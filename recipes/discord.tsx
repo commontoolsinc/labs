@@ -1,7 +1,6 @@
 import {
   cell,
   derive,
-  h,
   handler,
   type JSONSchema,
   NAME,
@@ -124,7 +123,7 @@ export default recipe(
   ResultSchema,
   ({ requestor_id }) => {
     const messages = cell<MessageSchema[]>([]);
-    derive(messages, (messages) => {
+    derive(messages, (_) => {
       console.log("REQUESTOR-ID is ", requestor_id);
     });
 

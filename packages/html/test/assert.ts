@@ -89,7 +89,7 @@ export const matchObject = (
 export const throws = (run: () => void, message = "") => {
   try {
     run();
-  } catch (e) {
+  } catch (_) {
     return;
   }
   throw new AssertionError({

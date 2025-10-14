@@ -615,7 +615,6 @@ export class CTToolsChip extends BaseElement {
         const count = Array.isArray(this.tools)
           ? (this.tools?.length ?? 0)
           : (this.tools ? Object.keys(this.tools as any).length : 0);
-        const items = this._normalizedTools();
 
         return html`
           <div

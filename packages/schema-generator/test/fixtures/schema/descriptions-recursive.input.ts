@@ -4,4 +4,3 @@ interface SchemaRoot {
   /** Child nodes */
   children: SchemaRoot[];
 }
-

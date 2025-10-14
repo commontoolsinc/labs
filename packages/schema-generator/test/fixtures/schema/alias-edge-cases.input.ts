@@ -43,18 +43,18 @@ interface SchemaRoot {
   // Test deep alias chains
   veryDeepCell: VeryDeepCell<string>;
   deepStream: DeepStream<number>;
-  
-  // Test Stream-Cell nesting with aliases  
+
+  // Test Stream-Cell nesting with aliases
   stringCellStream: StringCellStream;
   deepNestedStream: DeepNestedStream;
-  
+
   // Test array aliasing scenarios
   indirectArray: IndirectCellArray;
   numberListCell: CellOfNumberList;
-  
+
   // Test multi-hop array aliases
   users: CellOfUserList;
-  
+
   // Test complex alias chains
   userStore: UserDataStore;
 }

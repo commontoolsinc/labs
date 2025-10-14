@@ -378,7 +378,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   private extractComplexDefaultFromTypeSymbol(
     type: ts.Type,
-    symbol: ts.Symbol,
+    _symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
     // For now, try to extract from type string - this is a fallback approach

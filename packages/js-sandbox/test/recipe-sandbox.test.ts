@@ -1,4 +1,4 @@
-import { RecipeSandbox, SandboxValue } from "../mod.ts";
+import { RecipeSandbox } from "../mod.ts";
 import { assert, assertEquals } from "@std/assert";
 import { compile } from "./utils.ts";
 import { expect } from "@std/expect";

@@ -9,4 +9,3 @@ interface SchemaRoot extends Base {
   /** Derived name */
   name: string;
 }
-

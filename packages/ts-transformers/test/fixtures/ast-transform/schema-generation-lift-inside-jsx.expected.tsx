@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { lift, h } from "commontools";
+import { lift } from "commontools";
 interface Person {
     name: string;
     age: number;

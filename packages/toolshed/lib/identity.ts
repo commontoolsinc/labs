@@ -10,7 +10,7 @@ export const identity: Identity = await (async () => {
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
       return await Identity.fromPkcs8(pkcs8Key);
-    } catch (e) {
+    } catch (_) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }
   } else if (env.IDENTITY_PASSPHRASE) {

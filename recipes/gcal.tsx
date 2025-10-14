@@ -3,7 +3,6 @@ import {
   cell,
   derive,
   getRecipeEnvironment,
-  h,
   handler,
   ID,
   ifElse,
@@ -302,7 +301,7 @@ async function googleRequest(
         status = json.error.code;
         statusText = json.error?.message;
       }
-    } catch (e) {
+    } catch (_) {
       // If parsing as json failed, then this is probably a real 200 scenario
     }
   }

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, h } from "commontools";
+import { derive } from "commontools";
 
 // Test case: User-written derive calls should not be double-wrapped
 // This tests that derive(index, (i) => i + 1) doesn't become derive(index, index => derive(index, (i) => i + 1))

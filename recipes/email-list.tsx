@@ -1,4 +1,5 @@
-import { derive, h, JSONSchema, NAME, recipe, str, UI } from "commontools";
+/// <cts-enable />
+import { derive, JSONSchema, NAME, recipe, str, UI } from "commontools";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailSchema = {
