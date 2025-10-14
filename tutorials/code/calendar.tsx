@@ -9,6 +9,7 @@ import {
   recipe,
   UI,
 } from "commontools";
+import CalendarTodo from "./calendar_todo.tsx";
 
 interface CalendarState {
   dates: Default<
@@ -65,21 +66,15 @@ export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
   // Get todos for the clicked date using the same lifted function
   const clickedDateTodos = getTodosForDate({ todos, date: clickedDate });
 
+  // Create the CalendarTodo subrecipe with todos and selected date
+  const todoView = CalendarTodo({ todos, date: clickedDate });
+
   return {
     [UI]: (
       <div>
-        <h2>Calendar</h2>
-        <p>Clicked on: {clickedDate}</p>
-        {clickedDate && clickedDateTodos.length > 0 && (
-          <div style="background: #f0f0f0; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
-            <h4 style="margin-top: 0;">Todos for {clickedDate}:</h4>
-            <ul>
-              {clickedDateTodos.map((todo, index) => (
-                <li key={index}>{todo}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <h2>Selected Date View</h2>
+        {todoView}
+        <h2>The Calendar View</h2>
         {dates.map((date) => {
           const dateTodos = getTodosForDate({ todos, date });
           return (
