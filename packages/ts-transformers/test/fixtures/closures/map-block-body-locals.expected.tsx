@@ -82,7 +82,7 @@ export default recipe({
                 const localTax = subtotal * 0.1;
                 // Should only capture state.taxRate, not subtotal or localTax
                 return (<div key={index}>
-              Subtotal: {subtotal}, Tax: {localTax + taxRate}
+              Subtotal: {subtotal}, Tax: {__ctHelpers.derive({ localTax, taxRate }, ({ localTax, taxRate }) => localTax + taxRate)}
             </div>);
             }), { taxRate: state.taxRate })}
       </div>),

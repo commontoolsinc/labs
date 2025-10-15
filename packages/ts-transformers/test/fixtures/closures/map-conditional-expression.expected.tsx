@@ -83,9 +83,11 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { threshold, discount } }) => (<div>
-            Price: ${element.price > threshold
-                    ? element.price * (1 - discount)
-                    : element.price}
+            Price: ${__ctHelpers.ifElse(
+              __ctHelpers.derive({ element_price: element.price, threshold }, ({ element_price, threshold }) => element_price > threshold),
+              __ctHelpers.derive({ element_price: element.price, discount }, ({ element_price, discount }) => element_price * (1 - discount)),
+              element.price
+            )}
           </div>)), { threshold: state.threshold, discount: state.discount })}
       </div>),
     };
