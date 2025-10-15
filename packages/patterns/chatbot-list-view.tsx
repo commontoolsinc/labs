@@ -198,7 +198,7 @@ const _handleCharmLinkClicked = handler(
   },
 );
 
-const combineLists = lift(
+const _merge = lift(
   (
     { allCharms, charmsList }: { allCharms: any[]; charmsList: CharmEntry[] },
   ) => {
