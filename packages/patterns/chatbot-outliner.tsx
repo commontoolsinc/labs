@@ -3,7 +3,6 @@ import {
   BuiltInLLMMessage,
   Cell,
   Default,
-  derive,
   handler,
   ifElse,
   JSONSchema,
@@ -12,11 +11,9 @@ import {
   OpaqueRef,
   recipe,
   UI,
-  wish,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
-import { MentionableCharm } from "./backlinks-index.tsx";
 
 type Charm = any;
 
@@ -39,6 +36,7 @@ type PageResult = {
 
 export type PageInput = {
   outline: Outliner;
+  allCharms: Cell<Charm[]>;
 };
 
 const handleCharmLinkClick = handler<
@@ -52,27 +50,15 @@ const handleCharmLinkClick = handler<
   return navigateTo(detail.charm);
 });
 
-function getMentionable() {
-  return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
-    wish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
-      [],
-    ) as unknown as Cell<MentionableCharm[]>,
-    (i) => i,
-  );
-}
-
 export const Page = recipe<PageInput>(
   "Page",
-  ({ outline }) => {
-    const mentionable = getMentionable();
-
+  ({ outline, allCharms }) => {
     return {
       [NAME]: "Page",
       [UI]: (
         <ct-outliner
           $value={outline as any}
-          $mentionable={mentionable}
+          $mentionable={allCharms}
           oncharm-link-click={handleCharmLinkClick({})}
         />
       ),
@@ -89,6 +75,7 @@ type LLMTestInput = {
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
   >;
+  allCharms: Cell<Charm[]>;
 };
 
 type LLMTestResult = {
@@ -124,7 +111,7 @@ const appendOutlinerNode = handler<
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "Outliner",
-  ({ title, expandChat, messages, outline }) => {
+  ({ title, expandChat, messages, outline, allCharms }) => {
     const tools = {
       appendOutlinerNode: {
         description: "Add a new outliner node.",
@@ -142,7 +129,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
       },
     };
 
-    const chat = Chat({ messages, tools });
+    const chat = Chat({ messages, tools, mentionable: allCharms });
 
     return {
       [NAME]: title,
@@ -166,7 +153,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
 
               <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
                 <ct-vstack data-label="Tools">
-                  <Page outline={outline} />
+                  <Page outline={outline} allCharms={allCharms} />
                 </ct-vstack>
               </ct-vscroll>
             </ct-screen>

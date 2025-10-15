@@ -3,7 +3,6 @@ import {
   Cell,
   cell,
   Default,
-  derive,
   handler,
   ID,
   ifElse,
@@ -14,13 +13,18 @@ import {
   recipe,
   toSchema,
   UI,
-  wish,
 } from "commontools";
 
 import Chat from "./chatbot-note-composed.tsx";
+import _BacklinksIndex, { BacklinksMap } from "./backlinks-index.tsx";
 import { ListItem } from "./common-tools.tsx";
 
-import { type MentionableCharm } from "./backlinks-index.tsx";
+export type MentionableCharm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: MentionableCharm[];
+};
+
 type CharmEntry = {
   [ID]: string; // randomId is a string
   local_id: string; // same as ID but easier to access
@@ -30,6 +34,8 @@ type CharmEntry = {
 type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
+  allCharms: Cell<any[]>;
+  index: BacklinksMap;
   theme?: {
     accentColor: Default<string, "#3b82f6">;
     fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
@@ -122,10 +128,11 @@ const populateChatList = lift(
     charmsList: CharmEntry[];
     allCharms: Cell<any[]>;
     selectedCharm: Cell<{ charm: any }>;
+    index: any;
   }>(),
   undefined,
   (
-    { charmsList, allCharms, selectedCharm },
+    { charmsList, allCharms, selectedCharm, index },
   ) => {
     if (charmsList.length === 0) {
       const isInitialized = cell(false);
@@ -133,6 +140,8 @@ const populateChatList = lift(
         charm: Chat({
           title: "New Chat",
           messages: [],
+          allCharms,
+          index,
         }),
         selectedCharm,
         charmsList,
@@ -150,15 +159,18 @@ const createChatRecipe = handler<
   {
     selectedCharm: Cell<{ charm: any }>;
     charmsList: Cell<CharmEntry[]>;
-    allCharms: Cell<MentionableCharm[]>;
+    allCharms: Cell<any[]>;
+    index: any;
   }
 >(
-  (_, { selectedCharm, charmsList, allCharms }) => {
+  (_, { selectedCharm, charmsList, allCharms, index }) => {
     const isInitialized = cell(false);
 
     const charm = Chat({
       title: "New Chat",
       messages: [],
+      allCharms,
+      index,
     });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
@@ -198,7 +210,7 @@ const _handleCharmLinkClicked = handler(
   },
 );
 
-const _merge = lift(
+const combineLists = lift(
   (
     { allCharms, charmsList }: { allCharms: any[]; charmsList: CharmEntry[] },
   ) => {
@@ -225,12 +237,13 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
-  ({ selectedCharm, charmsList, theme }) => {
-    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
-      (c) => c,
-    );
+  ({ selectedCharm, charmsList, allCharms, index, theme }) => {
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
+
+    const combined = combineLists({
+      allCharms: allCharms as unknown as MentionableCharm[],
+      charmsList,
+    });
 
     populateChatList({
       selectedCharm: selectedCharm as unknown as Cell<
@@ -238,6 +251,7 @@ export default recipe<Input, Output>(
       >,
       charmsList,
       allCharms,
+      index,
     });
 
     const selected = getSelectedCharm({ entry: selectedCharm });
@@ -275,7 +289,8 @@ export default recipe<Input, Output>(
                     onClick={createChatRecipe({
                       selectedCharm,
                       charmsList,
-                      allCharms,
+                      allCharms: combined as unknown as any,
+                      index,
                     })}
                   >
                     Create New Chat
@@ -292,7 +307,8 @@ export default recipe<Input, Output>(
                 onct-keybind={createChatRecipe({
                   selectedCharm,
                   charmsList,
-                  allCharms,
+                  allCharms: combined as unknown as any,
+                  index,
                 })}
               />
             </div>

@@ -4,14 +4,11 @@ import {
   Cell,
   cell,
   Default,
-  derive,
   handler,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
-  wish,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
@@ -26,11 +23,17 @@ import {
   searchWeb,
 } from "./common-tools.tsx";
 
-import { type MentionableCharm } from "./backlinks-index.tsx";
+export type MentionableCharm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: MentionableCharm[];
+};
 
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
+  allCharms: Cell<MentionableCharm[]>;
+  index: { backlinks: BacklinksMap; mentionable: Cell<MentionableCharm[]> };
 };
 
 type ChatbotNoteResult = {
@@ -51,11 +54,12 @@ const newNote = handler<
   },
   { allCharms: Cell<MentionableCharm[]>; index: any }
 >(
-  (args, _) => {
+  (args, state) => {
     try {
       const n = Note({
         title: args.title,
         content: args.content || "",
+        index: state.index,
       });
 
       args.result.set(
@@ -161,24 +165,9 @@ const navigateToNote = handler<
   },
 );
 
-type BacklinksIndex = {
-  backlinks: BacklinksMap;
-  mentionable: any[];
-};
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
-}
-
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages }) => {
-    const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      backlinks: {},
-      mentionable: [],
-    });
-
+  ({ title, messages, allCharms, index }) => {
     const list = cell<ListItem[]>([]);
 
     const tools = {
@@ -233,7 +222,7 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       },
     };
 
-    const chat = Chat({ messages, tools });
+    const chat = Chat({ messages, tools, mentionable: allCharms });
 
     return {
       [NAME]: title,

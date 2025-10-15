@@ -8,19 +8,26 @@ import {
   lift,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
   UI,
-  wish,
 } from "commontools";
-import {
-  type BacklinksMap,
-  type MentionableCharm,
-} from "./backlinks-index.tsx";
+import { type BacklinksMap } from "./backlinks-index.tsx";
+
+export type MentionableCharm = {
+  [NAME]: string;
+  content?: string;
+  mentioned?: MentionableCharm[];
+};
+
 type Input = {
   title: Default<string, "Untitled Note">;
   content: Default<string, "">;
+  // Backlinks index handle to avoid per-note backlink computation
+  index: {
+    backlinks: BacklinksMap;
+    mentionable: Cell<MentionableCharm[]>;
+  };
 };
 
 type Output = {
@@ -80,28 +87,15 @@ const handleNewBacklink = handler<
   }
 });
 
-const handleCharmLinkClicked = handler(
+const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
   },
 );
 
-type BacklinksIndex = {
-  backlinks: BacklinksMap;
-  mentionable: any[];
-};
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
-}
-
 const Note = recipe<Input, Output>(
   "Note",
-  ({ title, content }) => {
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      backlinks: {},
-      mentionable: [],
-    });
+  ({ title, content, index }) => {
     const mentioned = cell<MentionableCharm[]>([]);
 
     // Look up backlinks from the shared index
@@ -146,18 +140,6 @@ const Note = recipe<Input, Output>(
             tabIndent
             lineNumbers
           />
-
-          <ct-hstack slot="footer">
-            {backlinks?.map((
-              charm: MentionableCharm,
-            ) => (
-              <ct-button
-                onClick={handleCharmLinkClicked({ charm })}
-              >
-                {charm?.[NAME]}
-              </ct-button>
-            ))}
-          </ct-hstack>
         </ct-screen>
       ),
       title,
