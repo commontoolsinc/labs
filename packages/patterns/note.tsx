@@ -14,14 +14,10 @@ import {
   UI,
   wish,
 } from "commontools";
-import { type BacklinksMap } from "./backlinks-index.tsx";
-
-export type MentionableCharm = {
-  [NAME]: string;
-  content?: string;
-  mentioned?: MentionableCharm[];
-};
-
+import {
+  type BacklinksMap,
+  type MentionableCharm,
+} from "./backlinks-index.tsx";
 type Input = {
   title: Default<string, "Untitled Note">;
   content: Default<string, "">;

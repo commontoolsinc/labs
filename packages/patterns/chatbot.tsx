@@ -15,7 +15,7 @@ import {
   UI,
   wish,
 } from "commontools";
-import { MentionableCharm } from "./chatbot-list-view.tsx";
+import { type MentionableCharm } from "./backlinks-index.tsx";
 
 const addAttachment = handler<
   {

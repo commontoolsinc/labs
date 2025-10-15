@@ -11,14 +11,12 @@ import {
   wish,
 } from "commontools";
 
-// Import recipes we want to be launchable from the default app.
 import Chatbot from "./chatbot.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
-import { type MentionableCharm } from "./chatbot-note-composed.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, {
   BacklinksMap,
-  type BacklinksMap as _BacklinksMap,
+  type MentionableCharm,
 } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 

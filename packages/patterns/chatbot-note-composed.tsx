@@ -26,11 +26,7 @@ import {
   searchWeb,
 } from "./common-tools.tsx";
 
-export type MentionableCharm = {
-  [NAME]: string;
-  content?: string;
-  mentioned?: MentionableCharm[];
-};
+import { type MentionableCharm } from "./backlinks-index.tsx";
 
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
