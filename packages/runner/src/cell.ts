@@ -24,7 +24,11 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import { validateAndTransform } from "./schema.ts";
+import {
+  processDefaultValue,
+  resolveSchema,
+  validateAndTransform,
+} from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
@@ -448,6 +452,11 @@ export class RegularCell<T> implements Cell<T> {
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    // If writing a whole array, make sure each object become their own doc.
+    if (Array.isArray(newValue)) {
+      newValue = newValue.map((val) => addIDIfNeeded(val)) as typeof newValue;
+    }
+
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
       this.runtime,
@@ -486,29 +495,30 @@ export class RegularCell<T> implements Cell<T> {
     const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
-    // If there's no current value, initialize based on schema
+    // If there's no current value, initialize based on schema, even if there is
+    // no default value.
     if (currentValue === undefined) {
-      if (isObject(this.schema)) {
-        // Check if schema allows objects
-        const allowsObject = ContextualFlowControl.isTrueSchema(this.schema) ||
-          this.schema.type === "object" ||
-          (Array.isArray(this.schema.type) &&
-            this.schema.type.includes("object")) ||
-          (this.schema.anyOf &&
-            this.schema.anyOf.some((s) =>
-              typeof s === "object" && s.type === "object"
-            ));
+      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
 
-        if (!allowsObject) {
-          throw new Error(
-            "Cannot update with object value - schema does not allow objects",
-          );
-        }
-      } else if (this.schema === false) {
+      // TODO(seefeld,ubik2): This should all be moved to schema helpers. This
+      // just wants to know whether the value could be an object.
+      const allowsObject = resolvedSchema === undefined ||
+        ContextualFlowControl.isTrueSchema(resolvedSchema) ||
+        (isObject(resolvedSchema) &&
+          (resolvedSchema.type === "object" ||
+            (Array.isArray(resolvedSchema.type) &&
+              resolvedSchema.type.includes("object")) ||
+            (resolvedSchema.anyOf &&
+              resolvedSchema.anyOf.some((s) =>
+                typeof s === "object" && s.type === "object"
+              ))));
+
+      if (!allowsObject) {
         throw new Error(
           "Cannot update with object value - schema does not allow objects",
         );
       }
+
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
 
@@ -546,14 +556,6 @@ export class RegularCell<T> implements Cell<T> {
       throw new Error("Can't push into non-array value");
     }
 
-    // If this is an object and it doesn't have an ID, add one.
-    const valuesToWrite = value.map((val: any) =>
-      (!isLink(val) && isObject(val) &&
-          (val as { [ID]?: unknown })[ID] === undefined && getTopFrame())
-        ? { [ID]: getTopFrame()!.generatedIdCounter++, ...val }
-        : val
-    );
-
     // If there is no array yet, create it first. We have to do this as a
     // separate operation, so that in the next steps [ID] is properly anchored
     // in the array.
@@ -565,17 +567,27 @@ export class RegularCell<T> implements Cell<T> {
         [],
         cause,
       );
-      array = isObject(this.schema) && Array.isArray(this.schema?.default)
-        ? this.schema.default
+      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
+      array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
+        ? processDefaultValue(
+          this.runtime,
+          this.tx,
+          this.link,
+          resolvedSchema.default,
+        )
         : [];
     }
+
+    // Make sure all objects have IDs, whether they were previously written or
+    // came from a default value.
+    const valuesToWrite = [...array, ...value].map((val) => addIDIfNeeded(val));
 
     // Append the new values to the array.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      [...array, ...valuesToWrite],
+      valuesToWrite,
       cause,
     );
   }
@@ -877,6 +889,23 @@ function subscribeToReferencedDocs<T>(
   };
 }
 
+function addIDIfNeeded<T>(value: T): T {
+  if (
+    (!isLink(value) && isObject(value) &&
+      (value as { [ID]?: unknown })[ID] === undefined && getTopFrame())
+  ) {
+    return { [ID]: getTopFrame()!.generatedIdCounter++, ...value };
+  } else {
+    return value;
+  }
+}
+
+/**
+ * Converts cells and objects that can be turned to cells to links.
+ *
+ * @param value - The value to convert.
+ * @returns The converted value.
+ */
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   path: string[] = [],

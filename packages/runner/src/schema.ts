@@ -102,7 +102,7 @@ export function resolveSchema(
  *
  * For `required` objects and arrays assume {} and [] as default value.
  */
-function processDefaultValue(
+export function processDefaultValue(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
