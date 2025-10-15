@@ -158,3 +158,78 @@ export function isFunctionParameter(
 
   return false;
 }
+
+/**
+ * Visit a node's children, handling JSX expressions properly.
+ * TypeScript's visitEachChild doesn't traverse into JsxExpression.expression,
+ * so we need to handle those manually.
+ *
+ * This is the transformation/visitor version. For read-only analysis,
+ * see the special JSX handling in dataflow.ts.
+ */
+export function visitEachChildWithJsx(
+  node: ts.Node,
+  visitor: ts.Visitor,
+  context: ts.TransformationContext | undefined,
+): ts.Node {
+  // Handle JSX elements - need to traverse JSX expression children manually
+  if (ts.isJsxElement(node)) {
+    const openingElement = ts.visitNode(node.openingElement, visitor);
+    const children = ts.visitNodes(
+      node.children,
+      (child) => {
+        if (ts.isJsxExpression(child) && child.expression) {
+          // Visit the expression inside the JSX expression
+          const visitedExpression = ts.visitNode(
+            child.expression,
+            visitor,
+          ) as ts.Expression | undefined;
+          return ts.factory.updateJsxExpression(child, visitedExpression);
+        }
+        return ts.visitNode(child, visitor);
+      },
+      ts.isJsxChild,
+    );
+    const closingElement = ts.visitNode(node.closingElement, visitor);
+    return ts.factory.updateJsxElement(
+      node,
+      openingElement as ts.JsxOpeningElement,
+      children,
+      closingElement as ts.JsxClosingElement,
+    );
+  }
+
+  // Handle JSX self-closing elements
+  if (ts.isJsxSelfClosingElement(node)) {
+    return ts.visitEachChild(node, visitor, context);
+  }
+
+  // Handle JSX fragments
+  if (ts.isJsxFragment(node)) {
+    const openingFragment = ts.visitNode(node.openingFragment, visitor);
+    const children = ts.visitNodes(
+      node.children,
+      (child) => {
+        if (ts.isJsxExpression(child) && child.expression) {
+          const visitedExpression = ts.visitNode(
+            child.expression,
+            visitor,
+          ) as ts.Expression | undefined;
+          return ts.factory.updateJsxExpression(child, visitedExpression);
+        }
+        return ts.visitNode(child, visitor);
+      },
+      ts.isJsxChild,
+    );
+    const closingFragment = ts.visitNode(node.closingFragment, visitor);
+    return ts.factory.updateJsxFragment(
+      node,
+      openingFragment as ts.JsxOpeningFragment,
+      children,
+      closingFragment as ts.JsxClosingFragment,
+    );
+  }
+
+  // For all other nodes, use the default behavior
+  return ts.visitEachChild(node, visitor, context);
+}

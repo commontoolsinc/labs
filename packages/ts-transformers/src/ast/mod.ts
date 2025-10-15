@@ -9,6 +9,7 @@ export {
   getExpressionText,
   getMemberSymbol,
   isFunctionParameter,
+  visitEachChildWithJsx,
 } from "./utils.ts";
 export {
   getTypeReferenceArgument,
