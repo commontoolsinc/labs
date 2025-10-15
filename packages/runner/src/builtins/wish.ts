@@ -6,7 +6,7 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
-import { ALL_CHARMS_ID } from "./well-known.ts";
+import { ALL_CHARMS_ID, DEFAULT_PATTERN_ID } from "./well-known.ts";
 import type { JSONSchema } from "../builder/types.ts";
 
 type WishResolution = {
@@ -15,7 +15,8 @@ type WishResolution = {
 };
 
 const WISH_TARGETS: Record<string, WishResolution> = {
-  "#/allCharms": { entityId: { "/": ALL_CHARMS_ID } },
+  "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
+  "/": { entityId: { "/": DEFAULT_PATTERN_ID } },
 };
 
 function resolveWishTarget(

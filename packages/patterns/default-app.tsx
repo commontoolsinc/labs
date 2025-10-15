@@ -18,6 +18,7 @@ import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { type MentionableCharm } from "./chatbot-note-composed.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, {
+  BacklinksMap,
   type BacklinksMap as _BacklinksMap,
 } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
@@ -33,6 +34,10 @@ type CharmsListInput = void;
 // Recipe returns only UI, no data outputs (only symbol properties)
 interface CharmsListOutput {
   [key: string]: unknown;
+  backlinksIndex: {
+    backlinks: BacklinksMap;
+    mentionable: MentionableCharm[];
+  };
 }
 
 const visit = handler<
@@ -124,6 +129,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
     const index = BacklinksIndex({ allCharms });
 
     return {
+      backlinksIndex: index,
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
       [UI]: (
         <ct-screen>

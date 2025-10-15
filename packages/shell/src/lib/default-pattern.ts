@@ -13,7 +13,7 @@ export async function create(cc: CharmsController): Promise<CharmController> {
     new HttpProgramResolver(DEFAULT_APP_URL),
   );
 
-  const charm = await cc.create(program);
+  const charm = await cc.create(program, undefined, "default-charm");
 
   // Wait for the link to be processed
   await runtime.idle();
