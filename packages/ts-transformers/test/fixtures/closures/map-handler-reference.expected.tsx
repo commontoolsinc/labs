@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { h, recipe, UI, handler, Cell } from "commontools";
+import { recipe, UI, handler, Cell } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {

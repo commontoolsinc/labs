@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { h, recipe, UI } from "commontools";
+import { recipe, UI } from "commontools";
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
