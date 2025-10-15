@@ -88,7 +88,8 @@ function resolvesToParameterOfKind(
   let current: ts.Expression = expression;
   let symbol: ts.Symbol | undefined;
   let isRootIdentifierOnly = true;
-  const allowPropertyTraversal = kind === "array-map";
+
+  // Traverse to find root identifier
   while (true) {
     if (ts.isIdentifier(current)) {
       symbol = checker.getSymbolAtLocation(current);
@@ -99,9 +100,8 @@ function resolvesToParameterOfKind(
       ts.isElementAccessExpression(current) ||
       ts.isCallExpression(current)
     ) {
-      if (!allowPropertyTraversal) {
-        isRootIdentifierOnly = false;
-      }
+      // Any traversal means this is not just the root identifier
+      isRootIdentifierOnly = false;
       current = current.expression;
       continue;
     }
@@ -120,11 +120,14 @@ function resolvesToParameterOfKind(
   if (!symbol) return false;
   const declarations = symbol.getDeclarations();
   if (!declarations) return false;
-  return declarations.some((declaration) =>
-    ts.isParameter(declaration) &&
-    getOpaqueCallKindForParameter(declaration, checker) === kind &&
-    (kind === "array-map" || isRootIdentifierOnly)
-  );
+
+  // Only match the root identifier itself (e.g., `state` or `element`),
+  // not property accesses (e.g., `state.count` or `element.price`)
+  return isRootIdentifierOnly &&
+    declarations.some((declaration) =>
+      ts.isParameter(declaration) &&
+      getOpaqueCallKindForParameter(declaration, checker) === kind
+    );
 }
 
 function resolvesToMapParameter(

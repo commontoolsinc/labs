@@ -83,7 +83,7 @@ export default recipe({
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { taxRate } }) => (<div>
-              Total: ${element.price * (1 + taxRate)}
+              Total: ${__ctHelpers.derive({ element_price: element.price, taxRate }, ({ element_price, taxRate }) => element_price * (1 + taxRate))}
             </div>)), { taxRate: state.taxRate })}
       </div>),
     };
