@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, h, recipe, UI } from "commontools";
+import { Cell, cell, recipe, UI } from "commontools";
 
 interface State {
   values: number[];
