@@ -1,6 +1,10 @@
 import ts from "typescript";
 
-import { getMemberSymbol, isFunctionParameter } from "./utils.ts";
+import {
+  getExpressionText,
+  getMemberSymbol,
+  isFunctionParameter,
+} from "./utils.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { detectCallKind } from "./call-kind.ts";
@@ -51,7 +55,7 @@ export function dedupeExpressions(
 ): ts.Expression[] {
   const seen = new Map<string, ts.Expression>();
   for (const expr of expressions) {
-    const key = expr.getText(sourceFile);
+    const key = getExpressionText(expr);
     if (!seen.has(key)) {
       seen.set(key, expr);
     }
@@ -136,8 +140,7 @@ export function createDataFlowAnalyzer(
     expression: ts.Expression,
     scope: DataFlowScopeInternal,
   ): string => {
-    const sourceFile = expression.getSourceFile();
-    const text = expression.getText(sourceFile);
+    const text = getExpressionText(expression);
     return `${scope.id}:${text}`;
   };
 
@@ -231,6 +234,19 @@ export function createDataFlowAnalyzer(
       if (childAnalyses.length > 0) {
         const merged = mergeAnalyses(...childAnalyses);
 
+        // Log dataflows for synthetic nodes
+        if (merged.dataFlows.length > 0) {
+          const printer = ts.createPrinter();
+          const dataFlowTexts = merged.dataFlows.map(df => {
+            try {
+              return printer.printNode(ts.EmitHint.Unspecified, df, df.getSourceFile() || ts.createSourceFile("", "", ts.ScriptTarget.Latest));
+            } catch {
+              return `<error printing ${ts.SyntaxKind[df.kind]}>`;
+            }
+          });
+          console.log(`[DATAFLOW] ${exprKind} "${exprText}" has ${merged.dataFlows.length} dataFlows: [${dataFlowTexts.join(", ")}]`);
+        }
+
         // For synthetic CallExpressions, detect call kind and set rewriteHint
         if (ts.isCallExpression(expression)) {
           const callKind = detectCallKind(expression, checker);
@@ -258,8 +274,49 @@ export function createDataFlowAnalyzer(
           };
         }
 
-        // Preserve requiresRewrite from children for property access expressions
+        // Special handling for synthetic property access expressions
+        // For synthetic nodes, we can't use checker.getSymbolAtLocation or isOpaqueRefType reliably
+        // But we can detect if this looks like a property access that should be a dataflow
         if (ts.isPropertyAccessExpression(expression)) {
+          // Find the root identifier by walking up the property chain
+          let current: ts.Expression = expression;
+          while (ts.isPropertyAccessExpression(current)) {
+            current = current.expression;
+          }
+
+          if (ts.isIdentifier(current)) {
+            const symbol = checker.getSymbolAtLocation(current);
+            if (symbol) {
+              // Check if this is a parameter in an opaque call (builder or array-map)
+              const declarations = symbol.getDeclarations();
+              if (declarations) {
+                for (const decl of declarations) {
+                  if (ts.isParameter(decl)) {
+                    // Walk up to find if this parameter belongs to a builder or array-map call
+                    let func: ts.Node | undefined = decl.parent;
+                    while (func && !ts.isFunctionLike(func)) func = func.parent;
+                    if (func) {
+                      let callNode: ts.Node | undefined = func.parent;
+                      while (callNode && !ts.isCallExpression(callNode)) callNode = callNode.parent;
+                      if (callNode) {
+                        const callKind = detectCallKind(callNode as ts.CallExpression, checker);
+                        if (callKind?.kind === "array-map" || callKind?.kind === "builder") {
+                          // This is element.price or state.foo - return full property access as dataflow
+                          return {
+                            containsOpaqueRef: true,
+                            requiresRewrite: true,
+                            dataFlows: [expression],
+                            localNodes: [],
+                          };
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          // Otherwise preserve merged analysis from children
           return merged;
         }
 
