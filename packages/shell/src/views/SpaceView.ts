@@ -4,6 +4,7 @@ import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
 import * as DefaultPattern from "../lib/default-pattern.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import "../components/OmniLayout.ts";
 
 export class XSpaceView extends BaseView {
   static override styles = css`
@@ -94,11 +95,11 @@ export class XSpaceView extends BaseView {
         `)
       // TBD if we want to use x-charm or ct-render directly here
       : html`
-          <div>
-            <ct-render class="main" .cell="${defaultPattern.getCell()}"></ct-render>
-            <ct-render class="sidebar" .cell="${defaultPattern.getCell().key('sidebarUI')}"></ct-render>
-            <ct-render class="fab" .cell="${defaultPattern.getCell().key('fabUI')}"></ct-render>
-          </div>
+          <x-omni-layout>
+            <ct-render slot="main" .cell="${defaultPattern.getCell()}"></ct-render>
+            <ct-render slot="sidebar" .cell="${defaultPattern.getCell().key('sidebarUI')}"></ct-render>
+            <ct-render slot="fab" .cell="${defaultPattern.getCell().key('fabUI')}"></ct-render>
+          </x-omni-layout>
       `;
 
     return html`
