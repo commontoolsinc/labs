@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { visitEachChildWithJsx } from "../ast/mod.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -695,7 +696,7 @@ function transformNestedMapCallbacks(
         }
       }
     }
-    return ts.visitEachChild(node, nestedVisitor, context.tsContext);
+    return visitEachChildWithJsx(node, nestedVisitor, context.tsContext);
   };
 
   return ts.visitNode(body, nestedVisitor) as ts.ConciseBody;
@@ -717,7 +718,7 @@ function transformElementReferences(
       if (ts.isIdentifier(node) && node.text === elemName.text) {
         return factory.createIdentifier("element");
       }
-      return ts.visitEachChild(node, visitor, undefined);
+      return visitEachChildWithJsx(node, visitor, undefined);
     };
     return ts.visitNode(body, visitor) as ts.ConciseBody;
   }
@@ -762,7 +763,7 @@ function transformDestructuredProperties(
           );
         }
       }
-      return ts.visitEachChild(node, visitor, undefined);
+      return visitEachChildWithJsx(node, visitor, undefined);
     };
     return ts.visitNode(body, visitor) as ts.ConciseBody;
   }
@@ -786,7 +787,7 @@ function replaceCaptures(
       if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
         return factory.createIdentifier(varName);
       }
-      return ts.visitEachChild(node, visitor, undefined);
+      return visitEachChildWithJsx(node, visitor, undefined);
     };
     transformedBody = ts.visitNode(
       transformedBody,
