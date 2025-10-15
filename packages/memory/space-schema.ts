@@ -27,7 +27,6 @@ import type {
   Entity,
   FactSelection,
   MemorySpace,
-  MIME,
   SchemaQuery,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";

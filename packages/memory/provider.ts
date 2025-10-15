@@ -16,7 +16,6 @@ import {
   InvocationURL,
   MemorySession,
   MemorySpace,
-  MIME,
   Proto,
   Protocol,
   ProviderCommand,
