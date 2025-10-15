@@ -180,7 +180,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
         </ct-screen>
       ),
       sidebarUI: <aside>Wow, a sidebar!</aside>,
-      fabUI: <button>omni button</button>,
+      fabUI: <ct-message-input placeholder="Type something..." buttonText="Omnibot" />,
     };
   },
 );
