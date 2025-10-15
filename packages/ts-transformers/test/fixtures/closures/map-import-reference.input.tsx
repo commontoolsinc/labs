@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI } from "commontools";
+import { recipe, UI } from "commontools";
 
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;

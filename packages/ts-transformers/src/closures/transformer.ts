@@ -985,7 +985,7 @@ function transformMapCallback(
 }
 
 function transformClosures(context: TransformationContext): ts.SourceFile {
-  const { checker, factory, sourceFile } = context;
+  const { checker, sourceFile } = context;
 
   function visit(node: ts.Node): ts.Node {
     // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
