@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { h, recipe, UI } from "commontools";
+import { recipe, UI } from "commontools";
 interface Item {
     price: number;
     quantity: number;
