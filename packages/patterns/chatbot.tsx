@@ -13,6 +13,7 @@ import {
   recipe,
   Stream,
   UI,
+  wish,
 } from "commontools";
 import { MentionableCharm } from "./chatbot-list-view.tsx";
 
@@ -115,7 +116,6 @@ type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
   theme?: any;
-  mentionable: Cell<MentionableCharm[]>;
 };
 
 type PromptAttachment = {
@@ -174,9 +174,20 @@ export const TitleGenerator = recipe<
   return title;
 });
 
+function getMentionable() {
+  return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
+    wish<MentionableCharm[]>(
+      "/backlinksIndex/mentionable",
+      [],
+    ) as unknown as Cell<MentionableCharm[]>,
+    (i) => i,
+  );
+}
+
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools, theme, mentionable }) => {
+  ({ messages, tools, theme }) => {
+    const mentionable = getMentionable();
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
 

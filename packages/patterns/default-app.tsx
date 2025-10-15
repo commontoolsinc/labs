@@ -5,7 +5,6 @@ import {
   handler,
   NAME,
   navigateTo,
-  OpaqueRef,
   recipe,
   str,
   UI,
@@ -67,33 +66,21 @@ const removeCharm = handler<
   }
 });
 
-const spawnChatList = handler<
-  Record<string, never>,
-  { allCharms: Cell<Charm[]>; index: any }
->((_, state) => {
+const spawnChatList = handler<void, void>((_, __) => {
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
     charmsList: [],
-    allCharms: state.allCharms, // we should handle empty here
-    index: state.index,
   }));
 });
 
-const spawnChatbot = handler<
-  Record<string, never>,
-  { allCharms: Cell<MentionableCharm[]> }
->((_, state) => {
+const spawnChatbot = handler<void, void>((_, __) => {
   return navigateTo(Chatbot({
     messages: [],
     tools: undefined,
-    mentionable: state.allCharms,
   }));
 });
 
-const spawnChatbotOutliner = handler<
-  Record<string, never>,
-  { allCharms: Cell<Charm[]> }
->((_, state) => {
+const spawnChatbotOutliner = handler<void, void>((_, __) => {
   return navigateTo(ChatbotOutliner({
     title: "Chatbot Outliner",
     expandChat: false,
@@ -101,31 +88,23 @@ const spawnChatbotOutliner = handler<
     outline: {
       root: { body: "", children: [], attachments: [] },
     },
-    allCharms: state.allCharms,
   }));
 });
 
-const spawnNote = handler<
-  Record<string, never>,
-  { index: any }
->((_, state) => {
+const spawnNote = handler<void, void>((_, __) => {
   return navigateTo(Note({
     title: "New Note",
     content: "",
-    index: state.index,
   }));
 });
-
-function getAllCharms() {
-  const allCharms = wish<MentionableCharm[]>("#/allCharms", []);
-  // ensure schema is added to return type
-  return derive<MentionableCharm[], MentionableCharm[]>(allCharms, (c) => c);
-}
 
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
-    const allCharms = getAllCharms();
+    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
+      wish<MentionableCharm[]>("#allCharms", []),
+      (c) => c,
+    );
     const index = BacklinksIndex({ allCharms });
 
     return {
@@ -137,10 +116,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             code="KeyN"
             alt
             preventDefault
-            onct-keybind={spawnChatList({
-              allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
-              index: index as unknown as OpaqueRef<any>,
-            })}
+            onct-keybind={spawnChatList()}
           />
 
           <ct-vstack gap="4" padding="6">
@@ -148,33 +124,22 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             <ct-hstack gap="2" align="center">
               <h3>Quicklaunch:</h3>
               <ct-button
-                onClick={spawnChatList({
-                  allCharms: allCharms as unknown as OpaqueRef<
-                    MentionableCharm[]
-                  >,
-                  index: index as unknown as OpaqueRef<any>,
-                })}
+                onClick={spawnChatList()}
               >
                 📂 Chat List
               </ct-button>
               <ct-button
-                onClick={spawnChatbot({
-                  allCharms: allCharms as unknown as OpaqueRef<
-                    MentionableCharm[]
-                  >,
-                })}
+                onClick={spawnChatbot()}
               >
                 💬 Chatbot
               </ct-button>
               <ct-button
-                onClick={spawnChatbotOutliner({ allCharms })}
+                onClick={spawnChatbotOutliner()}
               >
                 📝 Chatbot Outliner
               </ct-button>
               <ct-button
-                onClick={spawnNote({
-                  index: index as unknown as OpaqueRef<any>,
-                })}
+                onClick={spawnNote()}
               >
                 📄 Note
               </ct-button>
