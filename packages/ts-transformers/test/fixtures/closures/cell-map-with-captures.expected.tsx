@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, h, recipe, UI } from "commontools";
+import { Cell, cell, recipe, UI } from "commontools";
 interface State {
     values: number[];
     multiplier: number;
