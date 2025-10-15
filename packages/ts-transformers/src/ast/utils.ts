@@ -1,6 +1,29 @@
 import * as ts from "typescript";
 
 /**
+ * Safely get text from an expression, handling both regular and synthetic nodes.
+ * Synthetic nodes (created by transformers) don't have valid source positions,
+ * so we use a printer instead of getText().
+ */
+export function getExpressionText(expr: ts.Expression): string {
+  const sourceFile = expr.getSourceFile();
+  if (!sourceFile) {
+    // Synthetic node - use printer
+    try {
+      const printer = ts.createPrinter();
+      return printer.printNode(
+        ts.EmitHint.Unspecified,
+        expr,
+        ts.createSourceFile("", "", ts.ScriptTarget.Latest),
+      );
+    } catch {
+      return `<error printing ${ts.SyntaxKind[expr.kind]}>`;
+    }
+  }
+  return expr.getText(sourceFile);
+}
+
+/**
  * Helper to resolve the base type of an expression
  */
 function resolveBaseType(
