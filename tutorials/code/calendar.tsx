@@ -12,21 +12,7 @@ import {
 import CalendarTodo from "./calendar_todo.tsx";
 
 interface CalendarState {
-  dates: Default<
-    string[],
-    [
-      "2025-10-01",
-      "2025-10-05",
-      "2025-10-08",
-      "2025-10-12",
-      "2025-10-15",
-      "2025-10-18",
-      "2025-10-22",
-      "2025-10-25",
-      "2025-10-28",
-      "2025-10-31",
-    ]
-  >;
+  dates: Default< string[], [ ] >;
   clickedDate: Default<string, "">;
 }
 
@@ -39,23 +25,25 @@ const clickDate = handler<
   },
 );
 
+const addRandomDate = handler<
+  unknown,
+  { dates: Cell<string[]> }
+>(
+  (_, { dates }) => {
+    // Generate a random date in 2025
+    const year = 2025;
+    const month = Math.floor(Math.random() * 12) + 1;
+    const day = Math.floor(Math.random() * 28) + 1; // Use 28 to avoid month length issues
+    const randomDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+    dates.push(randomDate);
+  },
+);
+
 export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
   // Note: We use cell() instead of Default<> for the todos map because
   // Default<> doesn't work reliably with Record/map types
-  const todos = cell<Record<string, string[]>>({
-    "2025-10-05": [
-      "2025-10-05: water plants",
-      "2025-10-05: buy groceries",
-    ],
-    "2025-10-15": [
-      "2025-10-15: team meeting",
-      "2025-10-15: finish report",
-    ],
-    "2025-10-25": [
-      "2025-10-25: make breakfast",
-      "2025-10-25: call dentist",
-    ],
-  });
+  const todos = cell<Record<string, string[]>>({ });
 
   // Create lifted function to get todos for a given date
   const getTodosForDate = lift(
@@ -78,6 +66,9 @@ export default recipe<CalendarState>("calendar", ({ dates, clickedDate }) => {
         <h2>Selected Date View</h2>
         {todoView}
         <h2>The Calendar View</h2>
+        <ct-button onclick={addRandomDate({ dates })}>
+          Add Random Date
+        </ct-button>
         {dates.map((date) => {
           const dateTodos = getTodosForDate({ todos, date });
           return (
