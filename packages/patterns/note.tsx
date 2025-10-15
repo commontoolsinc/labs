@@ -5,7 +5,6 @@ import {
   Default,
   derive,
   handler,
-  lift,
   NAME,
   navigateTo,
   OpaqueRef,
@@ -90,27 +89,6 @@ const handleNewBacklink = handler<
 const _handleCharmLinkClicked = handler(
   (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
     return navigateTo(charm);
-  },
-);
-
-const computeBacklinks = lift<
-  { allCharms: Cell<MentionableCharm[]>; self: Cell<MentionableCharm> },
-  MentionableCharm[]
->(
-  ({ allCharms, self }) => {
-    const cs = allCharms.get();
-    if (!cs) return [];
-
-    const results = [];
-
-    for (let i = 0; i < cs.length; i++) {
-      const c = cs[i];
-      if (c.mentioned?.some((m) => self.equals(allCharms.key(i)))) {
-        results.push(c);
-      }
-    }
-
-    return results;
   },
 );
 
