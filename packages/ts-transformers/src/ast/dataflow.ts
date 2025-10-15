@@ -205,8 +205,10 @@ export function createDataFlowAnalyzer(
         }
         // Traverse JSX children (this is what forEachChild misses!)
         expression.children.forEach((child) => {
-          if (ts.isJsxExpression(child) && child.expression) {
-            analyzeChild(child.expression);
+          if (ts.isJsxExpression(child)) {
+            if (child.expression) {
+              analyzeChild(child.expression);
+            }
           } else {
             analyzeChild(child);
           }
@@ -233,19 +235,6 @@ export function createDataFlowAnalyzer(
       // Inherit properties from children
       if (childAnalyses.length > 0) {
         const merged = mergeAnalyses(...childAnalyses);
-
-        // Log dataflows for synthetic nodes
-        if (merged.dataFlows.length > 0) {
-          const printer = ts.createPrinter();
-          const dataFlowTexts = merged.dataFlows.map(df => {
-            try {
-              return printer.printNode(ts.EmitHint.Unspecified, df, df.getSourceFile() || ts.createSourceFile("", "", ts.ScriptTarget.Latest));
-            } catch {
-              return `<error printing ${ts.SyntaxKind[df.kind]}>`;
-            }
-          });
-          console.log(`[DATAFLOW] ${exprKind} "${exprText}" has ${merged.dataFlows.length} dataFlows: [${dataFlowTexts.join(", ")}]`);
-        }
 
         // For synthetic CallExpressions, detect call kind and set rewriteHint
         if (ts.isCallExpression(expression)) {
@@ -838,6 +827,31 @@ export function createDataFlowAnalyzer(
           return analyzeExpression(element, scope, context);
         }
         return emptyAnalysis();
+      });
+      return mergeAnalyses(...analyses);
+    }
+
+    // Handle JSX elements in non-synthetic path too
+    if (ts.isJsxElement(expression)) {
+      const analyses: InternalAnalysis[] = [];
+      // Analyze opening element attributes
+      if (expression.openingElement.attributes) {
+        expression.openingElement.attributes.properties.forEach((attr) => {
+          if (ts.isExpression(attr)) {
+            analyses.push(analyzeExpression(attr, scope, context));
+          }
+        });
+      }
+      // Analyze JSX children - must handle JsxExpression specially
+      expression.children.forEach((child) => {
+        if (ts.isJsxExpression(child)) {
+          if (child.expression) {
+            analyses.push(analyzeExpression(child.expression, scope, context));
+          }
+        } else if (ts.isJsxElement(child)) {
+          analyses.push(analyzeExpression(child, scope, context));
+        }
+        // Ignore JsxText and other non-expression children
       });
       return mergeAnalyses(...analyses);
     }
