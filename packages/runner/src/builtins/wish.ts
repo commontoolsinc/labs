@@ -20,22 +20,49 @@ const WISH_TARGETS: Record<string, WishResolution> = {
 };
 
 function resolveWishTarget(
-  wish: string,
+  resolution: WishResolution,
   runtime: IRuntime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
 ): Cell<unknown> | undefined {
-  const target = WISH_TARGETS[wish];
-  if (!target) return undefined;
-
-  const path = target.path ? [...target.path] : [];
+  const path = resolution.path ? [...resolution.path] : [];
   return runtime.getCellFromEntityId(
     space,
-    target.entityId,
+    resolution.entityId,
     path,
     undefined,
     tx,
   );
+}
+
+type ParsedWishTarget = {
+  key: string;
+  path: string[];
+};
+
+function parseWishTarget(target: string): ParsedWishTarget | undefined {
+  const trimmed = target.trim();
+  if (trimmed === "") return undefined;
+
+  if (trimmed.startsWith("#")) {
+    const rest = trimmed.slice(1);
+    const segments = rest.split("/").filter((segment) => segment.length > 0);
+    const baseSegment = segments.shift();
+    if (!baseSegment) return undefined;
+    const key = `#${baseSegment}`;
+    return { key, path: segments };
+  }
+
+  if (trimmed.startsWith("/")) {
+    const segments = trimmed.split("/").filter((segment) => segment.length > 0);
+    return { key: "/", path: segments };
+  }
+
+  return undefined;
+}
+
+function segmentToPropertyKey(segment: string): PropertyKey {
+  return /^\d+$/.test(segment) ? Number(segment) : segment;
 }
 
 const TARGET_SCHEMA = {
@@ -54,29 +81,52 @@ export function wish(
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
     const values = inputsWithTx.get() ?? [];
-    const target = inputsWithTx.key(0).asSchema(TARGET_SCHEMA).get();
-    const defaultValue = values.length >= 2 ? values[1] : undefined;
-    const hasDefault = defaultValue !== undefined && defaultValue !== null;
+    const targetValue = inputsWithTx.key(0).asSchema(TARGET_SCHEMA).get();
+    const hasDefault = values.length >= 2 && values[1] !== null &&
+      values[1] !== undefined;
     const defaultCell = hasDefault ? inputsWithTx.key(1) : undefined;
 
-    const wishTarget = typeof target === "string" ? target.trim() : "";
+    const wishTarget = typeof targetValue === "string"
+      ? targetValue.trim()
+      : "";
 
     if (wishTarget === "") {
       sendResult(tx, hasDefault ? defaultCell : undefined);
       return;
     }
 
-    const resolvedCell = resolveWishTarget(
-      wishTarget,
+    const parsed = parseWishTarget(wishTarget);
+    if (!parsed) {
+      console.error(`Wish target "${wishTarget}" is not recognized.`);
+      sendResult(tx, hasDefault ? defaultCell : undefined);
+      return;
+    }
+
+    const resolution = WISH_TARGETS[parsed.key];
+    if (!resolution) {
+      console.error(`Wish target "${wishTarget}" is not recognized.`);
+      sendResult(tx, hasDefault ? defaultCell : undefined);
+      return;
+    }
+
+    const baseCell = resolveWishTarget(
+      resolution,
       runtime,
       parentCell.space,
       tx,
     );
 
-    if (!resolvedCell) {
+    if (!baseCell) {
       console.error(`Wish target "${wishTarget}" is not recognized.`);
       sendResult(tx, hasDefault ? defaultCell : undefined);
       return;
+    }
+
+    let resolvedCell = baseCell;
+    for (const segment of parsed.path) {
+      resolvedCell = resolvedCell.withTx(tx).key(
+        segmentToPropertyKey(segment) as never,
+      );
     }
 
     sendResult(tx, resolvedCell.withTx(tx));
