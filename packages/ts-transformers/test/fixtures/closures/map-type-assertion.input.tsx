@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, OpaqueRef } from "commontools";
+import { recipe, UI, OpaqueRef } from "commontools";
 
 interface Item {
   id: number;
