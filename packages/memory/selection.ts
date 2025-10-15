@@ -1,14 +1,14 @@
 import type {
-  Cause,
+  CauseString,
   Changes,
-  Entity,
   Fact,
   FactSelection,
   JSONValue,
+  MIME,
   OfTheCause,
   Select,
   SelectAll,
-  The,
+  URI,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
 
@@ -24,8 +24,8 @@ export const from = (
     >(
       selection,
       fact.of,
-      fact.the as The,
-      cause.toString(),
+      fact.the,
+      cause.toString() as CauseString,
       is === undefined ? { since } : { is, since },
     );
   }
@@ -35,11 +35,11 @@ export const from = (
 // We include the permutations of selector or selection,
 // setting with or without a cause, empty or non-empty
 
-export const set = <T, U extends OfTheCause<T> | Changes<The, Entity>>(
+export const set = <T, U extends OfTheCause<T> | Changes<MIME, URI>>(
   selection: U,
-  of: Entity,
-  the: The,
-  cause: Cause,
+  of: URI,
+  the: MIME,
+  cause: CauseString,
   value: T,
 ): U => {
   const attributes = (of in selection) ? selection[of] : {};
@@ -50,28 +50,36 @@ export const set = <T, U extends OfTheCause<T> | Changes<The, Entity>>(
   return selection;
 };
 
+/**
+ * Like set, but the selector can have wildcard strings.
+ */
 export const setSelector = <T>(
-  selector: Select<Entity, Select<The, Select<Cause, T>>>,
-  of: Entity | SelectAll,
-  the: The | SelectAll,
-  cause: Cause | SelectAll,
+  selector: Select<URI, Select<MIME, Select<CauseString, T>>>,
+  of: URI | SelectAll,
+  the: MIME | SelectAll,
+  cause: CauseString | SelectAll,
   value: T,
-): OfTheCause<T> => {
+): Select<URI, Select<MIME, Select<CauseString, T>>> => {
   const attributes = (of in selector)
-    ? selector[of] as Select<The, Select<Cause, T>>
+    ? selector[of] as Select<MIME, Select<CauseString, T>>
     : {};
-  const causes = (the in attributes) ? attributes[the] as Select<Cause, T> : {};
+  const causes = (the in attributes)
+    ? attributes[the] as Select<CauseString, T>
+    : {};
   causes[cause] = value;
   attributes[the] = causes;
   selector[of] = attributes;
   return selector;
 };
 
+/**
+ * Like set, but setRevision will only have a single cause/value entry.
+ */
 export const setRevision = <T>(
   selection: OfTheCause<T>,
-  of: Entity,
-  the: The,
-  cause: Cause,
+  of: URI,
+  the: MIME,
+  cause: CauseString,
   value: T,
 ): OfTheCause<T> => {
   const attributes = (of in selection) ? selection[of] : {};
@@ -82,8 +90,8 @@ export const setRevision = <T>(
 
 export const setEmptyObj = <T>(
   selection: OfTheCause<T>,
-  of: Entity,
-  the?: The,
+  of: URI,
+  the?: MIME,
 ): OfTheCause<T> => {
   const attributes = (of in selection) ? selection[of] : {};
   if (the !== undefined) {
@@ -95,11 +103,16 @@ export const setEmptyObj = <T>(
 
 export const iterate = function* <T>(
   selection: OfTheCause<T>,
-): Iterable<{ of: Entity; the: The; cause: Cause; value: T }> {
+): Iterable<{ of: URI; the: MIME; cause: CauseString; value: T }> {
   for (const [of, attributes] of Object.entries(selection)) {
     for (const [the, causes] of Object.entries(attributes)) {
       for (const [cause, state] of Object.entries(causes)) {
-        yield { of: of as Entity, the: the as The, cause, value: state };
+        yield {
+          of: of as URI,
+          the: the as MIME,
+          cause: cause as CauseString,
+          value: state,
+        };
       }
     }
   }
@@ -109,13 +122,13 @@ type EmptyObj = Record<string | number | symbol, never>;
 // Selectors can have wildcard strings
 // If we're missing a "the" or "cause", we treat these as wildcards
 export const iterateSelector = function* <T>(
-  selector: Select<Entity, Select<The, Select<Cause, T>>>,
+  selector: Select<URI, Select<MIME, Select<CauseString, T>>>,
   defaultValue: T,
 ): Iterable<
   {
-    of: Entity | SelectAll;
-    the: The | SelectAll;
-    cause: Cause | SelectAll;
+    of: URI | SelectAll;
+    the: MIME | SelectAll;
+    cause: CauseString | SelectAll;
     value: T;
   }
 > {
@@ -132,9 +145,9 @@ export const iterateSelector = function* <T>(
       // we will extract at most one cause from the selector
       const [[cause, state]] = causeEntries;
       yield {
-        of: of as Entity | SelectAll,
-        the: the as The | SelectAll,
-        cause,
+        of: of as URI | SelectAll,
+        the: the as MIME | SelectAll,
+        cause: cause as CauseString | SelectAll,
         value: state,
       };
     }
@@ -144,8 +157,8 @@ export const iterateSelector = function* <T>(
 // This gets what should be the only cause/value pair for an of/the pair.
 export const getRevision = <T>(
   selection: OfTheCause<T>,
-  of: Entity,
-  the: The | SelectAll,
+  of: URI,
+  the: MIME | SelectAll,
 ): T | undefined => {
   const [_cause, value] = getChange(selection, of, the) ?? [null, undefined];
   return value;
@@ -153,9 +166,9 @@ export const getRevision = <T>(
 
 export const getChange = <T>(
   selection: OfTheCause<T>,
-  of: Entity,
-  the: The | SelectAll,
-): [Cause, T] | undefined => {
+  of: URI,
+  the: MIME | SelectAll,
+): [CauseString, T] | undefined => {
   if (of in selection) {
     const attributes = selection[of];
     let attrEntries;
@@ -172,7 +185,7 @@ export const getChange = <T>(
     for (const [_the, causes] of attrEntries) {
       const [change] = Object.entries(causes);
       if (change) {
-        return change;
+        return change as [CauseString, T];
       }
     }
   }
@@ -182,9 +195,9 @@ export const getChange = <T>(
 // Selectors can have wildcard strings, so we can't use the standard version
 // This gets what should be the only cause/value pair for an of/the pair.
 export const getSelectorRevision = <T>(
-  selector: Select<Entity, Select<The, Select<Cause, T>>>,
-  of: Entity,
-  the: The,
+  selector: Select<URI, Select<MIME, Select<CauseString, T>>>,
+  of: URI,
+  the: MIME,
 ): T | undefined => {
   const attributes = selector[of] ?? selector[SelectAllString];
   if (attributes !== undefined) {

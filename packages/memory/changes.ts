@@ -1,7 +1,7 @@
 import {
   AssertFact,
   Assertion,
-  Cause,
+  CauseString,
   Changes,
   ClaimFact,
   Fact,
@@ -22,7 +22,7 @@ export const from = <T extends Statement>(statements: Iterable<T>) => {
   }
 
   return changes as T extends Assertion<infer The, infer Of, infer Is>
-    ? { [of in Of]: { [the in The]: { [cause: Cause]: { is: Is } } } }
+    ? { [of in Of]: { [the in The]: { [cause in CauseString]: { is: Is } } } }
     : T extends Fact<infer The, infer Of, infer Is> ? Changes<The, Of, Is>
     : T extends Statement<infer The, infer Of, infer Is> ? Changes<The, Of, Is>
     : never;

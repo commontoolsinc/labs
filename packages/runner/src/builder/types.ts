@@ -32,6 +32,7 @@ import type {
   StreamDataFunction,
   StreamFunction,
   StrFunction,
+  WishFunction,
 } from "@commontools/api";
 import {
   h,
@@ -287,6 +288,7 @@ export interface BuilderFunctionsAndConstants {
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
   navigateTo: NavigateToFunction;
+  wish: WishFunction;
 
   // Cell creation
   createCell: CreateCellFunction;

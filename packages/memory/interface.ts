@@ -80,7 +80,7 @@ export interface AuthorizationError extends Error {
 }
 
 export type Call<
-  Ability extends The = The,
+  Ability extends string = The,
   Of extends DID = DID,
   Args extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
@@ -91,7 +91,7 @@ export type Call<
 };
 
 export type Command<
-  Ability extends The = The,
+  Ability extends string = The,
   Of extends DID = DID,
   In extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
@@ -103,7 +103,7 @@ export type Command<
 };
 
 export type Invocation<
-  Ability extends The = The,
+  Ability extends string = The,
   Of extends DID = DID,
   In extends NonNullable<unknown> = NonNullable<unknown>,
 > = {
@@ -514,32 +514,28 @@ export type MemorySpace = `did:${string}:${string}`;
 /**
  * Unique identifier for the mutable entity.
  */
-export type Entity = `${string}:${string}`;
+export type Entity = URI;
 
 /**
  * Type of the fact, usually formatted as media type. By default we expect
  * this to be  "application/json", but in the future we may support other
  * data types.
  */
-export type The = string & { toString(): The };
-
-export type Cause<T = Assertion | Retraction | Unclaimed> = string & {
-  toString(): Cause<T>;
-};
+export type The = MIME;
 
 export type InvocationURL<T> = `job:${string}` & {
   toString(): InvocationURL<T>;
 };
 
 export interface FactAddress {
-  the: The;
-  of: Entity;
+  the: MIME;
+  of: URI;
 }
 
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export interface Unclaimed<T extends The = The, Of extends Entity = Entity> {
+export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
@@ -563,8 +559,8 @@ export interface Unclaimed<T extends The = The, Of extends Entity = Entity> {
  * retracting over the wire without having to sending JSON values back and forth.
  */
 export interface Assertion<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > {
   the: T;
@@ -581,8 +577,8 @@ export interface Assertion<
  * denoting assertion that no longer hold and is a fact in itself.
  */
 export interface Retraction<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > {
   the: T;
@@ -592,8 +588,8 @@ export interface Retraction<
 }
 
 export interface Invariant<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > {
   the: T;
@@ -610,14 +606,14 @@ export interface Invariant<
  * by {@link Retraction}.
  */
 export type Fact<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
 
 export type Statement<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
@@ -647,7 +643,7 @@ export type Claim = {
 export type Commit<Subject extends string = MemorySpace> = {
   [of in Subject]: {
     ["application/commit+json"]: {
-      [cause: Cause]: {
+      [cause in CauseString]: {
         is: CommitData;
       };
     };
@@ -681,36 +677,35 @@ export type ClaimFact = true;
 // incompatible with JSONValue.
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
-
 // This is the structure of a bunch of our objects
 export type OfTheCause<T> = {
-  [of in Entity]: {
-    [the in The]: {
-      [cause: Cause]: T;
+  [of in URI]: {
+    [the in MIME]: {
+      [cause in CauseString]: T;
     };
   };
 };
 
 export type Changes<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > = {
   [of in Of]: {
     [the in T]: {
-      [cause: Cause]: RetractFact | AssertFact<Is> | ClaimFact;
+      [cause in CauseString]: RetractFact | AssertFact<Is> | ClaimFact;
     };
   };
 };
 
 export type FactSelection<
-  T extends The = The,
-  Of extends Entity = Entity,
+  T extends string = MIME,
+  Of extends string = URI,
   Is extends JSONValue = JSONValue,
 > = {
   [of in Of]: {
     [the in T]: {
-      [cause: Cause]: {
+      [cause in CauseString]: {
         is?: Is;
         since: number;
       };
@@ -724,8 +719,12 @@ export type DID = `did:${string}:${string}`;
 
 export type DIDKey = `did:key:${string}`;
 
+// Entity identifier (typically `of:<base32-digest>`, but sometimes `did:<something>`).
 export type URI = `${string}:${string}`;
+// Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
+// This is the base32 digest preceded by "b" as per multibase spec.
+export type CauseString = `b${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",
@@ -801,8 +800,8 @@ export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
 // }
 
 export type SchemaSelector = Select<
-  Entity,
-  Select<The, Select<Cause, SchemaPathSelector>>
+  URI,
+  Select<MIME, Select<CauseString, SchemaPathSelector>>
 >;
 
 export type Operation =
@@ -844,8 +843,8 @@ export type Select<Key extends string, Match> =
  * Selector that replica can be queried by.
  */
 export type Selector = Select<
-  Entity,
-  Select<The, Select<Cause, { is?: Unit }>>
+  URI,
+  Select<MIME, Select<CauseString, { is?: Unit }>>
 >;
 
 export type Selection<Space extends MemorySpace = MemorySpace> = {
