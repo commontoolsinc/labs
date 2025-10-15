@@ -947,7 +947,7 @@ export class CTCodeEditor extends BaseElement {
       newMentioned.map((c) => `of:${c.id}`),
     );
 
-    if (curURIs.symmetricDifference(newURIs).size === 0) {
+    if (curURIs.size === newURIs.size && [...curURIs].every((uri) => newURIs.has(uri))) {
       return; // no change
     }
 
