@@ -31,6 +31,8 @@ interface CharmsListOutput {
   backlinksIndex: {
     mentionable: MentionableCharm[];
   };
+  sidebarUI: unknown;
+  fabUI: unknown;
 }
 
 const visit = handler<
@@ -177,6 +179,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vstack>
         </ct-screen>
       ),
+      sidebarUI: <aside>Wow, a sidebar!</aside>,
+      fabUI: <button>omni button</button>,
     };
   },
 );

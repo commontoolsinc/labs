@@ -1,6 +1,6 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { render } from "@commontools/html";
+import { isVNode, render } from "@commontools/html";
 import { isCell, UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
@@ -126,12 +126,11 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private async _loadAndRenderRecipe(retry: boolean = true) {
+  private async _loadAndRenderRecipe(
+    recipeId: string,
+    retry: boolean = true,
+  ) {
     try {
-      const recipeId = getRecipeIdFromCharm(this.cell);
-      if (!recipeId) {
-        throw new Error("No recipe ID found in charm");
-      }
       this._log("loading recipe:", recipeId);
 
       // Load and run the recipe
@@ -141,24 +140,99 @@ export class CTRender extends BaseElement {
       );
       await this.cell.runtime.runSynced(this.cell, recipe);
 
-      // Render the UI output
-      if (!this._renderContainer) {
-        throw new Error("Render container not found");
-      }
-
-      this._log("rendering UI");
-      this._cleanup = render(this._renderContainer, this.cell.key(UI));
+      await this._renderUiFromCell(this.cell);
     } catch (error) {
       if (retry) {
         console.warn("Failed to load recipe, retrying...");
         // First failure, sync and retry once
         await this.cell.sync();
-        await this._loadAndRenderRecipe(false);
+        await this._loadAndRenderRecipe(recipeId, false);
       } else {
         // Second failure, give up
         throw error;
       }
     }
+  }
+
+  private async _renderUiFromCell(cell: Cell<unknown>) {
+    if (!this._renderContainer) {
+      throw new Error("Render container not found");
+    }
+
+    await this._maybeSyncCell(cell);
+    const target = await this._resolveRenderTarget(cell);
+
+    this._log("rendering UI");
+    if (isCell(target)) {
+      this._cleanup = render(this._renderContainer, target as Cell);
+    } else {
+      this._cleanup = render(this._renderContainer, target as any);
+    }
+  }
+
+  private async _resolveRenderTarget(
+    cell: Cell<unknown>,
+  ): Promise<Cell<unknown> | unknown> {
+    const value = this._safeGetCellValue(cell);
+    if (this._isRecord(value) && UI in value) {
+      const uiCell = (cell as Cell).key(UI);
+      await this._maybeSyncCell(uiCell);
+      const uiValue = this._safeGetCellValue(uiCell);
+      if (uiValue === undefined || this._isRenderableVNode(uiValue)) {
+        return uiCell;
+      }
+    }
+
+    if (this._isRenderableVNode(value) || value === undefined) {
+      return cell;
+    }
+
+    throw new Error("Cell does not contain renderable UI content");
+  }
+
+  private async _maybeSyncCell(cell: Cell<unknown>) {
+    const sync = (cell as { sync?: () => Promise<unknown> | unknown }).sync;
+    if (typeof sync === "function") {
+      await sync.call(cell);
+    }
+  }
+
+  private _getRecipeId(cell: Cell<unknown>): string | undefined {
+    try {
+      return getRecipeIdFromCharm(cell);
+    } catch (error) {
+      this._log("no recipe id available", error);
+      return undefined;
+    }
+  }
+
+  private _safeGetCellValue(cell: Cell<unknown>): unknown {
+    try {
+      return cell.get();
+    } catch (error) {
+      this._log("failed to read cell value", error);
+      return undefined;
+    }
+  }
+
+  private _isRenderableVNode(value: unknown): boolean {
+    return isVNode(value);
+  }
+
+  private _isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+  }
+
+  private _getCellPathLength(cell: Cell<unknown>): number {
+    const internalCell = cell as unknown as {
+      getAsNormalizedFullLink?: () => { path: readonly string[] };
+    };
+    const getter = internalCell.getAsNormalizedFullLink;
+    if (typeof getter !== "function") {
+      return 0;
+    }
+    const link = getter.call(cell);
+    return Array.isArray(link?.path) ? link.path.length : 0;
   }
 
   private async _renderCell() {
@@ -182,13 +256,24 @@ export class CTRender extends BaseElement {
       // Clean up any previous render
       this._cleanupPreviousRender();
 
-      // Validate cell and get recipe ID
       if (!isCell(this.cell)) {
         throw new Error("Invalid cell: expected a Cell object");
       }
 
-      // Load and render the recipe
-      await this._loadAndRenderRecipe();
+      const isSubPath = this._getCellPathLength(this.cell) > 0;
+
+      if (isSubPath) {
+        this._log("cell is a subpath, rendering directly");
+        await this._renderUiFromCell(this.cell);
+      } else {
+        const recipeId = this._getRecipeId(this.cell);
+        if (recipeId) {
+          await this._loadAndRenderRecipe(recipeId);
+        } else {
+          this._log("no recipe id found, rendering cell directly");
+          await this._renderUiFromCell(this.cell);
+        }
+      }
 
       // Mark as rendered and trigger re-render to hide spinner
       this._hasRendered = true;
