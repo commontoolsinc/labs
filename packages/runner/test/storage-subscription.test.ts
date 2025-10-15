@@ -7,7 +7,7 @@ import type {
   IStorageSubscription,
   StorageNotification,
 } from "../src/storage/interface.ts";
-import type { Entity } from "@commontools/memory/interface";
+import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 import { Runtime } from "../src/runtime.ts";
@@ -83,7 +83,7 @@ describe("Storage Subscription", () => {
       runtime.storageManager.subscribe(subscription);
 
       // Use direct transaction operations like the original test
-      const entityId = `of:test-commit-${Date.now()}` as Entity;
+      const entityId = `of:test-commit-${Date.now()}` as URI;
       const value = { message: "Hello, world!" };
 
       tx.write({
@@ -182,7 +182,7 @@ describe("Storage Subscription", () => {
     it("should receive revert notification on conflict", async () => {
       // Create memory from session before subscribing
       const memory = storageManager.session().mount(space);
-      const entityId = `test:conflict-${Date.now()}` as Entity;
+      const entityId = `test:conflict-${Date.now()}` as URI;
 
       // Transact the memory so we have some fact in there
       const existingFact = Fact.assert({
@@ -211,7 +211,7 @@ describe("Storage Subscription", () => {
       }, { version: 2 });
 
       // Check that before commit provider.replica.get returns undefined
-      const factAddress = { id: entityId, type: "application/json" };
+      const factAddress = { id: entityId, type: "application/json" as MIME };
       expect(replica.get(factAddress)).toBeUndefined();
 
       // Send commit (without await) and check optimistic update
@@ -250,7 +250,7 @@ describe("Storage Subscription", () => {
 
       // Get the replica and call load to trigger load notification
       const { replica } = storageManager.open(space);
-      const entityId = `test:load-${Date.now()}` as Entity;
+      const entityId = `test:load-${Date.now()}` as URI;
       const factAddress = { the: "application/json", of: entityId };
 
       await (replica as any).load([[factAddress, undefined]]);
@@ -273,7 +273,7 @@ describe("Storage Subscription", () => {
     it("should receive pull notification when data is pulled from remote", async () => {
       // Put something in the memory first
       const memory = storageManager.session().mount(space);
-      const entityId = `test:pull-${Date.now()}` as Entity;
+      const entityId = `test:pull-${Date.now()}` as URI;
       const fact = Fact.assert({
         the: "application/json",
         of: entityId,

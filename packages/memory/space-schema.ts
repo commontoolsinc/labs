@@ -22,10 +22,11 @@ import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
 import type {
-  Cause,
+  CauseString,
   Entity,
   FactSelection,
   MemorySpace,
+  MIME,
   SchemaQuery,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
@@ -54,8 +55,6 @@ import {
 
 export type * from "./interface.ts";
 
-//type FullFactAddress = FactAddress & { cause: Cause; since: number };
-
 const logger = getLogger("space-schema", {
   enabled: false,
   level: "info",
@@ -72,7 +71,10 @@ export class ServerObjectManager extends BaseObjectManager<
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
   // Mapping from factKey to object with cause and since
-  private factDetails = new Map<string, { cause: Cause; since: number }>();
+  private factDetails = new Map<
+    string,
+    { cause: CauseString; since: number }
+  >();
   private restrictedValues = new Set<string>();
 
   constructor(
@@ -329,7 +331,7 @@ const redactCommits = <Space extends MemorySpace>(
 function addToSelection(
   includedFacts: FactSelection,
   entry: IAttestation,
-  cause: Cause,
+  cause: CauseString,
   since: number,
 ) {
   setRevision(
@@ -345,7 +347,7 @@ function addToSelection(
 function getMatchingFacts<Space extends MemorySpace>(
   session: Session<Space>,
   factSelector: FactSelector,
-): Iterable<IAttestation & { cause: Cause; since: number }> {
+): Iterable<IAttestation & { cause: CauseString; since: number }> {
   const results = [];
   for (const fact of selectFacts(session, factSelector)) {
     results.push({

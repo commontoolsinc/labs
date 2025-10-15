@@ -13,7 +13,7 @@ import type {
   Assertion,
   AsyncResult,
   AuthorizationError,
-  Cause,
+  CauseString,
   Changes,
   Claim,
   Commit,
@@ -21,10 +21,11 @@ import type {
   ConflictError,
   ConnectionError,
   DIDKey,
-  Entity,
   Fact,
+  FactAddress,
   FactSelection,
   MemorySpace,
+  MIME,
   OfTheCause,
   Query,
   QueryError,
@@ -37,11 +38,11 @@ import type {
   Selection,
   SpaceSession,
   SystemError,
-  The,
   ToJSON,
   Transaction,
   TransactionError,
   Unit,
+  URI,
 } from "./interface.ts";
 import {
   getRevision,
@@ -403,7 +404,7 @@ export const close = <Space extends MemorySpace>({
 type StateRow = {
   fact: string;
   the: string;
-  of: Entity;
+  of: string;
   is: string | null;
   cause: string | null;
   since: number;
@@ -411,7 +412,7 @@ type StateRow = {
 
 const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
-  { the, of }: { the: The; of: Entity },
+  { the, of }: { the: MIME; of: URI },
 ): Revision<Fact> | null => {
   const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
   if (row) {
@@ -420,7 +421,7 @@ const recall = <Space extends MemorySpace>(
       of,
       cause: row.cause
         ? (fromString(row.cause) as Reference<Assertion>)
-        : refer(unclaimed(row)),
+        : refer(unclaimed({ the, of })),
       since: row.since,
     };
 
@@ -452,7 +453,7 @@ type CauseRow = {
  */
 const _causeChain = <Space extends MemorySpace>(
   session: Session<Space>,
-  { the, of }: { the: The; of: Entity },
+  { the, of }: { the: MIME; of: URI },
   excludeFact: string | undefined,
 ): Revision<Fact>[] => {
   const { store } = session;
@@ -493,11 +494,11 @@ const getFact = <Space extends MemorySpace>(
   // followed by the same chain of facts. At that point, it really is the same.
   // Since `the` and `of` are part of the fact reference, they are also unique.
   const revision: Revision<Fact> = {
-    the: row.the,
-    of: row.of,
+    the: row.the as MIME,
+    of: row.of as URI,
     cause: row.cause
       ? (fromString(row.cause) as Reference<Assertion>)
-      : refer(unclaimed(row)),
+      : refer(unclaimed(row as FactAddress)),
     since: row.since,
   };
   if (row.is) {
@@ -537,19 +538,31 @@ const select = <Space extends MemorySpace>(
 };
 
 export type FactSelector = {
-  the: The | SelectAll;
-  of: Entity | SelectAll;
-  cause: Cause | SelectAll;
+  the: MIME | SelectAll;
+  of: URI | SelectAll;
+  cause: CauseString | SelectAll;
   is?: undefined | Record<string | number | symbol, never>;
   since?: number;
 };
 
 export type SelectedFact = {
-  the: The;
-  of: Entity;
-  cause: Cause;
+  the: MIME;
+  of: URI;
+  cause: CauseString;
   is?: JSONValue;
   since: number;
+};
+
+const toFact = function (row: StateRow): SelectedFact {
+  return {
+    the: row.the as MIME,
+    of: row.of as URI,
+    cause: row.cause
+      ? row.cause as CauseString
+      : refer(unclaimed(row as FactAddress)).toString() as CauseString,
+    is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    since: row.since,
+  };
 };
 
 // Select facts matching the selector. Facts are ordered by since.
@@ -566,19 +579,13 @@ export const selectFacts = function* <Space extends MemorySpace>(
   }) as StateRow[];
 
   for (const row of rows) {
-    yield {
-      the: row.the,
-      of: row.of,
-      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
-      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
-      since: row.since,
-    };
+    yield toFact(row);
   }
 };
 
 export const selectFact = function <Space extends MemorySpace>(
   { store }: Session<Space>,
-  { the, of, since }: { the: The; of: Entity; since?: number },
+  { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
   const rows = store.prepare(EXPORT).all({
     the: the,
@@ -587,17 +594,7 @@ export const selectFact = function <Space extends MemorySpace>(
     is: null,
     since: since ?? null,
   }) as StateRow[];
-  if (rows.length > 0) {
-    const row = rows[0];
-    return {
-      the: row.the,
-      of: row.of,
-      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
-      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
-      since: row.since,
-    };
-  }
-  return undefined;
+  return (rows.length > 0) ? toFact(rows[0]) : undefined;
 };
 
 /**
@@ -783,7 +780,7 @@ const commit = <Space extends MemorySpace>(
     commit.is.labels = labels;
   }
   const changes: Commit<Space> = {} as Commit<Space>;
-  set(changes, commit.of, commit.the, commit.cause.toString(), {
+  set(changes, commit.of, commit.the, commit.cause.toString() as CauseString, {
     is: commit.is,
   });
   return changes;
@@ -963,7 +960,7 @@ export function getLabels<
 // Get the label that applies to the entity.
 export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
-  of: Entity,
+  of: URI,
 ) {
   return selectFact(session, { of, the: LABEL_TYPE });
 }

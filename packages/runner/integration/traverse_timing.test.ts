@@ -1,3 +1,4 @@
+import { MIME } from "@commontools/memory/interface";
 import {
   JSONValue,
   SchemaPathSelector,
@@ -11723,7 +11724,7 @@ class TestObjectManager
     ) {
       const [[type, caused]] = Object.entries(attrs as Record<string, unknown>);
       const [[_, revision]] = Object.entries(caused as Record<string, unknown>);
-      const address: BaseMemoryAddress = { id: uri as URI, type: type };
+      const address: BaseMemoryAddress = { id: uri as URI, type: type as MIME };
       this.store.set(this.toKey(address), revision as SimpleRevision);
     }
   }

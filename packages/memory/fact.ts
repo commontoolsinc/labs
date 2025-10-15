@@ -1,15 +1,14 @@
-import { JSONValue } from "@commontools/runner";
+import { JSONValue, URI } from "@commontools/runner";
 import {
   Assertion,
-  Entity,
   Fact,
   FactSelection,
   Invariant,
+  MIME,
   Reference,
   Retraction,
   Revision,
   State,
-  The,
   Unclaimed,
 } from "./interface.ts";
 import {
@@ -23,13 +22,13 @@ import {
  * Creates an unclaimed fact.
  */
 export const unclaimed = (
-  { the, of }: { the: The; of: Entity },
+  { the, of }: { the: MIME; of: URI },
 ): Unclaimed => ({
   the,
   of,
 });
 
-export const assert = <Is extends JSONValue, T extends The, Of extends Entity>({
+export const assert = <Is extends JSONValue, T extends MIME, Of extends URI>({
   the,
   of,
   is,
@@ -77,14 +76,14 @@ export const claimState = (state: State): Invariant => ({
 export const iterate = function* (
   selection: FactSelection,
 ): Iterable<Revision<Fact>> {
-  for (const [entity, attributes] of Object.entries(selection)) {
+  for (const [of, attributes] of Object.entries(selection)) {
     for (const [the, changes] of Object.entries(attributes)) {
       const [change] = Object.entries(changes);
       if (change) {
         const [cause, { is, since }] = change;
         yield {
-          the,
-          of: entity as Entity,
+          the: the as MIME,
+          of: of as URI,
           cause: fromString(cause),
           since,
           ...(is ? { is } : undefined),
@@ -98,8 +97,8 @@ export const iterate = function* (
 // conform), and convert it to a proper fact.
 
 export function normalizeFact<
-  T extends The,
-  Of extends Entity,
+  T extends MIME,
+  Of extends URI,
   Is extends JSONValue,
 >(
   arg: {
@@ -116,8 +115,8 @@ export function normalizeFact<
 ): Assertion<T, Of, Is>;
 
 export function normalizeFact<
-  T extends The,
-  Of extends Entity,
+  T extends MIME,
+  Of extends URI,
   Is extends JSONValue,
 >(
   arg: {
@@ -133,8 +132,8 @@ export function normalizeFact<
 ): Retraction<T, Of, Is>;
 
 export function normalizeFact<
-  T extends The,
-  Of extends Entity,
+  T extends MIME,
+  Of extends URI,
   Is extends JSONValue,
 >(
   arg: {

@@ -1,11 +1,11 @@
 import {
-  Cause,
-  Entity,
+  CauseString,
   MemorySpace,
+  MIME,
   SchemaSelector,
   Selector,
-  The,
   Transaction,
+  URI,
 } from "./interface.ts";
 import { iterate } from "./selection.ts";
 import { COMMIT_LOG_TYPE } from "./commit.ts";
@@ -78,17 +78,17 @@ export const fromSelector = function* (selector: Selector | SchemaSelector) {
       for (
         const cause of selector.length > 0 ? selector : [ANY]
       ) {
-        const selector: { of?: Entity; the?: The; cause?: Cause } = {};
+        const selector: { of?: URI; the?: MIME; cause?: CauseString } = {};
         if (of !== ANY) {
-          selector.of = of as Entity;
+          selector.of = of as URI;
         }
 
         if (the !== ANY) {
-          selector.the = the as The;
+          selector.the = the as MIME;
         }
 
         if (cause !== ANY) {
-          selector.cause = cause as Cause;
+          selector.cause = cause as CauseString;
         }
         yield selector;
       }
