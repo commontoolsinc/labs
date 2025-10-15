@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import type { DataFlowGraph, DataFlowNode } from "./dataflow.ts";
+import { getExpressionText } from "./utils.ts";
 
 export interface NormalizedDataFlow {
   readonly canonicalKey: string;
@@ -26,12 +27,10 @@ export function normalizeDataFlows(
   let nodesToProcess = graph.nodes;
   if (requestedDataFlows && requestedDataFlows.length > 0) {
     const requestedTexts = new Set(
-      requestedDataFlows.map((expr) => expr.getText(expr.getSourceFile())),
+      requestedDataFlows.map((expr) => getExpressionText(expr)),
     );
     nodesToProcess = graph.nodes.filter((node) =>
-      requestedTexts.has(
-        node.expression.getText(node.expression.getSourceFile()),
-      )
+      requestedTexts.has(getExpressionText(node.expression))
     );
   }
 
@@ -103,8 +102,7 @@ export function normalizeDataFlows(
 
   for (const node of nodesToProcess) {
     const expression = normalizeExpression(node);
-    const sourceFile = expression.getSourceFile();
-    const key = `${node.scopeId}:${expression.getText(sourceFile)}`;
+    const key = `${node.scopeId}:${getExpressionText(expression)}`;
     let group = grouped.get(key);
     if (!group) {
       group = {

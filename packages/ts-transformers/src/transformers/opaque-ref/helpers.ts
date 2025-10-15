@@ -4,6 +4,7 @@ import { createDeriveCall } from "../builtins/derive.ts";
 import {
   type DataFlowAnalysis,
   detectCallKind,
+  getExpressionText,
   type NormalizedDataFlow,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
@@ -272,13 +273,11 @@ export function createDeriveCallForExpression(
   };
   for (const entry of plan.entries) {
     const canonical = entry.dataFlow.expression;
-    const canonicalText = canonical.getText(canonical.getSourceFile());
+    const canonicalText = getExpressionText(canonical);
     addRef(canonical);
     for (const occurrence of entry.dataFlow.occurrences) {
       const normalized = normalizeForCanonical(occurrence.expression);
-      if (
-        normalized.getText(normalized.getSourceFile()) === canonicalText
-      ) {
+      if (getExpressionText(normalized) === canonicalText) {
         addRef(normalized);
       }
     }
