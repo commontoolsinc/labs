@@ -119,15 +119,8 @@ const Note = recipe<Input, Output>(
   ({ title, content, index }) => {
     const mentioned = cell<MentionableCharm[]>([]);
 
-    // Look up backlinks from the shared index
-    const backlinks: OpaqueRef<MentionableCharm[]> = lift<
-      { index: { backlinks: BacklinksMap }; content: string },
-      MentionableCharm[]
-    >(({ index, content }) => {
-      const key = content;
-      const map = index.backlinks as BacklinksMap;
-      return map[key] ?? [];
-    })({ index, content });
+    // will be populated by the BacklinksIndex
+    const backlinks: OpaqueRef<MentionableCharm[]> = cell([]);
 
     // Use shared mentionable list from index
     const mentionableSource = index.mentionable;
