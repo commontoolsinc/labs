@@ -173,14 +173,59 @@ export function createDataFlowAnalyzer(
     // Handle synthetic nodes (created by previous transformers)
     // We can't analyze them directly, but we need to visit children
     if (!expression.getSourceFile()) {
+      const exprKind = ts.SyntaxKind[expression.kind];
+      // Synthetic nodes don't have positions, so getText() will crash
+      let exprText = "<synthetic>";
+      try {
+        const printer = ts.createPrinter();
+        exprText = printer.printNode(ts.EmitHint.Unspecified, expression, expression.getSourceFile() || ts.createSourceFile("", "", ts.ScriptTarget.Latest));
+      } catch {
+        // Ignore errors
+      }
+
       // Collect analyses from all children
       const childAnalyses: InternalAnalysis[] = [];
 
-      ts.forEachChild(expression, (child) => {
+      // Helper to analyze a child expression
+      const analyzeChild = (child: ts.Node) => {
         if (ts.isExpression(child)) {
-          childAnalyses.push(analyzeExpression(child, scope, context));
+          const childAnalysis = analyzeExpression(child, scope, context);
+          childAnalyses.push(childAnalysis);
         }
-      });
+      };
+
+      // Special handling for JSX elements - ts.forEachChild doesn't traverse JSX expression children
+      if (ts.isJsxElement(expression)) {
+        // Traverse opening element attributes
+        if (expression.openingElement.attributes) {
+          expression.openingElement.attributes.properties.forEach(analyzeChild);
+        }
+        // Traverse JSX children (this is what forEachChild misses!)
+        expression.children.forEach((child) => {
+          if (ts.isJsxExpression(child) && child.expression) {
+            analyzeChild(child.expression);
+          } else {
+            analyzeChild(child);
+          }
+        });
+      } else if (ts.isJsxSelfClosingElement(expression)) {
+        // Traverse self-closing element attributes
+        if (expression.attributes) {
+          expression.attributes.properties.forEach(analyzeChild);
+        }
+      } else if (ts.isJsxFragment(expression)) {
+        // Traverse fragment children
+        expression.children.forEach((child) => {
+          if (ts.isJsxExpression(child) && child.expression) {
+            analyzeChild(child.expression);
+          } else {
+            analyzeChild(child);
+          }
+        });
+      } else {
+        // For non-JSX nodes, use the default traversal
+        ts.forEachChild(expression, analyzeChild);
+      }
 
       // Inherit properties from children
       if (childAnalyses.length > 0) {
@@ -218,9 +263,31 @@ export function createDataFlowAnalyzer(
           return merged;
         }
 
+        // For binary expressions with OpaqueRef, set requiresRewrite based on containsOpaqueRef
+        // This matches the logic in the non-synthetic code path (line 380-388)
+        if (ts.isBinaryExpression(expression)) {
+          return {
+            ...merged,
+            requiresRewrite: merged.containsOpaqueRef,
+          };
+        }
+
+        // For JSX elements, arrow functions, and other expression containers, preserve requiresRewrite from children
+        // This matches the non-synthetic code paths for these node types
+        if (
+          ts.isJsxElement(expression) ||
+          ts.isJsxFragment(expression) ||
+          ts.isJsxSelfClosingElement(expression) ||
+          ts.isParenthesizedExpression(expression) ||
+          ts.isArrowFunction(expression) ||
+          ts.isFunctionExpression(expression)
+        ) {
+          return merged;
+        }
+
+        // Other synthetic nodes don't require rewrite
         return {
           ...merged,
-          // Other synthetic nodes don't require rewrite
           requiresRewrite: false,
         };
       }
