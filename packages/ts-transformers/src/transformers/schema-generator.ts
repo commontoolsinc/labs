@@ -5,6 +5,7 @@ import {
   Transformer,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
+import { visitEachChildWithJsx } from "../ast/mod.ts";
 
 let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
@@ -91,7 +92,7 @@ export class SchemaGeneratorTransformer extends Transformer {
         return satisfiesExpression;
       }
 
-      return ts.visitEachChild(node, visit, transformation);
+      return visitEachChildWithJsx(node, visit, transformation);
     };
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;
