@@ -380,4 +380,174 @@ describe("serializableEvent", () => {
       "Should not include id on target",
     );
   });
+
+  it("serializes an event with target.dataset", () => {
+    const { document } = mock;
+    const div = document.createElement("div");
+    div.setAttribute("data-id", "123");
+    div.setAttribute("data-name", "test");
+    const event = new Event("click");
+    Object.defineProperty(event, "target", { value: div });
+    const result = serializableEvent(event) as object;
+    assert.matchObject(result, {
+      type: "click",
+      target: {
+        dataset: {
+          id: "123",
+          name: "test",
+        },
+      },
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+  });
+});
+
+describe("dataset attributes", () => {
+  it("sets data-* attributes using setAttribute", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": "123",
+        "data-name": "test",
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("data-id"), "123");
+    assert.equal(div.getAttribute("data-name"), "test");
+    // @ts-ignore: dataset exists on Element in real DOM
+    assert.equal(div.dataset.id, "123");
+    // @ts-ignore: dataset exists on Element in real DOM
+    assert.equal(div.dataset.name, "test");
+    cancel();
+  });
+
+  it("removes data-* attributes when value is null", () => {
+    const { renderOptions, document } = mock;
+    const parent = document.getElementById("root")!;
+
+    // First render with data attribute
+    const vnode1 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": "123",
+      },
+      children: [],
+    };
+    const cancel1 = renderImpl(parent, vnode1, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("data-id"), "123");
+    cancel1();
+
+    // Re-render with null value
+    const vnode2 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": null,
+      },
+      children: [],
+    };
+    const cancel2 = renderImpl(parent, vnode2, renderOptions);
+    const div2 = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div2.hasAttribute("data-id"), false);
+    cancel2();
+  });
+
+  it("removes data-* attributes when value is undefined", () => {
+    const { renderOptions, document } = mock;
+    const parent = document.getElementById("root")!;
+
+    // First render with data attribute
+    const vnode1 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": "123",
+      },
+      children: [],
+    };
+    const cancel1 = renderImpl(parent, vnode1, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("data-id"), "123");
+    cancel1();
+
+    // Re-render with undefined value
+    // @ts-ignore: Testing undefined handling even though it's not in Props type
+    const vnode2 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": undefined,
+      },
+      children: [],
+    } as VNode;
+    const cancel2 = renderImpl(parent, vnode2, renderOptions);
+    const div2 = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div2.hasAttribute("data-id"), false);
+    cancel2();
+  });
+
+  it("converts non-string values to strings for data-* attributes", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-count": 42,
+        "data-enabled": true,
+        "data-items": ["a", "b", "c"],
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("data-count"), "42");
+    assert.equal(div.getAttribute("data-enabled"), "true");
+    assert.equal(div.getAttribute("data-items"), "a,b,c");
+    cancel();
+  });
+
+  it("updates data-* attributes when value changes", () => {
+    const { renderOptions, document } = mock;
+    const parent = document.getElementById("root")!;
+
+    // First render
+    const vnode1 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": "123",
+      },
+      children: [],
+    };
+    const cancel1 = renderImpl(parent, vnode1, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("data-id"), "123");
+    cancel1();
+
+    // Update with new value
+    const vnode2 = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        "data-id": "456",
+      },
+      children: [],
+    };
+    const cancel2 = renderImpl(parent, vnode2, renderOptions);
+    const div2 = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div2.getAttribute("data-id"), "456");
+    cancel2();
+  });
 });
