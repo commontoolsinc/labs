@@ -78,6 +78,13 @@ export function isFunctionParameter(
   node: ts.Identifier,
   checker: ts.TypeChecker,
 ): boolean {
+  // Handle synthetic nodes: if the node doesn't have a source file, we can't traverse parent chain safely
+  // Synthetic identifiers from map closure transformation (like `discount`, `element`) are treated as
+  // opaque parameters, not regular function parameters
+  if (!node.getSourceFile()) {
+    return false;
+  }
+
   const symbol = checker.getSymbolAtLocation(node);
   if (symbol) {
     const declarations = symbol.getDeclarations();
@@ -112,7 +119,7 @@ export function isFunctionParameter(
   }
 
   const parent = node.parent;
-  if (ts.isParameter(parent) && parent.name === node) {
+  if (parent && ts.isParameter(parent) && parent.name === node) {
     return true;
   }
 
@@ -178,14 +185,8 @@ export function visitEachChildWithJsx(
     const children = ts.visitNodes(
       node.children,
       (child) => {
-        if (ts.isJsxExpression(child) && child.expression) {
-          // Visit the expression inside the JSX expression
-          const visitedExpression = ts.visitNode(
-            child.expression,
-            visitor,
-          ) as ts.Expression | undefined;
-          return ts.factory.updateJsxExpression(child, visitedExpression);
-        }
+        // Visit the JsxExpression node itself, not just its inner expression
+        // This allows transformers to process JsxExpression nodes
         return ts.visitNode(child, visitor);
       },
       ts.isJsxChild,
@@ -210,13 +211,7 @@ export function visitEachChildWithJsx(
     const children = ts.visitNodes(
       node.children,
       (child) => {
-        if (ts.isJsxExpression(child) && child.expression) {
-          const visitedExpression = ts.visitNode(
-            child.expression,
-            visitor,
-          ) as ts.Expression | undefined;
-          return ts.factory.updateJsxExpression(child, visitedExpression);
-        }
+        // Visit the child node itself (including JsxExpression nodes)
         return ts.visitNode(child, visitor);
       },
       ts.isJsxChild,

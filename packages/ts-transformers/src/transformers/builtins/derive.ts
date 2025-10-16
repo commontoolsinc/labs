@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
+import { getExpressionText } from "../../ast/mod.ts";
 
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -42,7 +43,8 @@ function createPropertyName(
     return ref.text;
   }
   if (ts.isPropertyAccessExpression(ref)) {
-    return ref.getText().replace(/\./g, "_");
+    // Use getExpressionText to handle both regular and synthetic nodes
+    return getExpressionText(ref).replace(/\./g, "_");
   }
   return `ref${index + 1}`;
 }
@@ -58,7 +60,8 @@ function planDeriveEntries(
   const seen = new Map<string, DeriveEntry>();
 
   refs.forEach((ref) => {
-    const key = ref.getText();
+    // Use getExpressionText to handle both regular and synthetic nodes
+    const key = getExpressionText(ref);
     let entry = seen.get(key);
     if (!entry) {
       const paramName = getSimpleName(ref) ?? `_v${entries.length + 1}`;

@@ -186,6 +186,30 @@ export function createDataFlowAnalyzer(
         // Ignore errors
       }
 
+      // Special handling for synthetic identifiers (must come BEFORE child traversal)
+      // These are likely parameters from map closure transformation (like `discount`)
+      // We can't resolve symbols for synthetic nodes, but we should treat them as opaque
+      if (ts.isIdentifier(expression)) {
+        // If it's a synthetic identifier, treat it as opaque
+        // This handles cases like `discount` where the whole identifier is synthetic
+        // We need to record it in the graph so normalizeDataFlows can find it
+        const node: DataFlowNode = {
+          id: context.nextNodeId++,
+          expression,
+          canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
+          parentId: null,
+          scopeId: scope.id,
+          isExplicit: true, // Explicit: synthetic opaque parameter
+        };
+        context.collectedNodes.push(node);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+          localNodes: [node],
+        };
+      }
+
       // Collect analyses from all children
       const childAnalyses: InternalAnalysis[] = [];
 
@@ -291,11 +315,21 @@ export function createDataFlowAnalyzer(
                         const callKind = detectCallKind(callNode as ts.CallExpression, checker);
                         if (callKind?.kind === "array-map" || callKind?.kind === "builder") {
                           // This is element.price or state.foo - return full property access as dataflow
+                          // Add to graph so normalizeDataFlows can find it
+                          const node: DataFlowNode = {
+                            id: context.nextNodeId++,
+                            expression,
+                            canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
+                            parentId: null,
+                            scopeId: scope.id,
+                            isExplicit: true, // Explicit: synthetic opaque property access
+                          };
+                          context.collectedNodes.push(node);
                           return {
                             containsOpaqueRef: true,
                             requiresRewrite: true,
                             dataFlows: [expression],
-                            localNodes: [],
+                            localNodes: [node],
                           };
                         }
                       }
@@ -310,11 +344,21 @@ export function createDataFlowAnalyzer(
               // a property access on a simple identifier (not a complex expression),
               // treat it as an opaque property access that needs derive wrapping.
               // This handles cases like `element.price` where `element` is synthetic.
+              // Add to graph so normalizeDataFlows can find it
+              const node: DataFlowNode = {
+                id: context.nextNodeId++,
+                expression,
+                canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
+                parentId: null,
+                scopeId: scope.id,
+                isExplicit: true, // Explicit: synthetic opaque property access
+              };
+              context.collectedNodes.push(node);
               return {
                 containsOpaqueRef: true,
                 requiresRewrite: true,
                 dataFlows: [expression],
-                localNodes: [],
+                localNodes: [node],
               };
             }
           }
@@ -329,6 +373,15 @@ export function createDataFlowAnalyzer(
           return {
             ...merged,
             requiresRewrite: merged.containsOpaqueRef,
+          };
+        }
+
+        // For conditional expressions, set requiresRewrite to true if they contain opaque refs
+        // This matches the non-synthetic code path for conditional expressions (line 720)
+        if (ts.isConditionalExpression(expression)) {
+          return {
+            ...merged,
+            requiresRewrite: true,
           };
         }
 

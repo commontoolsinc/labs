@@ -75,7 +75,7 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { scale } }) => (<div>
-            Point: ({element.x * scale}, {element.y * scale})
+            Point: ({__ctHelpers.derive({ element_x: element.x, scale }, ({ element_x: _v1, scale: scale }) => _v1 * scale)}, {__ctHelpers.derive({ element_y: element.y, scale }, ({ element_y: _v1, scale: scale }) => _v1 * scale)})
           </div>)), { scale: state.scale })}
       </div>),
     };

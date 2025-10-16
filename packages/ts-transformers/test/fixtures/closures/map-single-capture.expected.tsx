@@ -54,7 +54,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount } }) => (<span>{__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price, discount }) => element_price * discount)}</span>)), { discount: state.discount })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount } }) => (<span>{__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price: _v1, discount: discount }) => _v1 * discount)}</span>)), { discount: state.discount })}
       </div>),
     };
 });
