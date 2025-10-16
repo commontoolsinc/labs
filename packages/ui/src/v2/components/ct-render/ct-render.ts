@@ -159,24 +159,13 @@ export class CTRender extends BaseElement {
       throw new Error("Render container not found");
     }
 
-    await this._maybeSyncCell(cell);
+    await cell.sync();
 
     this._log("rendering UI");
     this._cleanup = render(this._renderContainer, cell as Cell);
   }
 
-  private async _maybeSyncCell(cell: Cell<unknown>) {
-    if (isCell(cell)) {
-      await cell.sync();
-    }
-  }
-
-  private _getRecipeId(cell: Cell<unknown>): string | undefined {
-    return getRecipeIdFromCharm(cell);
-  }
-
   private _isSubPath(cell: Cell<unknown>): boolean {
-    if (!isCell(cell)) return false;
     try {
       const link = cell.getAsNormalizedFullLink();
       return Array.isArray(link?.path) && link.path.length > 0;
@@ -206,17 +195,13 @@ export class CTRender extends BaseElement {
       // Clean up any previous render
       this._cleanupPreviousRender();
 
-      if (!isCell(this.cell)) {
-        throw new Error("Invalid cell: expected a Cell object");
-      }
-
       const isSubPath = this._isSubPath(this.cell);
 
       if (isSubPath) {
         this._log("cell is a subpath, rendering directly");
         await this._renderUiFromCell(this.cell);
       } else {
-        const recipeId = this._getRecipeId(this.cell);
+        const recipeId = getRecipeIdFromCharm(this.cell);
         if (recipeId) {
           await this._loadAndRenderRecipe(recipeId);
         } else {
@@ -240,11 +225,6 @@ export class CTRender extends BaseElement {
       this._log("cleaning up previous render");
       this._cleanup();
       this._cleanup = undefined;
-    }
-
-    // Clear the container
-    if (this._renderContainer) {
-      this._renderContainer.innerHTML = "";
     }
   }
 
