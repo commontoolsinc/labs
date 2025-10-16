@@ -43,9 +43,36 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
-        {state.items.map((item) => (<div>
-            Item: {__ctHelpers.derive(item.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
-          </div>))}
+        {state.items.mapWithPattern(__ctHelpers.recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["id", "price"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div>
+            Item: {__ctHelpers.derive(element.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
+          </div>)), {})}
       </div>),
     };
 });

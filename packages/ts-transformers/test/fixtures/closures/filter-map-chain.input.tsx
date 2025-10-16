@@ -21,7 +21,7 @@ export default recipe<State>("FilterMapChain", (state) => {
           .filter((item) => item.active)
           .map((item) => (
             <div>
-              Total: ${item.price * (1 + state.taxRate)}
+              Total: {item.price * (1 + state.taxRate)}
             </div>
           ))}
       </div>

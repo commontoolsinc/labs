@@ -112,12 +112,12 @@ export default recipe({
               <span>{element.name}</span>
               <span>- Original: ${element.price}</span>
               <span>
-                - Discounted: ${__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price, discount }) => (element_price * (1 - discount)).toFixed(2))}
+                - Discounted: ${__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price: _v1, discount: discount }) => (_v1 * (1 - discount)).toFixed(2))}
               </span>
               <span>
                 - With tax:
-                ${__ctHelpers.derive({ element_price: element.price, discount, taxRate }, ({ element_price, discount, taxRate }) => (element_price * (1 - discount) * (1 + taxRate))
-                    .toFixed(2))}
+                ${__ctHelpers.derive({ element_price: element.price, discount, taxRate }, ({ element_price: _v1, discount: discount, taxRate: taxRate }) => (_v1 * (1 - discount) * (1 + taxRate))
+                .toFixed(2))}
               </span>
             </li>)), { discount: state.discount, taxRate: state.taxRate })}
         </ul>

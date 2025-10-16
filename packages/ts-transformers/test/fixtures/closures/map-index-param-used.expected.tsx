@@ -78,7 +78,7 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: { offset } }) => (<div>
-            Item #{__ctHelpers.derive({ index, offset }, ({ index, offset }) => index + offset)}: {element.name}
+            Item #{__ctHelpers.derive({ index, offset }, ({ index: index, offset: offset }) => index + offset)}: {element.name}
           </div>)), { offset: state.offset })}
       </div>),
     };
