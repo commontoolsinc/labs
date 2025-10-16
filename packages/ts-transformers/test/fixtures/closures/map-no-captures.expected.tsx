@@ -37,7 +37,30 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* No captures - just uses the callback parameter */}
-        {state.items.map((item) => (<div>Item #{item.id}: ${item.price}</div>))}
+        {state.items.mapWithPattern(__ctHelpers.recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                properties: {
+                    item: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["item"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["id", "price"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ item }) => (<div>Item #{item.id}: ${item.price}</div>)), {})}
       </div>),
     };
 });

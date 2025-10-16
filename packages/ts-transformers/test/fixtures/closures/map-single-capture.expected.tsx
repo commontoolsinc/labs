@@ -33,7 +33,7 @@ export default recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
-                    element: {
+                    item: {
                         type: "object",
                         properties: {
                             price: {
@@ -42,7 +42,7 @@ export default recipe({
                         },
                         required: ["price"]
                     },
-                    params: {
+                    state: {
                         type: "object",
                         properties: {
                             discount: {
@@ -53,8 +53,8 @@ export default recipe({
                         required: ["discount"]
                     }
                 },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount } }) => (<span>{__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price, discount }) => element_price * discount)}</span>)), { discount: state.discount })}
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, ({ item, state }) => (<span>{__ctHelpers.derive({ item_price: item.price, state_discount: state.discount }, ({ item_price: _v1, state_discount: _v2 }) => _v1 * _v2)}</span>)), { state: { discount: state.discount } })}
       </div>),
     };
 });

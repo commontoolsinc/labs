@@ -50,10 +50,10 @@ export default recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
-                    element: {
+                    item: {
                         $ref: "#/$defs/Item"
                     },
-                    params: {
+                    state: {
                         type: "object",
                         properties: {
                             discount: {
@@ -63,16 +63,16 @@ export default recipe({
                             taxRate: {
                                 type: "number",
                                 asOpaque: true
-                            },
-                            multiplier: {
-                                type: "number",
-                                enum: [2]
                             }
                         },
-                        required: ["discount", "taxRate", "multiplier"]
+                        required: ["discount", "taxRate"]
+                    },
+                    multiplier: {
+                        type: "number",
+                        enum: [2]
                     }
                 },
-                required: ["element", "params"],
+                required: ["item", "state", "multiplier"],
                 $defs: {
                     Item: {
                         type: "object",
@@ -87,9 +87,9 @@ export default recipe({
                         required: ["price", "quantity"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount, taxRate, multiplier } }) => (<span>
-            Total: {__ctHelpers.derive({ element_price: element.price, element_quantity: element.quantity, discount, taxRate, multiplier }, ({ element_price, element_quantity, discount, taxRate, multiplier }) => element_price * element_quantity * discount * taxRate * multiplier + shippingCost)}
-          </span>)), { discount: state.discount, taxRate: state.taxRate, multiplier: multiplier })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ item, state, multiplier }) => (<span>
+            Total: {__ctHelpers.derive({ item_price: item.price, item_quantity: item.quantity, state_discount: state.discount, state_taxRate: state.taxRate }, ({ item_price: _v1, item_quantity: _v2, state_discount: _v3, state_taxRate: _v4 }) => _v1 * _v2 * _v3 * _v4 * multiplier + shippingCost)}
+          </span>)), { state: { discount: state.discount, taxRate: state.taxRate }, multiplier: multiplier })}
       </div>),
     };
 });
