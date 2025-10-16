@@ -18,9 +18,9 @@ Before ever calling `ct` you MUST read `docs/common/CT.md`.
 
 ### Recipe Development
 
-Whenever you work on recipes, look in the `recipes` folder provided by the user
-for the `RECIPES.md` and `COMPONENTS.md` files. These are your bible. You can
-re-read `.claude/commands/recipe-dev.md` any time to refresh your memory.
+Whenever you work on patterns (sometimes called recipes), consult the `patterns` package for a set of well-tested minimal examples. To learn more about the pattern framework, consult `docs/common/*.md` and `tutorials/*.md`.  You should re-read `.claude/commands/recipe-dev.md` when confused to refresh your memory on `ct` and deploying charms.
+
+These patterns are composed using functions from `packages/builder` and executed by our runtime in `packages/runner`, managed by `packages/charm` and rendered by `packages/html`
 
 ### Formatting
 
@@ -57,6 +57,7 @@ re-read `.claude/commands/recipe-dev.md` any time to refresh your memory.
 - Structure tests with `@std/testing/bdd` (`describe`/`it`).
 - Use `@std/expect` for assertions.
 - Give tests descriptive names.
+- Run using `deno task test` NOT `deno test`, the flags are important
 
 ## Good Patterns & Practices
 
