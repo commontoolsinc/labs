@@ -278,6 +278,7 @@ interface OptJSONObject {
 export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
   constructor(
     protected manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+    protected cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {}
   abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
 
@@ -324,6 +325,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           doc,
           [],
           tracker,
+          this.cfc,
           schemaTracker,
           DefaultSchemaSelector,
         );
@@ -366,6 +368,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents pointer cycles
+ * @param cfc: ContextualFlowControl with classification rules
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  *
@@ -378,6 +381,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
   doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
+  cfc: ContextualFlowControl,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
@@ -389,6 +393,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
       curDoc,
       remaining,
       tracker,
+      cfc,
       schemaTracker,
       selector,
     );
@@ -429,6 +434,7 @@ export function getAtPath<S extends BaseMemoryAddress>(
         curDoc,
         remaining,
         tracker,
+        cfc,
         schemaTracker,
         selector,
       );
@@ -451,8 +457,9 @@ function notFound(address: BaseMemoryAddress): IAttestation {
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents infinite pointer cycles
+ * @param cfc: ContextualFlowControl with classification rules
  * @param schemaTracker: Tracks schema to use for loaded docs
- * @param selector?: SchemaPathSelector used to query the target doc
+ * @param selector: SchemaPathSelector used to query the target doc
  *
  * @returns an IAttestation object with the target doc, docRoot, path, and value.
  */
@@ -461,6 +468,7 @@ function followPointer<S extends BaseMemoryAddress>(
   doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
+  cfc: ContextualFlowControl,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
@@ -481,6 +489,7 @@ function followPointer<S extends BaseMemoryAddress>(
       doc.address.path.slice(1),
       selector,
       link.path as string[],
+      cfc,
     );
   }
   using t = tracker.include(doc.value!, selector?.schemaContext, doc);
@@ -531,6 +540,7 @@ function followPointer<S extends BaseMemoryAddress>(
     targetDoc,
     [...link.path, ...path] as string[],
     tracker,
+    cfc,
     schemaTracker,
     selector,
   );
@@ -631,6 +641,7 @@ function narrowSchema(
   docPath: readonly string[],
   selector: SchemaPathSelector,
   targetPath: readonly string[],
+  cfc: ContextualFlowControl,
 ): SchemaPathSelector {
   let pathIndex = 0;
   while (pathIndex < docPath.length && pathIndex < selector.path.length) {
@@ -644,7 +655,6 @@ function narrowSchema(
     // we've reached the end of our selector path, but still have parts in our doc path, so narrow the schema
     // Some of the schema may have been applicable to other parts of the doc, but we only want to use the
     // portion that will apply to the next doc.
-    const cfc = new ContextualFlowControl();
     const schema = cfc.schemaAtPath(
       selector.schemaContext!.schema,
       docPath.slice(pathIndex),
@@ -739,6 +749,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
         doc,
         selector.path.slice(valuePath.length),
         this.tracker,
+        this.cfc,
         this.schemaTracker,
         selector,
       );
@@ -962,6 +973,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       doc,
       [],
       this.tracker,
+      this.cfc,
       this.schemaTracker,
       selector,
     );
