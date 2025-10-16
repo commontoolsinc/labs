@@ -1,4 +1,4 @@
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Cancel,
   type Cell,
@@ -322,10 +322,23 @@ const listen = (
 };
 
 const setProp = <T>(target: T, key: string, value: unknown) => {
-  // @ts-ignore - we've validated these via runtime checks
-  if (target[key] !== value) {
-    // @ts-ignore - we've validated these via runtime checks
-    target[key] = value;
+  // Handle data-* attributes specially - they need to be set as HTML attributes
+  // to populate the dataset property correctly
+  if (key.startsWith("data-") && target instanceof Element) {
+    // If value is null or undefined, remove the attribute
+    if (value == null) {
+      if (target.hasAttribute(key)) {
+        target.removeAttribute(key);
+      }
+    } else {
+      const currentValue = target.getAttribute(key);
+      const newValue = String(value);
+      if (currentValue !== newValue) {
+        target.setAttribute(key, newValue);
+      }
+    }
+  } else if (target[key as keyof T] !== value) {
+    target[key as keyof T] = value as T[keyof T];
   }
 };
 
@@ -413,6 +426,18 @@ export function serializableEvent<T>(event: Event): T {
       .map(
         (option) => ({ value: option.value }),
       );
+  }
+
+  // Copy dataset as a plain object for serialization
+  if (isObject(target) && "dataset" in target && isRecord(target.dataset)) {
+    const dataset: Record<string, string> = {};
+    for (const key in target.dataset) {
+      // String() to normalize, just in case
+      dataset[key] = String(target.dataset[key]);
+    }
+    if (Object.keys(dataset).length > 0) {
+      targetObject.dataset = dataset;
+    }
   }
 
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
