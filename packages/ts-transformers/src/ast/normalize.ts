@@ -183,3 +183,36 @@ export function selectDataFlowsWithin(
     )
   );
 }
+
+/**
+ * Selects data flows that are referenced (used) within a node, based on expression text matching.
+ * This is complementary to selectDataFlowsWithin, which uses position-based checking.
+ *
+ * This is particularly useful for finding parameter references where the parameter declaration
+ * is outside the node (e.g., in conditional branches of ternary expressions).
+ *
+ * @param set The normalized data flow set to filter
+ * @param node The node to check for references within
+ * @returns Data flows whose expressions are referenced within the node
+ */
+export function selectDataFlowsReferencedIn(
+  set: NormalizedDataFlowSet,
+  node: ts.Node,
+): NormalizedDataFlow[] {
+  const referencedExpressions = new Set<string>();
+
+  // Find all expressions used in the node
+  const visit = (n: ts.Node) => {
+    if (ts.isExpression(n)) {
+      referencedExpressions.add(getExpressionText(n));
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+
+  // Return data flows whose expression text matches any referenced expression
+  return set.all.filter((dataFlow) => {
+    const flowExprText = getExpressionText(dataFlow.expression);
+    return referencedExpressions.has(flowExprText);
+  });
+}
