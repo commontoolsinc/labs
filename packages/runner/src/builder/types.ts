@@ -63,6 +63,7 @@ export type {
   CreateCellFunction,
   Handler,
   HandlerFactory,
+  JSONArray,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,

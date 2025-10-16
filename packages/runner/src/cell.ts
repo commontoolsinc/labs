@@ -6,6 +6,8 @@ import {
   ID,
   ID_FIELD,
   isStreamValue,
+  JSONArray,
+  JSONObject,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
@@ -171,6 +173,7 @@ declare module "@commontools/api" {
       values: V extends object ? V : never,
     ): void;
     push(
+      this: Cell<JSONArray | JSONObject>,
       ...value: Array<
         | (T extends Array<infer U> ? (Cellify<U> | U) : any)
         | Cell
@@ -178,6 +181,7 @@ declare module "@commontools/api" {
     ): void;
     equals(other: any): boolean;
     key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+      this: Cell<JSONArray | JSONObject>,
       valueKey: K,
     ): Cell<
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
@@ -519,14 +523,19 @@ export class RegularCell<T> implements Cell<T> {
     }
   }
 
-  push(...value: T extends Array<infer U> ? U[] : never): void;
   push(
+    this: RegularCell<JSONArray | JSONObject>,
+    ...value: T extends Array<infer U> ? U[] : never
+  ): void;
+  push(
+    this: RegularCell<JSONArray | JSONObject>,
     ...value: Array<
       | (T extends Array<infer U> ? (Cellify<U> | U) : any)
       | Cell
     >
   ): void;
   push(
+    this: RegularCell<JSONArray | JSONObject>,
     ...value: any[]
   ): void {
     if (!this.tx) throw new Error("Transaction required for push");
