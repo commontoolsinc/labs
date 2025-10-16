@@ -2,7 +2,7 @@ import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
-import { getExpressionText, selectDataFlowsWithin } from "../../../ast/mod.ts";
+import { selectDataFlowsReferencedIn } from "../../../ast/mod.ts";
 import type { NormalizedDataFlowSet } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
@@ -10,30 +10,6 @@ import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
-
-// Helper to find data flows that are referenced in an expression
-// This is needed for parameters which don't have positional occurrences within the expression
-function selectDataFlowsReferencedIn(
-  set: NormalizedDataFlowSet,
-  node: ts.Node,
-): typeof set.all {
-  const referencedExpressions = new Set<string>();
-
-  // Find all expressions used in the node
-  const visit = (n: ts.Node) => {
-    if (ts.isExpression(n)) {
-      referencedExpressions.add(getExpressionText(n));
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(node);
-
-  // Return data flows whose expression text matches any referenced expression
-  return set.all.filter((dataFlow) => {
-    const flowExprText = getExpressionText(dataFlow.expression);
-    return referencedExpressions.has(flowExprText);
-  });
-}
 
 // Helper to process a conditional branch (whenTrue/whenFalse)
 function processBranch(

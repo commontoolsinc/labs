@@ -3,7 +3,6 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
   detectCallKind,
-  getExpressionText,
   isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -60,8 +59,6 @@ function transform(context: TransformationContext): ts.SourceFile {
       if (!node.expression) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
-
-      const exprText = getExpressionText(node.expression);
 
       if (isEventHandlerJsxAttribute(node)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);

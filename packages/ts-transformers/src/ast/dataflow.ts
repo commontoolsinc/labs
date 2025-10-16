@@ -49,20 +49,6 @@ export interface DataFlowAnalysis {
   rewriteHint?: RewriteHint;
 }
 
-export function dedupeExpressions(
-  expressions: ts.Expression[],
-  sourceFile: ts.SourceFile,
-): ts.Expression[] {
-  const seen = new Map<string, ts.Expression>();
-  for (const expr of expressions) {
-    const key = getExpressionText(expr);
-    if (!seen.has(key)) {
-      seen.set(key, expr);
-    }
-  }
-  return Array.from(seen.values());
-}
-
 interface DataFlowScopeInternal {
   readonly id: number;
   readonly parentId: number | null;
@@ -176,17 +162,18 @@ export function createDataFlowAnalyzer(
     // Handle synthetic nodes (created by previous transformers)
     // We can't analyze them directly, but we need to visit children
     if (!expression.getSourceFile()) {
-      const exprKind = ts.SyntaxKind[expression.kind];
       // Synthetic nodes don't have positions, so getText() will crash
-      let exprText = "<synthetic>";
+      // We don't currently use the printed text, but keep it for debugging
       try {
         const printer = ts.createPrinter();
-        exprText = printer.printNode(
+        const _exprText = printer.printNode(
           ts.EmitHint.Unspecified,
           expression,
           expression.getSourceFile() ||
             ts.createSourceFile("", "", ts.ScriptTarget.Latest),
         );
+        // _exprText could be logged for debugging if needed
+        void _exprText;
       } catch {
         // Ignore errors
       }
