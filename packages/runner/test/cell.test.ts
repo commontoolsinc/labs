@@ -590,6 +590,96 @@ describe("createProxy", () => {
     expect(proxy.nested.arrays[0][0]).toBe(1);
   });
 
+  it("should support spreading array query results with for...of", () => {
+    const c = runtime.getCell<{ items: { name: string }[] }>(
+      space,
+      "should support spreading array query results",
+      undefined,
+      tx,
+    );
+    c.set({ items: [{ name: "a" }, { name: "b" }, { name: "c" }] });
+    const proxy = c.getAsQueryResult();
+
+    // Use for...of loop to iterate over the array
+    const collected: any[] = [];
+    for (const item of proxy.items) {
+      collected.push(item);
+    }
+
+    expect(collected.length).toBe(3);
+
+    // Each element should be a query result proxy (for objects)
+    expect(isQueryResult(collected[0])).toBe(true);
+    expect(isQueryResult(collected[1])).toBe(true);
+    expect(isQueryResult(collected[2])).toBe(true);
+
+    // We can access properties through the proxies
+    expect(collected[0].name).toBe("a");
+    expect(collected[1].name).toBe("b");
+    expect(collected[2].name).toBe("c");
+  });
+
+  it("should support spreading array query results with spread operator", () => {
+    const c = runtime.getCell<{ items: { id: number }[] }>(
+      space,
+      "should support spreading array with spread operator",
+      undefined,
+      tx,
+    );
+    c.set({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+    const proxy = c.getAsQueryResult();
+
+    // Spread the array into a new array
+    const spread = [...proxy.items];
+
+    expect(spread.length).toBe(3);
+
+    // Each element should be a query result proxy (for objects)
+    expect(isQueryResult(spread[0])).toBe(true);
+    expect(isQueryResult(spread[1])).toBe(true);
+    expect(isQueryResult(spread[2])).toBe(true);
+
+    // Verify we can access properties
+    expect(spread[0].id).toBe(1);
+    expect(spread[1].id).toBe(2);
+    expect(spread[2].id).toBe(3);
+  });
+
+  it("should support spreading nested array query results", () => {
+    const c = runtime.getCell<{ nested: { data: { value: number }[][] } }>(
+      space,
+      "should support spreading nested arrays",
+      undefined,
+      tx,
+    );
+    c.set({
+      nested: {
+        data: [[{ value: 1 }, { value: 2 }], [{ value: 3 }, { value: 4 }]],
+      },
+    });
+    const proxy = c.getAsQueryResult();
+
+    // Spread the outer array
+    const outerSpread = [...proxy.nested.data];
+    expect(outerSpread.length).toBe(2);
+
+    // Each inner array should be a query result proxy
+    expect(isQueryResult(outerSpread[0])).toBe(true);
+    expect(isQueryResult(outerSpread[1])).toBe(true);
+
+    // Spread an inner array
+    const innerSpread = [...outerSpread[0]];
+    expect(innerSpread.length).toBe(2);
+
+    // Elements of the inner array should also be query result proxies (for objects)
+    expect(isQueryResult(innerSpread[0])).toBe(true);
+    expect(isQueryResult(innerSpread[1])).toBe(true);
+
+    // Verify we can access properties
+    expect(innerSpread[0].value).toBe(1);
+    expect(innerSpread[1].value).toBe(2);
+  });
+
   it.skip("should support pop() and only read the popped element", () => {
     const c = runtime.getCell<{ a: number[] }>(
       space,

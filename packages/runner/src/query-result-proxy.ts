@@ -123,6 +123,26 @@ export function createQueryResultProxy<T>(
           return () => createCell(runtime, link, tx, true);
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(link);
+        } else if (prop === Symbol.iterator && Array.isArray(target)) {
+          return function () {
+            let index = 0;
+            return {
+              next() {
+                if (index < target.length) {
+                  const result = {
+                    value: createQueryResultProxy(runtime, tx, {
+                      ...link,
+                      path: [...link.path, String(index)],
+                    }, depth + 1),
+                    done: false,
+                  };
+                  index++;
+                  return result;
+                }
+                return { done: true };
+              },
+            };
+          };
         }
 
         const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
