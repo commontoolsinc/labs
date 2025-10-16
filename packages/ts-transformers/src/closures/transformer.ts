@@ -354,18 +354,118 @@ function isOpaqueRefArrayMapCall(
 }
 
 /**
- * Extract the root identifier name from an expression.
- * For property access like state.discount, returns "discount".
- * For plain identifiers, returns the identifier name.
+ * Represents a hierarchical property path for a captured expression.
+ * E.g., state.pricing.discount → { root: "state", path: ["pricing", "discount"] }
  */
-function getCaptureName(expr: ts.Expression): string | undefined {
-  if (ts.isPropertyAccessExpression(expr)) {
-    // For state.discount, capture as "discount"
-    return expr.name.text;
-  } else if (ts.isIdentifier(expr)) {
-    return expr.text;
+interface CapturePathInfo {
+  readonly root: string;
+  readonly path: readonly string[];
+  readonly expression: ts.Expression;
+}
+
+/**
+ * Parse a captured expression into root identifier + property path.
+ * Examples:
+ *   state.discount → { root: "state", path: ["discount"] }
+ *   state.pricing.discount → { root: "state", path: ["pricing", "discount"] }
+ *   discount → { root: "discount", path: [] }
+ */
+function parseCaptureExpression(expr: ts.Expression): CapturePathInfo | undefined {
+  if (ts.isIdentifier(expr)) {
+    // Simple identifier - no path
+    return {
+      root: expr.text,
+      path: [],
+      expression: expr,
+    };
   }
+
+  if (ts.isPropertyAccessExpression(expr)) {
+    // Build path from right to left
+    const path: string[] = [];
+    let current: ts.Expression = expr;
+
+    while (ts.isPropertyAccessExpression(current)) {
+      path.unshift(current.name.text);
+      current = current.expression;
+    }
+
+    if (ts.isIdentifier(current)) {
+      return {
+        root: current.text,
+        path,
+        expression: expr,
+      };
+    }
+  }
+
   return undefined;
+}
+
+/**
+ * Node in a hierarchical capture tree.
+ */
+interface CaptureTreeNode {
+  properties: Map<string, CaptureTreeNode>;
+  expressions: ts.Expression[];
+}
+
+/**
+ * Group captured expressions by root identifier into hierarchical structure.
+ *
+ * Example:
+ *   Input: [state.discount, state.taxRate, config.url]
+ *   Output: {
+ *     "state": {
+ *       properties: {
+ *         "discount": { properties: {}, expressions: [state.discount] },
+ *         "taxRate": { properties: {}, expressions: [state.taxRate] }
+ *       },
+ *       expressions: []
+ *     },
+ *     "config": {
+ *       properties: {
+ *         "url": { properties: {}, expressions: [config.url] }
+ *       },
+ *       expressions: []
+ *     }
+ *   }
+ */
+function groupCapturesByRoot(
+  captureExpressions: Set<ts.Expression>,
+): Map<string, CaptureTreeNode> {
+  const rootMap = new Map<string, CaptureTreeNode>();
+
+  for (const expr of captureExpressions) {
+    const pathInfo = parseCaptureExpression(expr);
+    if (!pathInfo) continue;
+
+    const { root, path } = pathInfo;
+
+    // Get or create root node
+    if (!rootMap.has(root)) {
+      rootMap.set(root, { properties: new Map(), expressions: [] });
+    }
+    const rootNode = rootMap.get(root)!;
+
+    if (path.length === 0) {
+      // Simple identifier - store at root level
+      rootNode.expressions.push(expr);
+    } else {
+      // Property access - build nested structure
+      let currentNode = rootNode;
+      for (const prop of path) {
+        if (!currentNode.properties.has(prop)) {
+          currentNode.properties.set(prop, { properties: new Map(), expressions: [] });
+        }
+        currentNode = currentNode.properties.get(prop)!;
+      }
+      // Store expression at leaf node
+      currentNode.expressions.push(expr);
+    }
+  }
+
+  return rootMap;
 }
 
 /**
@@ -404,60 +504,167 @@ function determineElementType(
 }
 
 /**
- * Build params object type properties for captured variables.
+ * Build type properties for a capture tree node recursively.
+ * Creates nested object types for hierarchical captures.
  */
-function buildParamsProperties(
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
+function buildCaptureTypeProperties(
+  node: CaptureTreeNode,
   context: TransformationContext,
 ): ts.TypeElement[] {
   const { factory, checker } = context;
   const typeRegistry = context.options.typeRegistry;
-  const paramsProperties: ts.TypeElement[] = [];
+  const properties: ts.TypeElement[] = [];
 
-  for (const varName of capturedVarNames) {
-    const expr = captures.get(varName);
-    if (!expr) continue;
+  // Add properties for nested captures
+  for (const [propName, childNode] of node.properties) {
+    if (childNode.properties.size > 0 || childNode.expressions.length > 1) {
+      // This property has nested structure - create nested object type
+      const nestedProperties = buildCaptureTypeProperties(childNode, context);
+      const nestedTypeNode = factory.createTypeLiteralNode(nestedProperties);
 
-    // Get the Type of the captured expression
-    const exprType = checker.getTypeAtLocation(expr);
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier(propName),
+          undefined,
+          nestedTypeNode,
+        ),
+      );
+    } else if (childNode.expressions.length === 1) {
+      // Leaf property - get type from expression
+      const expr = childNode.expressions[0]!;
+      const exprType = checker.getTypeAtLocation(expr);
+      const typeNode = checker.typeToTypeNode(
+        exprType,
+        context.sourceFile,
+        ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-    // Convert Type to TypeNode
-    const typeNode = checker.typeToTypeNode(
-      exprType,
-      context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      if (typeRegistry) {
+        typeRegistry.set(typeNode, exprType);
+      }
 
-    // Register this property's TypeNode with its Type
-    if (typeRegistry) {
-      typeRegistry.set(typeNode, exprType);
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier(propName),
+          undefined,
+          typeNode,
+        ),
+      );
     }
-
-    paramsProperties.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier(varName),
-        undefined,
-        typeNode,
-      ),
-    );
   }
 
-  return paramsProperties;
+  // Add properties for expressions at this level (simple identifiers)
+  for (const expr of node.expressions) {
+    if (ts.isIdentifier(expr)) {
+      const exprType = checker.getTypeAtLocation(expr);
+      const typeNode = checker.typeToTypeNode(
+        exprType,
+        context.sourceFile,
+        ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      if (typeRegistry) {
+        typeRegistry.set(typeNode, exprType);
+      }
+
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier(expr.text),
+          undefined,
+          typeNode,
+        ),
+      );
+    }
+  }
+
+  return properties;
+}
+
+/**
+ * Build hierarchical params properties from capture tree.
+ */
+function buildHierarchicalParamsProperties(
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.TypeElement[] {
+  const properties: ts.TypeElement[] = [];
+  const { factory } = context;
+
+  for (const [rootName, rootNode] of captureTree) {
+    if (rootNode.properties.size > 0) {
+      // Root has nested properties - create nested object type
+      const nestedProperties = buildCaptureTypeProperties(rootNode, context);
+      const nestedTypeNode = factory.createTypeLiteralNode(nestedProperties);
+
+      properties.push(
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier(rootName),
+          undefined,
+          nestedTypeNode,
+        ),
+      );
+    } else if (rootNode.expressions.length > 0) {
+      // Simple identifier at root level
+      const expr = rootNode.expressions[0]!;
+      if (ts.isIdentifier(expr)) {
+        const exprType = context.checker.getTypeAtLocation(expr);
+        const typeNode = context.checker.typeToTypeNode(
+          exprType,
+          context.sourceFile,
+          ts.NodeBuilderFlags.NoTruncation |
+            ts.NodeBuilderFlags.UseStructuralFallback,
+        ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+        if (context.options.typeRegistry) {
+          context.options.typeRegistry.set(typeNode, exprType);
+        }
+
+        properties.push(
+          factory.createPropertySignature(
+            undefined,
+            factory.createIdentifier(rootName),
+            undefined,
+            typeNode,
+          ),
+        );
+      }
+    }
+  }
+
+  return properties;
+}
+
+/**
+ * Get the original parameter name from a parameter declaration.
+ * Handles both simple identifiers and destructured patterns.
+ */
+function getOriginalParamName(
+  param: ts.ParameterDeclaration | undefined,
+  fallback: string,
+): string {
+  if (!param) return fallback;
+  if (ts.isIdentifier(param.name)) {
+    return param.name.text;
+  }
+  // For destructured params, use fallback
+  return fallback;
 }
 
 /**
  * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
- * Returns a TypeLiteral representing { element: T, index?: number, params: {...} }
+ * Now returns a TypeLiteral with original parameter names: { item: T, index?: number, state: {...}, ... }
  */
 function buildCallbackParamTypeNode(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.TypeNode {
   const { factory } = context;
@@ -469,44 +676,40 @@ function buildCallbackParamTypeNode(
     context,
   );
 
-  // 2. Build callback parameter properties
+  // 2. Get original parameter name (or fallback to "element")
+  const elemParamName = getOriginalParamName(elemParam, "element");
+
+  // 3. Build callback parameter properties
   const callbackParamProperties: ts.TypeElement[] = [
     factory.createPropertySignature(
       undefined,
-      factory.createIdentifier("element"),
+      factory.createIdentifier(elemParamName),
       undefined,
       elemTypeNode,
     ),
   ];
 
-  // 3. Add optional index property if present
+  // 4. Add optional index property if present
   if (indexParam) {
+    const indexParamName = getOriginalParamName(indexParam, "index");
     callbackParamProperties.push(
       factory.createPropertySignature(
         undefined,
-        factory.createIdentifier("index"),
+        factory.createIdentifier(indexParamName),
         factory.createToken(ts.SyntaxKind.QuestionToken),
         factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
       ),
     );
   }
 
-  // 4. Build params object type with captured variables
-  const paramsProperties = buildParamsProperties(
-    capturedVarNames,
-    captures,
+  // 5. Build hierarchical params properties from capture tree
+  const hierarchicalParams = buildHierarchicalParamsProperties(
+    captureTree,
     context,
   );
 
-  // 5. Add params property
-  callbackParamProperties.push(
-    factory.createPropertySignature(
-      undefined,
-      factory.createIdentifier("params"),
-      undefined,
-      factory.createTypeLiteralNode(paramsProperties),
-    ),
-  );
+  // 6. Add all captured root properties directly to callback param
+  callbackParamProperties.push(...hierarchicalParams);
 
   return factory.createTypeLiteralNode(callbackParamProperties);
 }
@@ -690,20 +893,27 @@ function createMapTransformVisitor(
 }
 
 /**
- * Transform references to original element parameter to use "element" instead.
+ * Transform references to original element parameter if it was renamed.
+ * With hierarchical params, we keep the original name, so this is rarely needed.
+ * Only used when the parameter name itself needs normalization (e.g., collision resolution).
  */
 function transformElementReferences(
   body: ts.ConciseBody,
   elemParam: ts.ParameterDeclaration | undefined,
+  targetName: string,
   factory: ts.NodeFactory,
 ): ts.ConciseBody {
   const elemName = elemParam?.name;
 
-  // Replace references to the original param with element
-  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "element") {
+  // Only rename if we have an identifier parameter that differs from target
+  if (
+    elemName &&
+    ts.isIdentifier(elemName) &&
+    elemName.text !== targetName
+  ) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && node.text === elemName.text) {
-        return factory.createIdentifier("element");
+        return factory.createIdentifier(targetName);
       }
       return visitEachChildWithJsx(node, visitor, undefined);
     };
@@ -714,11 +924,13 @@ function transformElementReferences(
 }
 
 /**
- * Transform destructured property references to use element.prop.
+ * Transform destructured property references to use paramName.prop.
+ * E.g., ({ price }) => price * 2 becomes (item) => item.price * 2
  */
 function transformDestructuredProperties(
   body: ts.ConciseBody,
   elemParam: ts.ParameterDeclaration | undefined,
+  paramName: string,
   factory: ts.NodeFactory,
 ): ts.ConciseBody {
   const elemName = elemParam?.name;
@@ -733,7 +945,7 @@ function transformDestructuredProperties(
     }
   }
 
-  // If param was destructured, replace destructured property references with element.prop
+  // If param was destructured, replace destructured property references with paramName.prop
   if (destructuredProps.size > 0) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
@@ -745,7 +957,7 @@ function transformDestructuredProperties(
             node.parent.name === node)
         ) {
           return factory.createPropertyAccessExpression(
-            factory.createIdentifier("element"),
+            factory.createIdentifier(paramName),
             factory.createIdentifier(node.text),
           );
         }
@@ -758,35 +970,80 @@ function transformDestructuredProperties(
   return body;
 }
 
-/**
- * Replace captured expressions with their parameter names.
- */
-function replaceCaptures(
-  body: ts.ConciseBody,
-  captures: Map<string, ts.Expression>,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  let transformedBody = body;
+// Note: replaceCaptures() has been removed!
+// With hierarchical params, captures keep their original names/structure,
+// so no body rewriting is needed for captured expressions.
 
-  for (const [varName, capturedExpr] of captures) {
-    const visitor: ts.Visitor = (node) => {
-      // Check if this node matches the captured expression
-      if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
-        return factory.createIdentifier(varName);
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(
-      transformedBody,
-      visitor,
-    ) as ts.ConciseBody;
+/**
+ * Build hierarchical params object from capture tree recursively.
+ */
+function buildHierarchicalParamsObject(
+  node: CaptureTreeNode,
+  factory: ts.NodeFactory,
+): ts.ObjectLiteralExpression {
+  const properties: ts.PropertyAssignment[] = [];
+
+  // Add properties for nested captures
+  for (const [propName, childNode] of node.properties) {
+    if (childNode.properties.size > 0) {
+      // Nested structure - recurse
+      const nestedObject = buildHierarchicalParamsObject(childNode, factory);
+      properties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          nestedObject,
+        ),
+      );
+    } else if (childNode.expressions.length > 0) {
+      // Leaf property - use the expression
+      const expr = childNode.expressions[0]!;
+      properties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          expr,
+        ),
+      );
+    }
   }
 
-  return transformedBody;
+  return factory.createObjectLiteralExpression(properties, false);
 }
 
 /**
- * Create the final recipe call with params object.
+ * Detect and resolve parameter name collisions with captured roots.
+ * Returns a map of original root name → adjusted name.
+ */
+function resolveNameCollisions(
+  elemParamName: string,
+  indexParamName: string | undefined,
+  captureTree: Map<string, CaptureTreeNode>,
+): Map<string, string> {
+  const collisionMap = new Map<string, string>();
+  const paramNames = new Set([elemParamName]);
+  if (indexParamName) paramNames.add(indexParamName);
+
+  for (const rootName of captureTree.keys()) {
+    if (paramNames.has(rootName)) {
+      // Collision detected - add suffix
+      let suffix = 1;
+      let newName = `${rootName}_${suffix}`;
+      while (paramNames.has(newName) || captureTree.has(newName)) {
+        suffix++;
+        newName = `${rootName}_${suffix}`;
+      }
+      collisionMap.set(rootName, newName);
+      paramNames.add(newName);
+    } else {
+      collisionMap.set(rootName, rootName);
+    }
+  }
+
+  return collisionMap;
+}
+
+/**
+ * Create the final recipe call with hierarchical params object.
+ * Uses original parameter names and nested structure for captures.
  */
 function createRecipeCallWithParams(
   mapCall: ts.CallExpression,
@@ -794,53 +1051,56 @@ function createRecipeCallWithParams(
   transformedBody: ts.ConciseBody,
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.CallExpression {
   const { factory } = context;
 
-  // Create the destructured parameter
+  // Get original parameter names
+  const elemParamName = getOriginalParamName(elemParam, "element");
+  const indexParamName = indexParam
+    ? getOriginalParamName(indexParam, "index")
+    : undefined;
+
+  // Resolve any name collisions
+  const nameMap = resolveNameCollisions(
+    elemParamName,
+    indexParamName,
+    captureTree,
+  );
+
+  // Create the destructured parameter with original names
   const properties: ts.BindingElement[] = [
     factory.createBindingElement(
       undefined,
       undefined,
-      factory.createIdentifier("element"),
+      factory.createIdentifier(elemParamName),
       undefined,
     ),
   ];
 
-  if (indexParam) {
+  if (indexParam && indexParamName) {
     properties.push(
       factory.createBindingElement(
         undefined,
         undefined,
-        factory.createIdentifier("index"),
+        factory.createIdentifier(indexParamName),
         undefined,
       ),
     );
   }
 
-  // Add params destructuring
-  const paramsPattern = factory.createObjectBindingPattern(
-    Array.from(capturedVarNames).map((name) =>
+  // Add captured roots as direct parameters (with collision-resolved names)
+  for (const [originalRoot, adjustedRoot] of nameMap) {
+    properties.push(
       factory.createBindingElement(
         undefined,
         undefined,
-        factory.createIdentifier(name),
+        factory.createIdentifier(adjustedRoot),
         undefined,
-      )
-    ),
-  );
-
-  properties.push(
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier("params"),
-      paramsPattern,
-      undefined,
-    ),
-  );
+      ),
+    );
+  }
 
   const destructuredParam = factory.createParameterDeclaration(
     undefined,
@@ -868,8 +1128,7 @@ function createRecipeCallWithParams(
     mapCall,
     elemParam,
     indexParam,
-    capturedVarNames,
-    captures,
+    captureTree,
     context,
   );
 
@@ -881,15 +1140,31 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
-  // Create the params object
+  // Create the hierarchical params object
   const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [varName, expr] of captures) {
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        factory.createIdentifier(varName),
-        expr,
-      ),
-    );
+  for (const [originalRoot, adjustedRoot] of nameMap) {
+    const rootNode = captureTree.get(originalRoot);
+    if (!rootNode) continue;
+
+    if (rootNode.properties.size > 0) {
+      // Nested structure
+      const nestedObject = buildHierarchicalParamsObject(rootNode, factory);
+      paramProperties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(adjustedRoot),
+          nestedObject,
+        ),
+      );
+    } else if (rootNode.expressions.length > 0) {
+      // Simple identifier
+      const expr = rootNode.expressions[0]!;
+      paramProperties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(adjustedRoot),
+          expr,
+        ),
+      );
+    }
   }
   const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
@@ -910,7 +1185,7 @@ function createRecipeCallWithParams(
 }
 
 /**
- * Transform a map callback for OpaqueRef arrays.
+ * Transform a map callback for OpaqueRef arrays using hierarchical params.
  * Always transforms to use recipe + mapWithPattern, even with no captures,
  * to ensure callback parameters become opaque.
  */
@@ -925,22 +1200,16 @@ function transformMapCallback(
   // Collect captured variables from the callback
   const captureExpressions = collectCaptures(callback, checker);
 
-  // Build map of capture name -> expression
-  const captures = new Map<string, ts.Expression>();
-  for (const expr of captureExpressions) {
-    const name = getCaptureName(expr);
-    if (name && !captures.has(name)) {
-      captures.set(name, expr);
-    }
-  }
-
-  // Build set of captured variable names
-  const capturedVarNames = new Set<string>(captures.keys());
+  // Group captures by root identifier into hierarchical tree
+  const captureTree = groupCapturesByRoot(captureExpressions);
 
   // Get callback parameters
   const originalParams = callback.parameters;
   const elemParam = originalParams[0];
   const indexParam = originalParams[1]; // May be undefined
+
+  // Get original parameter name (for destructured property transformation)
+  const elemParamName = getOriginalParamName(elemParam, "element");
 
   // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
   // parameter names. This ensures nested callbacks can properly detect captures from
@@ -948,32 +1217,37 @@ function transformMapCallback(
   let transformedBody = ts.visitNode(callback.body, visitor) as ts.ConciseBody;
 
   // Transform the callback body in stages:
-  // 1. Replace element parameter name
+  // Note: With hierarchical params, we DON'T need to replace captures!
+  // They already have the correct names/structure.
+
+  // 1. Transform element parameter reference if needed
+  // (Usually not needed since we use original name)
   transformedBody = transformElementReferences(
     transformedBody,
     elemParam,
+    elemParamName,
     factory,
   );
 
-  // 2. Transform destructured properties
+  // 2. Transform destructured properties to use paramName.prop
+  // This is the ONLY case where body transformation is still needed
   transformedBody = transformDestructuredProperties(
     transformedBody,
     elemParam,
+    elemParamName,
     factory,
   );
 
-  // 3. Replace captured expressions with their parameter names
-  transformedBody = replaceCaptures(transformedBody, captures, factory);
+  // 3. NO capture replacement needed! That's the magic of hierarchical params.
 
-  // Create the final recipe call with params
+  // Create the final recipe call with hierarchical params
   return createRecipeCallWithParams(
     mapCall,
     callback,
     transformedBody,
     elemParam,
     indexParam,
-    capturedVarNames,
-    captures,
+    captureTree,
     context,
   );
 }

@@ -150,58 +150,18 @@ export function filterRelevantDataFlows(
   analysis: DataFlowAnalysis,
   context: TransformationContext,
 ): NormalizedDataFlow[] {
-  const isParameterExpression = (expression: ts.Expression): boolean => {
-    let current: ts.Expression = expression;
-    while (true) {
-      if (ts.isIdentifier(current)) {
-        return isFunctionParameter(current, context.checker);
-      }
-      if (
-        ts.isPropertyAccessExpression(current) ||
-        ts.isElementAccessExpression(current) ||
-        ts.isCallExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      if (
-        ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current) ||
-        ts.isNonNullExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      return false;
-    }
-  };
-
-  return dataFlows.filter((dataFlow) => {
-    if (
-      originatesFromIgnoredParameter(
-        dataFlow.expression,
-        dataFlow.scopeId,
-        analysis,
-        context.checker,
-      )
-    ) {
-      return false;
-    }
-    if (isParameterExpression(dataFlow.expression)) {
-      if (resolvesToMapParameter(dataFlow.expression, context.checker)) {
-        return true;
-      }
-      if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-        return false;
-      }
-      return false;
-    }
-    if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-      return false;
-    }
-    return true;
-  });
+  // With hierarchical params, we keep all dataflows except those that originate
+  // from ignored parameters (parameters in the current scope that aren't opaque).
+  // This is much simpler than the old flat params approach which tried to
+  // distinguish between array-map and builder parameters.
+  return dataFlows.filter((dataFlow) =>
+    !originatesFromIgnoredParameter(
+      dataFlow.expression,
+      dataFlow.scopeId,
+      analysis,
+      context.checker,
+    )
+  );
 }
 
 export function createDeriveCallForExpression(

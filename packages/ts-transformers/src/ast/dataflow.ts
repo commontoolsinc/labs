@@ -477,6 +477,7 @@ export function createDataFlowAnalyzer(
 
     if (ts.isIdentifier(expression)) {
       const symbol = checker.getSymbolAtLocation(expression);
+
       if (isSymbolIgnored(symbol)) {
         return emptyAnalysis();
       }
@@ -518,6 +519,7 @@ export function createDataFlowAnalyzer(
       const propertyType = checker.getTypeAtLocation(expression);
 
       if (isOpaqueRefType(propertyType, checker)) {
+
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -596,6 +598,7 @@ export function createDataFlowAnalyzer(
           localNodes: [node],
         };
       }
+
       return {
         containsOpaqueRef: target.containsOpaqueRef,
         requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
