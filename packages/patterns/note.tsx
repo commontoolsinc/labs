@@ -14,10 +14,7 @@ import {
   UI,
   wish,
 } from "commontools";
-import {
-  type BacklinksMap,
-  type MentionableCharm,
-} from "./backlinks-index.tsx";
+import { type MentionableCharm } from "./backlinks-index.tsx";
 type Input = {
   title: Default<string, "Untitled Note">;
   content: Default<string, "">;
@@ -26,7 +23,7 @@ type Input = {
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
   content: Default<string, "">;
-  backlinks: Default<Array<MentionableCharm>, []>;
+  backlinks: MentionableCharm[];
 };
 
 const _updateTitle = handler<
@@ -80,14 +77,13 @@ const handleNewBacklink = handler<
   }
 });
 
-const handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
+const handleCharmLinkClicked = handler<void, { charm: MentionableCharm }>(
+  (_, { charm }) => {
     return navigateTo(charm);
   },
 );
 
 type BacklinksIndex = {
-  backlinks: BacklinksMap;
   mentionable: any[];
 };
 
@@ -99,20 +95,12 @@ const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
     const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      backlinks: {},
       mentionable: [],
     });
     const mentioned = cell<MentionableCharm[]>([]);
 
-    // Look up backlinks from the shared index
-    const backlinks: OpaqueRef<MentionableCharm[]> = lift<
-      { index: { backlinks: BacklinksMap }; content: string },
-      MentionableCharm[]
-    >(({ index, content }) => {
-      const key = content;
-      const map = index.backlinks as BacklinksMap;
-      return map[key] ?? [];
-    })({ index, content });
+    // populated in backlinks-index.tsx
+    const backlinks = cell<MentionableCharm[]>([]);
 
     // Use shared mentionable list from index
     const mentionableSource = index.mentionable;
@@ -138,7 +126,7 @@ const Note = recipe<Input, Output>(
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({
-              mentionable: mentionableSource as unknown as MentionableCharm[],
+              mentionable: mentionableSource,
             })}
             language="text/markdown"
             theme="light"
@@ -148,9 +136,7 @@ const Note = recipe<Input, Output>(
           />
 
           <ct-hstack slot="footer">
-            {backlinks?.map((
-              charm: MentionableCharm,
-            ) => (
+            {backlinks?.map((charm) => (
               <ct-button
                 onClick={handleCharmLinkClicked({ charm })}
               >

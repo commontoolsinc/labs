@@ -14,10 +14,7 @@ import {
 import Chatbot from "./chatbot.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
-import BacklinksIndex, {
-  BacklinksMap,
-  type MentionableCharm,
-} from "./backlinks-index.tsx";
+import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 
 export type Charm = {
@@ -32,7 +29,6 @@ type CharmsListInput = void;
 interface CharmsListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    backlinks: BacklinksMap;
     mentionable: MentionableCharm[];
   };
 }

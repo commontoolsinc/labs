@@ -140,7 +140,6 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Mentions index object or Cell-like containing:
    * - mentionable: Cell<MentionableArray> (required)
-   * - backlinks: any (optional)
    */
   declare mentions?: Cell<any>;
   declare mentioned?: Cell<MentionableArray>;

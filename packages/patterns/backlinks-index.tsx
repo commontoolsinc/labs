@@ -1,22 +1,44 @@
 /// <cts-enable />
-import { lift, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 export type MentionableCharm = {
-  [NAME]: string;
-  content?: string;
-  mentioned?: MentionableCharm[];
+  [NAME]?: string;
+  mentioned: MentionableCharm[];
+  backlinks: MentionableCharm[];
+};
+
+export type WriteableBacklinks = {
+  mentioned: WriteableBacklinks[];
+  backlinks: Cell<WriteableBacklinks[]>;
 };
 
 type Input = {
   allCharms: MentionableCharm[];
 };
 
-export type BacklinksMap = { [charmId: string]: MentionableCharm[] };
-
 type Output = {
-  backlinks: BacklinksMap;
   mentionable: MentionableCharm[];
 };
+
+const computeIndex = lift<
+  { allCharms: WriteableBacklinks[] },
+  void
+>(
+  ({ allCharms }) => {
+    const cs = allCharms ?? [];
+
+    for (const c of cs) {
+      c.backlinks?.set([]);
+    }
+
+    for (const c of cs) {
+      const mentions = c.mentioned ?? [];
+      for (const m of mentions) {
+        m.backlinks?.push(c);
+      }
+    }
+  },
+);
 
 /**
  * BacklinksIndex builds a map of backlinks across all charms and exposes a
@@ -37,29 +59,9 @@ type Output = {
 const BacklinksIndex = recipe<Input, Output>(
   "BacklinksIndex",
   ({ allCharms }) => {
-    const computeIndex = lift<
-      { allCharms: MentionableCharm[] },
-      BacklinksMap
-    >(
-      ({ allCharms }) => {
-        const cs = allCharms ?? [];
-        const index: BacklinksMap = {};
-
-        for (const c of cs) {
-          const mentions = c.mentioned ?? [];
-          for (const m of mentions) {
-            const key = m?.content || m?.[NAME];
-            if (!key) continue;
-            if (!index[key]) index[key] = [];
-            index[key].push(c);
-          }
-        }
-
-        return index;
-      },
-    );
-
-    const backlinks: OpaqueRef<BacklinksMap> = computeIndex({ allCharms });
+    computeIndex({
+      allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
+    });
 
     // Compute mentionable list from allCharms via lift, then mirror that into
     // a real Cell for downstream consumers that expect a Cell.
@@ -88,7 +90,6 @@ const BacklinksIndex = recipe<Input, Output>(
     return {
       [NAME]: "BacklinksIndex",
       [UI]: undefined,
-      backlinks,
       mentionable: computeMentionable({ allCharms }),
     };
   },
