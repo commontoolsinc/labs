@@ -6,14 +6,15 @@ import {
   type SchemaContext,
 } from "@commontools/runner";
 import {
-  BaseMemoryAddress,
-  BaseObjectManager,
+  type BaseMemoryAddress,
   CompoundCycleTracker,
   DefaultSchemaSelector,
   getAtPath,
   type IAttestation,
   loadSource,
+  ManagedStorageTransaction,
   MapSet,
+  type ObjectStorageManager,
   type PointerCycleTracker,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
@@ -41,7 +42,7 @@ import {
 import {
   collectClassifications,
   type FactSelectionValue,
-  FactSelector,
+  type FactSelector,
   getClassifications,
   getLabel,
   getLabels,
@@ -52,6 +53,7 @@ import {
   type Session as SpaceStoreSession,
   toSelection,
 } from "./space.ts";
+import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
 
 export type * from "./interface.ts";
 
@@ -64,10 +66,8 @@ const logger = getLogger("space-schema", {
 // class that traverses the docs doesn't need to know the implementation.
 // It also lets us use one system on the server (where we have the sqlite db)
 // and another system on the client.
-export class ServerObjectManager extends BaseObjectManager<
-  BaseMemoryAddress,
-  Immutable<JSONValue> | undefined
-> {
+export class ServerObjectManager implements ObjectStorageManager {
+  private readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
   // Mapping from factKey to object with cause and since
@@ -81,7 +81,6 @@ export class ServerObjectManager extends BaseObjectManager<
     private session: SpaceStoreSession<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
-    super();
   }
 
   /**
@@ -91,8 +90,8 @@ export class ServerObjectManager extends BaseObjectManager<
    * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
-  override load(address: BaseMemoryAddress): IAttestation | null {
-    const key = this.toKey(address);
+  load(address: BaseMemoryAddress): IAttestation | null {
+    const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     } else if (this.restrictedValues.has(key)) {
@@ -127,10 +126,7 @@ export class ServerObjectManager extends BaseObjectManager<
         }
       }
       // Any entry in readValues should also have an entry in factDetails
-      this.factDetails.set(this.toKey(address), {
-        cause: fact.cause,
-        since: fact.since,
-      });
+      this.factDetails.set(key, { cause: fact.cause, since: fact.since });
       this.readValues.set(key, valueEntry);
       return valueEntry;
     }
@@ -141,12 +137,9 @@ export class ServerObjectManager extends BaseObjectManager<
     return this.readValues.values();
   }
 
-  getLabels(): Iterable<[Entity, SelectedFact | undefined]> {
-    return this.readLabels.entries();
-  }
-
   getDetails(address: BaseMemoryAddress) {
-    return this.factDetails.get(this.toKey(address));
+    const key = `${address.id}/${address.type}`;
+    return this.factDetails.get(key);
   }
 }
 
@@ -191,6 +184,7 @@ export const selectSchema = <Space extends MemorySpace>(
         selectorEntry.value,
         tracker,
         cfc,
+        session.subject,
         schemaTracker,
       );
 
@@ -257,20 +251,24 @@ function loadFactsForDoc(
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
+  space: MemorySpace,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
     if (selector.schemaContext !== undefined) {
       const factValue: IAttestation = {
         address: { ...fact.address, path: [...fact.address.path, "value"] },
         value: (fact.value as Immutable<JSONObject>).value,
       };
       const [newDoc, newSelector] = getAtPath(
-        manager,
+        tx,
         factValue,
         selector.path,
         tracker,
         cfc,
+        space,
         schemaTracker,
         selector,
       );
@@ -279,8 +277,9 @@ function loadFactsForDoc(
       }
       // We've provided a schema context for this, so traverse it
       const traverser = new SchemaObjectTraverser(
-        manager,
+        tx,
         newSelector!,
+        space,
         tracker,
         schemaTracker,
       );
@@ -293,7 +292,7 @@ function loadFactsForDoc(
       manager.load(fact.address);
     }
     // Also load any source links and recipes
-    loadSource(manager, fact, new Set<string>(), schemaTracker);
+    loadSource(tx, fact, space, new Set<string>(), schemaTracker);
   }
 }
 

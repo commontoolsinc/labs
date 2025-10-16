@@ -10,6 +10,7 @@ import {
 } from "../src/index.ts";
 import {
   CompoundCycleTracker,
+  ManagedStorageTransaction,
   MapSet,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -25,6 +26,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -37,7 +39,7 @@ describe("Query", () => {
     string,
     Revision<State>
   >();
-  let manager: StoreObjectManager;
+  let emulatedStorageTx: IExtendedStorageTransaction;
   let tracker: CompoundCycleTracker<JSONValue, SchemaContext | undefined>;
 
   beforeEach(() => {
@@ -49,7 +51,9 @@ describe("Query", () => {
       storageManager,
     });
     tx = runtime.edit();
-    manager = new StoreObjectManager(store);
+    const manager = new StoreObjectManager(store);
+    const managerTx = new ManagedStorageTransaction(manager);
+    emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
     tracker = new CompoundCycleTracker<JSONValue, SchemaContext | undefined>();
   });
 
@@ -122,8 +126,9 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       { path: [], schemaContext: schemaContext },
+      "did:null:null",
       tracker,
       schemaTracker,
     );
@@ -208,8 +213,9 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       { path: [], schemaContext: schemaContext },
+      "did:null:null",
       tracker,
       schemaTracker,
     );
@@ -287,8 +293,9 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       { path: [], schemaContext: schemaContext },
+      "did:null:null",
       tracker,
       schemaTracker,
     );
@@ -393,8 +400,9 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       { path: [], schemaContext },
+      "did:null:null",
       tracker,
       schemaTracker,
     );
@@ -492,8 +500,9 @@ describe("Query", () => {
 
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       selector,
+      "did:null:null",
       tracker,
       schemaTracker,
     );

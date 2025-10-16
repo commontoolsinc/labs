@@ -19,8 +19,30 @@ import type {
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
-import { fromURI } from "./uri-utils.ts";
-import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
+import type {
+  Activity,
+  CommitError,
+  IAttestation,
+  IMemoryAddress,
+  IMemorySpaceAddress,
+  InactiveTransactionError,
+  IReadOptions,
+  IStorageTransaction,
+  ITransactionJournal,
+  ITransactionReader,
+  ITransactionWriter,
+  MemorySpace,
+  ReaderError,
+  ReadError,
+  Result,
+  StorageTransactionStatus,
+  Unit,
+  WriteError,
+  WriterError,
+} from "./storage/interface.ts";
+import { resolve } from "./storage/transaction/attestation.ts";
+import { IExtendedStorageTransaction } from "./runtime.ts";
+import { MIME } from "@commontools/memory/interface";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -208,11 +230,59 @@ export type PointerCycleTracker = CompoundCycleTracker<
   SchemaContext | undefined
 >;
 
-export interface ObjectStorageManager<K, S, V> {
-  addRead(address: K, value: V, source: S): void;
-  addWrite(address: K, value: V, source: S): void;
-  // load the object for the specified key
-  load(address: K): IAttestation | null;
+class ManagedStorageJournal implements ITransactionJournal {
+  activity(): Iterable<Activity> {
+    return [];
+  }
+  novelty(_space: MemorySpace): Iterable<IAttestation> {
+    return [];
+  }
+  history(_space: MemorySpace): Iterable<IAttestation> {
+    return [];
+  }
+}
+
+/**
+ * Implementation of IStorageTransaction that is backed by an ObjectManager
+ * This is a read-only transaction, and is only used by the traverse code.
+ */
+export class ManagedStorageTransaction implements IStorageTransaction {
+  constructor(
+    private manager: ObjectStorageManager,
+    public journal = new ManagedStorageJournal(),
+  ) {
+  }
+
+  status(): StorageTransactionStatus {
+    return { status: "ready", journal: this.journal };
+  }
+
+  read(
+    address: IMemorySpaceAddress,
+    _options?: IReadOptions,
+  ): Result<IAttestation, ReadError> {
+    const source = this.manager.load(address) ??
+      { address: { ...address, path: [] } };
+    return resolve(source, address);
+  }
+  writer(_space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    throw new Error("Method not implemented.");
+  }
+  write(
+    _address: IMemorySpaceAddress,
+    _value?: JSONValue,
+  ): Result<IAttestation, WriterError | WriteError> {
+    throw new Error("Method not implemented.");
+  }
+  reader(_space: MemorySpace): Result<ITransactionReader, ReaderError> {
+    throw new Error("Method not implemented.");
+  }
+  abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {
+    throw new Error("Method not implemented.");
+  }
+  commit(): Promise<Result<Unit, CommitError>> {
+    throw new Error("Method not implemented.");
+  }
 }
 
 export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
@@ -225,42 +295,9 @@ export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 //  1. Loading objects from the DB (on the server)
 //  2. Loading objects from our memory interface (on the client)
 
-export abstract class BaseObjectManager<
-  S extends BaseMemoryAddress,
-  V extends JSONValue | undefined,
-> implements ObjectStorageManager<BaseMemoryAddress, S, V> {
-  constructor(
-    protected readValues = new Map<string, IAttestation>(),
-    protected writeValues = new Map<string, IAttestation>(),
-  ) {}
-
-  addRead(address: S, value: V, source: S) {
-    const key = this.toKey(address);
-    this.readValues.set(key, {
-      value: value,
-      address: { path: [], ...source },
-    });
-  }
-
-  addWrite(address: S, value: V, source: S) {
-    const key = this.toKey(address);
-    this.writeValues.set(key, {
-      value: value,
-      address: { path: [], ...source },
-    });
-  }
-
-  toKey(address: BaseMemoryAddress): string {
-    return `${address.id}/${address.type}`;
-  }
-
-  toAddress(str: string): BaseMemoryAddress {
-    return { id: `of:${str}`, type: "application/json" };
-  }
-
-  // load the doc from the underlying system.
-  // implementations are responsible for adding this to the readValues
-  abstract load(address: BaseMemoryAddress): IAttestation | null;
+export interface ObjectStorageManager {
+  // load the object for the specified key
+  load(address: BaseMemoryAddress): IAttestation | null;
 }
 
 export type OptJSONValue =
@@ -275,9 +312,9 @@ interface OptJSONObject {
 
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
-export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
+export abstract class BaseObjectTraverser {
   constructor(
-    protected manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+    protected tx: IExtendedStorageTransaction,
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {}
   abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
@@ -287,12 +324,14 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
    * This is the simplest form of traversal, where we include everything.
    *
    * @param doc
+   * @param space
    * @param tracker
    * @param schemaTracker
    * @returns
    */
   protected traverseDAG(
     doc: IAttestation,
+    space: MemorySpace,
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
   ): Immutable<JSONValue> | undefined {
@@ -313,6 +352,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
             },
             value: item,
           },
+          space,
           tracker,
           schemaTracker,
         )
@@ -321,18 +361,19 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
         const [newDoc, _] = getAtPath(
-          this.manager,
+          this.tx,
           doc,
           [],
           tracker,
           this.cfc,
+          space,
           schemaTracker,
           DefaultSchemaSelector,
         );
         if (newDoc.value === undefined) {
           return null;
         }
-        return this.traverseDAG(newDoc, tracker, schemaTracker);
+        return this.traverseDAG(newDoc, space, tracker, schemaTracker);
       } else {
         using t = tracker.include(doc.value, SchemaAll, doc);
         if (t === null) {
@@ -347,6 +388,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
                 address: { ...doc.address, path: [...doc.address.path, k] },
                 value: value,
               },
+              space,
               tracker,
               schemaTracker,
             ),
@@ -369,6 +411,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
  * @param path - Property/index path to follow
  * @param tracker - Prevents pointer cycles
  * @param cfc: ContextualFlowControl with classification rules
+ * @param space: the memory space used for resolving pointers
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  *
@@ -376,12 +419,13 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
  * docRoot, path, and value and also containing the updated selector that
  * applies to that target doc.
  */
-export function getAtPath<S extends BaseMemoryAddress>(
-  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+export function getAtPath(
+  tx: IExtendedStorageTransaction,
   doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
+  space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
@@ -389,11 +433,12 @@ export function getAtPath<S extends BaseMemoryAddress>(
   let remaining = [...path];
   while (isAnyCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
-      manager,
+      tx,
       curDoc,
       remaining,
       tracker,
       cfc,
+      space,
       schemaTracker,
       selector,
     );
@@ -430,11 +475,12 @@ export function getAtPath<S extends BaseMemoryAddress>(
     // If this next value is a pointer, use the pointer resolution code
     while (isAnyCellLink(curDoc.value)) {
       [curDoc, selector] = followPointer(
-        manager,
+        tx,
         curDoc,
         remaining,
         tracker,
         cfc,
+        space,
         schemaTracker,
         selector,
       );
@@ -453,29 +499,33 @@ function notFound(address: BaseMemoryAddress): IAttestation {
 /**
  * Resolves a pointer reference to its target value.
  *
- * @param manager - Object storage manager for document access
+ * @param tx - IStorageTransaction that can be used to read data
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents infinite pointer cycles
  * @param cfc: ContextualFlowControl with classification rules
+ * @param space: the space where this pointer was encountered
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector: SchemaPathSelector used to query the target doc
  *
  * @returns an IAttestation object with the target doc, docRoot, path, and value.
  */
-function followPointer<S extends BaseMemoryAddress>(
-  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+function followPointer(
+  tx: IExtendedStorageTransaction,
   doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
+  space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
-  const target: BaseMemoryAddress = (link.id !== undefined)
-    ? { id: link.id, type: "application/json" }
-    : doc.address;
+  // We may access portions of the doc outside what we have in our doc
+  // attestation, so set the target to the top level doc from the manager.
+  const target: IMemorySpaceAddress = (link.id !== undefined)
+    ? { space, id: link.id, type: "application/json", path: [] }
+    : { space, ...doc.address, path: [] };
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -497,23 +547,23 @@ function followPointer<S extends BaseMemoryAddress>(
     // Cycle detected - treat this as notFound to avoid traversal
     return [notFound(doc.address), selector];
   }
-  // We may access portions of the doc outside what we have in our doc
-  // attestation, so reload the top level doc from the manager.
-  const valueEntry = manager.load(target);
-  if (valueEntry === null) {
+  // Load the top level doc from the manager.
+  const { ok: valueEntry, error } = tx.read(target);
+  if (error) {
     return [notFound(doc.address), selector];
   }
   if (link.id !== undefined) {
     // We have a reference to a different doc, so track the dependency
     // and update our targetDoc
     if (schemaTracker !== undefined && selector !== undefined) {
-      schemaTracker.add(manager.toKey(target), selector);
+      schemaTracker.add(`${target.id}/${target.type}`, selector);
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
     if (valueEntry.value !== undefined) {
       loadSource(
-        manager,
+        tx,
         valueEntry,
+        space,
         new Set<string>(),
         schemaTracker,
       );
@@ -536,11 +586,12 @@ function followPointer<S extends BaseMemoryAddress>(
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
   // then the provided path from the arguments.
   return getAtPath(
-    manager,
+    tx,
     targetDoc,
     [...link.path, ...path] as string[],
     tracker,
     cfc,
+    space,
     schemaTracker,
     selector,
   );
@@ -548,13 +599,14 @@ function followPointer<S extends BaseMemoryAddress>(
 
 // Recursively load the source from the doc ()
 // This will also load any recipes linked by the doc.
-export function loadSource<S extends BaseMemoryAddress>(
-  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+export function loadSource(
+  tx: IExtendedStorageTransaction,
   valueEntry: IAttestation,
+  space: MemorySpace,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
-  loadLinkedRecipe(manager, valueEntry, schemaTracker);
+  loadLinkedRecipe(tx, valueEntry, space, schemaTracker);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -573,27 +625,36 @@ export function loadSource<S extends BaseMemoryAddress>(
     }
     return;
   }
-  const of: string = source["/"];
-  if (cycleCheck.has(of)) {
+  const shortId: string = source["/"];
+  if (cycleCheck.has(shortId)) {
     return;
   }
-  cycleCheck.add(of);
-  const address = manager.toAddress(of);
-  const entry = manager.load(address);
-  if (entry === null || entry.value === undefined) {
+  cycleCheck.add(shortId);
+  const address: IMemorySpaceAddress = {
+    space,
+    id: `of:${shortId}`,
+    type: "application/json",
+    path: [],
+  };
+  const { ok: entry, error } = tx.read(address);
+  if (error) {
+    return;
+  }
+  if (error || entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
+    schemaTracker.add(`${address.id}/${address.type}`, MinimalSchemaSelector);
   }
-  loadSource(manager, entry, cycleCheck, schemaTracker);
+  loadSource(tx, entry, space, cycleCheck, schemaTracker);
 }
 
 // Load the linked recipe from the doc ()
 // We don't recurse, since that's not required for recipe links
-function loadLinkedRecipe<S extends BaseMemoryAddress>(
-  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+function loadLinkedRecipe(
+  tx: IExtendedStorageTransaction,
   valueEntry: IAttestation,
+  space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
@@ -608,26 +669,40 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   if (!isObject(value)) {
     return;
   }
-  let address;
+  let address: IMemorySpaceAddress | undefined;
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
   if ("spell" in value && isAnyCellLink(value["spell"])) {
     const link = parseLink(value["spell"])!;
-    address = manager.toAddress(fromURI(link.id!));
+    address = {
+      space,
+      id: link.id!,
+      type: link.type! as MIME,
+      path: [],
+    };
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
     const recipeId = value["$TYPE"];
     const entityId = refer({ causal: { recipeId, type: "recipe" } });
-    address = manager.toAddress(entityId.toJSON()["/"]);
+    const shortId = entityId.toJSON()["/"];
+    address = {
+      space,
+      id: `of:${shortId}`,
+      type: "application/json",
+      path: [],
+    };
   }
   if (address === undefined) {
     return;
   }
-  const entry = manager.load(address);
+  const { ok: entry, error } = tx.read(address);
+  if (error) {
+    return;
+  }
   if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
+    schemaTracker.add(`${address.id}/${address.type}`, MinimalSchemaSelector);
   }
 }
 
@@ -700,11 +775,11 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
-export class SchemaObjectTraverser<S extends BaseMemoryAddress>
-  extends BaseObjectTraverser<S> {
+export class SchemaObjectTraverser extends BaseObjectTraverser {
   constructor(
-    manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+    tx: IExtendedStorageTransaction,
     private selector: SchemaPathSelector,
+    private space: MemorySpace,
     private tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<JSONValue>,
       SchemaContext | undefined
@@ -714,13 +789,14 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       SchemaPathSelector
     >(deepEqual),
   ) {
-    super(manager);
+    super(tx);
   }
 
   override traverse(
     doc: IAttestation,
   ): Immutable<OptJSONValue> {
-    this.schemaTracker.add(this.manager.toKey(doc.address), this.selector);
+    const key = `${doc.address.id}/${doc.address.type}`;
+    this.schemaTracker.add(key, this.selector);
     return this.traverseWithSelector(doc, this.selector);
   }
 
@@ -745,11 +821,12 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       return undefined;
     } else { // valuePath length < selector.path.length
       const [nextDoc, nextSelector] = getAtPath(
-        this.manager,
+        this.tx,
         doc,
         selector.path.slice(valuePath.length),
         this.tracker,
         this.cfc,
+        this.space,
         this.schemaTracker,
         selector,
       );
@@ -774,7 +851,12 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      return this.traverseDAG(doc, this.tracker, this.schemaTracker);
+      return this.traverseDAG(
+        doc,
+        this.space,
+        this.tracker,
+        this.schemaTracker,
+      );
     } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
@@ -969,11 +1051,12 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       schemaContext: schemaContext,
     };
     const [newDoc, newSelector] = getAtPath(
-      this.manager,
+      this.tx,
       doc,
       [],
       this.tracker,
       this.cfc,
+      this.space,
       this.schemaTracker,
       selector,
     );

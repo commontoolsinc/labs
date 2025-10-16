@@ -7,8 +7,12 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import { SchemaObjectTraverser } from "../src/traverse.ts";
+import {
+  ManagedStorageTransaction,
+  SchemaObjectTraverser,
+} from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -72,10 +76,12 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     );
 
     const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
       path: [],
       schemaContext: { schema: true, rootSchema: true },
-    });
+    }, "did:null:null");
 
     const result = traverser.traverse({
       address: { id: doc2Uri, type, path: ["value"] },

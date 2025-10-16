@@ -1,19 +1,17 @@
 import type { Revision, State } from "@commontools/memory/interface";
-import type { JSONValue } from "../builder/types.ts";
 
-import {
-  type BaseMemoryAddress,
-  BaseObjectManager,
+import type {
+  BaseMemoryAddress,
   IAttestation,
+  ObjectStorageManager,
 } from "../traverse.ts";
 
-export abstract class ClientObjectManager
-  extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
-  // Cache our read labels, and any docs we can't read
-  public missingDocs = new Map<string, BaseMemoryAddress>();
+// Object Manager backed by a store map
+export class StoreObjectManager implements ObjectStorageManager {
+  private readValues = new Map<string, IAttestation>();
+  private missingDocs = new Map<string, BaseMemoryAddress>();
 
-  constructor() {
-    super();
+  constructor(private store = new Map<string, Revision<State>>()) {
   }
 
   getReadDocs(): Iterable<IAttestation> {
@@ -23,19 +21,10 @@ export abstract class ClientObjectManager
   getMissingDocs(): Iterable<BaseMemoryAddress> {
     return this.missingDocs.values();
   }
-}
-
-// Object Manager backed by a store map
-export class StoreObjectManager extends ClientObjectManager {
-  constructor(
-    private store: Map<string, Revision<State>>,
-  ) {
-    super();
-  }
 
   // Returns null if there is no matching fact
-  override load(address: BaseMemoryAddress): IAttestation | null {
-    const key = this.toKey(address);
+  load(address: BaseMemoryAddress): IAttestation | null {
+    const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
