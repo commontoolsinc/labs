@@ -8,6 +8,7 @@ import {
   recipe,
   str,
   UI,
+  VNode,
   wish,
 } from "commontools";
 
@@ -92,6 +93,16 @@ const spawnNote = handler<void, void>((_, __) => {
     title: "New Note",
     content: "",
   }));
+});
+
+export const Fab = recipe<void, VNode>("FAB", () => {
+  return (
+    <ct-message-input placeholder="Type something..." buttonText="Omnibot" />
+  );
+});
+
+export const Sidebar = recipe<void, VNode>("Sidebar", () => {
+  return <aside>Wow, a sidebar!</aside>;
 });
 
 export default recipe<CharmsListInput, CharmsListOutput>(
@@ -179,8 +190,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vstack>
         </ct-screen>
       ),
-      sidebarUI: <aside>Wow, a sidebar!</aside>,
-      fabUI: <ct-message-input placeholder="Type something..." buttonText="Omnibot" />,
+      sidebarUI: Sidebar(),
+      fabUI: Fab(),
     };
   },
 );
