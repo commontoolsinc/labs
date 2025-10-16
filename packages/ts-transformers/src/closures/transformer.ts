@@ -138,8 +138,8 @@ function shouldCaptureIdentifier(
   func: ts.FunctionLikeDeclaration,
   checker: ts.TypeChecker,
 ): ts.Identifier | undefined {
-  // Skip if node doesn't have a parent (can happen with synthetic nodes)
-  if (!node.parent) {
+  // Skip synthetic nodes (created by transformers, not from source)
+  if (!node.getSourceFile()) {
     return undefined;
   }
 
