@@ -181,7 +181,12 @@ export function createDataFlowAnalyzer(
       let exprText = "<synthetic>";
       try {
         const printer = ts.createPrinter();
-        exprText = printer.printNode(ts.EmitHint.Unspecified, expression, expression.getSourceFile() || ts.createSourceFile("", "", ts.ScriptTarget.Latest));
+        exprText = printer.printNode(
+          ts.EmitHint.Unspecified,
+          expression,
+          expression.getSourceFile() ||
+            ts.createSourceFile("", "", ts.ScriptTarget.Latest),
+        );
       } catch {
         // Ignore errors
       }
@@ -310,16 +315,26 @@ export function createDataFlowAnalyzer(
                     while (func && !ts.isFunctionLike(func)) func = func.parent;
                     if (func) {
                       let callNode: ts.Node | undefined = func.parent;
-                      while (callNode && !ts.isCallExpression(callNode)) callNode = callNode.parent;
+                      while (callNode && !ts.isCallExpression(callNode)) {
+                        callNode = callNode.parent;
+                      }
                       if (callNode) {
-                        const callKind = detectCallKind(callNode as ts.CallExpression, checker);
-                        if (callKind?.kind === "array-map" || callKind?.kind === "builder") {
+                        const callKind = detectCallKind(
+                          callNode as ts.CallExpression,
+                          checker,
+                        );
+                        if (
+                          callKind?.kind === "array-map" ||
+                          callKind?.kind === "builder"
+                        ) {
                           // This is element.price or state.foo - return full property access as dataflow
                           // Add to graph so normalizeDataFlows can find it
                           const node: DataFlowNode = {
                             id: context.nextNodeId++,
                             expression,
-                            canonicalKey: `${scope.id}:${getExpressionText(expression)}`,
+                            canonicalKey: `${scope.id}:${
+                              getExpressionText(expression)
+                            }`,
                             parentId: null,
                             scopeId: scope.id,
                             isExplicit: true, // Explicit: synthetic opaque property access

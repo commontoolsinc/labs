@@ -3,8 +3,8 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
   createDataFlowAnalyzer,
   detectCallKind,
-  isEventHandlerJsxAttribute,
   getExpressionText,
+  isEventHandlerJsxAttribute,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
@@ -99,7 +99,11 @@ function transform(context: TransformationContext): ts.SourceFile {
 
       if (result) {
         // IMPORTANT: Visit children of the rewritten expression to transform nested JSX
-        const visitedResult = visitEachChildWithJsx(result, visit, context.tsContext) as ts.Expression;
+        const visitedResult = visitEachChildWithJsx(
+          result,
+          visit,
+          context.tsContext,
+        ) as ts.Expression;
         return context.factory.createJsxExpression(
           node.dotDotDotToken,
           visitedResult,

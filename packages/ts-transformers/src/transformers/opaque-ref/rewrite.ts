@@ -1,9 +1,6 @@
 import ts from "typescript";
 
-import {
-  normalizeDataFlows,
-  visitEachChildWithJsx,
-} from "../../ast/mod.ts";
+import { normalizeDataFlows, visitEachChildWithJsx } from "../../ast/mod.ts";
 import type {
   AnalyzeFn,
   Emitter,
