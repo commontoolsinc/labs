@@ -128,7 +128,14 @@ export function createQueryResultProxy<T>(
             let index = 0;
             return {
               next() {
-                if (index < target.length) {
+                const readTx = (tx?.status().status === "ready")
+                  ? tx
+                  : runtime.edit();
+                const length = readTx.readValueOrThrow({
+                  ...link,
+                  path: [...link.path, "length"],
+                }) as number;
+                if (index < length) {
                   const result = {
                     value: createQueryResultProxy(runtime, tx, {
                       ...link,
