@@ -576,12 +576,8 @@ export const complianceChecklist = recipe<ComplianceChecklistArgs>(
     const insights = lift(computeInsights)(currentTasks);
 
     const tasksView = lift(cloneTasks)(currentTasks);
-    const categorySummaries = lift((snapshot: ComplianceInsights) =>
-      snapshot.categories.map((entry) => ({ ...entry }))
-    )(insights);
-    const gapDetails = lift((snapshot: ComplianceInsights) =>
-      snapshot.gapList.map((entry) => ({ ...entry }))
-    )(insights);
+    const categorySummaries = insights.categories;
+    const gapDetails = insights.gapList;
 
     const coveragePercent = lift((snapshot: ComplianceInsights) =>
       snapshot.coveragePercent
