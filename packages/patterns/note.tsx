@@ -75,7 +75,7 @@ const handleNewBacklink = handler<
   }
 });
 
-const handleCharmLinkClicked = handler<void, { charm: MentionableCharm }>(
+const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   (_, { charm }) => {
     return navigateTo(charm);
   },
