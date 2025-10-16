@@ -42,7 +42,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { multiplier } }) => (<span>{__ctHelpers.derive({ element, multiplier }, ({ element, multiplier }) => element * multiplier)}</span>)), { multiplier: state.multiplier })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { multiplier } }) => (<span>{__ctHelpers.derive({ element, multiplier }, ({ element: element, multiplier: multiplier }) => element * multiplier)}</span>)), { multiplier: state.multiplier })}
       </div>),
     };
 });

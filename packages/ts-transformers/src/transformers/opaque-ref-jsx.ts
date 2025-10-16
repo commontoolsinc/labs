@@ -4,6 +4,8 @@ import {
   createDataFlowAnalyzer,
   detectCallKind,
   isEventHandlerJsxAttribute,
+  getExpressionText,
+  visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
 
@@ -53,22 +55,29 @@ function transform(context: TransformationContext): ts.SourceFile {
   const analyze = createDataFlowAnalyzer(context.checker);
 
   const visit: ts.Visitor = (node) => {
-    if (ts.isJsxExpression(node) && node.expression) {
+    if (ts.isJsxExpression(node)) {
+      // Skip empty JSX expressions (like JSX comments {/* ... */})
+      if (!node.expression) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      const exprText = getExpressionText(node.expression);
+
       if (isEventHandlerJsxAttribute(node)) {
-        return ts.visitEachChild(node, visit, context.tsContext);
+        return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
       // Skip if inside a derive callback
       const insideDeriveCallback = isInsideDeriveCallback(node, checker);
       if (insideDeriveCallback) {
-        return ts.visitEachChild(node, visit, context.tsContext);
+        return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
       const analysis = analyze(node.expression);
 
       // Skip if doesn't require rewriting
       if (!analysis.requiresRewrite) {
-        return ts.visitEachChild(node, visit, context.tsContext);
+        return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
       if (context.options.mode === "error") {
@@ -89,19 +98,24 @@ function transform(context: TransformationContext): ts.SourceFile {
       });
 
       if (result) {
+        // IMPORTANT: Visit children of the rewritten expression to transform nested JSX
+        const visitedResult = visitEachChildWithJsx(result, visit, context.tsContext) as ts.Expression;
         return context.factory.createJsxExpression(
           node.dotDotDotToken,
-          result,
+          visitedResult,
         );
       }
+
+      // No rewrite needed, but visit children to transform nested expressions
+      return visitEachChildWithJsx(node, visit, context.tsContext);
     }
 
-    return ts.visitEachChild(node, visit, context.tsContext);
+    return visitEachChildWithJsx(node, visit, context.tsContext);
   };
 
-  return ts.visitEachChild(
+  return visitEachChildWithJsx(
     context.sourceFile,
     visit,
     context.tsContext,
-  );
+  ) as ts.SourceFile;
 }
