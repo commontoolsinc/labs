@@ -187,7 +187,7 @@ export class CTRender extends BaseElement {
       return cell;
     }
 
-    throw new Error("Cell does not contain renderable UI content");
+    return cell;
   }
 
   private async _maybeSyncCell(cell: Cell<unknown>) {
