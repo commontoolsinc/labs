@@ -20,7 +20,9 @@ Before ever calling `ct` you MUST read `docs/common/CT.md`.
 
 Whenever you work on patterns (sometimes called recipes), consult the `patterns` package for a set of well-tested minimal examples. To learn more about the pattern framework, consult `docs/common/*.md` and `tutorials/*.md`.  You should re-read `.claude/commands/recipe-dev.md` when confused to refresh your memory on `ct` and deploying charms.
 
-These patterns are composed using functions from `packages/builder` and executed by our runtime in `packages/runner`, managed by `packages/charm` and rendered by `packages/html`
+These patterns are composed using functions from `packages/builder` and executed by our runtime in `packages/runner`, managed by `packages/charm` and rendered by `packages/html`.
+
+IMPORTANT: ignore the top level `recipes` folder, it is defunct.
 
 ### Formatting
 
