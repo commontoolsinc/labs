@@ -2,13 +2,72 @@ import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
-import { selectDataFlowsWithin } from "../../../ast/mod.ts";
+import { getExpressionText, selectDataFlowsWithin } from "../../../ast/mod.ts";
+import type { NormalizedDataFlowSet } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
+
+// Helper to find data flows that are referenced in an expression
+// This is needed for parameters which don't have positional occurrences within the expression
+function selectDataFlowsReferencedIn(
+  set: NormalizedDataFlowSet,
+  node: ts.Node,
+): typeof set.all {
+  const referencedExpressions = new Set<string>();
+
+  // Find all expressions used in the node
+  const visit = (n: ts.Node) => {
+    if (ts.isExpression(n)) {
+      referencedExpressions.add(getExpressionText(n));
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+
+  // Return data flows whose expression text matches any referenced expression
+  return set.all.filter((dataFlow) => {
+    const flowExprText = getExpressionText(dataFlow.expression);
+    return referencedExpressions.has(flowExprText);
+  });
+}
+
+// Helper to process a conditional branch (whenTrue/whenFalse)
+function processBranch(
+  expr: ts.Expression,
+  dataFlows: NormalizedDataFlowSet,
+  analysis: ReturnType<Parameters<Emitter>[0]["analyze"]>,
+  context: Parameters<Emitter>[0]["context"],
+  analyze: Parameters<Emitter>[0]["analyze"],
+  rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
+): ts.Expression {
+  const branchDataFlows = filterRelevantDataFlows(
+    selectDataFlowsReferencedIn(dataFlows, expr),
+    analysis,
+    context,
+  );
+
+  const branchAnalysis = analyze(expr);
+
+  if (
+    branchDataFlows.length > 0 &&
+    branchAnalysis.requiresRewrite &&
+    !isSimpleOpaqueRefAccess(expr, context.checker)
+  ) {
+    const plan = createBindingPlan(branchDataFlows);
+    const derived = createDeriveCallForExpression(expr, plan, context);
+    if (derived) {
+      return derived;
+    }
+  }
+
+  // Fallback: rewrite children
+  const rewritten = rewriteChildren(expr);
+  return rewritten || expr;
+}
 
 export const emitConditionalExpression: Emitter = ({
   expression,
@@ -21,7 +80,7 @@ export const emitConditionalExpression: Emitter = ({
   if (!ts.isConditionalExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
 
-  const predicateDataFlows = selectDataFlowsWithin(
+  const predicateDataFlows = selectDataFlowsReferencedIn(
     dataFlows,
     expression.condition,
   );
@@ -29,9 +88,6 @@ export const emitConditionalExpression: Emitter = ({
     !isSimpleOpaqueRefAccess(expression.condition, context.checker);
 
   let predicate: ts.Expression = expression.condition;
-  let whenTrue: ts.Expression = expression.whenTrue;
-  let whenFalse: ts.Expression = expression.whenFalse;
-
   if (shouldDerivePredicate) {
     const plan = createBindingPlan(predicateDataFlows);
     const derivedPredicate = createDeriveCallForExpression(
@@ -44,67 +100,23 @@ export const emitConditionalExpression: Emitter = ({
     }
   }
 
-  const whenTrueDataFlows = filterRelevantDataFlows(
-    selectDataFlowsWithin(dataFlows, expression.whenTrue),
+  const whenTrue = processBranch(
+    expression.whenTrue,
+    dataFlows,
     analysis,
     context,
+    analyze,
+    rewriteChildren,
   );
 
-  // Check if the whenTrue branch actually requires rewriting
-  const whenTrueAnalysis = analyze(expression.whenTrue);
-
-  if (whenTrueDataFlows.length > 0 && whenTrueAnalysis.requiresRewrite) {
-    const plan = createBindingPlan(whenTrueDataFlows);
-    const derivedWhenTrue = createDeriveCallForExpression(
-      expression.whenTrue,
-      plan,
-      context,
-    );
-    if (derivedWhenTrue) {
-      whenTrue = derivedWhenTrue;
-    } else {
-      const rewritten = rewriteChildren(expression.whenTrue);
-      if (rewritten) {
-        whenTrue = rewritten;
-      }
-    }
-  } else {
-    const rewritten = rewriteChildren(expression.whenTrue);
-    if (rewritten) {
-      whenTrue = rewritten;
-    }
-  }
-
-  const whenFalseDataFlows = filterRelevantDataFlows(
-    selectDataFlowsWithin(dataFlows, expression.whenFalse),
+  const whenFalse = processBranch(
+    expression.whenFalse,
+    dataFlows,
     analysis,
     context,
+    analyze,
+    rewriteChildren,
   );
-
-  // Check if the whenFalse branch actually requires rewriting
-  const whenFalseAnalysis = analyze(expression.whenFalse);
-
-  if (whenFalseDataFlows.length > 0 && whenFalseAnalysis.requiresRewrite) {
-    const plan = createBindingPlan(whenFalseDataFlows);
-    const derivedWhenFalse = createDeriveCallForExpression(
-      expression.whenFalse,
-      plan,
-      context,
-    );
-    if (derivedWhenFalse) {
-      whenFalse = derivedWhenFalse;
-    } else {
-      const rewritten = rewriteChildren(expression.whenFalse);
-      if (rewritten) {
-        whenFalse = rewritten;
-      }
-    }
-  } else {
-    const rewritten = rewriteChildren(expression.whenFalse);
-    if (rewritten) {
-      whenFalse = rewritten;
-    }
-  }
 
   return createIfElseCall({
     expression,
