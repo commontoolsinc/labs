@@ -34,7 +34,7 @@ const computeIndex = lift<
     for (const c of cs) {
       const mentions = c.mentioned ?? [];
       for (const m of mentions) {
-        m.backlinks?.push(c);
+        m?.backlinks?.push(c);
       }
     }
   },

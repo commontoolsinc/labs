@@ -87,7 +87,7 @@ const listMentionable = handler<
   },
 );
 
-const readNoteByIndex = handler<
+const readContentByIndex = handler<
   {
     /** A cell to store the result text */
     index: number;
@@ -107,7 +107,7 @@ const readNoteByIndex = handler<
 );
 
 type Note = MentionableCharm & { content: string };
-const editNoteByIndex = handler<
+const editContentByIndex = handler<
   {
     /** The index of the note to edit */
     index: number;
@@ -207,14 +207,14 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       readContentByIndex: {
         description:
           "Read the content of a mentionable by its index in the listMentionable() list (if possible)",
-        handler: readNoteByIndex({
+        handler: readContentByIndex({
           allNotes: mentionable as unknown as OpaqueRef<Note[]>,
         }),
       },
-      editNoteByIndex: {
+      editContentByIndex: {
         description:
           "Edit the content of a mentionable by its index in the listMentionable() list (if possible)",
-        handler: editNoteByIndex({
+        handler: editContentByIndex({
           allNotes: mentionable as unknown as OpaqueRef<Note[]>,
         }),
       },
