@@ -680,6 +680,69 @@ describe("createProxy", () => {
     expect(innerSpread[1].value).toBe(2);
   });
 
+  it("should support spreading arrays with cell references", () => {
+    // Create individual cells to reference
+    const cell1 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-1",
+      undefined,
+      tx,
+    );
+    cell1.set({ name: "first", value: 100 });
+
+    const cell2 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-2",
+      undefined,
+      tx,
+    );
+    cell2.set({ name: "second", value: 200 });
+
+    const cell3 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-3",
+      undefined,
+      tx,
+    );
+    cell3.set({ name: "third", value: 300 });
+
+    // Create an array cell containing references to other cells
+    const arrayCell = runtime.getCell<any[]>(
+      space,
+      "array-with-refs",
+      undefined,
+      tx,
+    );
+    arrayCell.set([cell1, cell2, cell3]);
+
+    const proxy = arrayCell.getAsQueryResult();
+
+    // Spread the array
+    const spread = [...proxy];
+
+    expect(spread.length).toBe(3);
+
+    // Each element should be a query result proxy
+    expect(isQueryResult(spread[0])).toBe(true);
+    expect(isQueryResult(spread[1])).toBe(true);
+    expect(isQueryResult(spread[2])).toBe(true);
+
+    // Verify we can access the referenced cells' data
+    expect(spread[0].name).toBe("first");
+    expect(spread[0].value).toBe(100);
+    expect(spread[1].name).toBe("second");
+    expect(spread[1].value).toBe(200);
+    expect(spread[2].name).toBe("third");
+    expect(spread[2].value).toBe(300);
+
+    // Use for...of to iterate
+    const names: string[] = [];
+    for (const item of proxy) {
+      names.push(item.name);
+    }
+    expect(names).toEqual(["first", "second", "third"]);
+  });
+
   it.skip("should support pop() and only read the popped element", () => {
     const c = runtime.getCell<{ a: number[] }>(
       space,
