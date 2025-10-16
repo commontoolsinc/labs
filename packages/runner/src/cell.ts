@@ -5,6 +5,7 @@ import {
   type Cell,
   ID,
   ID_FIELD,
+  type IDFields,
   isStreamValue,
   type JSONSchema,
   type OpaqueRef,
@@ -453,14 +454,14 @@ export class RegularCell<T> implements Cell<T> {
     if (!this.synced) this.sync();
 
     // Looks for arrays and makes sure each object gets its own doc.
-    newValue = recursivelyAddIDIfNeeded(newValue);
+    const transformedValue = recursivelyAddIDIfNeeded(newValue);
 
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolveLink(this.tx, this.link, "writeRedirect"),
-      newValue,
+      transformedValue,
       getTopFrame()?.cause,
     );
 
@@ -522,8 +523,7 @@ export class RegularCell<T> implements Cell<T> {
 
     // Now update each property
     for (const [key, value] of Object.entries(values)) {
-      // Workaround for type checking, since T can be Cell<> and that's fine.
-      (this.key as any)(key).set(recursivelyAddIDIfNeeded(value));
+      (this as Cell<any>).key(key).set(value);
     }
   }
 
@@ -903,7 +903,7 @@ function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without top frame.
   if (!getTopFrame()) return value;
 
-  // Already a link, no need to add IDs. Not a record, no need to add IDs.
+  // Not a record, no need to add IDs. Already a link, no need to add IDs.
   if (!isRecord(value) || isLink(value)) return value;
 
   // Already seen, return previously annotated result.
@@ -938,12 +938,12 @@ function recursivelyAddIDIfNeeded<T>(
     });
 
     // Copy supported symbols from original value.
-    if (ID in value) {
-      (result as { [ID]: unknown })[ID] = value[ID];
-    }
-    if (ID_FIELD in value) {
-      (result as { [ID_FIELD]: unknown })[ID_FIELD] = value[ID_FIELD];
-    }
+    [ID, ID_FIELD].forEach((symbol) => {
+      if (symbol in value) {
+        (result as IDFields)[symbol as keyof IDFields] =
+          value[symbol as keyof IDFields];
+      }
+    });
 
     return result as T;
   }
