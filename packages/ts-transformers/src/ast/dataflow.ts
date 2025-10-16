@@ -303,9 +303,23 @@ export function createDataFlowAnalyzer(
                   }
                 }
               }
+            } else {
+              // Symbol is undefined for the root - this is likely a synthetic parameter
+              // from a transformer (like `element` from map closure transformer).
+              // We can't resolve symbols for synthetic nodes, but if this looks like
+              // a property access on a simple identifier (not a complex expression),
+              // treat it as an opaque property access that needs derive wrapping.
+              // This handles cases like `element.price` where `element` is synthetic.
+              return {
+                containsOpaqueRef: true,
+                requiresRewrite: true,
+                dataFlows: [expression],
+                localNodes: [],
+              };
             }
           }
           // Otherwise preserve merged analysis from children
+          // NOTE: We should rarely hit this - it means the root wasn't an identifier
           return merged;
         }
 
@@ -478,6 +492,17 @@ export function createDataFlowAnalyzer(
       }
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
         const node = recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+          localNodes: [node],
+        };
+      }
+      // Check if this identifier is a parameter to a builder or array-map call (like recipe)
+      // These parameters become implicitly opaque even though their type isn't OpaqueRef
+      if (isRootOpaqueParameter(symbol)) {
+        const node = recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
