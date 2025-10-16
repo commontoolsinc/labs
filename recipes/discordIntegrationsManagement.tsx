@@ -1,4 +1,5 @@
-import { derive, h, JSONSchema, NAME, recipe, Schema, UI } from "commontools";
+/// <cts-enable />
+import { derive, JSONSchema, NAME, recipe, Schema, UI } from "commontools";
 
 const IntegrationSpaceCharmSchema = {
   type: "object",

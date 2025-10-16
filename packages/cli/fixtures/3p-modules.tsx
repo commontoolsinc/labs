@@ -1,13 +1,5 @@
-import {
-  derive,
-  h,
-  ID,
-  type JSONSchema,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+/// <cts-enable />
+import { type JSONSchema, NAME, recipe, str, UI } from "commontools";
 import TurndownService from "turndown";
 
 const Input = {
@@ -41,8 +33,7 @@ function assert(condition: boolean, message: string) {
 export default recipe(
   Input,
   Output,
-  (state) => {
-    //const { foo } = state;
+  (_state) => {
     const html = `
     <div id="root">
       <ul foo="bar">

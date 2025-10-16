@@ -97,10 +97,10 @@ const then = <T>(
       onsuccess(request.result);
     }
   } else {
-    request.addEventListener("success", (event) => onsuccess(request.result), {
+    request.addEventListener("success", (_) => onsuccess(request.result), {
       once: true,
     });
-    request.addEventListener("error", (event) => onfail(request.error!), {
+    request.addEventListener("error", (_) => onfail(request.error!), {
       once: true,
     });
   }
@@ -237,7 +237,7 @@ export class Store<
     entries: Iterable<Model>,
     merge: Merge<Model>,
   ): Promise<Result<object, StoreError>> {
-    const { key, value, address } = this.format;
+    const { key: _, value, address } = this.format;
     return this.session.transact<object, StoreError>(
       "readwrite",
       async (store) => {

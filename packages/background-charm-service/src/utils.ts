@@ -42,7 +42,7 @@ export async function getIdentity(
     try {
       const pkcs8Key = await Deno.readFile(identityPath);
       return await Identity.fromPkcs8(pkcs8Key, keyConfig);
-    } catch (e) {
+    } catch (_e) {
       throw new Error(`Could not read key at ${identityPath}.`);
     }
   } else if (operatorPass) {

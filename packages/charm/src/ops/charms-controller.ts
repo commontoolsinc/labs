@@ -31,13 +31,14 @@ export class CharmsController<T = unknown> {
   async create(
     program: RuntimeProgram | string,
     options: CreateCharmOptions = {},
+    cause: string | undefined = undefined,
   ): Promise<CharmController<T>> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
     const charm = await this.#manager.runPersistent<T>(
       recipe,
       options.input,
-      undefined,
+      cause,
       undefined,
       { start: options.start ?? true },
     );
@@ -120,11 +121,11 @@ export class CharmsController<T = unknown> {
     };
 
     const runtime = new Runtime({
+      apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
         address: new URL("/api/storage/memory", apiUrl),
       }),
-      blobbyServerUrl: apiUrl.toString(),
     });
 
     const manager = new CharmManager(session, runtime);

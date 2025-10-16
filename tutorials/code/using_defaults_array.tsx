@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, h, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, recipe, UI } from "commontools";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;

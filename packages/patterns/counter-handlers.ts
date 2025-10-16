@@ -5,7 +5,7 @@ export const increment = handler<
   unknown,
   { value: Cell<number> }
 >(
-  (args, state) => {
+  (_args, state) => {
     state.value.set(state.value.get() + 1);
   },
 );
@@ -14,7 +14,7 @@ export const decrement = handler<
   unknown,
   { value: Cell<number> }
 >(
-  (args, state) => {
+  (_args, state) => {
     state.value.set(state.value.get() - 1);
   },
 );

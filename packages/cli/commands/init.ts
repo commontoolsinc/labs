@@ -2,7 +2,7 @@ import { Command } from "@cliffy/command";
 import { Engine } from "@commontools/runner";
 import { join } from "@std/path/join";
 import { getCompilerOptions } from "@commontools/js-runtime/typescript";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 import { dirname } from "@std/path/dirname";
 
 export const init = new Command()
@@ -79,7 +79,7 @@ function createTsConfig() {
 //
 // Also copies recipe documentation from docs/common to .ct-docs for reference.
 async function initWorkspace(cwd: string) {
-  const cache = new StaticCache();
+  const cache = new StaticCacheFS();
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
     cache,
   );

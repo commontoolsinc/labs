@@ -13,7 +13,6 @@ describe("counter direct operations test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
   let charm: CharmController;

@@ -1,4 +1,4 @@
-import { CommandType, type Scenario, type Step } from "./interfaces.ts";
+import { CommandType, type Scenario } from "./interfaces.ts";
 
 const familyCookbook = (prompt: string, idx: number): Scenario => {
   return {

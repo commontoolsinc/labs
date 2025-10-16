@@ -2,6 +2,7 @@ import * as Access from "./access.ts";
 import {
   AsyncResult,
   Await,
+  CauseString,
   CloseResult,
   Commit,
   ConnectionError,
@@ -379,9 +380,10 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
-      const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
-        redactedData.transaction,
-      );
+      const [_lastId, _maxSince, facts] = await this
+        .getSchemaSubscriptionMatches(
+          redactedData.transaction,
+        );
 
       const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
       for (const [id, channels] of this.channels) {
@@ -434,10 +436,16 @@ class MemoryProviderSession<
       { is?: Memory.JSONValue; since: number }
     > = {};
     for (const fact of factVersions) {
-      setRevision(selection, fact.of, fact.the, fact.cause.toString(), {
-        is: fact.is,
-        since: fact.since,
-      });
+      setRevision(
+        selection,
+        fact.of,
+        fact.the,
+        fact.cause.toString() as CauseString,
+        {
+          is: fact.is,
+          since: fact.since,
+        },
+      );
     }
     return selection;
   }

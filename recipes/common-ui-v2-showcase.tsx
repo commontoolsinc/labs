@@ -1,4 +1,5 @@
-import { h, NAME, recipe, schema, str, UI } from "commontools";
+/// <cts-enable />
+import { NAME, recipe, schema, str, UI } from "commontools";
 
 const model = schema({
   type: "object",

@@ -29,7 +29,7 @@
  * - Updates aria-valuetext with percentage or "Loading" for indeterminate state
  */
 
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";

@@ -7,7 +7,6 @@ import {
   handler,
   lift,
   recipe,
-  str,
   toSchema,
 } from "commontools";
 
@@ -451,7 +450,6 @@ export const budgetPlanner = recipe<BudgetPlannerArgs>(
     )({ categories, total: sanitizedTotal });
 
     const categoryCatalog = derive(baseState, (state) => state.catalog);
-    const baseAllocations = derive(baseState, (state) => state.allocations);
     const overrides = cell<AllocationRecord | null>(null);
     const history = cell<string[]>(["Budget initialized"]);
     const lastAction = cell("Budget initialized");

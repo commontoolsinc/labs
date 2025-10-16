@@ -27,7 +27,7 @@ describe("scheduler", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -522,7 +522,7 @@ describe("event handling", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -804,7 +804,7 @@ describe("reactive retries", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -982,7 +982,7 @@ describe("Stream event success callbacks", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -1219,7 +1219,7 @@ describe("Stream event success callbacks", () => {
     let callbackTx: IExtendedStorageTransaction | undefined;
 
     runtime.scheduler.addEventHandler(
-      (tx, event) => {
+      (tx, _event) => {
         eventHandlerCalls++;
         // Always fail
         tx.abort("Intentional failure - should exhaust retries");

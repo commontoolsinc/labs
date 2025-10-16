@@ -37,7 +37,7 @@ describe("Schema-to-TS Type Conversion", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -369,7 +369,6 @@ describe("Schema-to-TS Type Conversion", () => {
       stateSchema,
       (event, state) => {
         // Type checking - this should compile only if types are correctly inferred
-        const eventType = event.type;
         const payload = event.payload || "default";
 
         // Access state properties, including the cell

@@ -170,7 +170,7 @@ export class TreeDiffCalculator {
    */
   static calculateOutdentDiff(
     targetPath: number[],
-    tree: any,
+    _tree: any,
   ): TreeOperationResult {
     const changes: PathChange[] = [];
 
@@ -213,7 +213,7 @@ export class TreeDiffCalculator {
    */
   static calculateMoveUpDiff(
     targetPath: number[],
-    tree: any,
+    _tree: any,
   ): TreeOperationResult {
     const changes: PathChange[] = [];
 
@@ -317,7 +317,7 @@ export class TreeDiffCalculator {
   static calculateCreateAfterDiff(
     targetPath: number[],
     nodeData: { body: string; children?: any[]; attachments?: any[] },
-    tree: any,
+    _tree: any,
   ): TreeOperationResult {
     const changes: PathChange[] = [];
 
@@ -349,7 +349,7 @@ export class TreeDiffCalculator {
   static calculateCreateChildDiff(
     targetPath: number[],
     nodeData: { body: string; children?: any[]; attachments?: any[] },
-    tree: any,
+    _tree: any,
   ): TreeOperationResult {
     const changes: PathChange[] = [];
     const newPath = [...targetPath, 0]; // First child

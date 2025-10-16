@@ -250,7 +250,7 @@ export async function parseComposerDocument(
 
     try {
       document = JSON.parse(serializedDocument) as Descendant[];
-    } catch (error) {
+    } catch (_) {
       console.warn(
         "Failed to parse JSON compose document, assuming plain text:",
       );

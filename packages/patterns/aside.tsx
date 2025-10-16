@@ -1,18 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  derive,
-  handler,
-  ifElse,
-  lift,
-  NAME,
-  navigateTo,
-  recipe,
-  toSchema,
-  UI,
-} from "commontools";
+import { NAME, recipe, UI } from "commontools";
 
 // note: you may need to zoom in our out in the browser to see the
 // content and/or tabs

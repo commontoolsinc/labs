@@ -524,6 +524,13 @@ export type CompileAndRunFunction = <T = any, S = any>(
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
+export type WishFunction = {
+  <T = unknown>(target: Opaque<string>): OpaqueRef<T | undefined>;
+  <T = unknown>(
+    target: Opaque<string>,
+    defaultValue: Opaque<T>,
+  ): OpaqueRef<T>;
+};
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
@@ -575,6 +582,7 @@ export declare const fetchData: FetchDataFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
+export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
@@ -596,7 +604,7 @@ export const schema = <T extends JSONSchema>(schema: T) => schema;
 
 // toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
 // The actual implementation is done by the TypeScript transformer
-export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+export const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
   return {} as JSONSchema;
 };
 

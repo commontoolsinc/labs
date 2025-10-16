@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { OpaqueRef, recipe } from "commontools";
+import { recipe } from "commontools";
 
 interface TodoItem {
   title: string;

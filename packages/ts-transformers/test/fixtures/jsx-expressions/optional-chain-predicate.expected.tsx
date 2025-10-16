@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, h, recipe, NAME, UI } from "commontools";
+import { cell, NAME, recipe, UI } from "commontools";
 export default recipe("Optional Chain Predicate", () => {
     const items = cell<string[]>([]);
     return {

@@ -1,13 +1,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import {
-  Cell,
-  isStream,
-  Runtime,
-  RuntimeProgram,
-  UI,
-} from "@commontools/runner";
+import { isStream, Runtime, RuntimeProgram, UI } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
@@ -28,30 +22,6 @@ export interface SpaceConfig {
 
 export interface CharmConfig extends SpaceConfig {
   charm: string;
-}
-
-function parseSpace(
-  space: string,
-): string {
-  if (space.startsWith("did:key:")) {
-    // Need to be able to resolve a did key to a name, based
-    // on current Session requirements.
-    throw new Error("`space` as a DID key is not yet supported.");
-  }
-  if (space.startsWith("~")) {
-    // Need to be able to resolve a private space to a did key, based
-    // on current Session requirements.
-    throw new Error("`space` must not be a private space.");
-  }
-  return space;
-}
-
-function getCharmIdSafe(charm: Cell<unknown>): string {
-  const id = charmId(charm);
-  if (!id) {
-    throw new Error("Could not get an ID from a Cell<Charm>");
-  }
-  return id;
 }
 
 async function makeSession(config: SpaceConfig): Promise<Session> {
@@ -76,11 +46,11 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
   // Use a const ref object so we can assign later while keeping const binding
   const charmManagerRef: { current?: CharmManager } = {};
   const runtime = new Runtime({
+    apiUrl: new URL(config.apiUrl),
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
     }),
-    blobbyServerUrl: config.apiUrl,
     navigateCallback: (target) => {
       try {
         const id = charmId(target);
@@ -110,6 +80,11 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
       }
     },
   });
+
+  if (!(await runtime.healthCheck())) {
+    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+  }
+
   const charmManager = new CharmManager(session, runtime);
   charmManagerRef.current = charmManager;
   await charmManager.synced();

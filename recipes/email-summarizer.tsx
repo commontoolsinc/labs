@@ -1,6 +1,6 @@
+/// <cts-enable />
 import {
   derive,
-  h,
   handler,
   JSONSchema,
   lift,

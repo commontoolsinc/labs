@@ -4,4 +4,3 @@ interface SchemaRoot {
   /** Doc for number index */
   [index: number]: number;
 }
-

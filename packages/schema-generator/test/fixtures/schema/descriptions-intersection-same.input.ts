@@ -11,4 +11,3 @@ interface B {
 }
 
 type SchemaRoot = A & B;
-

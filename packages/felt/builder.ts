@@ -2,7 +2,7 @@ import * as esbuild from "esbuild";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { debounce } from "@std/async/debounce";
 import { ResolvedConfig } from "./interface.ts";
-import { blue, bold, dim, green, red, yellow } from "@std/fmt/colors";
+import { blue, dim, green, red, yellow } from "@std/fmt/colors";
 
 function formatFileSize(bytes: number): string {
   const units = ["B", "KB", "MB", "GB"];

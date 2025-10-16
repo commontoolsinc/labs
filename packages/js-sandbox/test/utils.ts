@@ -4,9 +4,9 @@ import {
   JsScript,
   TypeScriptCompiler,
 } from "@commontools/js-runtime";
-import { StaticCache } from "@commontools/static";
+import { TestStaticCache } from "@commontools/static/utils";
 
-const types = await getTypeScriptEnvironmentTypes(new StaticCache());
+const types = await getTypeScriptEnvironmentTypes(new TestStaticCache());
 
 export async function compile(
   code: string | Record<string, string>,

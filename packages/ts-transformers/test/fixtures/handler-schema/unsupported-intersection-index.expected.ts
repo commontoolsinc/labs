@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { handler, Cell } from "commontools";
+import { Cell, handler } from "commontools";
 interface Item {
     text: string;
 }

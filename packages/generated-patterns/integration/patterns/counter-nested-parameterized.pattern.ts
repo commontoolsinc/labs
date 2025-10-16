@@ -137,18 +137,6 @@ export const parameterizedChildCounter = recipe<ParameterizedChildArgs>(
   },
 );
 
-const specializationSchema = {
-  type: "object",
-  required: ["id", "step", "labelPrefix", "start"],
-  additionalProperties: false,
-  properties: {
-    id: { type: "string" },
-    step: { type: "number" },
-    labelPrefix: { type: "string" },
-    start: { type: "number" },
-  },
-} as const;
-
 const toRecord = (config: ChildConfig): ChildSpecializationRecord => ({
   id: config.id,
   step: config.step,

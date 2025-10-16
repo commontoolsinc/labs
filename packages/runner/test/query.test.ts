@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
 import {
   deepEqual,
+  JSONObject,
   type JSONSchema,
   type JSONValue,
   type SchemaContext,
@@ -13,11 +14,12 @@ import {
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import type {
+  MIME,
   Revision,
   SchemaPathSelector,
   State,
+  URI,
 } from "@commontools/memory/interface";
-import type { Entity } from "@commontools/memory/interface";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
@@ -43,7 +45,7 @@ describe("Query", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
     tx = runtime.edit();
@@ -71,9 +73,9 @@ describe("Query", () => {
     );
     testCell1.set(docValue1);
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
-    const assert1 = {
+    const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}` as Entity,
+      of: `of:${entityId1["/"]}`,
       is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
@@ -94,9 +96,9 @@ describe("Query", () => {
     );
     testCell2.setRaw(docValue2);
     const entityId2 = testCell2.entityId!;
-    const assert2 = {
+    const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}` as Entity,
+      of: `of:${entityId2["/"]}`,
       is: { value: docValue2 },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
@@ -128,7 +130,7 @@ describe("Query", () => {
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
       address: { id: assert2.of, type: assert2.the, path: ["value"] },
-      value: assert2.is.value,
+      value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -164,9 +166,9 @@ describe("Query", () => {
     );
     testCell1.set({ employees: [{ name: { first: "Bob" } }] });
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
-    const assert1 = {
+    const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}` as Entity,
+      of: `of:${entityId1["/"]}`,
       is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
@@ -187,9 +189,9 @@ describe("Query", () => {
     };
     testCell2.setRaw(docValue2);
     const entityId2 = testCell2.entityId!;
-    const assert2 = {
+    const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}` as Entity,
+      of: `of:${entityId2["/"]}`,
       is: { value: docValue2 },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
@@ -214,7 +216,7 @@ describe("Query", () => {
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
       address: { id: assert2.of, type: assert2.the, path: ["value"] },
-      value: assert2.is.value,
+      value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -265,8 +267,8 @@ describe("Query", () => {
     });
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
     const assert1 = {
-      the: "application/json",
-      of: `of:${entityId1["/"]}` as Entity,
+      the: "application/json" as MIME,
+      of: `of:${entityId1["/"]}` as URI,
       is: {
         value: {
           name: {
@@ -329,7 +331,7 @@ describe("Query", () => {
     );
 
     // testCell1 self property points to itself
-    const assert1 = {
+    const assert1: Revision<State> = {
       the: "application/json",
       of: testCell1.sourceURI,
       is: {
@@ -350,7 +352,7 @@ describe("Query", () => {
 
     store.set(`${assert1.of}/${assert1.the}`, assert1);
 
-    const assert2 = {
+    const assert2: Revision<State> = {
       the: "application/json",
       of: testCell2.sourceURI,
       is: {
@@ -403,7 +405,7 @@ describe("Query", () => {
         type: "application/json",
         path: ["value"],
       },
-      value: assert1.is.value,
+      value: (assert1.is as JSONObject).value,
     });
 
     expect(result).toBeDefined();
@@ -443,9 +445,9 @@ describe("Query", () => {
     );
     testCell1.set(docValue1);
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
-    const assert1 = {
+    const assert1: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId1["/"]}` as Entity,
+      of: `of:${entityId1["/"]}`,
       is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
@@ -477,9 +479,9 @@ describe("Query", () => {
     };
 
     const entityId2 = testCell2.entityId!;
-    const assert2 = {
+    const assert2: Revision<State> = {
       the: "application/json",
-      of: `of:${entityId2["/"]}` as Entity,
+      of: `of:${entityId2["/"]}`,
       is: { value: testCell2.getRaw() },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
@@ -498,7 +500,7 @@ describe("Query", () => {
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
       address: { id: assert2.of, type: assert2.the, path: ["value"] },
-      value: assert2.is.value,
+      value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,

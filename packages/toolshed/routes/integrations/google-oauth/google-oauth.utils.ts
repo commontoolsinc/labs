@@ -66,7 +66,7 @@ export const getBaseUrl = (url: string): string => {
     return origin.startsWith("http://localhost")
       ? origin
       : origin.replace("http://", "https://");
-  } catch (error) {
+  } catch (_) {
     // Fallback for development/testing
     return "http://localhost:8000";
   }
@@ -225,7 +225,7 @@ export async function getTokensFromAuthCell(
 }
 
 // Standard error response
-export function createErrorResponse(c: Context, message: string, status = 400) {
+export function createErrorResponse(c: Context, message: string) {
   return c.json({
     success: false,
     error: message,

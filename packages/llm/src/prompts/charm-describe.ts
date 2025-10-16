@@ -1,7 +1,7 @@
 import { LLMClient } from "../client.ts";
 import { applyDefaults, GenerationOptions, llmPrompt } from "../index.ts";
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
-import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
+import { extractTextFromLLMResponse } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
   "charm-describe-system",

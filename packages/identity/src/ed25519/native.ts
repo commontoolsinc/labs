@@ -5,7 +5,6 @@ import {
   didToBytes,
   ED25519_ALG,
   ed25519RawToPkcs8,
-  isNativeEd25519Supported,
 } from "./utils.ts";
 import {
   AsBytes,

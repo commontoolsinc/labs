@@ -1,10 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertStringIncludes } from "@std/assert";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 
 import { transformSource } from "../utils.ts";
 
-const staticCache = new StaticCache();
+const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
 const SOURCE = `/// <cts-enable />

@@ -61,7 +61,7 @@ ${newSpec}
 
 by following the following steps:
 <steps>
-${steps.map((step, index) => `<step>${step}</step>`).join("\n")}
+${steps.map((step) => `<step>${step}</step>`).join("\n")}
 </steps>`
         : ""
     }`,

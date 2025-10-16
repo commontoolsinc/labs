@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { join } from "@std/path";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 import {
   CommonToolsTransformerPipeline,
   transformCtDirective,
@@ -261,7 +261,7 @@ export async function compareFixtureTransformation(
 }
 
 async function loadEnvironmentTypes(): Promise<Record<EnvTypeKey, string>> {
-  const cache = new StaticCache();
+  const cache = new StaticCacheFS();
   const entries = await Promise.all(
     ENV_TYPE_ENTRIES.map(async (key) =>
       [key, await cache.getText(`types/${key}.d.ts`)] as const

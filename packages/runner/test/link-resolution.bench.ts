@@ -12,7 +12,7 @@ const space = signer.did();
 Deno.bench("followWriteRedirects with simple alias", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -36,7 +36,7 @@ Deno.bench("followWriteRedirects with simple alias", () => {
 Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -73,7 +73,7 @@ Deno.bench("followWriteRedirects with nested aliases (5 levels)", () => {
 Deno.bench("resolveLink with direct reference", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -96,7 +96,7 @@ Deno.bench("resolveLink with direct reference", () => {
 Deno.bench("circular reference navigation (A->B->A->value)", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -127,7 +127,7 @@ Deno.bench("circular reference navigation (A->B->A->value)", () => {
 Deno.bench("complex path navigation (6 hops through 3 cells)", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -165,7 +165,7 @@ Deno.bench("complex path navigation (6 hops through 3 cells)", () => {
 Deno.bench("array element resolution in circular structures", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();
@@ -204,7 +204,7 @@ Deno.bench("array element resolution in circular structures", () => {
 Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
-    blobbyServerUrl: import.meta.url,
+    apiUrl: new URL(import.meta.url),
     storageManager,
   });
   const tx = runtime.edit();

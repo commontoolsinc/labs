@@ -58,7 +58,7 @@ const timedHandler = handler({
     }
 } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.lastUpdate = event.timestamp;
-    event.data.forEach((value, key) => {
+    event.data.forEach((_value, key) => {
         state.history.set(key, new Date());
     });
 });

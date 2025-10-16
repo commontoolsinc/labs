@@ -1,4 +1,10 @@
-import { assert, assertEquals, assertFalse, assertMatch } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertFalse,
+  assertMatch,
+} from "@std/assert";
 import { refer } from "merkle-reference";
 import type { JSONSchema } from "@commontools/runner";
 import * as Changes from "../changes.ts";
@@ -167,7 +173,7 @@ test("create memory fails if already exists", store, async (session) => {
 
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
-  const { history, ...baseConflict } = conflict.error.conflict;
+  const { history: _, ...baseConflict } = conflict.error.conflict;
   assertEquals(baseConflict, {
     space: subject.did(),
     the,
@@ -267,13 +273,18 @@ test("list excludes retracted facts", store, async (session) => {
   });
 
   const q2 = await memory.query({
-    select: { [doc]: { [the]: { is: {} } } },
+    select: { [doc]: { [the]: { "_": { is: {} } } } },
   });
 
+  const redactedEntry = q2.ok?.selection[subject.did()][doc][the];
+  assertExists(redactedEntry);
+  const [[cause, item]] = Object.entries(redactedEntry);
+
+  // Make sure there's no `is` property
+  assertEquals(item, { since: 1 }, "excludes retracted facts");
   assertEquals(
     q2.ok?.selection,
-    { [subject.did()]: { [doc]: { [the]: {} } } },
-    "excludes retracted facts",
+    { [subject.did()]: { [doc]: { [the]: { [cause]: { since: 1 } } } } },
   );
 });
 
@@ -517,7 +528,7 @@ test("cancel subscription", store, async (session) => {
 
   const v2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
 
-  const t1 = Transaction.create({
+  const _t1 = Transaction.create({
     issuer: subject.did(),
     subject: subject.did(),
     changes: Changes.from([v2]),

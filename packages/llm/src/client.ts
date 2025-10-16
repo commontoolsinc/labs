@@ -1,5 +1,4 @@
 import {
-  LLMContent,
   LLMGenerateObjectRequest,
   LLMGenerateObjectResponse,
   LLMRequest,
@@ -7,7 +6,6 @@ import {
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
-import { type BuiltInLLMMessage } from "@commontools/api";
 
 type PartialCallback = (text: string) => void;
 

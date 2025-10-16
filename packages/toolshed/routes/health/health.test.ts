@@ -2,7 +2,6 @@ import { assertEquals } from "@std/assert";
 
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
-import type { HealthResponse } from "./health.handlers.ts";
 import router from "@/routes/health/health.index.ts";
 
 if (env.ENV !== "test") {

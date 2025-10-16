@@ -15,8 +15,8 @@ import type {
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isCell, isStream } from "../cell.ts";
-import { ID, NAME, type Recipe, TYPE, UI } from "../builder/types.ts";
+import { isStream } from "../cell.ts";
+import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -57,7 +57,7 @@ function stripInjectedResult(
   const copy: Record<string, unknown> = { ...obj };
   const props = copy.properties as Record<string, unknown> | undefined;
   if (props && typeof props === "object") {
-    const { result, ...rest } = props as Record<string, unknown>;
+    const { result: _, ...rest } = props as Record<string, unknown>;
     copy.properties = rest;
   }
   const req = copy.required as unknown[] | undefined;
@@ -911,7 +911,7 @@ async function startRequest(
                   if (nestedArgs !== undefined) {
                     adjustedInput = nestedArgs;
                   } else {
-                    const { path, ...rest } =
+                    const { path: _, ...rest } =
                       (input && typeof input === "object") ? input : {} as any;
                     adjustedInput = rest;
                   }

@@ -20,11 +20,11 @@ console.log("\n=== TEST: Sync Schema uses Path ===");
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
   const addressSchema = {
     type: "object",
@@ -92,11 +92,11 @@ async function test() {
 
   // Attempt to load on runtime2
   const runtime2 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
 
   // When we build a cell from a cell link, we don't do the right thing with

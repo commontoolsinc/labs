@@ -14,7 +14,7 @@ import {
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type, context: GenerationContext): boolean {
+  supportsType(type: ts.Type, _context: GenerationContext): boolean {
     return (type.flags & ts.TypeFlags.Union) !== 0;
   }
 

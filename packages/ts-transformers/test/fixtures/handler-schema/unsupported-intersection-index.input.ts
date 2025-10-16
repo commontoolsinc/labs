@@ -1,8 +1,12 @@
 /// <cts-enable />
-import { handler, Cell } from "commontools";
+import { Cell, handler } from "commontools";
 
-interface Item { text: string; }
-interface ListState { items: Cell<Item[]>; }
+interface Item {
+  text: string;
+}
+interface ListState {
+  items: Cell<Item[]>;
+}
 
 // Index signature will prevent safe merge
 type Indexed = { [k: string]: unknown };

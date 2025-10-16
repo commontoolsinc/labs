@@ -22,7 +22,7 @@ describe("SelectorTracker", () => {
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
 
@@ -93,7 +93,7 @@ describe("SelectorTracker", () => {
         "id": "of:baeddoc",
         type: "application/json",
       };
-      const { promise, resolve, reject } = Promise.withResolvers<
+      const { promise } = Promise.withResolvers<
         Result<Unit, Error>
       >();
       const initialSelector = {
@@ -115,7 +115,7 @@ describe("SelectorTracker", () => {
         },
       };
       const vnodeChildrenSchema = vnodeSchema.properties.children;
-      const [existingSelector1, existingPromise1] = selectorTracker
+      const [existingSelector1, _existingPromise1] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children"],
           schemaContext: {
@@ -125,7 +125,7 @@ describe("SelectorTracker", () => {
         }, runtime.cfc);
       expect(existingSelector1).toEqual(standardInitialSelector);
 
-      const [existingSelector2, existingPromise2] = selectorTracker
+      const [existingSelector2, _existingPromise2] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children", "0"],
           schemaContext: {
@@ -141,7 +141,7 @@ describe("SelectorTracker", () => {
         "id": "of:baeddoc",
         type: "application/json",
       };
-      const { promise, resolve, reject } = Promise.withResolvers<
+      const { promise } = Promise.withResolvers<
         Result<Unit, Error>
       >();
       const initialSelector = {
@@ -163,7 +163,7 @@ describe("SelectorTracker", () => {
         },
       };
       const nameSchema = { "type": "string" } as const satisfies JSONSchema;
-      const [existingSelector1, existingPromise1] = selectorTracker
+      const [existingSelector1, _existingPromise1] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "name"],
           schemaContext: {

@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 import { isObject } from "@commontools/utils/types";
 
 // Cache for TypeScript library definitions
@@ -16,7 +16,7 @@ async function getTypeScriptEnvironmentTypes(): Promise<
     return typeLibsCache;
   }
 
-  const cache = new StaticCache();
+  const cache = new StaticCacheFS();
   const es2023 = await cache.getText("types/es2023.d.ts");
   const jsx = await cache.getText("types/jsx.d.ts");
   const dom = await cache.getText("types/dom.d.ts");
@@ -125,7 +125,7 @@ export async function getTypeFromCode(
   code: string,
   typeName: string,
 ): Promise<{ type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode }> {
-  const { program, checker, sourceFile } = await createTestProgram(code);
+  const { checker, sourceFile } = await createTestProgram(code);
 
   let foundType: ts.Type | undefined;
   let foundTypeNode: ts.TypeNode | undefined;

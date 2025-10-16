@@ -1,5 +1,6 @@
 // Test file with named export instead of default export
-import { h, recipe, schema } from "commontools";
+/// <cts-enable />
+import { recipe, schema } from "commontools";
 
 const model = schema({
   type: "object",
@@ -15,7 +16,7 @@ export const myNamedRecipe = recipe(model, model, (cell) => {
   };
 });
 
-export default recipe(model, model, (cell) => {
+export default recipe(model, model, (_cell) => {
   return {
     message: "from default export",
   };

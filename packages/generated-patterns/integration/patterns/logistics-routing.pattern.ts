@@ -328,8 +328,6 @@ const reassignShipment = handler(
     updated.sort((left, right) => left.id.localeCompare(right.id));
     context.shipments.set(updated);
 
-    const metrics = computeLoadMetrics(routes, updated);
-    const targetMetric = metrics.find((entry) => entry.route === targetRoute);
     const message =
       `Moved ${shipmentId} from ${record.route} to ${targetRoute}`;
     const log = context.history.get();

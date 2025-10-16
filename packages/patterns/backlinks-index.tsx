@@ -1,15 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  derive,
-  lift,
-  NAME,
-  OpaqueRef,
-  recipe,
-  UI,
-} from "commontools";
+import { lift, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]: string;

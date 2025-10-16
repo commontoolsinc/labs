@@ -1,4 +1,4 @@
-import { Context, MiddlewareHandler } from "@hono/hono";
+import { MiddlewareHandler } from "@hono/hono";
 import { context, Span, SpanStatusCode, trace } from "@opentelemetry/api";
 import { getTracerProvider } from "@/lib/otel.ts";
 
@@ -36,7 +36,6 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
     const method = c.req.method;
-    const route = c.req.routePath || path;
 
     await obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
       span.setAttribute("http.method", method);

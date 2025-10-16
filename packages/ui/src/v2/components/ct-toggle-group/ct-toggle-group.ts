@@ -1,4 +1,4 @@
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, PropertyValues, unsafeCSS } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { toggleGroupStyles } from "./styles.ts";
 

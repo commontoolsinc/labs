@@ -299,6 +299,10 @@ export type StreamDataFunction = <T>(params: Opaque<{
 }>;
 export type CompileAndRunFunction = <T = any, S = any>(params: Opaque<BuiltInCompileAndRunParams<T>>) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
+export type WishFunction = {
+    <T = unknown>(target: Opaque<string>): OpaqueRef<T | undefined>;
+    <T = unknown>(target: Opaque<string>, defaultValue: Opaque<T>): OpaqueRef<T>;
+};
 export type CreateNodeFactoryFunction = <T = any, R = any>(moduleSpec: Module) => ModuleFactory<T, R>;
 export type CreateCellFunction = {
     <T>(schema?: JSONSchema, name?: string, value?: T): Cell<T>;
@@ -327,6 +331,7 @@ export declare const fetchData: FetchDataFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
+export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
@@ -343,7 +348,7 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
     -readonly [P in keyof T]: Mutable<T[P]>;
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
-export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
+export declare const toSchema: <T>(_options?: Partial<JSONSchema>) => JSONSchema;
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
     [K in keyof T]: StripCell<T[K]>;
 } : T;

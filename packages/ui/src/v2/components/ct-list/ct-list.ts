@@ -529,7 +529,7 @@ export class CTList extends BaseElement {
             : repeat(
               items.filter((item) => item && item.title),
               (item, index) => `${index}-${item.title}`,
-              (item, index) => this.renderItem(cell.key(index), index),
+              (_, index) => this.renderItem(cell.key(index), index),
             )}
         </div>
 
@@ -538,7 +538,7 @@ export class CTList extends BaseElement {
     `;
   }
 
-  private renderItem(item: Cell<ListItem>, index: number) {
+  private renderItem(item: Cell<ListItem>, _index: number) {
     const isEditing = this._editing?.equals(item);
 
     const actionButton = this.action && !this.readonly
@@ -555,7 +555,7 @@ export class CTList extends BaseElement {
               type="text"
               class="edit-input"
               .value="${item.get().title}"
-              @input="${(e: Event) => {
+              @input="${(_: Event) => {
                 this._editing = item;
               }}"
               @blur="${(e: Event) => {

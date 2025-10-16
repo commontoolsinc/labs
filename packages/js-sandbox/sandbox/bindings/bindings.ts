@@ -81,7 +81,7 @@ export class Bindings {
       let formatted;
       try {
         formatted = JSON.stringify(message);
-      } catch (e) {
+      } catch (_) {
         if (
           message && typeof message === "object" && "toString" in message &&
           typeof message.toString === "function"

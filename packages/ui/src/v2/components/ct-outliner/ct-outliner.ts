@@ -4,11 +4,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
-import {
-  Mentionable,
-  MentionableArray,
-  mentionableArraySchema,
-} from "../../core/mentionable.ts";
+import { MentionableArray } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 
 /**
@@ -26,10 +22,6 @@ async function mutateCell<T>(
 }
 
 import type {
-  EditingKeyboardContext,
-  EditingState,
-  KeyboardContext,
-  MentionableItem,
   Node as OutlineTreeNode,
   PathBasedOutlinerOperations,
   Tree,
@@ -41,17 +33,14 @@ import {
 } from "./tree-diff.ts";
 import {
   executeEditingKeyboardCommand,
-  executeKeyboardCommand,
   executePathBasedKeyboardCommand,
 } from "./keyboard-commands.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import {
-  getNodeBodyCell,
   getNodeBodyCellByPath,
   getNodeByPath,
-  getNodeCell,
   getNodeCellByPath,
   getNodeChildrenCell,
   getNodePath,
@@ -170,7 +159,7 @@ export class CTOutliner extends BaseElement
 
   // Mention controller
   private mentionController = new MentionController(this, {
-    onInsert: (markdown, mention) => this._insertMentionInEditor(markdown),
+    onInsert: (markdown, _mention) => this._insertMentionInEditor(markdown),
     getCursorPosition: () => this._getEditorCursorPosition(),
     getContent: () => this.editingContent,
   });
@@ -428,7 +417,7 @@ export class CTOutliner extends BaseElement
     if (!this.value) return result;
 
     const newNode = TreeOperations.createNode({ body: nodeData.body });
-    const newNodePath = [...path, 0]; // Insert as first child
+    const _newNodePath = [...path, 0]; // Insert as first child
 
     const node = getNodeByPath(this.tree, path);
     if (!node) return result;
@@ -520,8 +509,8 @@ export class CTOutliner extends BaseElement
 
   indentNodeWithEditState(
     node: OutlineTreeNode,
-    editingContent: string,
-    cursorPosition: number,
+    _editingContent: string,
+    _cursorPosition: number,
   ): void {
     // For compatibility - finish editing first, then indent
     if (this.editingNodePath) {
@@ -532,8 +521,8 @@ export class CTOutliner extends BaseElement
 
   outdentNodeWithEditState(
     node: OutlineTreeNode,
-    editingContent: string,
-    cursorPosition: number,
+    _editingContent: string,
+    _cursorPosition: number,
   ): void {
     // For compatibility - finish editing first, then outdent
     if (this.editingNodePath) {
@@ -1080,7 +1069,7 @@ export class CTOutliner extends BaseElement
   }
 
   private handleNodeClick(
-    node: OutlineTreeNode,
+    _node: OutlineTreeNode,
     nodePath: number[],
     event: MouseEvent,
   ) {
@@ -1113,7 +1102,7 @@ export class CTOutliner extends BaseElement
   }
 
   private handleCollapseClick(
-    node: OutlineTreeNode,
+    _node: OutlineTreeNode,
     nodePath: number[],
     event: MouseEvent,
   ) {
@@ -1316,7 +1305,7 @@ export class CTOutliner extends BaseElement
       return;
     }
 
-    const context = EventUtils.createKeyboardContext(
+    const _context = EventUtils.createKeyboardContext(
       event,
       this,
       focusedNode,
@@ -1592,7 +1581,7 @@ export class CTOutliner extends BaseElement
    * Handle checkbox change event to sync state
    */
   private handleCheckboxChange(
-    node: OutlineTreeNode,
+    _node: OutlineTreeNode,
     nodePath: number[],
     event: Event,
   ) {
@@ -1785,7 +1774,7 @@ export class CTOutliner extends BaseElement
     return repeat(
       nodes.getAsQueryResult() as OutlineTreeNode[],
       (node) => this.getNodeIndex(node),
-      (node, index) =>
+      (_, index) =>
         this.renderNode(nodes.key(index), level, [...parentPath, index]),
     );
   }
@@ -2014,7 +2003,7 @@ export class CTOutliner extends BaseElement
         <span class="markdown-content" @click="${this
           .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
       `;
-    } catch (error) {
+    } catch (_) {
       // Fallback to plain text if markdown parsing fails
       return html`
         <span>${content}</span>

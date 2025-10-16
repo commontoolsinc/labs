@@ -1,6 +1,11 @@
 type Default<T, V extends T = T> = T;
-interface Cell<T> { get(): T; set(v: T): void }
-interface Stream<T> { subscribe(cb: (v: T) => void): void }
+interface Cell<T> {
+  get(): T;
+  set(v: T): void;
+}
+interface Stream<T> {
+  subscribe(cb: (v: T) => void): void;
+}
 
 interface SchemaRoot {
   /** Titles in a cell */

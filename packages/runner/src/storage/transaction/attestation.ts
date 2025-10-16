@@ -30,7 +30,7 @@ export class InvalidDataURIError extends Error implements IInvalidDataURIError {
     }
   }
 
-  from(space: MemorySpace) {
+  from(_space: MemorySpace) {
     return this;
   }
 }
@@ -43,7 +43,7 @@ export class UnsupportedMediaTypeError extends Error
     super(message);
   }
 
-  from(space: MemorySpace) {
+  from(_space: MemorySpace) {
     return this;
   }
 }
@@ -382,7 +382,7 @@ export class NotFound extends RangeError implements INotFoundError {
     this.path = path;
   }
 
-  from(space: MemorySpace) {
+  from(_space: MemorySpace) {
     // Return the same error instance as it doesn't use space in the message
     return this;
   }
@@ -406,7 +406,7 @@ export class TypeMismatchError extends TypeError implements ITypeMismatchError {
     this.actualType = actualType;
   }
 
-  from(space: MemorySpace) {
+  from(_space: MemorySpace) {
     // Return the same error instance as it doesn't use space in the message
     return this;
   }

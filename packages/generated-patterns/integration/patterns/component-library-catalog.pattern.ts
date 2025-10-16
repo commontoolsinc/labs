@@ -227,7 +227,7 @@ function sanitizeComponentIdFromInput(
 
 function sanitizeRecipeLabel(
   value: unknown,
-  component: ComponentDefinition,
+  _component: ComponentDefinition,
   fallback: string,
 ): string {
   const text = sanitizeText(value);

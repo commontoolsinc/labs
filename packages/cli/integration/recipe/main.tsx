@@ -1,5 +1,5 @@
-// deno-lint-ignore-file jsx-no-useless-fragment
-import { derive, h, NAME, recipe, str, UI } from "commontools";
+/// <cts-enable />
+import { derive, NAME, recipe, str, UI } from "commontools";
 import { decrement, increment, model } from "./utils.ts";
 
 export const customRecipeExport = recipe(model, model, (cell) => {

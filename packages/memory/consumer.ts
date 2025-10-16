@@ -3,7 +3,7 @@ import type {
   Authorization,
   AuthorizationError,
   Await,
-  Cause,
+  CauseString,
   Clock,
   Command,
   ConnectionError,
@@ -14,7 +14,6 @@ import type {
   ConsumerResultFor,
   DID,
   EnhancedCommit,
-  Entity,
   Fact,
   FactSelection,
   InferOf,
@@ -22,6 +21,7 @@ import type {
   InvocationURL,
   JSONValue,
   MemorySpace,
+  MIME,
   OfTheCause,
   Proto,
   Protocol,
@@ -33,20 +33,20 @@ import type {
   Reference,
   Result,
   Revision,
-  SchemaContext,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
   SchemaSelector,
   Seconds,
   Select,
+  SelectAll,
   Selection,
   Selector,
   Signer,
-  The,
   Transaction,
   TransactionResult,
   UCAN,
+  URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import { fromJSON, refer } from "./reference.ts";
@@ -368,18 +368,22 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   }
 
   private static asSelectSchema(queryArg: QueryArgs): SchemaQueryArgs {
-    const selectSchema: OfTheCause<SchemaPathSelector> = {};
+    const selectSchema: Select<
+      URI,
+      Select<MIME, Select<CauseString, SchemaPathSelector>>
+    > = {};
     for (const [of, attributes] of Object.entries(queryArg.select)) {
-      const entityEntry: Select<The, Select<Cause, SchemaPathSelector>> = {};
-      selectSchema[of as Entity] = entityEntry;
+      const entityEntry: Select<MIME, Select<CauseString, SchemaPathSelector>> =
+        {};
+      selectSchema[of as URI | SelectAll] = entityEntry;
       let attrEntries = Object.entries(attributes);
       // A Selector may not have a "the", but SchemaSelector needs all three levels
       if (attrEntries.length === 0) {
         attrEntries = [["_", {}]];
       }
       for (const [the, causes] of attrEntries) {
-        const attributeEntry: Select<Cause, SchemaPathSelector> = {};
-        entityEntry[the] = attributeEntry;
+        const attributeEntry: Select<CauseString, SchemaPathSelector> = {};
+        entityEntry[the as MIME | SelectAll] = attributeEntry;
         // A Selector may not have a cause, but SchemaSelector needs all three levels
         let causeEntries = Object.entries(causes);
         if (causeEntries.length === 0) {
@@ -391,7 +395,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
             schemaContext: SchemaNone,
             ...selector.is ? { is: selector.is } : {},
           };
-          attributeEntry[cause] = causeEntry;
+          attributeEntry[cause as CauseString | SelectAll] = causeEntry;
         }
       }
     }
@@ -413,7 +417,7 @@ interface Job<Ability, Protocol extends Proto> {
   perform(effect: ConsumerEffectFor<Ability, Protocol>): void;
 }
 
-class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
+class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
   promise: Promise<ConsumerResultFor<Ability, Protocol>>;
 
   return: (input: ConsumerResultFor<Ability, Protocol>) => boolean;
@@ -422,7 +426,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
 
   #reference: Reference<Invocation>;
 
-  static create<Ability extends The, Protocol extends Proto>(
+  static create<Ability extends string, Protocol extends Proto>(
     as: DID,
     { cmd, sub, args, nonce }: Command<Ability, InferOf<Protocol>>,
     time: UTCUnixTimestampInSeconds,
@@ -479,7 +483,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     return this.source.args;
   }
 
-  perform(effect: ConsumerEffectFor<Ability, Protocol>) {}
+  perform(_effect: ConsumerEffectFor<Ability, Protocol>) {}
 }
 
 class QueryView<
@@ -606,7 +610,7 @@ class QuerySubscriptionInvocation<
   controller:
     | undefined
     | ReadableStreamDefaultController<EnhancedCommit<Space>>;
-  patterns: { the?: The; of?: Entity; cause?: Cause }[];
+  patterns: { the?: MIME; of?: URI; cause?: CauseString }[];
 
   selection: Selection<Space>;
   constructor(public query: QueryView<Space, MemoryProtocol>) {
@@ -655,7 +659,7 @@ class QuerySubscriptionInvocation<
     const fact = toRevision(commit.commit);
 
     const { the, of, is } = fact;
-    const cause = fact.cause.toString();
+    const cause = fact.cause.toString() as CauseString;
     const { transaction, since } = is;
     const matchCommit = this.patterns.some((pattern) =>
       (!pattern.of || pattern.of === of) &&
@@ -667,8 +671,10 @@ class QuerySubscriptionInvocation<
       // Update the main application/commit+json record for the space
       setRevision(differential, of, the, cause, { is, since });
     }
-    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
-      for (const [the, changes] of Object.entries(attributes)) {
+    for (const [k1, attributes] of Object.entries(transaction.args.changes)) {
+      const of = k1 as URI;
+      for (const [k2, changes] of Object.entries(attributes)) {
+        const the = k2 as MIME;
         const causeEntries = Object.entries(changes);
         if (causeEntries.length === 0) {
           // A classified object will not have a cause/change pair
@@ -677,13 +683,14 @@ class QuerySubscriptionInvocation<
             (!pattern.the || pattern.the === the) && !pattern.cause
           );
           if (matchDoc) {
-            setEmptyObj(differential, of as Entity, the);
+            setEmptyObj(differential, of, the);
           }
         } else {
-          const [[cause, change]] = causeEntries;
+          const [[k3, change]] = causeEntries;
+          const cause = k3 as CauseString;
           if (change !== true) {
             const state = Object.entries(
-              selection?.[of as Entity]?.[the] ?? {},
+              selection?.[of]?.[the] ?? {},
             );
             const [current] = state.length > 0 ? state[0] : [];
             if (cause !== current) {
@@ -697,7 +704,7 @@ class QuerySubscriptionInvocation<
                 const value = change.is
                   ? { is: change.is, since: since }
                   : { since: since };
-                setRevision(differential, of as Entity, the, cause, value);
+                setRevision(differential, of, the, cause, value);
               }
             }
           }

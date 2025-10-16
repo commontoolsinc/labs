@@ -15,7 +15,7 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (e, state) => {
+} as const satisfies __ctHelpers.JSONSchema, (_e, state) => {
     state.value.set(state.value.get() + 1);
 });
 const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {

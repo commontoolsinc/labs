@@ -58,7 +58,7 @@ describe.skip("Push conflict", () => {
     });
 
     runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
+      apiUrl: new URL(import.meta.url),
       storageManager,
     });
   });

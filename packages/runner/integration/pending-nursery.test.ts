@@ -20,11 +20,11 @@ console.log("\n=== TEST: Simple object persistence ===");
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
   const provider1: Provider =
     (runtime1.storageManager.open(identity.did()) as any).provider;
@@ -53,18 +53,18 @@ async function test() {
   let s1Count = 0;
   provider1.replica.heap.subscribe(
     { id: uri, type: "application/json" },
-    (v) => {
+    (_) => {
       s1Count++;
     },
   );
 
   // Second runtime - fetch data
   const runtime2 = new Runtime({
+    apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: API_URL,
   });
 
   const provider2: Provider =
@@ -125,8 +125,6 @@ async function test() {
   // reset our subscribe callback counters
   s1Count = 0;
   s2Count = 0;
-
-  const cell2Contents = JSON.parse(JSON.stringify(cell2.get()));
 
   const tx2a = runtime2.edit();
   cell2.withTx(tx2a).set({ message: "Hello World", count: 46 });

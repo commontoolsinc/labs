@@ -1,6 +1,6 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
-import { StaticCache } from "@commontools/static";
+import { StaticCacheFS } from "@commontools/static";
 import { getMimeType } from "@/lib/mime-type.ts";
 import { compareETags, createCacheHeaders } from "@commontools/static/etag";
 
@@ -8,7 +8,7 @@ const router = createRouter();
 
 // Static cache instance - separate from runtime cache
 // for isolation and performance
-const cache = new StaticCache();
+const cache = new StaticCacheFS();
 
 router.use(
   "*",

@@ -15,7 +15,7 @@
  * ```
  */
 
-import { css, html, PropertyValues, unsafeCSS } from "lit";
+import { html, unsafeCSS } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { scrollAreaStyles } from "./styles.ts";
 

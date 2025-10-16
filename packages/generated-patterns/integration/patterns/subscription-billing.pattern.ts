@@ -116,7 +116,7 @@ const describePlanActivation = (
 
 const describeInvoiceRecord = (
   plan: PlanDefinition,
-  cycle: number,
+  _cycle: number,
   invoice: string,
   nextInvoice: string,
 ): string => {

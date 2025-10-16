@@ -1,4 +1,4 @@
-import { h } from "@commontools/html";
+/// <cts-enable />
 import { derive, JSONSchema, NAME, recipe } from "commontools";
 
 const ExtractListsInputSchema = {

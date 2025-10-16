@@ -157,7 +157,7 @@ function devSocketClient(
   { hostname, port }: { hostname: string; port: number },
 ) {
   const socket = new WebSocket(`ws://${hostname}:${port}`);
-  socket.addEventListener("open", (event) => {
+  socket.addEventListener("open", (_) => {
     socket.addEventListener("message", (event) => {
       if (event.data === "reload") {
         globalThis.location.reload();

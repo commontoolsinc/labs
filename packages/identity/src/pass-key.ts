@@ -78,7 +78,7 @@ export class PassKey {
     const challenge = random(32);
     const userId = random(32);
     const user = {
-      id: userId,
+      id: userId as BufferSource,
       name,
       displayName,
     };
@@ -86,11 +86,7 @@ export class PassKey {
     const publicKey: PublicKeyCredentialCreationOptions = {
       challenge: challenge as BufferSource,
       rp: { id: RP_ID(), name: RP },
-      user: {
-        id: userId as BufferSource,
-        name,
-        displayName,
-      },
+      user,
       attestation: "none", // default
       authenticatorSelection: {
         // "Resident Keys" have been renamed to "Discoverable Keys",

@@ -1,8 +1,7 @@
+/// <cts-enable />
 import {
   Cell,
-  derive,
   generateObject,
-  h,
   handler,
   ifElse,
   lift,

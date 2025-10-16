@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, h } from "commontools";
+import { lift } from "commontools";
 
 interface Person {
   name: string;

@@ -8,7 +8,6 @@ import "../ct-tool-call/ct-tool-call.ts";
 import "../ct-button/ct-button.ts";
 import type {
   BuiltInLLMContent,
-  BuiltInLLMMessage,
   BuiltInLLMTextPart,
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
@@ -361,7 +360,7 @@ export class CTChatMessage extends BaseElement {
     // Use a regex to find <pre><code>...</code></pre> blocks and wrap them
     return html.replace(
       /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
-      (match, codeAttrs, codeContent) => {
+      (_match, codeAttrs, codeContent) => {
         const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
         // Decode HTML entities for the copy content
         const decodedContent = this._decodeHtmlEntities(codeContent);

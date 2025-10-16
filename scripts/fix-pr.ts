@@ -1,8 +1,5 @@
 #!/usr/bin/env -S deno run --allow-run --allow-read --allow-write
 
-// Configuration
-const REPO_PATH = Deno.cwd(); // Assumes script is run from repo root
-
 interface PRComment {
   author: string;
   body: string;

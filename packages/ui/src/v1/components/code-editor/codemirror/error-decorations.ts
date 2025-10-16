@@ -85,7 +85,6 @@ const errorTooltipField = StateField.define<readonly CompilationError[]>({
 const errorTooltip = (
   view: EditorView,
   pos: number,
-  side: -1 | 1,
 ): Tooltip | null => {
   const errors = view.state.field(errorTooltipField);
 

@@ -1,5 +1,5 @@
-import { describe, it } from "@std/testing/bdd";
-import { runPatternScenario } from "./pattern-harness.ts";
+import { describe } from "@std/testing/bdd";
+import { runPatternScenario as _runPatternScenario } from "./pattern-harness.ts";
 
 // Import pattern scenarios as they are created
 // Example:

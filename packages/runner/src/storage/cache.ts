@@ -1,14 +1,14 @@
 import { fromString, refer } from "merkle-reference";
 import type {
+  CauseString,
   Changes as MemoryChanges,
-  Commit,
   ConsumerCommandInvocation,
   Entity,
   Fact,
   FactAddress,
-  Invariant,
   JSONValue,
   MemorySpace,
+  MIME,
   Protocol,
   ProviderCommand,
   Result,
@@ -24,12 +24,7 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import {
-  assert,
-  claimState,
-  retract,
-  unclaimed,
-} from "@commontools/memory/fact";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
@@ -59,7 +54,7 @@ import type {
   StorageValue,
   URI,
 } from "./interface.ts";
-import { type Cell, isCell } from "../cell.ts";
+import { type Cell } from "../cell.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
@@ -139,7 +134,7 @@ const fromKey = (key: string): BaseMemoryAddress => {
   }
   const id = key.substring(0, separatorIndex);
   const type = key.substring(separatorIndex + 1);
-  return { id: id as URI, type };
+  return { id: id as URI, type: type as MIME };
 };
 
 export class NoCache<Model extends object, Address>
@@ -148,7 +143,7 @@ export class NoCache<Model extends object, Address>
    * Pulls nothing because this store does not store anything.
    */
   async pull(
-    selector: Selector<Address>,
+    _selector: Selector<Address>,
   ): Promise<Result<Selection<Address, Model>, IStoreError>> {
     return await { ok: new Map() };
   }
@@ -156,13 +151,13 @@ export class NoCache<Model extends object, Address>
   /**
    * Merges nothing because this store discards everything.
    */
-  async merge(entries: Iterable<Model>, merge: Merge<Model>) {
+  async merge(_entries: Iterable<Model>, _merge: Merge<Model>) {
     return await { ok: {} };
   }
 }
 
 class Nursery implements SyncPush<State> {
-  static put(before?: State, after?: State) {
+  static put(_before?: State, after?: State) {
     return after;
   }
   static delete() {
@@ -794,7 +789,7 @@ export class Replica {
           logger.error(() => ["query failure", queryArgs, result.error]);
           return Promise.resolve({ error: result.error });
         } else {
-          const integrated = await this.integrateResults(
+          const _integrated = await this.integrateResults(
             newEntries,
             result.ok.schemaFacts,
           );
@@ -1560,7 +1555,7 @@ class ProviderConnection implements IStorageProvider {
 
 export class Provider implements IStorageProvider {
   workspace: Replica;
-  the: string;
+  the: MIME;
   session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: IRemoteStorageProviderSettings;
@@ -1589,7 +1584,7 @@ export class Provider implements IStorageProvider {
     the = "application/json",
     settings = defaultSettings,
   }: RemoteStorageProviderOptions) {
-    this.the = the;
+    this.the = the as MIME;
     this.settings = settings;
     this.session = session;
     this.spaces = new Map();
@@ -1631,7 +1626,6 @@ export class Provider implements IStorageProvider {
     uri: URI,
     callback: (value: StorageValue<T>) => void,
   ): Cancel {
-    const { the } = this;
     // Capture workspace locally, so that if it changes later, our cancel
     // will unsubscribe with the same object.
     const { workspace } = this;
@@ -1774,7 +1768,7 @@ export class Provider implements IStorageProvider {
       if (consumerSession?.invocations) {
         consumerSession.invocations.clear();
       }
-    } catch (error) {
+    } catch (_) {
       // Ignore error
     }
 
@@ -1961,11 +1955,11 @@ export const getChanges = (
   const changes = {} as MemoryChanges;
   for (const statement of statements) {
     if (statement.cause) {
-      const cause = statement.cause.toString();
+      const cause = statement.cause.toString() as CauseString;
       const value = statement.is === undefined ? {} : { is: statement.is };
       set(changes, statement.of, statement.the, cause, value);
     } else {
-      const cause = statement.fact.toString();
+      const cause = statement.fact.toString() as CauseString;
       set(changes, statement.of, statement.the, cause, true);
     }
   }
@@ -1973,7 +1967,7 @@ export const getChanges = (
 };
 
 // Given an Assert statement with labels, return a SchemaContext with the ifc tags
-const generateSchemaFromLabels = (
+const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
   if (isObject(change?.is) && "labels" in change.is) {
