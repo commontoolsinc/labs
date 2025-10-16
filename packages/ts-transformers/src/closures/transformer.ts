@@ -660,46 +660,33 @@ function expressionsMatch(a: ts.Expression, b: ts.Expression): boolean {
 }
 
 /**
- * Transform nested map callbacks within a callback body.
+ * Create a visitor function that transforms OpaqueRef map calls.
+ * This visitor can be reused for both top-level and nested transformations.
  */
-function transformNestedMapCallbacks(
-  body: ts.ConciseBody,
+function createMapTransformVisitor(
   context: TransformationContext,
-): ts.ConciseBody {
+): ts.Visitor {
   const { checker } = context;
 
-  const nestedVisitor: ts.Visitor = (node) => {
-    // Check for nested OpaqueRef<T[]> map calls
+  const visit: ts.Visitor = (node) => {
+    // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
     if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
-      const nestedCallback = node.arguments[0];
+      const callback = node.arguments[0];
+
+      // Check if the callback is an arrow function or function expression
       if (
-        nestedCallback &&
-        (ts.isArrowFunction(nestedCallback) ||
-          ts.isFunctionExpression(nestedCallback))
+        callback &&
+        (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
       ) {
-        const nestedCaptures = collectCaptures(nestedCallback, checker);
-        if (nestedCaptures.size > 0) {
-          const capturesByName = new Map<string, ts.Expression>();
-          for (const expr of nestedCaptures) {
-            const name = getCaptureName(expr);
-            if (name && !capturesByName.has(name)) {
-              capturesByName.set(name, expr);
-            }
-          }
-          // Recursively transform the nested callback
-          return transformMapCallback(
-            node,
-            nestedCallback,
-            capturesByName,
-            context,
-          );
-        }
+        return transformMapCallback(node, callback, context, visit);
       }
     }
-    return visitEachChildWithJsx(node, nestedVisitor, context.tsContext);
+
+    // Continue visiting children (handles JSX correctly)
+    return visitEachChildWithJsx(node, visit, context.tsContext);
   };
 
-  return ts.visitNode(body, nestedVisitor) as ts.ConciseBody;
+  return visit;
 }
 
 /**
@@ -923,26 +910,32 @@ function createRecipeCallWithParams(
 }
 
 /**
- * Transform a map callback that captures variables.
+ * Transform a map callback for OpaqueRef arrays.
+ * Always transforms to use recipe + mapWithPattern, even with no captures,
+ * to ensure callback parameters become opaque.
  */
 function transformMapCallback(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
-  captures: Map<string, ts.Expression>,
   context: TransformationContext,
+  visitor: ts.Visitor,
 ): ts.CallExpression {
-  const { factory } = context;
+  const { factory, checker } = context;
+
+  // Collect captured variables from the callback
+  const captureExpressions = collectCaptures(callback, checker);
+
+  // Build map of capture name -> expression
+  const captures = new Map<string, ts.Expression>();
+  for (const expr of captureExpressions) {
+    const name = getCaptureName(expr);
+    if (name && !captures.has(name)) {
+      captures.set(name, expr);
+    }
+  }
 
   // Build set of captured variable names
-  const capturedVarNames = new Set<string>();
-  for (const [varName] of captures) {
-    capturedVarNames.add(varName);
-  }
-
-  // If no captures, return the original call
-  if (capturedVarNames.size === 0) {
-    return mapCall;
-  }
+  const capturedVarNames = new Set<string>(captures.keys());
 
   // Get callback parameters
   const originalParams = callback.parameters;
@@ -951,8 +944,8 @@ function transformMapCallback(
 
   // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
   // parameter names. This ensures nested callbacks can properly detect captures from
-  // parent callback scope.
-  let transformedBody = transformNestedMapCallbacks(callback.body, context);
+  // parent callback scope. Reuse the same visitor for consistency.
+  let transformedBody = ts.visitNode(callback.body, visitor) as ts.ConciseBody;
 
   // Transform the callback body in stages:
   // 1. Replace element parameter name
@@ -986,48 +979,10 @@ function transformMapCallback(
 }
 
 function transformClosures(context: TransformationContext): ts.SourceFile {
-  const { checker, sourceFile } = context;
+  const { sourceFile } = context;
 
-  function visit(node: ts.Node): ts.Node {
-    // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
-    if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
-      const callback = node.arguments[0];
+  // Create a unified visitor that handles both top-level and nested map transformations
+  const visitor = createMapTransformVisitor(context);
 
-      // Check if the callback is an arrow function or function expression
-      if (
-        callback &&
-        (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-      ) {
-        // Collect captures
-        const captureExpressions = collectCaptures(callback, checker);
-
-        if (captureExpressions.size > 0) {
-          // Build map of capture name -> expression
-          // For property access like state.discount, we use "discount" as the name
-          const capturesByName = new Map<string, ts.Expression>();
-          for (const expr of captureExpressions) {
-            const name = getCaptureName(expr);
-            if (name && !capturesByName.has(name)) {
-              capturesByName.set(name, expr);
-            }
-          }
-
-          // Transform the map call
-          const transformed = transformMapCallback(
-            node,
-            callback,
-            capturesByName,
-            context,
-          );
-
-          return transformed;
-        }
-      }
-    }
-
-    // Continue visiting children
-    return ts.visitEachChild(node, visit, context.tsContext);
-  }
-
-  return ts.visitNode(sourceFile, visit) as ts.SourceFile;
+  return ts.visitNode(sourceFile, visitor) as ts.SourceFile;
 }
