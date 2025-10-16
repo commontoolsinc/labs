@@ -154,6 +154,51 @@ export function createDataFlowAnalyzer(
     }),
   });
 
+  // Set parent pointers for synthetic nodes created by transformers.
+  // Synthetic nodes don't have parent pointers set, which breaks logic
+  // that relies on .parent (like method call detection).
+  const setParentPointers = (node: ts.Node, parent?: ts.Node): void => {
+    if (parent && !(node as any).parent) {
+      (node as any).parent = parent;
+    }
+    ts.forEachChild(node, (child) => setParentPointers(child, node));
+  };
+
+  // Determine how CallExpressions should be handled based on their call kind.
+  // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.
+  const handleCallExpression = (
+    merged: InternalAnalysis,
+    callKind: ReturnType<typeof detectCallKind>,
+    callee: InternalAnalysis,
+    rewriteHint: RewriteHint,
+  ): InternalAnalysis => {
+    // Builder calls (like recipe) don't need derive wrapping
+    if (callKind?.kind === "builder") {
+      return {
+        ...merged,
+        requiresRewrite: false,
+        rewriteHint,
+      };
+    }
+
+    // Array-map calls preserve requiresRewrite from the callee
+    // to handle cases like state.items.filter(...).map(...)
+    if (callKind?.kind === "array-map") {
+      return {
+        ...merged,
+        requiresRewrite: callee.requiresRewrite,
+        rewriteHint,
+      };
+    }
+
+    // Default: CallExpressions require rewrite if they contain opaque refs
+    return {
+      ...merged,
+      requiresRewrite: merged.containsOpaqueRef || merged.requiresRewrite,
+      rewriteHint,
+    };
+  };
+
   const analyzeExpression = (
     expression: ts.Expression,
     scope: DataFlowScopeInternal,
@@ -162,6 +207,9 @@ export function createDataFlowAnalyzer(
     // Handle synthetic nodes (created by previous transformers)
     // We can't analyze them directly, but we need to visit children
     if (!expression.getSourceFile()) {
+      // Set parent pointers for the entire synthetic subtree to enable
+      // parent-based logic (method call detection, etc.) to work
+      setParentPointers(expression);
       // Synthetic nodes don't have positions, so getText() will crash
       // We don't currently use the printed text, but keep it for debugging
       try {
@@ -182,6 +230,17 @@ export function createDataFlowAnalyzer(
       // These are likely parameters from map closure transformation (like `discount`)
       // We can't resolve symbols for synthetic nodes, but we should treat them as opaque
       if (ts.isIdentifier(expression)) {
+        // Skip property names in property access expressions - they're not data flows.
+        // For example, `toSchema` in `__ctHelpers.toSchema` is just a property name.
+        if (
+          expression.parent &&
+          ts.isPropertyAccessExpression(expression.parent) &&
+          expression.parent.name === expression
+        ) {
+          // This is a property name, not a value reference - don't capture it
+          return emptyAnalysis();
+        }
+
         // If it's a synthetic identifier, treat it as opaque
         // This handles cases like `discount` where the whole identifier is synthetic
         // We need to record it in the graph so normalizeDataFlows can find it
@@ -273,10 +332,9 @@ export function createDataFlowAnalyzer(
             return undefined;
           })();
 
-          return {
-            ...merged,
-            rewriteHint,
-          };
+          // For synthetic CallExpressions, we don't have a separate callee analysis
+          // Approximate by using merged for both parameters
+          return handleCallExpression(merged, callKind, merged, rewriteHint);
         }
 
         // Special handling for synthetic property access expressions
@@ -346,6 +404,28 @@ export function createDataFlowAnalyzer(
               // a property access on a simple identifier (not a complex expression),
               // treat it as an opaque property access that needs derive wrapping.
               // This handles cases like `element.price` where `element` is synthetic.
+
+              // Skip __ctHelpers.* property accesses - these are helper functions, not opaque refs.
+              // For example: __ctHelpers.toSchema, __ctHelpers.recipe, __ctHelpers.derive
+              if (
+                ts.isIdentifier(current) &&
+                current.text === "__ctHelpers"
+              ) {
+                // This is a helper function access, not an opaque ref - don't capture it
+                return merged;
+              }
+
+              // Don't capture property accesses that are method calls.
+              // For example, `element.trim` in `element.trim()` should not be captured.
+              if (
+                expression.parent &&
+                ts.isCallExpression(expression.parent) &&
+                expression.parent.expression === expression
+              ) {
+                // This is a method call like element.trim() - don't capture it
+                return merged;
+              }
+
               // Add to graph so normalizeDataFlows can find it
               const node: DataFlowNode = {
                 id: context.nextNodeId++,
@@ -832,37 +912,7 @@ export function createDataFlowAnalyzer(
         return undefined;
       })();
 
-      if (callKind?.kind === "builder") {
-        return {
-          containsOpaqueRef: combined.containsOpaqueRef,
-          requiresRewrite: false,
-          dataFlows: combined.dataFlows,
-          localNodes: combined.localNodes,
-          rewriteHint,
-        };
-      }
-
-      if (callKind?.kind === "array-map") {
-        // For array-map, we don't rewrite the map call itself,
-        // but we DO need to preserve requiresRewrite from the target (callee)
-        // to handle cases like state.items.filter(...).map(...)
-        return {
-          containsOpaqueRef: combined.containsOpaqueRef,
-          requiresRewrite: callee.requiresRewrite,
-          dataFlows: combined.dataFlows,
-          localNodes: combined.localNodes,
-          rewriteHint,
-        };
-      }
-
-      return {
-        containsOpaqueRef: combined.containsOpaqueRef,
-        requiresRewrite: combined.containsOpaqueRef ||
-          combined.requiresRewrite,
-        dataFlows: combined.dataFlows,
-        localNodes: combined.localNodes,
-        rewriteHint,
-      };
+      return handleCallExpression(combined, callKind, callee, rewriteHint);
     }
 
     if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
