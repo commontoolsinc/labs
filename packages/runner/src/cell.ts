@@ -452,10 +452,8 @@ export class RegularCell<T> implements Cell<T> {
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    // If writing a whole array, make sure each object become their own doc.
-    if (Array.isArray(newValue)) {
-      newValue = newValue.map((val) => addIDIfNeeded(val)) as typeof newValue;
-    }
+    // Looks for arrays and makes sure each object gets its own doc.
+    newValue = recursivelyAddIDIfNeeded(newValue);
 
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
@@ -525,7 +523,7 @@ export class RegularCell<T> implements Cell<T> {
     // Now update each property
     for (const [key, value] of Object.entries(values)) {
       // Workaround for type checking, since T can be Cell<> and that's fine.
-      (this.key as any)(key).set(value);
+      (this.key as any)(key).set(recursivelyAddIDIfNeeded(value));
     }
   }
 
@@ -578,16 +576,12 @@ export class RegularCell<T> implements Cell<T> {
         : [];
     }
 
-    // Make sure all objects have IDs, whether they were previously written or
-    // came from a default value.
-    const valuesToWrite = [...array, ...value].map((val) => addIDIfNeeded(val));
-
     // Append the new values to the array.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      valuesToWrite,
+      recursivelyAddIDIfNeeded([...array, ...value]),
       cause,
     );
   }
@@ -889,14 +883,69 @@ function subscribeToReferencedDocs<T>(
   };
 }
 
-function addIDIfNeeded<T>(value: T): T {
-  if (
-    (!isLink(value) && isObject(value) &&
-      (value as { [ID]?: unknown })[ID] === undefined && getTopFrame())
-  ) {
-    return { [ID]: getTopFrame()!.generatedIdCounter++, ...value };
+/**
+ * Recursively adds IDs elements in arrays, unless they are already a link.
+ *
+ * This ensures that mutable arrays only consist of links to documents, at least
+ * when written to only via .set, .update and .push above.
+ *
+ * TODO(seefeld): When an array has default entries and is rewritten as [...old,
+ * new], this will still break, because the previous entries will point back to
+ * the array itself instead of being new entries.
+ *
+ * @param value - The value to add IDs to.
+ * @returns The value with IDs added.
+ */
+function recursivelyAddIDIfNeeded<T>(
+  value: T,
+  seen: Map<unknown, unknown> = new Map(),
+): T {
+  // Can't add IDs without top frame.
+  if (!getTopFrame()) return value;
+
+  // Already a link, no need to add IDs. Not a record, no need to add IDs.
+  if (!isRecord(value) || isLink(value)) return value;
+
+  // Already seen, return previously annotated result.
+  if (seen.has(value)) return seen.get(value) as T;
+
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+
+    // Set before traversing, otherwise we'll infinite recurse.
+    seen.set(value, result);
+
+    result.push(...value.map((v) => {
+      const value = recursivelyAddIDIfNeeded(v, seen);
+      // For objects on arrays only: Add ID if not already present.
+      if (
+        isObject(value) && !isLink(value) && !(ID in value)
+      ) {
+        return { [ID]: getTopFrame()!.generatedIdCounter++, ...value };
+      } else {
+        return value;
+      }
+    }));
+    return result as T;
   } else {
-    return value;
+    const result: Record<string, unknown> = {};
+
+    // Set before traversing, otherwise we'll infinite recurse.
+    seen.set(value, result);
+
+    Object.entries(value).forEach(([key, v]) => {
+      result[key] = recursivelyAddIDIfNeeded(v, seen);
+    });
+
+    // Copy supported symbols from original value.
+    if (ID in value) {
+      (result as { [ID]: unknown })[ID] = value[ID];
+    }
+    if (ID_FIELD in value) {
+      (result as { [ID_FIELD]: unknown })[ID_FIELD] = value[ID_FIELD];
+    }
+
+    return result as T;
   }
 }
 
