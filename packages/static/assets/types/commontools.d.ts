@@ -14,9 +14,9 @@ export interface Cell<T = any> {
     set(value: T): void;
     send(value: T): void;
     update(values: Partial<T>): void;
-    push(...value: T extends (infer U)[] ? U[] : never): void;
     equals(other: Cell<any>): boolean;
-    key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+    push(this: Cell<JSONArray | JSONObject>, ...value: T extends (infer U)[] ? U[] : never): void;
+    key<K extends keyof T>(this: Cell<JSONArray | JSONObject>, valueKey: K): Cell<T[K]>;
 }
 export interface Stream<T> {
     send(event: T): void;
@@ -34,7 +34,7 @@ export interface OpaqueRefMethods<T> {
     setDefault(value: Opaque<T> | T): void;
     setName(name: string): void;
     setSchema(schema: JSONSchema): void;
-    map<S>(fn: (element: T extends Array<infer U> ? Opaque<U> : Opaque<T>, index: Opaque<number>, array: T) => Opaque<S>): Opaque<S[]>;
+    map<S>(this: OpaqueRefMethods<JSONArray | JSONObject>, fn: (element: T extends Array<infer U> ? Opaque<U> : Opaque<T>, index: Opaque<number>, array: T) => Opaque<S>): Opaque<S[]>;
 }
 export interface Recipe {
     argumentSchema: JSONSchema;
