@@ -1,7 +1,7 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { isVNode, render } from "@commontools/html";
-import { isCell, UI } from "@commontools/runner";
+import { render } from "@commontools/html";
+import { isCell } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
 
@@ -160,79 +160,29 @@ export class CTRender extends BaseElement {
     }
 
     await this._maybeSyncCell(cell);
-    const target = await this._resolveRenderTarget(cell);
 
     this._log("rendering UI");
-    if (isCell(target)) {
-      this._cleanup = render(this._renderContainer, target as Cell);
-    } else {
-      this._cleanup = render(this._renderContainer, target as any);
-    }
-  }
-
-  private async _resolveRenderTarget(
-    cell: Cell<unknown>,
-  ): Promise<Cell<unknown> | unknown> {
-    const value = this._safeGetCellValue(cell);
-    if (this._isRecord(value) && UI in value) {
-      const uiCell = (cell as Cell).key(UI);
-      await this._maybeSyncCell(uiCell);
-      const uiValue = this._safeGetCellValue(uiCell);
-      if (uiValue === undefined || this._isRenderableVNode(uiValue)) {
-        return uiCell;
-      }
-    }
-
-    if (this._isRenderableVNode(value) || value === undefined) {
-      return cell;
-    }
-
-    return cell;
+    this._cleanup = render(this._renderContainer, cell as Cell);
   }
 
   private async _maybeSyncCell(cell: Cell<unknown>) {
-    const sync = (cell as { sync?: () => Promise<unknown> | unknown }).sync;
-    if (typeof sync === "function") {
-      await sync.call(cell);
+    if (isCell(cell)) {
+      await cell.sync();
     }
   }
 
   private _getRecipeId(cell: Cell<unknown>): string | undefined {
+    return getRecipeIdFromCharm(cell);
+  }
+
+  private _isSubPath(cell: Cell<unknown>): boolean {
+    if (!isCell(cell)) return false;
     try {
-      return getRecipeIdFromCharm(cell);
-    } catch (error) {
-      this._log("no recipe id available", error);
-      return undefined;
+      const link = cell.getAsNormalizedFullLink();
+      return Array.isArray(link?.path) && link.path.length > 0;
+    } catch {
+      return false;
     }
-  }
-
-  private _safeGetCellValue(cell: Cell<unknown>): unknown {
-    try {
-      return cell.get();
-    } catch (error) {
-      this._log("failed to read cell value", error);
-      return undefined;
-    }
-  }
-
-  private _isRenderableVNode(value: unknown): boolean {
-    return isVNode(value);
-  }
-
-  private _isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
-  }
-
-  private _getCellPathLength(cell: Cell<unknown>): number {
-    const internalCell = cell as unknown as {
-      getAsNormalizedFullLink?: () => { path: readonly string[] };
-    };
-    const getter = internalCell.getAsNormalizedFullLink;
-    if (typeof getter !== "function") {
-      return 0;
-    }
-    const link = getter.call(cell);
-    return Array.isArray(link?.path) ? link.path.length : 0;
   }
 
   private async _renderCell() {
@@ -260,7 +210,7 @@ export class CTRender extends BaseElement {
         throw new Error("Invalid cell: expected a Cell object");
       }
 
-      const isSubPath = this._getCellPathLength(this.cell) > 0;
+      const isSubPath = this._isSubPath(this.cell);
 
       if (isSubPath) {
         this._log("cell is a subpath, rendering directly");
