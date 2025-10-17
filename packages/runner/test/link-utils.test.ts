@@ -853,5 +853,28 @@ describe("link-utils", () => {
         "path",
       ]);
     });
+
+    it("should handle reused acyclic objects without throwing", () => {
+      const sharedObject = { value: 42 };
+      const data = {
+        first: sharedObject,
+        second: sharedObject,
+        nested: {
+          third: sharedObject,
+        },
+      };
+
+      // Should not throw even though sharedObject is referenced multiple times
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify
+      const base64 = dataURI.split(",")[1];
+      const json = atob(base64);
+      const parsed = JSON.parse(json);
+
+      expect(parsed.value.first.value).toBe(42);
+      expect(parsed.value.second.value).toBe(42);
+      expect(parsed.value.nested.third.value).toBe(42);
+    });
   });
 });

@@ -523,23 +523,27 @@ export function createDataCellURI(
       throw new Error(`Cycle detected when creating data URI`);
     }
     seen.add(value);
-    if (isAnyCellLink(value)) {
-      const link = parseLink(value);
-      if (!link.id) {
-        return createSigilLinkFromParsedLink({ ...link, id: baseId });
-      } else {
-        return value;
+    try {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value);
+        if (!link.id) {
+          return createSigilLinkFromParsedLink({ ...link, id: baseId });
+        } else {
+          return value;
+        }
+      } else if (Array.isArray(value)) {
+        return value.map((item) =>
+          traverseAndAddBaseIdToRelativeLinks(item, seen)
+        );
+      } else { // isObject
+        return Object.fromEntries(
+          Object.entries(value).map((
+            [key, value],
+          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+        );
       }
-    } else if (Array.isArray(value)) {
-      return value.map((item) =>
-        traverseAndAddBaseIdToRelativeLinks(item, seen)
-      );
-    } else { // isObject
-      return Object.fromEntries(
-        Object.entries(value).map((
-          [key, value],
-        ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
-      );
+    } finally {
+      seen.delete(value);
     }
   }
   const json = JSON.stringify({
