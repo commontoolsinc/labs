@@ -653,7 +653,7 @@ export class RegularCell<T> implements Cell<T> {
 
   resolveAsCell(): Cell<T> {
     const link = resolveLink(this.runtime.readTx(this.tx), this.link);
-    return createCell(this.runtime, link, this.tx, false, this.synced);
+    return createCell(this.runtime, link, this.tx, true, this.synced);
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
