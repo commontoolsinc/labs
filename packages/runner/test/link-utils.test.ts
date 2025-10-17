@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
-  findAndInlineDataURILinks,
   isLegacyAlias,
   isLink,
   isSigilValue,
