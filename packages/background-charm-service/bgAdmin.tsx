@@ -1,88 +1,54 @@
 /// <cts-enable />
-import {
-  derive,
-  handler,
-  JSONSchema,
-  lift,
-  Mutable,
-  NAME,
-  recipe,
-  Schema,
-  UI,
-} from "commontools";
+import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
 
 const DISABLED_VIA_UI = "Disabled via UI";
 
-// NOTE(ja): this must be the same as the schema in background-charm-service/src/schema.ts
-const BGCharmEntrySchema = {
-  type: "object",
-  properties: {
-    space: { type: "string" },
-    charmId: { type: "string" },
-    integration: { type: "string" },
-    createdAt: { type: "number" },
-    updatedAt: { type: "number" },
-    disabledAt: { type: "number", default: 0 },
-    lastRun: { type: "number", default: 0 },
-    status: { type: "string", default: "" },
-  },
-  required: [
-    "space",
-    "charmId",
-    "integration",
-    "createdAt",
-    "updatedAt",
-    "lastRun",
-    "status",
-  ],
-} as const satisfies JSONSchema;
-type BGCharmEntry = Mutable<Schema<typeof BGCharmEntrySchema>>;
+type BGCharmEntry = {
+  space: string;
+  charmId: string;
+  integration: string;
+  createdAt: number;
+  updatedAt: number;
+  disabledAt: Default<number, 0>;
+  lastRun: Default<number, 0>;
+  status: Default<string, "">;
+};
 
-const BGCharmEntriesSchema = {
-  type: "array",
-  items: BGCharmEntrySchema,
-  default: [],
-} as const satisfies JSONSchema;
-type BGCharmEntries = Schema<typeof BGCharmEntriesSchema>;
+type InputSchema = {
+  charms: Default<BGCharmEntry[], []>;
+};
 
-const InputSchema = {
-  type: "object",
-  properties: {
-    charms: BGCharmEntriesSchema,
-  },
-} as const satisfies JSONSchema;
-
-const ResultSchema = {
-  type: "object",
-  properties: {
-    charms: {
-      type: "array",
-      items: BGCharmEntrySchema,
-    },
-  },
-} as const satisfies JSONSchema;
+type ResultSchema = {
+  charms: BGCharmEntry[];
+};
 
 const deleteCharm = handler<
   never,
-  { charms: BGCharmEntry[]; charm: BGCharmEntry }
+  { charms: Cell<BGCharmEntry[]>; charm: Cell<BGCharmEntry> }
 >(
   (_, { charm, charms }) => {
-    const idx = charms.findIndex((i) =>
-      i.space === charm.space && i.charmId === charm.charmId
+    const { space, charmId } = charm.get();
+    const newList = charms.get().slice();
+    const index = newList.findIndex((i) =>
+      i.space === space && i.charmId === charmId
     );
-    if (idx !== -1) charms.splice(idx, 1);
+    if (index >= 0 && index < newList.length) {
+      newList.splice(index, 1);
+      charms.set(newList);
+    }
   },
 );
 
-const toggleCharm = handler<never, { charm: BGCharmEntry }>((_, { charm }) => {
-  if (charm.disabledAt) {
-    charm.disabledAt = undefined;
-    charm.status = "Initializing...";
-  } else {
-    charm.disabledAt = Date.now();
-    charm.status = DISABLED_VIA_UI;
-  }
-});
+const toggleCharm = handler<never, { charm: Cell<BGCharmEntry> }>(
+  (_, { charm }) => {
+    const data = charm.get();
+    if (data.disabledAt) {
+      charm.set({ ...data, disabledAt: 0, status: "Initializing..." });
+    } else {
+      charm.set({ ...data, disabledAt: Date.now(), status: DISABLED_VIA_UI });
+    }
+  },
+);
 
 // Minimal "moment" style formatting to get a string
 // representation of an (older) date relative to now,
@@ -136,19 +102,31 @@ function StatusIcon(
   return (
     <div
       title={title}
-      style={`background-color: ${color}; width: 20px; height: 20px; border-radius: 20px`}
+      style={{
+        backgroundColor: color,
+        width: "20px",
+        borderRadius: "20px",
+      }}
     >
     </div>
   );
 }
 
-const BGCharmRow = lift((
-  { charm, charms }: { charm: BGCharmEntry; charms: BGCharmEntries },
-) => {
-  const { integration, createdAt, updatedAt, disabledAt, lastRun, status } =
-    charm;
-  const space = charm.space.slice(-4);
-  const charmId = charm.charmId.slice(-4);
+function getRenderData(
+  charm: BGCharmEntry,
+) {
+  const {
+    integration,
+    space: rawSpace,
+    charmId: rawCharmId,
+    createdAt,
+    updatedAt,
+    disabledAt,
+    lastRun,
+    status,
+  } = charm;
+  const space = rawSpace.slice(-4);
+  const charmId = rawCharmId.slice(-4);
   const name = `#${space}/#${charmId}`;
 
   const createdAtDate = new Date(createdAt);
@@ -164,32 +142,15 @@ Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
     lastRunDate ? `(${lastRunDate.toLocaleString()})` : ""
   }`;
 
-  return (
-    <div className="bg-charm-row">
-      <div className="toggle-button">
-        <button
-          onClick={toggleCharm({ charm })}
-          type="button"
-        >
-          <StatusIcon status={status} disabledAt={disabledAt}></StatusIcon>
-        </button>
-      </div>
-      <div className="name ellipsis" title={details}>
-        {name}
-        <span className="integration">{integration}</span>
-      </div>
-      <div className="status ellipsis">{statusDisplay}</div>
-      <div className="delete">
-        <button
-          onClick={deleteCharm({ charm, charms })}
-          type="button"
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  );
-});
+  return {
+    status,
+    statusDisplay,
+    disabledAt,
+    details,
+    integration,
+    name,
+  };
+}
 
 const css = `
 .bg-charm-container {
@@ -233,9 +194,8 @@ const css = `
 }
 `;
 
-export default recipe(
-  InputSchema,
-  ResultSchema,
+export default recipe<InputSchema, ResultSchema>(
+  "BG Admin",
   ({ charms }) => {
     derive(charms, (charms) => {
       console.log("bg charm list:", charms);
@@ -246,13 +206,42 @@ export default recipe(
         <div>
           <style>{css}</style>
           <div className="bg-charm-container">
-            {charms.map((charm) => (
-              <BGCharmRow
-                charms={charms}
-                charm={charm}
-              >
-              </BGCharmRow>
-            ))}
+            {charms.map((charm) => {
+              const {
+                status,
+                disabledAt,
+                details,
+                name,
+                integration,
+                statusDisplay,
+              } = getRenderData(charm);
+              return (
+                <div className="bg-charm-row">
+                  <div className="toggle-button">
+                    <button
+                      onClick={toggleCharm({ charm })}
+                      type="button"
+                    >
+                      <StatusIcon status={status} disabledAt={disabledAt}>
+                      </StatusIcon>
+                    </button>
+                  </div>
+                  <div className="name ellipsis" title={details}>
+                    {name}
+                    <span className="integration">{integration}</span>
+                  </div>
+                  <div className="status ellipsis">{statusDisplay}</div>
+                  <div className="delete">
+                    <button
+                      onClick={deleteCharm({ charm, charms })}
+                      type="button"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ),
