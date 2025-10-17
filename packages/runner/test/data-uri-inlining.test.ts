@@ -12,7 +12,7 @@ const space = signer.did();
 
 // Helper to create data URIs for testing
 function createDataURI(data: any): string {
-  const json = JSON.stringify(data);
+  const json = JSON.stringify({ value: data });
   const base64 = btoa(json);
   return `data:application/json;charset=utf-8;base64,${base64}`;
 }
@@ -39,7 +39,7 @@ describe("data URI inlining", () => {
 
   describe("findAndInlineDataURILinks", () => {
     it("should inline simple data URI links", () => {
-      const dataURI = createDataURI({ value: "test data" });
+      const dataURI = createDataURI("test data");
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -54,7 +54,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links with paths", () => {
-      const dataURI = createDataURI({ value: { nested: { value: 42 } } });
+      const dataURI = createDataURI({ nested: { value: 42 } });
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -69,8 +69,8 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links in arrays", () => {
-      const dataURI1 = createDataURI({ value: "first" });
-      const dataURI2 = createDataURI({ value: "second" });
+      const dataURI1 = createDataURI("first");
+      const dataURI2 = createDataURI("second");
 
       const array = [
         {
@@ -96,7 +96,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links in objects", () => {
-      const dataURI = createDataURI({ value: "nested value" });
+      const dataURI = createDataURI("nested value");
       const obj = {
         key1: "regular value",
         key2: {
@@ -120,7 +120,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ value: "inner data" });
 
-      const dataURI = createDataURI({ value: innerCell.getAsLink() });
+      const dataURI = createDataURI(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -145,9 +145,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "inner data" } });
 
-      const dataURI = createDataURI({
-        value: innerCell.getAsLink(),
-      });
+      const dataURI = createDataURI(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -168,7 +166,7 @@ describe("data URI inlining", () => {
     });
 
     it("should return undefined for data URIs with invalid paths", () => {
-      const dataURI = createDataURI({ value: { a: 1 } });
+      const dataURI = createDataURI({ a: 1 });
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -198,7 +196,7 @@ describe("data URI inlining", () => {
     });
 
     it("should deeply traverse nested structures", () => {
-      const dataURI = createDataURI({ value: "deep value" });
+      const dataURI = createDataURI("deep value");
       const complex = {
         level1: {
           level2: [
@@ -221,7 +219,7 @@ describe("data URI inlining", () => {
     });
 
     it("should handle data URIs with schema", () => {
-      const dataURI = createDataURI({ value: 42 });
+      const dataURI = createDataURI(42);
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -241,11 +239,9 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "data" } });
 
-      const dataURI = createDataURI({
-        value: innerCell.getAsLink({
-          includeSchema: true,
-        }),
-      });
+      const dataURI = createDataURI(innerCell.getAsLink({
+        includeSchema: true,
+      }));
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -270,7 +266,7 @@ describe("data URI inlining", () => {
 
   describe("setRaw with data URI inlining", () => {
     it("should inline data URIs when using setRaw", () => {
-      const dataURI = createDataURI({ value: "inlined value" });
+      const dataURI = createDataURI("inlined value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -287,8 +283,8 @@ describe("data URI inlining", () => {
     });
 
     it("should inline nested data URIs in objects", () => {
-      const dataURI1 = createDataURI({ value: "value1" });
-      const dataURI2 = createDataURI({ value: "value2" });
+      const dataURI1 = createDataURI("value1");
+      const dataURI2 = createDataURI("value2");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw({
@@ -317,7 +313,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URIs in arrays", () => {
-      const dataURI = createDataURI({ value: "array item" });
+      const dataURI = createDataURI("array item");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw([
@@ -338,7 +334,7 @@ describe("data URI inlining", () => {
 
   describe("diffAndUpdate with data URI inlining", () => {
     it("should inline data URIs during diffAndUpdate", () => {
-      const dataURI = createDataURI({ value: "updated value" });
+      const dataURI = createDataURI("updated value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
       targetCell.set({ initial: "value" });
 
@@ -357,11 +353,9 @@ describe("data URI inlining", () => {
 
     it("should handle data URIs with complex nested structures", () => {
       const dataURI = createDataURI({
-        value: {
-          nested: {
-            array: [1, 2, 3],
-            obj: { key: "value" },
-          },
+        nested: {
+          array: [1, 2, 3],
+          obj: { key: "value" },
         },
       });
       const targetCell = runtime.getCell(space, "target", undefined, tx);
@@ -385,7 +379,7 @@ describe("data URI inlining", () => {
     });
 
     it("should not write data URIs to storage", () => {
-      const dataURI = createDataURI({ value: "test" });
+      const dataURI = createDataURI("test");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -404,6 +398,277 @@ describe("data URI inlining", () => {
 
       // The raw value should be the inlined value, not the data URI link
       expect(rawValue).toBe("test");
+    });
+  });
+
+  describe("corner cases", () => {
+    it("should handle relative links within data URIs", () => {
+      // Create a data URI containing both a relative link and the data it
+      // points to
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["other", "path"],
+          },
+        },
+      };
+      const dataURI = createDataURI({
+        link: relativeLink,
+        other: { path: "success" },
+      });
+
+      // Create a link to the data URI
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["link"],
+          },
+        },
+      };
+
+      // The relative link should be fully resolved to the actual value
+      const result = findAndInlineDataURILinks(link);
+
+      // Should return the final resolved value "success"
+      expect(result).toBe("success");
+    });
+
+    it("should resolve schema correctly when path extends beyond data URI content into linked document", () => {
+      // Create a cell with nested structure and schema
+      const linkedCell = runtime.getCell(space, "linked", undefined, tx);
+      linkedCell.set({
+        level1: {
+          level2: {
+            level3: "deep value",
+          },
+        },
+      });
+
+      // Create a link to linkedCell with a schema
+      const linkToOtherDoc = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: linkedCell.entityId["/"],
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                level1: {
+                  type: "object",
+                  properties: {
+                    level2: {
+                      type: "object",
+                      properties: {
+                        level3: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            rootSchema: {
+              type: "object",
+              properties: {
+                level1: {
+                  type: "object",
+                  properties: {
+                    level2: {
+                      type: "object",
+                      properties: {
+                        level3: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      // Embed the link in a data URI at some intermediate level
+      const dataURI = createDataURI({ intermediate: linkToOtherDoc });
+
+      // Now create a link that goes through data URI, then through intermediate,
+      // and then further into the linked document beyond what data URI describes
+      const complexLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["intermediate", "level1", "level2"],
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(complexLink);
+
+      // Result should be a link pointing into the linked document
+      // with the path extended beyond the data URI's structure
+      expect(result).toMatchObject({
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["level1", "level2"],
+            // Schema should be resolved for the nested path
+            schema: {
+              type: "object",
+              properties: {
+                level3: { type: "string" },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    it("should handle data URI with relative link and additional path", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      baseCell.set({
+        target: {
+          nested: {
+            value: 123,
+          },
+        },
+      });
+
+      // Relative link within data URI
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: baseCell.getAsNormalizedFullLink().id,
+            path: ["target"],
+          },
+        },
+      };
+      const dataURI = createDataURI(relativeLink);
+
+      // Link with additional path that goes beyond the relative link
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(link);
+
+      // Should combine the paths: relative link's path + additional path
+      expect(result).toMatchObject({
+        "/": {
+          [LINK_V1_TAG]: {
+            id: baseCell.getAsNormalizedFullLink().id,
+            path: ["target", "nested", "value"],
+          },
+        },
+      });
+
+      // Verify that the id is NOT a data: URI
+      const resultLink = result as any;
+      if (resultLink["/"] && resultLink["/"][LINK_V1_TAG]?.id) {
+        expect(resultLink["/"][LINK_V1_TAG].id).not.toMatch(/^data:/);
+      }
+    });
+
+    it("should handle deeply nested data URIs with multiple link layers", () => {
+      // Create a target cell
+      const targetCell = runtime.getCell(space, "target", undefined, tx);
+      targetCell.set({ final: "value" });
+
+      // Create a link to target
+      const linkToTarget = targetCell.getAsLink();
+
+      // Wrap it in a data URI
+      const dataURI1 = createDataURI({ wrapped: linkToTarget });
+
+      // Create a link to first data URI
+      const linkToDataURI1 = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI1,
+            path: ["wrapped"],
+          },
+        },
+      };
+
+      // Wrap that in another data URI
+      const dataURI2 = createDataURI({ doubleWrapped: linkToDataURI1 });
+
+      // Create final link
+      const finalLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI2,
+            path: ["doubleWrapped", "final"],
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(finalLink);
+
+      // Should eventually resolve to a link to the target cell
+      expect(result).toMatchObject({
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["final"],
+          },
+        },
+      });
+    });
+
+    it("should handle data URI with link that has empty path but additional traversal", () => {
+      const docCell = runtime.getCell(space, "doc", undefined, tx);
+      docCell.set({
+        field: {
+          subfield: "value",
+        },
+      });
+
+      // Link to document root with schema
+      const linkWithSchema = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: docCell.entityId["/"],
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                field: {
+                  type: "object",
+                  properties: {
+                    subfield: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const dataURI = createDataURI(linkWithSchema);
+
+      // Path extends into the linked document
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataURI,
+            path: ["field", "subfield"],
+          },
+        },
+      };
+
+      const result = findAndInlineDataURILinks(link);
+
+      // Should return a link with the extended path and resolved schema
+      expect(result).toMatchObject({
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["field", "subfield"],
+            schema: { type: "string" },
+          },
+        },
+      });
     });
   });
 });

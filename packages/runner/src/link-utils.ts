@@ -251,13 +251,13 @@ export function parseLink(
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: path.map((p) => p.toString()),
-      space: resolvedSpace,
+      ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
-      schema: link.schema,
-      rootSchema: link.rootSchema,
-      overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
+      ...(link.schema && { schema: link.schema }),
+      ...(link.rootSchema && { rootSchema: link.rootSchema }),
+      ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   }
 
@@ -266,7 +266,7 @@ export function parseLink(
     return {
       id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }),
       type: "application/json",
     };
   }
@@ -275,7 +275,7 @@ export function parseLink(
     return {
       id: toURI(value["/"]),
       path: [],
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
       type: "application/json",
     };
   }
@@ -298,14 +298,14 @@ export function parseLink(
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
-      space: base?.space,
+      ...(base?.space && { space: base.space }),
       type: "application/json",
-      schema: alias.schema as JSONSchema | undefined,
-      rootSchema: alias.rootSchema as JSONSchema | undefined,
+      ...(alias.schema && { schema: alias.schema }),
+      ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
   }
@@ -442,11 +442,11 @@ export function createSigilLinkFromParsedLink(
  */
 export function findAndInlineDataURILinks(value: any): any {
   if (isLink(value)) {
-    const parsedLink = parseLink(value)!;
+    const dataLink = parseLink(value)!;
 
-    if (parsedLink.id?.startsWith("data:")) {
-      let dataValue: any = getJSONFromDataURI(parsedLink.id);
-      const path = [...parsedLink.path];
+    if (dataLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      const path = [...dataLink.path];
 
       // This is a storage item, so we have to look into the "value" field for
       // the actual data.
@@ -455,32 +455,39 @@ export function findAndInlineDataURILinks(value: any): any {
 
       // If there is a link on the way to `path`, follow it, appending remaining
       // path to the target link.
-      while (path.length > 0 && dataValue !== undefined) {
+      while (dataValue !== undefined) {
         if (isAnyCellLink(dataValue)) {
-          const dataLink = parseLink(dataValue, parsedLink);
-          let schema = dataLink.schema;
+          // Parse the link found in the data URI
+          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
+          const newLink = parseLink(dataValue);
+          let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
             const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path, dataLink.rootSchema);
+            schema = cfc.getSchemaAtPath(schema, path, newLink.rootSchema);
           }
-          const newLink = createSigilLinkFromParsedLink({
-            // copy over from original data: URI link
-            ...parsedLink,
-
-            // overwrite with new link values, if present
+          // Create new link by merging dataLink with remaining path
+          const newSigilLink = createSigilLinkFromParsedLink({
+            // Start with values from the original data link
             ...dataLink,
 
-            // extend path
-            path: [...dataLink.path, ...path],
+            // overwrite with values from the new link
+            ...newLink,
 
-            // copy schema (only if present on new link)
+            // extend path with remaining segments
+            path: [...newLink.path, ...path],
+
+            // use resolved schema if we have one
             ...(schema !== undefined && { schema }),
           }, {
             includeSchema: true,
           });
-          return findAndInlineDataURILinks(newLink);
+          return findAndInlineDataURILinks(newSigilLink);
         }
-        dataValue = dataValue[path.shift()!];
+        if (path.length > 0) {
+          dataValue = dataValue[path.shift()!];
+        } else {
+          break;
+        }
       }
 
       return dataValue;
