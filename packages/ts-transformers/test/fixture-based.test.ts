@@ -64,12 +64,27 @@ const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 const FIXTURES_ROOT = "./test/fixtures";
 
+// Environment variable filtering for faster iteration
+// Usage: FIXTURE=map-array-destructured deno task test
+// Or: FIXTURE_PATTERN="array.*destructured" deno task test
+const fixtureFilter = Deno.env.get("FIXTURE");
+const fixturePattern = Deno.env.get("FIXTURE_PATTERN");
+
 for (const config of configs) {
   const suiteConfig = {
     suiteName: config.describe,
     rootDir: `${FIXTURES_ROOT}/${config.directory}`,
     expectedPath: ({ stem, extension }: { stem: string; extension: string }) =>
       `${stem}.expected${extension}`,
+    skip: (fixture: { baseName: string }) => {
+      if (fixtureFilter && fixture.baseName !== fixtureFilter) {
+        return true;
+      }
+      if (fixturePattern && !new RegExp(fixturePattern).test(fixture.baseName)) {
+        return true;
+      }
+      return false;
+    },
     async execute(fixture: { relativeInputPath: string }) {
       return await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,

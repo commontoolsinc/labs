@@ -714,7 +714,7 @@ function transformElementReferences(
 }
 
 /**
- * Transform destructured property references to use element.prop.
+ * Transform destructured property references to use element.prop or element[index].
  */
 function transformDestructuredProperties(
   body: ts.ConciseBody,
@@ -723,7 +723,7 @@ function transformDestructuredProperties(
 ): ts.ConciseBody {
   const elemName = elemParam?.name;
 
-  // Collect destructured property names if the param is a destructured binding pattern
+  // Collect destructured property names if the param is an object destructuring pattern
   const destructuredProps = new Set<string>();
   if (elemName && ts.isObjectBindingPattern(elemName)) {
     for (const element of elemName.elements) {
@@ -733,7 +733,19 @@ function transformDestructuredProperties(
     }
   }
 
-  // If param was destructured, replace destructured property references with element.prop
+  // Collect array destructured identifiers: [date, pizza] -> {date: 0, pizza: 1}
+  const arrayDestructuredVars = new Map<string, number>();
+  if (elemName && ts.isArrayBindingPattern(elemName)) {
+    let index = 0;
+    for (const element of elemName.elements) {
+      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
+        arrayDestructuredVars.set(element.name.text, index);
+      }
+      index++;
+    }
+  }
+
+  // If param was object-destructured, replace property references with element.prop
   if (destructuredProps.size > 0) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
@@ -748,6 +760,30 @@ function transformDestructuredProperties(
             factory.createIdentifier("element"),
             factory.createIdentifier(node.text),
           );
+        }
+      }
+      return visitEachChildWithJsx(node, visitor, undefined);
+    };
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
+  }
+
+  // If param was array-destructured, replace variable references with element[index]
+  if (arrayDestructuredVars.size > 0) {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node)) {
+        const index = arrayDestructuredVars.get(node.text);
+        if (index !== undefined) {
+          // Check if this identifier is not part of a property access already
+          if (
+            !node.parent ||
+            !(ts.isPropertyAccessExpression(node.parent) &&
+              node.parent.name === node)
+          ) {
+            return factory.createElementAccessExpression(
+              factory.createIdentifier("element"),
+              factory.createNumericLiteral(index),
+            );
+          }
         }
       }
       return visitEachChildWithJsx(node, visitor, undefined);
