@@ -359,6 +359,12 @@ export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth exte
 } ? Stream<Schema<Omit<T, "asStream">, Root, Depth>> : T extends {
     $ref: "#";
 } ? Schema<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : T extends {
+    $ref: "#/$defs/Root";
+} ? Root extends {
+    $defs: {
+        Root: infer U;
+    };
+} ? Schema<Omit<U, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : any : T extends {
     $ref: string;
 } ? any : T extends {
     enum: infer E extends readonly any[];
@@ -422,6 +428,12 @@ export type SchemaWithoutCell<T extends JSONSchema, Root extends JSONSchema = T,
 } ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth> : T extends {
     $ref: "#";
 } ? SchemaWithoutCell<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : T extends {
+    $ref: "#/$defs/Root";
+} ? Root extends {
+    $defs: {
+        Root: infer U;
+    };
+} ? SchemaWithoutCell<Omit<U, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : any : T extends {
     $ref: string;
 } ? any : T extends {
     enum: infer E extends readonly any[];

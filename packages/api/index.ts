@@ -766,8 +766,8 @@ type Decrement = {
 // Helper function to safely get decremented depth
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 
-// Same as above, but ignoreing asCell, so we never get cells. This is used for
-// calles of lifted functions and handlers, since they can pass either cells or
+// Same as above, but ignoring asCell, so we never get cells. This is used for
+// calls of lifted functions and handlers, since they can pass either cells or
 // values.
 
 export type SchemaWithoutCell<
@@ -789,6 +789,14 @@ export type SchemaWithoutCell<
         Root,
         DecrementDepth<Depth>
       >
+    // Handle $ref to root $defs
+    : T extends { $ref: "#/$defs/Root" }
+      ? Root extends { $defs: { Root: infer U } } ? SchemaWithoutCell<
+          Omit<U, "asCell" | "asStream">,
+          Root,
+          DecrementDepth<Depth>
+        >
+      : any // broken $ref is treated as any
     // Handle other $ref (placeholder - would need a schema registry for other refs)
     : T extends { $ref: string } ? any
     // Handle enum values
