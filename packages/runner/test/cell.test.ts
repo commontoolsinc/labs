@@ -3642,4 +3642,33 @@ describe("Cell success callbacks", () => {
       expect(link0.id).not.toBe(link1.id);
     });
   });
+
+  describe("resolveAsCell", () => {
+    it("should resolve a cell reference to the actual cell", () => {
+      const innerCell = runtime.getCell<number>(
+        space,
+        "inner-cell",
+        { type: "number" },
+        tx,
+      );
+      innerCell.set(42);
+
+      const outerCell = runtime.getCell<{ inner: unknown }>(
+        space,
+        "outer-cell",
+        {
+          type: "object",
+          properties: {
+            inner: { type: "number" },
+          },
+        },
+        tx,
+      );
+      outerCell.set({ inner: innerCell });
+
+      const resolvedCell = outerCell.key("inner").resolveAsCell();
+
+      expect(resolvedCell.equals(innerCell)).toBe(true);
+    });
+  });
 });

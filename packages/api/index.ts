@@ -26,6 +26,7 @@ export interface Cell<T = any> {
   push(...value: T extends (infer U)[] ? U[] : never): void;
   equals(other: Cell<any>): boolean;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+  resolveAsCell(): Cell<T>;
 }
 
 // Cell type with only public methods
