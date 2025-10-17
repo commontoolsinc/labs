@@ -435,7 +435,7 @@ export class RegularCell<T> implements Cell<T> {
 
   get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
+    return validateAndTransform(this.runtime, this.tx, this.link);
   }
 
   set(
@@ -837,7 +837,6 @@ function subscribeToReferencedDocs<T>(
     runtime,
     tx,
     link,
-    true,
   );
   const log = txToReactivityLog(tx);
 
@@ -853,7 +852,7 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
 
     // Run once with tx to capture _this_ cell's read dependencies.
-    validateAndTransform(runtime, tx, link, true);
+    validateAndTransform(runtime, tx, link);
 
     // Using a new transaction for the callback, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
@@ -862,7 +861,7 @@ function subscribeToReferencedDocs<T>(
 
     const extraTx = runtime.edit();
 
-    const newValue = validateAndTransform(runtime, extraTx, link, true);
+    const newValue = validateAndTransform(runtime, extraTx, link);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should

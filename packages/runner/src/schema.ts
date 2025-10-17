@@ -321,7 +321,6 @@ export function validateAndTransform(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
-  synced: boolean = false,
   seen: Array<[string, any]> = [],
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
@@ -500,7 +499,6 @@ export function validateAndTransform(
           runtime,
           tx,
           { ...link, schema: arrayOptions[0] },
-          synced,
           seen,
         );
       }
@@ -523,7 +521,6 @@ export function validateAndTransform(
         runtime,
         tx,
         { ...link, schema: { type: "array", items: { anyOf: merged } } },
-        synced,
         seen,
       );
     } else if (isObject(value)) {
@@ -561,7 +558,6 @@ export function validateAndTransform(
               runtime,
               tx,
               { ...link, schema: option },
-              synced,
               candidateSeen,
             ),
           };
@@ -604,7 +600,6 @@ export function validateAndTransform(
               runtime,
               tx,
               { ...link, schema: option },
-              synced,
               candidateSeen,
             ),
           };
@@ -621,7 +616,6 @@ export function validateAndTransform(
           runtime,
           tx,
           { ...link, schema: anyTypeOption },
-          synced,
           seen,
         );
       } else {
@@ -665,7 +659,6 @@ export function validateAndTransform(
             runtime,
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
-            synced,
             seen,
           );
         } else if (isObject(childSchema) && childSchema.default !== undefined) {
@@ -706,7 +699,6 @@ export function validateAndTransform(
             runtime,
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
-            synced,
             seen,
           );
         }
@@ -778,7 +770,6 @@ export function validateAndTransform(
         runtime,
         tx,
         elementLink,
-        synced,
         seen,
       );
     }
