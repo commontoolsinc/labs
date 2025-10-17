@@ -29,10 +29,7 @@ import {
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
-import {
-  Mentionable,
-  MentionableArray,
-} from "../../core/mentionable.ts";
+import { Mentionable, MentionableArray } from "../../core/mentionable.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -275,7 +272,6 @@ export class CTCodeEditor extends BaseElement {
   private getFilteredMentionable(query: string): Cell<Mentionable>[] {
     const mentionableCell = this._getMentionableCell();
     if (!mentionableCell) {
-      console.debug("CTCodeEditor#getFilteredMentionable", { query, reason: "no cell" });
       return [];
     }
 
@@ -284,11 +280,6 @@ export class CTCodeEditor extends BaseElement {
       mentionableData = mentionableData.get();
     }
     if (!Array.isArray(mentionableData) || mentionableData.length === 0) {
-      console.debug("CTCodeEditor#getFilteredMentionable", {
-        query,
-        count: 0,
-        raw: mentionableData,
-      });
       return [];
     }
 
@@ -306,12 +297,6 @@ export class CTCodeEditor extends BaseElement {
         matches.push(mentionableCell.key(i) as Cell<Mentionable>);
       }
     }
-
-    console.debug("CTCodeEditor#getFilteredMentionable", {
-      query,
-      count: matches.length,
-      example: matches[0]?.get(),
-    });
 
     return matches;
   }
@@ -640,19 +625,14 @@ export class CTCodeEditor extends BaseElement {
    * the source list updates.
    */
   private _setupMentionableSyncHandler(): void {
-    console.debug("CTCodeEditor#_setupMentionableSyncHandler:init");
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
     }
 
     const mentionableCell = this._getMentionableCell();
-    console.debug("CTCodeEditor#_setupMentionableSyncHandler:cell", {
-      hasCell: Boolean(mentionableCell),
-    });
     if (!mentionableCell) return;
     const unsubscribe = mentionableCell.sink(() => {
-      console.debug("CTCodeEditor#mentionableChange");
       this._updateMentionedFromContent();
     });
     this._mentionableUnsub = unsubscribe;
@@ -1012,9 +992,6 @@ export class CTCodeEditor extends BaseElement {
   private _extractMentionedCharms(content: string): Mentionable[] {
     const mentionableCell = this._getMentionableCell();
     if (!content || !mentionableCell) return [];
-    console.debug("CTCodeEditor#_extractMentionedCharms", {
-      contentLength: content.length,
-    });
 
     const ids: string[] = [];
     const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
@@ -1042,8 +1019,6 @@ export class CTCodeEditor extends BaseElement {
    * Resolve the active mentionable cell.
    */
   private _getMentionableCell(): Cell<MentionableArray> | null {
-    const hasCell = Boolean(this.mentionable);
-    console.debug("CTCodeEditor#_getMentionableCell", { hasCell });
     return this.mentionable ?? null;
   }
 }

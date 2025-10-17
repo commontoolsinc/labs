@@ -1,9 +1,6 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
-import {
-  type Mentionable,
-  type MentionableArray,
-} from "./mentionable.ts";
+import { type Mentionable, type MentionableArray } from "./mentionable.ts";
 
 /**
  * Configuration for the MentionController
@@ -130,10 +127,6 @@ export class MentionController implements ReactiveController {
    */
   getFilteredMentions(): MentionableArray {
     const all = this.readMentionables();
-    console.debug(
-      "MentionController#getFilteredMentions",
-      { query: this._state.query, count: all.length, sample: all[0] },
-    );
     if (all.length === 0) return [];
 
     const query = this._state.query.toLowerCase();
@@ -291,10 +284,6 @@ export class MentionController implements ReactiveController {
    * Returns array of Mentionable objects referenced in the text
    */
   extractMentionsFromText(text: string): Mentionable[] {
-    console.debug("MentionController#extractMentionsFromText", {
-      text,
-      mentionableLoaded: Boolean(this._mentionable),
-    });
     const mentions: Mentionable[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
@@ -312,7 +301,6 @@ export class MentionController implements ReactiveController {
 
   private readMentionables(): Mentionable[] {
     if (!this._mentionable) {
-      console.debug("MentionController#readMentionables:noSource");
       return [];
     }
 
@@ -320,7 +308,6 @@ export class MentionController implements ReactiveController {
     if (isCell(raw)) {
       raw = raw.get();
     }
-    console.debug("MentionController#readMentionables:raw", raw);
     if (!Array.isArray(raw) || raw.length === 0) {
       return [];
     }
