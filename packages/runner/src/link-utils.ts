@@ -16,7 +16,7 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
+import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
   getCellOrThrow,
@@ -27,6 +27,7 @@ import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -431,6 +432,64 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
+}
+
+/**
+ * Find any data: URI links and inline them.
+ *
+ * @param value - The value to find and inline data: URI links in.
+ * @returns The value with any data: URI links inlined.
+ */
+export function findAndInlineDataURILinks(value: any): any {
+  if (isLink(value)) {
+    const parsedLink = parseLink(value)!;
+
+    if (parsedLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(parsedLink.id);
+      const path = [...parsedLink.path];
+
+      // This is a storage item, so we have to look into the "value" field for
+      // the actual data.
+      if (!isRecord(dataValue)) return undefined;
+      dataValue = dataValue["value"];
+
+      // If there is a link on the way to `path`, follow it, appending remaining
+      // path to the target link.
+      while (path.length > 0 && dataValue !== undefined) {
+        if (isAnyCellLink(dataValue)) {
+          const dataLink = parseLink(dataValue, parsedLink);
+          let schema = dataLink.schema;
+          if (schema !== undefined && path.length > 0) {
+            const cfc = new ContextualFlowControl();
+            schema = cfc.getSchemaAtPath(schema, path, dataLink.rootSchema);
+          }
+          const newLink = createSigilLinkFromParsedLink({
+            ...(dataLink.space !== undefined && { space: dataLink.space }),
+            type: "application/json",
+            ...dataLink,
+            path: [...dataLink.path, ...path],
+            ...(schema !== undefined && { schema }),
+          });
+          return findAndInlineDataURILinks(newLink);
+        }
+        dataValue = dataValue[path.shift()!];
+      }
+
+      return dataValue;
+    } else {
+      return value;
+    }
+  } else if (Array.isArray(value)) {
+    return value.map(findAndInlineDataURILinks);
+  } else if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, value],
+      ) => [key, findAndInlineDataURILinks(value)]),
+    );
+  } else {
+    return value;
+  }
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
+  findAndInlineDataURILinks,
   isAnyCellLink,
   isLink,
   isWriteRedirectLink,
@@ -211,50 +212,16 @@ export function normalizeAndDiff(
 
   // Check for links that are data: URIs and inline them, by calling
   // normalizeAndDiff on the contents of the link.
-  if (isLink(newValue)) {
-    const parsedLink = parseLink(newValue, link);
-    if (parsedLink.id.startsWith("data:")) {
-      diffLogger.debug(() =>
-        `[BRANCH_CELL_LINK] Data link detected, treating as contents at path=${pathStr}`
-      );
-      // Use the tx code to make sure we read it the same way
-      let dataValue: any = tx.readValueOrThrow({
-        ...parsedLink,
-        path: [],
-      }, options);
-      const path = [...parsedLink.path];
-      // If there is a link on the way to `path`, follow it, appending remaining
-      // path to the target link.
-      for (;;) {
-        if (isAnyCellLink(dataValue)) {
-          const dataLink = parseLink(dataValue, parsedLink);
-          dataValue = createSigilLinkFromParsedLink({
-            ...dataLink,
-            path: [...dataLink.path, ...path],
-          });
-          break;
-        }
-        if (path.length > 0) {
-          if (isRecord(dataValue)) {
-            dataValue = dataValue[path.shift()!];
-          } else {
-            dataValue = undefined;
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-      return normalizeAndDiff(
-        runtime,
-        tx,
-        link,
-        dataValue,
-        context,
-        options,
-        seen,
-      );
-    }
+  if (isLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")) {
+    return normalizeAndDiff(
+      runtime,
+      tx,
+      link,
+      findAndInlineDataURILinks(newValue),
+      context,
+      options,
+      seen,
+    );
   }
 
   // If we're about to create a reference to ourselves, no-op
