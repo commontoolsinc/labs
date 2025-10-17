@@ -218,7 +218,7 @@ export class CTCodeEditor extends BaseElement {
 
       // Build options from existing mentionable items
       const options: Completion[] = mentionable.map((charm) => {
-        const charmIdObj = getEntityId(charm);
+        const charmIdObj = getEntityId(charm.resolveAsCell());
         const charmId = charmIdObj?.["/"] || "";
         const charmName = charm.key(NAME).get() || "";
         const insertText = `${charmName} (${charmId})`;
@@ -400,7 +400,7 @@ export class CTCodeEditor extends BaseElement {
       // let the pattern know about the new backlink
       tx.commit();
 
-      const charmId = getEntityId(result);
+      const charmId = getEntityId(result.resolveAsCell());
 
       // Insert the ID into the text if we have an editor
       if (this._editorView && charmId) {
