@@ -304,14 +304,17 @@ export class MentionController implements ReactiveController {
       return [];
     }
 
-    let raw = this._mentionable.get();
-    if (isCell(raw)) {
-      raw = raw.get();
-    }
-    if (!Array.isArray(raw) || raw.length === 0) {
+    const rawMentionable = this._mentionable.get();
+    const array = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCell(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    if (array.length === 0) {
       return [];
     }
 
-    return raw.filter((mention): mention is Mentionable => Boolean(mention));
+    return array.filter((mention): mention is Mentionable => Boolean(mention));
   }
 }

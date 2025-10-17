@@ -275,11 +275,14 @@ export class CTCodeEditor extends BaseElement {
       return [];
     }
 
-    let mentionableData = mentionableCell.get();
-    if (isCell(mentionableData)) {
-      mentionableData = mentionableData.get();
-    }
-    if (!Array.isArray(mentionableData) || mentionableData.length === 0) {
+    const rawMentionable = mentionableCell.get();
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCell(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    if (mentionableData.length === 0) {
       return [];
     }
 
@@ -470,11 +473,14 @@ export class CTCodeEditor extends BaseElement {
     const mentionableCell = this._getMentionableCell();
     if (!mentionableCell) return null;
 
-    let mentionableData = mentionableCell.get();
-    if (isCell(mentionableData)) {
-      mentionableData = mentionableData.get();
-    }
-    if (!Array.isArray(mentionableData)) return null;
+    const rawMentionable = mentionableCell.get();
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCell(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    if (mentionableData.length === 0) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
       const charmValue = mentionableData[i];
@@ -942,13 +948,14 @@ export class CTCodeEditor extends BaseElement {
     const newMentioned = this._extractMentionedCharms(content);
 
     // Compare by id set to avoid unnecessary writes
-    let rawCurrent = this.mentioned.get();
-    if (isCell(rawCurrent)) {
-      rawCurrent = rawCurrent.get();
-    }
-    const current: Mentionable[] = Array.isArray(rawCurrent)
-      ? rawCurrent.filter((value): value is Mentionable => Boolean(value))
+    const rawMentioned = this.mentioned.get();
+    const currentSource = Array.isArray(rawMentioned)
+      ? rawMentioned
+      : isCell(rawMentioned)
+      ? ((rawMentioned.get() ?? []) as MentionableArray)
       : [];
+
+    const current: Mentionable[] = currentSource.filter((value): value is Mentionable => Boolean(value));
 
     const curIds = new Set(
       current
