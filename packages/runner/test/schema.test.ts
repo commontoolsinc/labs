@@ -1397,7 +1397,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        plain.set({
+        plain.setRaw({
           type: "vnode",
           name: "div",
           props: { style: { color: "red" } },
@@ -1417,7 +1417,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        styleCell.set({ color: "red" });
+        styleCell.setRaw({ color: "red" });
 
         const innerTextCell = runtime.getCell<{ type: string; value: string }>(
           space,
@@ -1425,7 +1425,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        innerTextCell.set({ type: "text", value: "world" });
+        innerTextCell.setRaw({ type: "text", value: "world" });
 
         const childrenArrayCell = runtime.getCell<any[]>(
           space,
@@ -1433,7 +1433,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        childrenArrayCell.set([
+        childrenArrayCell.setRaw([
           { type: "text", value: "hello" },
           innerTextCell.getAsLink(),
         ]);
@@ -1451,7 +1451,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        withLinks.set({
+        withLinks.setRaw({
           type: "vnode",
           name: "div",
           props: {
@@ -2441,7 +2441,7 @@ describe("Schema Support", () => {
       expect(links[0].id).not.toBe(links[2].id);
     });
 
-    it("should resolve to array indices when elements are not nested documents", () => {
+    it("should create data URIs for plain objects not marked asCell", () => {
       const schema = {
         type: "object",
         properties: {
@@ -2482,14 +2482,17 @@ describe("Schema Support", () => {
       const itemCells = result.items.map((item: any) => item[toCell]());
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
-      // Without nested documents, links should point to array indices
-      expect(links[0].path).toEqual(["items", "0"]);
-      expect(links[1].path).toEqual(["items", "1"]);
-      expect(links[2].path).toEqual(["items", "2"]);
+      // Plain objects now get data URIs with empty paths
+      expect(links[0].id).toMatch(/^data:/);
+      expect(links[1].id).toMatch(/^data:/);
+      expect(links[2].id).toMatch(/^data:/);
+      expect(links[0].path).toEqual([]);
+      expect(links[1].path).toEqual([]);
+      expect(links[2].path).toEqual([]);
 
-      // They should all have the same ID (the parent cell)
-      expect(links[0].id).toBe(links[1].id);
-      expect(links[1].id).toBe(links[2].id);
+      // Each should have unique data URIs
+      expect(links[0].id).not.toBe(links[1].id);
+      expect(links[1].id).not.toBe(links[2].id);
     });
 
     it("should support array splice operations with nested documents", () => {
@@ -2614,15 +2617,19 @@ describe("Schema Support", () => {
       expect(links[0].path).toEqual([]);
       expect(links[2].path).toEqual([]);
 
-      // Plain objects have array index paths
-      expect(links[1].path).toEqual(["items", "1"]);
-      expect(links[3].path).toEqual(["items", "3"]);
+      // Plain objects now also have empty paths (data URIs)
+      expect(links[1].path).toEqual([]);
+      expect(links[3].path).toEqual([]);
 
-      // Nested documents should have unique IDs
+      // Nested documents should have unique IDs (of: format)
       expect(links[0].id).not.toBe(links[2].id);
+      expect(links[0].id).toMatch(/^of:/);
+      expect(links[2].id).toMatch(/^of:/);
 
-      // Plain objects should share the parent cell's ID
-      expect(links[1].id).toBe(links[3].id);
+      // Plain objects should have data URIs
+      expect(links[1].id).toMatch(/^data:/);
+      expect(links[3].id).toMatch(/^data:/);
+      expect(links[1].id).not.toBe(links[3].id); // Different data URIs
     });
 
     it("should preserve nested document references when reordering arrays", () => {
