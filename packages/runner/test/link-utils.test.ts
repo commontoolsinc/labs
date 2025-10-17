@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   areLinksSame,
+  createDataCellURI,
   createSigilLinkFromParsedLink,
   isLegacyAlias,
   isLink,
@@ -723,6 +724,157 @@ describe("link-utils", () => {
       // Result should have flags removed
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).properties.name.asStream).toBeUndefined();
+    });
+  });
+
+  describe("createDataCellURI", () => {
+    it("should throw on circular data", () => {
+      const circular: any = { name: "test" };
+      circular.self = circular;
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on nested circular data", () => {
+      const obj1: any = { name: "obj1" };
+      const obj2: any = { name: "obj2", ref: obj1 };
+      obj1.ref = obj2;
+
+      expect(() => createDataCellURI(obj1)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on circular data in arrays", () => {
+      const circular: any = { items: [] };
+      circular.items.push(circular);
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should rewrite relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        baseCell,
+      );
+
+      // Decode the data URI
+      const base64 = dataURI.split(",")[1];
+      const json = atob(base64);
+      const parsed = JSON.parse(json);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "nested",
+        "value",
+      ]);
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+    });
+
+    it("should rewrite nested relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const data = {
+        items: [
+          {
+            "/": {
+              [LINK_V1_TAG]: {
+                path: ["item", "0"],
+              },
+            },
+          },
+          {
+            nested: {
+              link: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    path: ["item", "1"],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const dataURI = createDataCellURI(data, baseCell);
+
+      // Decode the data URI
+      const base64 = dataURI.split(",")[1];
+      const json = atob(base64);
+      const parsed = JSON.parse(json);
+
+      expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
+        baseId,
+      );
+    });
+
+    it("should not modify absolute links", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const otherCell = runtime.getCell(space, "other", undefined, tx);
+      const otherId = otherCell.getAsNormalizedFullLink().id;
+
+      const absoluteLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: otherId,
+            path: ["some", "path"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI({ link: absoluteLink }, baseCell);
+
+      // Decode the data URI
+      const base64 = dataURI.split(",")[1];
+      const json = atob(base64);
+      const parsed = JSON.parse(json);
+
+      // Should remain unchanged
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "some",
+        "path",
+      ]);
+    });
+
+    it("should handle reused acyclic objects without throwing", () => {
+      const sharedObject = { value: 42 };
+      const data = {
+        first: sharedObject,
+        second: sharedObject,
+        nested: {
+          third: sharedObject,
+        },
+      };
+
+      // Should not throw even though sharedObject is referenced multiple times
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify
+      const base64 = dataURI.split(",")[1];
+      const json = atob(base64);
+      const parsed = JSON.parse(json);
+
+      expect(parsed.value.first.value).toBe(42);
+      expect(parsed.value.second.value).toBe(42);
+      expect(parsed.value.nested.third.value).toBe(42);
     });
   });
 });

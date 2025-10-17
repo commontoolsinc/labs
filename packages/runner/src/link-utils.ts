@@ -507,6 +507,52 @@ export function findAndInlineDataURILinks(value: any): any {
   }
 }
 
+// Helper to create data URIs for testing
+export function createDataCellURI(
+  data: any,
+  base?: Cell | NormalizedLink,
+): string {
+  const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
+
+  function traverseAndAddBaseIdToRelativeLinks(
+    value: any,
+    seen: Set<any>,
+  ): any {
+    if (!isRecord(value)) return value;
+    if (seen.has(value)) {
+      throw new Error(`Cycle detected when creating data URI`);
+    }
+    seen.add(value);
+    try {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value);
+        if (!link.id) {
+          return createSigilLinkFromParsedLink({ ...link, id: baseId });
+        } else {
+          return value;
+        }
+      } else if (Array.isArray(value)) {
+        return value.map((item) =>
+          traverseAndAddBaseIdToRelativeLinks(item, seen)
+        );
+      } else { // isObject
+        return Object.fromEntries(
+          Object.entries(value).map((
+            [key, value],
+          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+        );
+      }
+    } finally {
+      seen.delete(value);
+    }
+  }
+  const json = JSON.stringify({
+    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  });
+  const base64 = btoa(json);
+  return `data:application/json;charset=utf-8;base64,${base64}`;
+}
+
 /**
  * Traverse schema and remove all asCell and asStream flags.
  */
