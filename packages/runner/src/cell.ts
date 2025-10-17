@@ -5,6 +5,7 @@ import {
   type Cell,
   ID,
   ID_FIELD,
+  type IDFields,
   isStreamValue,
   type JSONSchema,
   type OpaqueRef,
@@ -24,7 +25,11 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
-import { validateAndTransform } from "./schema.ts";
+import {
+  processDefaultValue,
+  resolveSchema,
+  validateAndTransform,
+} from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
@@ -448,12 +453,15 @@ export class RegularCell<T> implements Cell<T> {
     // retry on conflict.
     if (!this.synced) this.sync();
 
+    // Looks for arrays and makes sure each object gets its own doc.
+    const transformedValue = recursivelyAddIDIfNeeded(newValue);
+
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolveLink(this.tx, this.link, "writeRedirect"),
-      newValue,
+      transformedValue,
       getTopFrame()?.cause,
     );
 
@@ -486,36 +494,36 @@ export class RegularCell<T> implements Cell<T> {
     const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
-    // If there's no current value, initialize based on schema
+    // If there's no current value, initialize based on schema, even if there is
+    // no default value.
     if (currentValue === undefined) {
-      if (isObject(this.schema)) {
-        // Check if schema allows objects
-        const allowsObject = ContextualFlowControl.isTrueSchema(this.schema) ||
-          this.schema.type === "object" ||
-          (Array.isArray(this.schema.type) &&
-            this.schema.type.includes("object")) ||
-          (this.schema.anyOf &&
-            this.schema.anyOf.some((s) =>
-              typeof s === "object" && s.type === "object"
-            ));
+      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
 
-        if (!allowsObject) {
-          throw new Error(
-            "Cannot update with object value - schema does not allow objects",
-          );
-        }
-      } else if (this.schema === false) {
+      // TODO(seefeld,ubik2): This should all be moved to schema helpers. This
+      // just wants to know whether the value could be an object.
+      const allowsObject = resolvedSchema === undefined ||
+        ContextualFlowControl.isTrueSchema(resolvedSchema) ||
+        (isObject(resolvedSchema) &&
+          (resolvedSchema.type === "object" ||
+            (Array.isArray(resolvedSchema.type) &&
+              resolvedSchema.type.includes("object")) ||
+            (resolvedSchema.anyOf &&
+              resolvedSchema.anyOf.some((s) =>
+                typeof s === "object" && s.type === "object"
+              ))));
+
+      if (!allowsObject) {
         throw new Error(
           "Cannot update with object value - schema does not allow objects",
         );
       }
+
       this.tx.writeValueOrThrow(resolvedLink, {});
     }
 
     // Now update each property
     for (const [key, value] of Object.entries(values)) {
-      // Workaround for type checking, since T can be Cell<> and that's fine.
-      (this.key as any)(key).set(value);
+      (this as Cell<any>).key(key).set(value);
     }
   }
 
@@ -546,14 +554,6 @@ export class RegularCell<T> implements Cell<T> {
       throw new Error("Can't push into non-array value");
     }
 
-    // If this is an object and it doesn't have an ID, add one.
-    const valuesToWrite = value.map((val: any) =>
-      (!isLink(val) && isObject(val) &&
-          (val as { [ID]?: unknown })[ID] === undefined && getTopFrame())
-        ? { [ID]: getTopFrame()!.generatedIdCounter++, ...val }
-        : val
-    );
-
     // If there is no array yet, create it first. We have to do this as a
     // separate operation, so that in the next steps [ID] is properly anchored
     // in the array.
@@ -565,8 +565,14 @@ export class RegularCell<T> implements Cell<T> {
         [],
         cause,
       );
-      array = isObject(this.schema) && Array.isArray(this.schema?.default)
-        ? this.schema.default
+      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
+      array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
+        ? processDefaultValue(
+          this.runtime,
+          this.tx,
+          this.link,
+          resolvedSchema.default,
+        )
         : [];
     }
 
@@ -575,7 +581,7 @@ export class RegularCell<T> implements Cell<T> {
       this.runtime,
       this.tx,
       resolvedLink,
-      [...array, ...valuesToWrite],
+      recursivelyAddIDIfNeeded([...array, ...value]),
       cause,
     );
   }
@@ -877,6 +883,78 @@ function subscribeToReferencedDocs<T>(
   };
 }
 
+/**
+ * Recursively adds IDs elements in arrays, unless they are already a link.
+ *
+ * This ensures that mutable arrays only consist of links to documents, at least
+ * when written to only via .set, .update and .push above.
+ *
+ * TODO(seefeld): When an array has default entries and is rewritten as [...old,
+ * new], this will still break, because the previous entries will point back to
+ * the array itself instead of being new entries.
+ *
+ * @param value - The value to add IDs to.
+ * @returns The value with IDs added.
+ */
+function recursivelyAddIDIfNeeded<T>(
+  value: T,
+  seen: Map<unknown, unknown> = new Map(),
+): T {
+  // Can't add IDs without top frame.
+  if (!getTopFrame()) return value;
+
+  // Not a record, no need to add IDs. Already a link, no need to add IDs.
+  if (!isRecord(value) || isLink(value)) return value;
+
+  // Already seen, return previously annotated result.
+  if (seen.has(value)) return seen.get(value) as T;
+
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+
+    // Set before traversing, otherwise we'll infinite recurse.
+    seen.set(value, result);
+
+    result.push(...value.map((v) => {
+      const value = recursivelyAddIDIfNeeded(v, seen);
+      // For objects on arrays only: Add ID if not already present.
+      if (
+        isObject(value) && !isLink(value) && !(ID in value)
+      ) {
+        return { [ID]: getTopFrame()!.generatedIdCounter++, ...value };
+      } else {
+        return value;
+      }
+    }));
+    return result as T;
+  } else {
+    const result: Record<string, unknown> = {};
+
+    // Set before traversing, otherwise we'll infinite recurse.
+    seen.set(value, result);
+
+    Object.entries(value).forEach(([key, v]) => {
+      result[key] = recursivelyAddIDIfNeeded(v, seen);
+    });
+
+    // Copy supported symbols from original value.
+    [ID, ID_FIELD].forEach((symbol) => {
+      if (symbol in value) {
+        (result as IDFields)[symbol as keyof IDFields] =
+          value[symbol as keyof IDFields];
+      }
+    });
+
+    return result as T;
+  }
+}
+
+/**
+ * Converts cells and objects that can be turned to cells to links.
+ *
+ * @param value - The value to convert.
+ * @returns The converted value.
+ */
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   path: string[] = [],

@@ -49,6 +49,7 @@ export { AuthSchema } from "./schema-lib.ts";
 export {
   ID,
   ID_FIELD,
+  type IDFields,
   NAME,
   type Schema,
   schema,

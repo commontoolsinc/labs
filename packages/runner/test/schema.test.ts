@@ -2750,4 +2750,116 @@ describe("Schema Support", () => {
       expect(remainingLink.id).toBe(links[1].id);
     });
   });
+
+  describe("toCell symbol non-enumerable behavior", () => {
+    it("should not copy toCell symbol when spreading object", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "spread-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "original", value: 42 });
+      const obj = cell.get();
+
+      // Verify the object has toCell
+      expect((obj as any)[toCell]).toBeDefined();
+      expect(typeof (obj as any)[toCell]).toBe("function");
+
+      // Spread the object
+      const spread = { ...obj };
+
+      // The spread object should NOT have toCell
+      expect((spread as any)[toCell]).toBeUndefined();
+
+      // The original object should still have toCell
+      expect((obj as any)[toCell]).toBeDefined();
+    });
+
+    it("should not copy toCell when modifying object with spread", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "spread-modify-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "original", value: 42 });
+      const obj = cell.get();
+
+      // Create a modified copy using spread
+      const modified = { ...obj, value: 100 };
+
+      // The modified object should not have toCell
+      expect((modified as any)[toCell]).toBeUndefined();
+
+      // The original should still have toCell pointing to the correct cell
+      const originalCell = (obj as any)[toCell]();
+      expect(isCell(originalCell)).toBe(true);
+      expect(originalCell.get()).toEqual({ name: "original", value: 42 });
+    });
+
+    it("should not enumerate toCell in Object.keys", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "keys-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "test", value: 123 });
+      const obj = cell.get();
+
+      // toCell should not appear in Object.keys
+      const keys = Object.keys(obj);
+      expect(keys).toEqual(["name", "value"]);
+      expect(keys).not.toContain(toCell);
+    });
+
+    it("should not enumerate toCell in for...in loop", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "forin-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "test", value: 456 });
+      const obj = cell.get();
+
+      // Collect keys from for...in
+      const keys: string[] = [];
+      for (const key in obj) {
+        keys.push(key);
+      }
+
+      expect(keys).toEqual(["name", "value"]);
+      expect(keys).not.toContain(toCell as any);
+    });
+  });
 });
