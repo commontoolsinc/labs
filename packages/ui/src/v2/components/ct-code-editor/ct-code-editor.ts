@@ -489,7 +489,7 @@ export class CTCodeEditor extends BaseElement {
 
       // getEntityId now properly dereferences cells with paths, so we get
       // the charm's intrinsic ID whether we call it on the cell or the value
-      const charmIdObj = getEntityId(charmCell);
+      const charmIdObj = getEntityId(charmCell.resolveAsCell());
       const charmId = charmIdObj?.["/"] || "";
       if (charmId === id) {
         return charmCell;
