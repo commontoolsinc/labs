@@ -80,7 +80,9 @@ for (const config of configs) {
       if (fixtureFilter && fixture.baseName !== fixtureFilter) {
         return true;
       }
-      if (fixturePattern && !new RegExp(fixturePattern).test(fixture.baseName)) {
+      if (
+        fixturePattern && !new RegExp(fixturePattern).test(fixture.baseName)
+      ) {
         return true;
       }
       return false;
