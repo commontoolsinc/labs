@@ -8,6 +8,7 @@ import {
   recipe,
   str,
   UI,
+  VNode,
   wish,
 } from "commontools";
 
@@ -31,6 +32,8 @@ interface CharmsListOutput {
   backlinksIndex: {
     mentionable: MentionableCharm[];
   };
+  sidebarUI: unknown;
+  fabUI: unknown;
 }
 
 const visit = handler<
@@ -92,6 +95,16 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
+export const Fab = recipe<void, VNode>("FAB", () => {
+  return (
+    <ct-message-input placeholder="Type something..." buttonText="Omnibot" />
+  );
+});
+
+export const Sidebar = recipe<void, VNode>("Sidebar", () => {
+  return <aside>Wow, a sidebar!</aside>;
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -100,6 +113,11 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
+
+    const omnibot = Chatbot({
+      messages: [],
+      tools: undefined,
+    });
 
     return {
       backlinksIndex: index,
@@ -177,6 +195,13 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vstack>
         </ct-screen>
       ),
+      sidebarUI: (
+        <div>
+          {omnibot.ui.attachmentsAndTools as any}
+          {omnibot.ui.chatLog as any}
+        </div>
+      ),
+      fabUI: omnibot.ui.promptInput,
     };
   },
 );
