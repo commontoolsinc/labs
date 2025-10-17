@@ -632,6 +632,14 @@ export type Schema<
         Root,
         DecrementDepth<Depth>
       >
+    // Handle $ref to root $defs
+    : T extends { $ref: "#/$defs/Root" }
+      ? Root extends { $defs: { Root: infer U } } ? Schema<
+          Omit<U, "asCell" | "asStream">,
+          Root,
+          DecrementDepth<Depth>
+        >
+      : any // broken $ref is treated as any
     // Handle other $ref (placeholder - would need a schema registry for other refs)
     : T extends { $ref: string } ? any
     // Handle enum values
