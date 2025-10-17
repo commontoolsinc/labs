@@ -464,11 +464,18 @@ export function findAndInlineDataURILinks(value: any): any {
             schema = cfc.getSchemaAtPath(schema, path, dataLink.rootSchema);
           }
           const newLink = createSigilLinkFromParsedLink({
-            ...(dataLink.space !== undefined && { space: dataLink.space }),
-            type: "application/json",
+            // copy over from original data: URI link
+            ...parsedLink,
+
+            // overwrite with new link values, if present
             ...dataLink,
+
+            // extend path
             path: [...dataLink.path, ...path],
+
+            // copy schema (only if present on new link)
             ...(schema !== undefined && { schema }),
+          }, {
             includeSchema: true,
           });
           return findAndInlineDataURILinks(newLink);
