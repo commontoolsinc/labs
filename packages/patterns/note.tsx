@@ -81,27 +81,21 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-type BacklinksIndex = {
-  mentionable: any[];
-};
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
+function schemaifyWish<T>(path: string, def: T | Opaque<T>) {
+  return derive<T, T>(wish<T>(path, def as Opaque<T>), (i) => i);
 }
 
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      mentionable: [],
-    });
+    const mentionable = schemaifyWish<MentionableCharm[]>(
+      "/backlinksIndex/mentionable",
+      [],
+    );
     const mentioned = cell<MentionableCharm[]>([]);
 
     // populated in backlinks-index.tsx
     const backlinks = cell<MentionableCharm[]>([]);
-
-    // Use shared mentionable list from index
-    const mentionableSource = index.mentionable;
 
     // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
@@ -119,13 +113,11 @@ const Note = recipe<Input, Output>(
 
           <ct-code-editor
             $value={content}
-            $mentions={index}
+            $mentionable={mentionable}
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({
-              mentionable: mentionableSource,
-            })}
+            onbacklink-create={handleNewBacklink({ mentionable })}
             language="text/markdown"
             theme="light"
             wordWrap

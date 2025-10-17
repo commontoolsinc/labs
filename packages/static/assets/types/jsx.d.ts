@@ -192,7 +192,7 @@ declare global {
         "placeholder"?: string,
         "timingStrategy"?: string,
         "timingDelay"?: number,
-        "$mentions"?: OpaqueRef<{ mentionable: Charm[] } | Cell<{ mentionable: Charm[] }>>,
+        "$mentionable"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
         "$mentioned"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
         "$pattern"?: OpaqueRef<any> | OpaqueRef<Cell<any>>,
         "pattern"?: any,

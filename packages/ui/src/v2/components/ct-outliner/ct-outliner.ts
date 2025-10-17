@@ -59,7 +59,7 @@ import "../ct-render/ct-render.ts";
  *
  * @attr {Cell<Tree>} value - Tree structure Cell containing root node and children
  * @attr {boolean} readonly - Whether the outliner is read-only
- * @attr {Array} mentionable - Array of mentionable items with {name, charm} structure
+ * @attr {Cell<MentionableArray>} mentionable - Items available for @-mention autocomplete
  *
  * @fires ct-change - Fired when content changes with detail: { value }
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
@@ -127,7 +127,7 @@ export class CTOutliner extends BaseElement
   static override properties = {
     value: { type: Object },
     readonly: { type: Boolean },
-    mentionable: { type: Array },
+    mentionable: { type: Object },
     tree: { type: Object, state: true },
     _collapsedNodePaths: { type: Object, state: true },
     focusedNodePath: { type: Array, state: true },
