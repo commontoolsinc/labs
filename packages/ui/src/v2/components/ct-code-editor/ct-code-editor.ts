@@ -955,7 +955,9 @@ export class CTCodeEditor extends BaseElement {
       ? ((rawMentioned.get() ?? []) as MentionableArray)
       : [];
 
-    const current: Mentionable[] = currentSource.filter((value): value is Mentionable => Boolean(value));
+    const current: Mentionable[] = currentSource.filter((
+      value,
+    ): value is Mentionable => Boolean(value));
 
     const curIds = new Set(
       current
