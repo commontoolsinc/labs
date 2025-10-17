@@ -114,6 +114,11 @@ export default recipe<CharmsListInput, CharmsListOutput>(
     );
     const index = BacklinksIndex({ allCharms });
 
+    const omnibot = Chatbot({
+      messages: [],
+      tools: undefined,
+    });
+
     return {
       backlinksIndex: index,
       [NAME]: str`DefaultCharmList (${allCharms.length})`,
@@ -190,8 +195,13 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vstack>
         </ct-screen>
       ),
-      sidebarUI: Sidebar(),
-      fabUI: Fab(),
+      sidebarUI: (
+        <div>
+          {omnibot.ui.attachmentsAndTools as any}
+          {omnibot.ui.chatLog as any}
+        </div>
+      ),
+      fabUI: omnibot.ui.promptInput,
     };
   },
 );
