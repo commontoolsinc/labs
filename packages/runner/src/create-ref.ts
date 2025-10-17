@@ -71,13 +71,34 @@ export function createRef(
 }
 
 /**
- * Helper to consistently get an entity ID from various object types
+ * Helper to consistently get an entity ID from various object types.
+ *
+ * For Cells with non-empty paths (e.g., created via cell.key(i)), this checks
+ * if the value at that path has its own intrinsic entity ID (e.g., a Cell stored
+ * in an array). If so, it returns that entity's ID instead of generating a
+ * path-based composite ID.
  */
 export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
     // Handle URI format with "of:" prefix
     if (value.startsWith("of:")) value = fromURI(value);
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
+  }
+
+  // If this is a Cell with a non-empty path, check if the value at that path
+  // has its own intrinsic entity ID. If so, return that instead of creating
+  // a path-based composite ID.
+  if (isCell(value)) {
+    const link = parseLink(value);
+    if (link?.path && link.path.length > 0) {
+      const actualValue = value.get();
+      // Only use the dereferenced value's ID if it has one
+      const dereferencedId = getEntityId(actualValue);
+      if (dereferencedId) {
+        return dereferencedId;
+      }
+      // Otherwise fall through to path-based composite behavior
+    }
   }
 
   const link = parseLink(value);

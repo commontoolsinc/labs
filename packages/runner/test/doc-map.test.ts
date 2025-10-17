@@ -89,6 +89,35 @@ describe("cell-map", () => {
         getEntityId(c.key("foo").getAsLink()),
       );
     });
+
+    it("should dereference cells with paths when value has entity ID", () => {
+      // Create an array cell containing cells with their own entity IDs
+      const item1 = runtime.getCell(space, "item-1", undefined, tx);
+      item1.set({ name: "Item 1", value: 100 });
+      const item1Id = getEntityId(item1);
+
+      const item2 = runtime.getCell(space, "item-2", undefined, tx);
+      item2.set({ name: "Item 2", value: 200 });
+      const item2Id = getEntityId(item2);
+
+      const arrayCell = runtime.getCell<any[]>(space, "item-array", undefined, tx);
+      arrayCell.set([item1, item2]);
+      tx.commit();
+
+      // Get cells via .key() - these have paths
+      const item1ViaKey = arrayCell.key(0);
+      const item2ViaKey = arrayCell.key(1);
+
+      // The bug was that getEntityId(arrayCell.key(0)) would return a
+      // path-based composite ID instead of item1's actual entity ID.
+      // After the fix, it should dereference and return the actual item IDs.
+      expect(getEntityId(item1ViaKey)).toEqual(item1Id);
+      expect(getEntityId(item2ViaKey)).toEqual(item2Id);
+
+      // Also verify that getting the value first works the same way
+      expect(getEntityId(item1ViaKey.get())).toEqual(item1Id);
+      expect(getEntityId(item2ViaKey.get())).toEqual(item2Id);
+    });
   });
 
   describe("getCellByEntityId and setCellByEntityId", () => {
