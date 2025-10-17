@@ -13,6 +13,7 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isAnyCellLink,
+  isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -1093,6 +1094,80 @@ describe("data-updating", () => {
 
     const value = targetCell.get();
     expect(value.result).toBe(100);
+  });
+
+  it("should inline data URI containing redirect without writing redirect to wrong location", () => {
+    // Setup: Create two separate cells - source and destination
+    const sourceCell = runtime.getCell<{ value: number }>(
+      space,
+      "data URI redirect source value",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ value: 99 });
+
+    const destinationCell = runtime.getCell<{ value: number }>(
+      space,
+      "data URI redirect destination value",
+      undefined,
+      tx,
+    );
+    destinationCell.set({ value: 42 });
+
+    // Create a data URI that contains a redirect pointing to sourceCell
+    const redirectAlias = sourceCell.key("value").getAsWriteRedirectLink();
+    const dataCell = runtime.getImmutableCell<any>(
+      space,
+      redirectAlias,
+      undefined,
+      tx,
+    );
+
+    // Create a target cell that currently has an alias to destinationCell
+    const targetCell = runtime.getCell<{ result: any }>(
+      space,
+      "data URI redirect target cell",
+      undefined,
+      tx,
+    );
+    targetCell.setRaw({
+      result: destinationCell.key("value").getAsWriteRedirectLink(),
+    });
+
+    const current = targetCell.key("result").getAsNormalizedFullLink();
+
+    // Write the data cell (which contains a redirect to sourceCell) to the target
+    // Before the fix: data URI was not inlined early enough, and the redirect
+    // would be written to destinationCell.value instead of target.result
+    // After the fix: data URI is inlined first, exposing the redirect, which is
+    // then properly written to target.result
+    const changes = normalizeAndDiff(
+      runtime,
+      tx,
+      current,
+      dataCell.getAsLink(),
+    );
+
+    // Should write the new redirect to target Cell.result
+    // Note: The change writes a redirect (alias object with $alias key)
+    expect(changes.length).toBe(1);
+    expect(changes[0].location.id).toBe(
+      targetCell.getAsNormalizedFullLink().id,
+    );
+    expect(changes[0].location.path).toEqual(["result"]);
+    // The value should be the redirect link
+    expect(isSigilLink(changes[0].value)).toBe(true);
+    const parsedLink = parseLink(changes[0].value);
+    expect(parsedLink?.overwrite).toBe("redirect");
+
+    applyChangeSet(tx, changes);
+
+    // Verify that targetCell now points to sourceCell's value (99), not destinationCell's (42)
+    expect(targetCell.get().result).toBe(99);
+
+    // Verify neither source nor destination cells were modified
+    expect(sourceCell.get()).toEqual({ value: 99 });
+    expect(destinationCell.get()).toEqual({ value: 42 });
   });
 
   describe("addCommonIDfromObjectID", () => {

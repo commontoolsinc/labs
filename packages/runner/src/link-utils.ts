@@ -16,7 +16,7 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
+import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
   getCellOrThrow,
@@ -27,6 +27,7 @@ import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -250,13 +251,13 @@ export function parseLink(
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: path.map((p) => p.toString()),
-      space: resolvedSpace,
+      ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
-      schema: link.schema,
-      rootSchema: link.rootSchema,
-      overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
+      ...(link.schema && { schema: link.schema }),
+      ...(link.rootSchema && { rootSchema: link.rootSchema }),
+      ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   }
 
@@ -265,7 +266,7 @@ export function parseLink(
     return {
       id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }),
       type: "application/json",
     };
   }
@@ -274,7 +275,7 @@ export function parseLink(
     return {
       id: toURI(value["/"]),
       path: [],
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
       type: "application/json",
     };
   }
@@ -297,14 +298,14 @@ export function parseLink(
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
-      space: base?.space,
+      ...(base?.space && { space: base.space }),
       type: "application/json",
-      schema: alias.schema as JSONSchema | undefined,
-      rootSchema: alias.rootSchema as JSONSchema | undefined,
+      ...(alias.schema && { schema: alias.schema }),
+      ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
   }
@@ -431,6 +432,125 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
+}
+
+/**
+ * Find any data: URI links and inline them.
+ *
+ * @param value - The value to find and inline data: URI links in.
+ * @returns The value with any data: URI links inlined.
+ */
+export function findAndInlineDataURILinks(value: any): any {
+  if (isLink(value)) {
+    const dataLink = parseLink(value)!;
+
+    if (dataLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      const path = [...dataLink.path];
+
+      // This is a storage item, so we have to look into the "value" field for
+      // the actual data.
+      if (!isRecord(dataValue)) return undefined;
+      dataValue = dataValue["value"];
+
+      // If there is a link on the way to `path`, follow it, appending remaining
+      // path to the target link.
+      while (dataValue !== undefined) {
+        if (isAnyCellLink(dataValue)) {
+          // Parse the link found in the data URI
+          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
+          const newLink = parseLink(dataValue);
+          let schema = newLink.schema;
+          if (schema !== undefined && path.length > 0) {
+            const cfc = new ContextualFlowControl();
+            schema = cfc.getSchemaAtPath(schema, path, newLink.rootSchema);
+          }
+          // Create new link by merging dataLink with remaining path
+          const newSigilLink = createSigilLinkFromParsedLink({
+            // Start with values from the original data link
+            ...dataLink,
+
+            // overwrite with values from the new link
+            ...newLink,
+
+            // extend path with remaining segments
+            path: [...newLink.path, ...path],
+
+            // use resolved schema if we have one
+            ...(schema !== undefined && { schema }),
+          }, {
+            includeSchema: true,
+          });
+          return findAndInlineDataURILinks(newSigilLink);
+        }
+        if (path.length > 0) {
+          dataValue = dataValue[path.shift()!];
+        } else {
+          break;
+        }
+      }
+
+      return dataValue;
+    } else {
+      return value;
+    }
+  } else if (Array.isArray(value)) {
+    return value.map(findAndInlineDataURILinks);
+  } else if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, value],
+      ) => [key, findAndInlineDataURILinks(value)]),
+    );
+  } else {
+    return value;
+  }
+}
+
+// Helper to create data URIs for testing
+export function createDataCellURI(
+  data: any,
+  base?: Cell | NormalizedLink,
+): string {
+  const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
+
+  function traverseAndAddBaseIdToRelativeLinks(
+    value: any,
+    seen: Set<any>,
+  ): any {
+    if (!isRecord(value)) return value;
+    if (seen.has(value)) {
+      throw new Error(`Cycle detected when creating data URI`);
+    }
+    seen.add(value);
+    try {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value);
+        if (!link.id) {
+          return createSigilLinkFromParsedLink({ ...link, id: baseId });
+        } else {
+          return value;
+        }
+      } else if (Array.isArray(value)) {
+        return value.map((item) =>
+          traverseAndAddBaseIdToRelativeLinks(item, seen)
+        );
+      } else { // isObject
+        return Object.fromEntries(
+          Object.entries(value).map((
+            [key, value],
+          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+        );
+      }
+    } finally {
+      seen.delete(value);
+    }
+  }
+  const json = JSON.stringify({
+    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  });
+  const base64 = btoa(json);
+  return `data:application/json;charset=utf-8;base64,${base64}`;
 }
 
 /**

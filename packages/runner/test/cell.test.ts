@@ -590,6 +590,159 @@ describe("createProxy", () => {
     expect(proxy.nested.arrays[0][0]).toBe(1);
   });
 
+  it("should support spreading array query results with for...of", () => {
+    const c = runtime.getCell<{ items: { name: string }[] }>(
+      space,
+      "should support spreading array query results",
+      undefined,
+      tx,
+    );
+    c.set({ items: [{ name: "a" }, { name: "b" }, { name: "c" }] });
+    const proxy = c.getAsQueryResult();
+
+    // Use for...of loop to iterate over the array
+    const collected: any[] = [];
+    for (const item of proxy.items) {
+      collected.push(item);
+    }
+
+    expect(collected.length).toBe(3);
+
+    // Each element should be a query result proxy (for objects)
+    expect(isQueryResult(collected[0])).toBe(true);
+    expect(isQueryResult(collected[1])).toBe(true);
+    expect(isQueryResult(collected[2])).toBe(true);
+
+    // We can access properties through the proxies
+    expect(collected[0].name).toBe("a");
+    expect(collected[1].name).toBe("b");
+    expect(collected[2].name).toBe("c");
+  });
+
+  it("should support spreading array query results with spread operator", () => {
+    const c = runtime.getCell<{ items: { id: number }[] }>(
+      space,
+      "should support spreading array with spread operator",
+      undefined,
+      tx,
+    );
+    c.set({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+    const proxy = c.getAsQueryResult();
+
+    // Spread the array into a new array
+    const spread = [...proxy.items];
+
+    expect(spread.length).toBe(3);
+
+    // Each element should be a query result proxy (for objects)
+    expect(isQueryResult(spread[0])).toBe(true);
+    expect(isQueryResult(spread[1])).toBe(true);
+    expect(isQueryResult(spread[2])).toBe(true);
+
+    // Verify we can access properties
+    expect(spread[0].id).toBe(1);
+    expect(spread[1].id).toBe(2);
+    expect(spread[2].id).toBe(3);
+  });
+
+  it("should support spreading nested array query results", () => {
+    const c = runtime.getCell<{ nested: { data: { value: number }[][] } }>(
+      space,
+      "should support spreading nested arrays",
+      undefined,
+      tx,
+    );
+    c.set({
+      nested: {
+        data: [[{ value: 1 }, { value: 2 }], [{ value: 3 }, { value: 4 }]],
+      },
+    });
+    const proxy = c.getAsQueryResult();
+
+    // Spread the outer array
+    const outerSpread = [...proxy.nested.data];
+    expect(outerSpread.length).toBe(2);
+
+    // Each inner array should be a query result proxy
+    expect(isQueryResult(outerSpread[0])).toBe(true);
+    expect(isQueryResult(outerSpread[1])).toBe(true);
+
+    // Spread an inner array
+    const innerSpread = [...outerSpread[0]];
+    expect(innerSpread.length).toBe(2);
+
+    // Elements of the inner array should also be query result proxies (for objects)
+    expect(isQueryResult(innerSpread[0])).toBe(true);
+    expect(isQueryResult(innerSpread[1])).toBe(true);
+
+    // Verify we can access properties
+    expect(innerSpread[0].value).toBe(1);
+    expect(innerSpread[1].value).toBe(2);
+  });
+
+  it("should support spreading arrays with cell references", () => {
+    // Create individual cells to reference
+    const cell1 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-1",
+      undefined,
+      tx,
+    );
+    cell1.set({ name: "first", value: 100 });
+
+    const cell2 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-2",
+      undefined,
+      tx,
+    );
+    cell2.set({ name: "second", value: 200 });
+
+    const cell3 = runtime.getCell<{ name: string; value: number }>(
+      space,
+      "ref-cell-3",
+      undefined,
+      tx,
+    );
+    cell3.set({ name: "third", value: 300 });
+
+    // Create an array cell containing references to other cells
+    const arrayCell = runtime.getCell<any[]>(
+      space,
+      "array-with-refs",
+      undefined,
+      tx,
+    );
+    arrayCell.set([cell1, cell2, cell3]);
+
+    const proxy = arrayCell.getAsQueryResult();
+
+    // Spread the array
+    const spread = [...proxy];
+
+    expect(spread.length).toBe(3);
+
+    // Each element should be a query result proxy
+    expect(isQueryResult(spread[0])).toBe(true);
+    expect(isQueryResult(spread[1])).toBe(true);
+    expect(isQueryResult(spread[2])).toBe(true);
+
+    // Verify we can access the referenced cells' data
+    expect(spread[0].name).toBe("first");
+    expect(spread[0].value).toBe(100);
+    expect(spread[1].name).toBe("second");
+    expect(spread[1].value).toBe(200);
+    expect(spread[2].name).toBe("third");
+    expect(spread[2].value).toBe(300);
+
+    // Use for...of to iterate
+    const names: string[] = [];
+    for (const item of proxy) {
+      names.push(item.name);
+    }
+    expect(names).toEqual(["first", "second", "third"]);
+  });
+
   it.skip("should support pop() and only read the popped element", () => {
     const c = runtime.getCell<{ a: number[] }>(
       space,
@@ -1850,13 +2003,7 @@ describe("asCell with schema", () => {
     expect(arrayCell.get()).toEqualIgnoringSymbols([10, 20, 30, 40]);
   });
 
-  it("should push values to undefined array with schema default has stable IDs", () => {
-    const schema = {
-      type: "array",
-      items: { type: "object", properties: { value: { type: "number" } } },
-      default: [{ [ID]: "test", value: 10 }, { [ID]: "test2", value: 20 }],
-    } as const satisfies JSONSchema;
-
+  it("should push values to undefined array with reused IDs", () => {
     const c = runtime.getCell<{ items?: any[] }>(
       space,
       "push-to-undefined-schema-stable-id",
@@ -1864,20 +2011,16 @@ describe("asCell with schema", () => {
       tx,
     );
     c.set({});
-    const arrayCell = c.key("items").asSchema(schema);
+    const arrayCell = c.key("items");
 
     arrayCell.push({ [ID]: "test3", "value": 30 });
     expect(arrayCell.get()).toEqualIgnoringSymbols([
-      { "value": 10 },
-      { "value": 20 },
       { "value": 30 },
     ]);
 
-    arrayCell.push({ [ID]: "test", "value": 40 });
+    arrayCell.push({ [ID]: "test3", "value": 40 });
     expect(arrayCell.get()).toEqualIgnoringSymbols([
       { "value": 40 }, // happens to overwrite, because IDs are the same
-      { "value": 20 },
-      { "value": 30 },
       { "value": 40 },
     ]);
   });
@@ -3326,5 +3469,177 @@ describe("Cell success callbacks", () => {
     // Verify the transaction actually failed
     const status = tx.status();
     expect(status.status).toBe("error");
+  });
+
+  describe("set operations with arrays", () => {
+    it("should add IDs to objects when setting an array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string; value: number }[]>(
+        space,
+        "array-set-test",
+        { type: "array" },
+        tx,
+      );
+
+      const objects = [
+        { name: "first", value: 1 },
+        { name: "second", value: 2 },
+      ];
+
+      cell.set(objects);
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: {
+          type: "object",
+          properties: { name: { type: "string" }, value: { type: "number" } },
+          asCell: true,
+        },
+      }).get();
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.length).toBe(2);
+      expect(isCell(result[0])).toBe(true);
+      expect(isCell(result[1])).toBe(true);
+      const link0 = result[0].getAsNormalizedFullLink();
+      const link1 = result[1].getAsNormalizedFullLink();
+      expect(link0.id).not.toBe(link1.id);
+      expect(link0.path).toEqual([]);
+      expect(link1.path).toEqual([]);
+      expect(result[0].get().name).toBe("first");
+      expect(result[1].get().name).toBe("second");
+    });
+
+    it("should preserve existing IDs when setting an array", () => {
+      const initialDataCell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "array-set-preserve-id-test-initial",
+        {
+          type: "object",
+          properties: { name: { type: "string" }, value: { type: "number" } },
+        },
+        tx,
+      );
+      initialDataCell.set({ name: "first", value: 1 });
+
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string; value: number }[]>(
+        space,
+        "array-set-preserve-id-test",
+        { type: "array" },
+        tx,
+      );
+
+      const objects = [
+        initialDataCell,
+        { name: "second", value: 2 },
+      ];
+
+      cell.set(objects);
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: {
+          type: "object",
+          properties: { name: { type: "string" }, value: { type: "number" } },
+          asCell: true,
+        },
+      }).get();
+      expect(isCell(result[0])).toBe(true);
+      expect(isCell(result[1])).toBe(true);
+      const link0 = result[0].getAsNormalizedFullLink();
+      const link1 = result[1].getAsNormalizedFullLink();
+      expect(link0.id).toBe(initialDataCell.getAsNormalizedFullLink().id);
+      expect(link0.id).not.toBe(link1.id);
+    });
+  });
+
+  describe("push operations with default values", () => {
+    it("should use default values from schema when pushing to empty array", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string; count: number }[]>(
+        space,
+        "push-with-defaults-test",
+        {
+          type: "array",
+          default: [{ name: "default", count: 0 }],
+        },
+        tx,
+      );
+
+      cell.push({ name: "new", count: 5 });
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(2);
+      expect(result[0].name).toBe("default");
+      expect(result[0].count).toBe(0);
+      expect(result[1].name).toBe("new");
+      expect(result[1].count).toBe(5);
+    });
+
+    it("should add IDs to default values from schema", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ name: string }[]>(
+        space,
+        "push-defaults-with-id-test",
+        {
+          type: "array",
+          default: [{ name: "default1" }, { name: "default2" }],
+        },
+        tx,
+      );
+
+      cell.push({ name: "new" });
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          asCell: true,
+        },
+      }).get();
+      expect(result.length).toBe(3);
+      expect(isCell(result[0])).toBe(true);
+      expect(isCell(result[1])).toBe(true);
+      expect(isCell(result[2])).toBe(true);
+      const link0 = result[0].getAsNormalizedFullLink();
+      const link1 = result[1].getAsNormalizedFullLink();
+      const link2 = result[2].getAsNormalizedFullLink();
+      expect(link0.id).not.toBe(link1.id);
+      expect(link1.id).not.toBe(link2.id);
+      expect(link0.id).not.toBe(link2.id);
+    });
+
+    it("should push objects with IDs even without schema defaults", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<{ value: number }[]>(
+        space,
+        "push-no-defaults-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.push({ value: 1 }, { value: 2 });
+      popFrame(frame);
+
+      const result = cell.asSchema({
+        type: "array",
+        items: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          asCell: true,
+        },
+      }).get();
+      expect(result.length).toBe(2);
+      expect(isCell(result[0])).toBe(true);
+      expect(isCell(result[1])).toBe(true);
+      const link0 = result[0].getAsNormalizedFullLink();
+      const link1 = result[1].getAsNormalizedFullLink();
+      expect(link0.id).not.toBe(link1.id);
+    });
   });
 });
