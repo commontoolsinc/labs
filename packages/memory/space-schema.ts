@@ -1,4 +1,5 @@
 import {
+  ContextualFlowControl,
   deepEqual,
   type JSONObject,
   type JSONValue,
@@ -48,7 +49,7 @@ import {
   type SelectedFact,
   selectFact,
   selectFacts,
-  type Session,
+  type Session as SpaceStoreSession,
   toSelection,
 } from "./space.ts";
 
@@ -77,7 +78,7 @@ export class ServerObjectManager extends BaseObjectManager<
   private restrictedValues = new Set<string>();
 
   constructor(
-    private session: Session<MemorySpace>,
+    private session: SpaceStoreSession<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
     super();
@@ -150,7 +151,7 @@ export class ServerObjectManager extends BaseObjectManager<
 }
 
 export const selectSchema = <Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
 ): FactSelection => {
   const startTime = performance.timeOrigin + performance.now();
@@ -163,6 +164,7 @@ export const selectSchema = <Space extends MemorySpace>(
     Immutable<JSONValue>,
     SchemaContext | undefined
   >();
+  const cfc = new ContextualFlowControl();
   const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
@@ -188,6 +190,7 @@ export const selectSchema = <Space extends MemorySpace>(
         entry,
         selectorEntry.value,
         tracker,
+        cfc,
         schemaTracker,
       );
 
@@ -253,6 +256,7 @@ function loadFactsForDoc(
   fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
+  cfc: ContextualFlowControl,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
@@ -266,6 +270,7 @@ function loadFactsForDoc(
         factValue,
         selector.path,
         tracker,
+        cfc,
         schemaTracker,
         selector,
       );
@@ -294,7 +299,7 @@ function loadFactsForDoc(
 
 const redactCommits = <Space extends MemorySpace>(
   includedFacts: FactSelection,
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
 ) => {
   const change = getChange(includedFacts, session.subject, COMMIT_LOG_TYPE);
   if (change !== undefined) {
@@ -344,7 +349,7 @@ function addToSelection(
 
 // Get the ValueEntry objects for the facts that match our selector
 function getMatchingFacts<Space extends MemorySpace>(
-  session: Session<Space>,
+  session: SpaceStoreSession<Space>,
   factSelector: FactSelector,
 ): Iterable<IAttestation & { cause: CauseString; since: number }> {
   const results = [];
