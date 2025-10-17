@@ -42,6 +42,7 @@ import { areLinksSame, isLink } from "./link-utils.ts";
 import type { IRuntime } from "./runtime.ts";
 import {
   createSigilLinkFromParsedLink,
+  findAndInlineDataURILinks,
   type NormalizedFullLink,
 } from "./link-utils.ts";
 import type {
@@ -714,7 +715,7 @@ export class RegularCell<T> implements Cell<T> {
       console.error("Can't set raw value, it's not JSON serializable", e);
       return;
     }
-    this.tx.writeValueOrThrow(this.link, value);
+    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
   getSourceCell<T>(

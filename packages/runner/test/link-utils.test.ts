@@ -343,6 +343,28 @@ describe("link-utils", () => {
       });
     });
 
+    it("should parse sigil links with relative references and not add id, space or schema if not present in the link", () => {
+      const sigilLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+      const result = parseLink(sigilLink);
+
+      expect(result).toEqual({
+        path: ["nested", "value"],
+        type: "application/json",
+      });
+
+      // Don't allow `id: undefined`, etc.
+      expect("id" in result!).toBe(false);
+      expect("space" in result!).toBe(false);
+      expect("schema" in result!).toBe(false);
+      expect("rootSchema" in result!).toBe(false);
+    });
+
     it("should parse cell links to normalized links", () => {
       const cell = runtime.getCell(space, "test");
       const cellLink = cell.getAsLink();
