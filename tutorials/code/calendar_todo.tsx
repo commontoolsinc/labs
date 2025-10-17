@@ -15,64 +15,40 @@ interface CalendarTodoState {
 
 const addTodo = handler<
   { detail: { message: string } },
-  { todos: Cell<Record<string, string[]>>; date: Cell<string> }
+  { todos: Cell<Record<string, string[]>>; date: string }
 >(
   (event, { todos, date }) => {
     const message = event.detail.message?.trim();
-    const dateValue = date.get();
-    if (!message || !dateValue) return;
+    if (!message || !date) return;
     const currentTodos = todos.get() || {};
-    const dateTodos = currentTodos[dateValue] || [];
+    const dateTodos = currentTodos[date] || [];
     const newTodos = [...dateTodos, message];
-    const updatedTodos: Record<string, string[]> = {};
-    for (const key of Object.keys(currentTodos)) {
-      updatedTodos[key] = key === dateValue ? newTodos : currentTodos[key];
-    }
-    // Add the date if it didn't exist
-    if (!currentTodos[dateValue]) {
-      updatedTodos[dateValue] = newTodos;
-    }
-
+    const updatedTodos = { ...currentTodos, [date]: newTodos };
+    console.log(
+      "New todos after addition:",
+      { message, date, currentTodos, newTodos, updatedTodos },
+    );
     todos.set(updatedTodos);
   },
 );
 
 const removeTodo = handler<
   { target: { dataset: Record<string, string> } },
-  { todos: Cell<Record<string, string[]>>; date: Cell<string> }
+  { todos: Cell<Record<string, string[]>>; date: string }
 >(
   (event, { todos, date }) => {
     console.log("removeTodo event:", event);
 
     const index = parseInt(event.target?.dataset?.index || "-1", 10);
-    const dateValue = date.get();
-    if (index === -1 || !dateValue) return;
+    if (index === -1 || !date) return;
 
     const currentTodos = todos.get() || {};
-    const dateTodos = currentTodos[dateValue] || [];
+    const dateTodos = currentTodos[date] || [];
 
-    const newTodos = dateTodos.reduce((acc, _, i) => {
-      console.log(`Index ${i} !== ${index} =>`, i !== index);
-      if (i !== index) {
-        acc.push(dateTodos[i]);
-      }
-      return acc;
-    }, [] as string[]);
+    const newTodos = dateTodos.toSpliced(index, 1);
 
-    console.log("New todos after removal:", newTodos);
-
-    const updatedTodos: Record<string, string[]> = {};
-    for (const key of Object.keys(currentTodos)) {
-      if (key === dateValue) {
-        updatedTodos[key] = newTodos;
-      } else {
-        const arr = currentTodos[key];
-        updatedTodos[key] = arr.reduce((acc, _, i) => {
-          acc.push(arr[i]);
-          return acc;
-        }, [] as string[]);
-      }
-    }
+    const updatedTodos = { ...currentTodos, [date]: newTodos };
+    console.log("New todos after removal:", updatedTodos);
 
     todos.set(updatedTodos);
   },
