@@ -100,7 +100,12 @@ describe("cell-map", () => {
       item2.set({ name: "Item 2", value: 200 });
       const item2Id = getEntityId(item2);
 
-      const arrayCell = runtime.getCell<any[]>(space, "item-array", undefined, tx);
+      const arrayCell = runtime.getCell<any[]>(
+        space,
+        "item-array",
+        undefined,
+        tx,
+      );
       arrayCell.set([item1, item2]);
       tx.commit();
 
