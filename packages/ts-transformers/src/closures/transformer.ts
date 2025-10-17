@@ -714,6 +714,30 @@ function transformElementReferences(
 }
 
 /**
+ * Transform references to original index parameter to use "index" instead.
+ */
+function transformIndexReferences(
+  body: ts.ConciseBody,
+  indexParam: ts.ParameterDeclaration | undefined,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  const indexName = indexParam?.name;
+
+  // Replace references to the original index param with "index"
+  if (indexName && ts.isIdentifier(indexName) && indexName.text !== "index") {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node) && node.text === indexName.text) {
+        return factory.createIdentifier("index");
+      }
+      return visitEachChildWithJsx(node, visitor, undefined);
+    };
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
+  }
+
+  return body;
+}
+
+/**
  * Transform destructured property references to use element.prop or element[index].
  */
 function transformDestructuredProperties(
@@ -991,14 +1015,21 @@ function transformMapCallback(
     factory,
   );
 
-  // 2. Transform destructured properties
+  // 2. Replace index parameter name
+  transformedBody = transformIndexReferences(
+    transformedBody,
+    indexParam,
+    factory,
+  );
+
+  // 3. Transform destructured properties
   transformedBody = transformDestructuredProperties(
     transformedBody,
     elemParam,
     factory,
   );
 
-  // 3. Replace captured expressions with their parameter names
+  // 4. Replace captured expressions with their parameter names
   transformedBody = replaceCaptures(transformedBody, captures, factory);
 
   // Create the final recipe call with params
