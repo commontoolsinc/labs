@@ -318,8 +318,6 @@ export function createCell<T>(
   noResolve = false,
   synced = false,
 ): Cell<T> {
-  let { schema, rootSchema } = link;
-
   // Resolve the path to check whether it's a stream.
   const readTx = runtime.readTx(tx);
   const resolvedLink = noResolve ? link : resolveLink(readTx, link);
@@ -327,18 +325,11 @@ export function createCell<T>(
     meta: ignoreReadForScheduling,
   });
 
-  // Use schema from alias if provided and no explicit schema was set
-  if (!schema && resolvedLink.schema) {
-    schema = resolvedLink.schema;
-    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
-  }
+  // Use schema from alias if provided
+  const { schema, rootSchema } = resolvedLink;
 
   if (isStreamValue(value)) {
-    return new StreamCell(
-      runtime,
-      { ...resolvedLink, schema, rootSchema },
-      tx,
-    ) as unknown as Cell<T>;
+    return new StreamCell(runtime, resolvedLink, tx) as unknown as Cell<T>;
   } else {
     return new RegularCell(
       runtime,
@@ -662,12 +653,17 @@ export class RegularCell<T> implements Cell<T> {
   ): QueryResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
+    const { schema: _schema, rootSchema: _rootSchema, ...linkWithoutSchema } =
+      this.link;
     return createQueryResultProxy(
       this.runtime,
       tx ?? this.tx ?? this.runtime.edit(),
       {
-        ...this.link,
-        path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
+        ...linkWithoutSchema,
+        path: [
+          ...this.link.path,
+          ...subPath.map((p) => p.toString()),
+        ] as string[],
       },
     );
   }

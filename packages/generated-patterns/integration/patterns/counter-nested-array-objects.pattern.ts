@@ -164,3 +164,5 @@ export const counterWithNestedArrayObjects = recipe<NestedArrayArgs>(
     };
   },
 );
+
+export default counterWithNestedArrayObjects;
