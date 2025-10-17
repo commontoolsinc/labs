@@ -469,6 +469,7 @@ export function findAndInlineDataURILinks(value: any): any {
             ...dataLink,
             path: [...dataLink.path, ...path],
             ...(schema !== undefined && { schema }),
+            includeSchema: true,
           });
           return findAndInlineDataURILinks(newLink);
         }
