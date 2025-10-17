@@ -392,15 +392,6 @@ export class CTCodeEditor extends BaseElement {
         content: "",
       };
 
-      if (!this.mentionable) {
-        throw new Error(
-          "ct-code-editor: `$mentionable` cell is required for backlink creation",
-        );
-      }
-      inputs["backlinksIndex"] = {
-        mentionable: this.mentionable,
-      };
-
       rt.run(tx, pattern, inputs, result);
 
       // let the pattern know about the new backlink
