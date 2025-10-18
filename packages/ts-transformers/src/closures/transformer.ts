@@ -954,12 +954,15 @@ function createRecipeCallWithParams(
   const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
   // Create mapWithPattern property access
-  const mapWithPatternAccess = ts.isPropertyAccessExpression(mapCall.expression)
-    ? factory.createPropertyAccessExpression(
-      mapCall.expression.expression, // state.items
-      factory.createIdentifier("mapWithPattern"),
-    )
-    : factory.createIdentifier("mapWithPattern"); // Fallback (shouldn't happen)
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    throw new Error(
+      "Expected mapCall.expression to be a PropertyAccessExpression",
+    );
+  }
+  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+    mapCall.expression.expression, // state.items
+    factory.createIdentifier("mapWithPattern"),
+  );
 
   // Return the transformed mapWithPattern call
   return factory.createCallExpression(
