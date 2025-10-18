@@ -796,7 +796,7 @@ export function validateAndTransform(
         !(isObject(elementSchema) &&
           (elementSchema.asCell || elementSchema.asStream ||
             (Array.isArray(elementSchema?.anyOf) &&
-              elementSchema.anyOf.some((option) =>
+              elementSchema.anyOf.every((option) =>
                 option.asCell || option.asStream
               )) ||
             (Array.isArray(elementSchema?.oneOf) &&
