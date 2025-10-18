@@ -511,7 +511,7 @@ export function findAndInlineDataURILinks(value: any): any {
 export function createDataCellURI(
   data: any,
   base?: Cell | NormalizedLink,
-): string {
+): URI {
   const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
 
   function traverseAndAddBaseIdToRelativeLinks(
