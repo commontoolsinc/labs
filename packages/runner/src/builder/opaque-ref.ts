@@ -18,7 +18,7 @@ import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 
-let mapFactory: NodeFactory<any, any>;
+let mapFactory: NodeFactory<any, any> | undefined;
 
 // A opaque ref factory that creates future cells with optional default values.
 //
