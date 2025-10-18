@@ -1459,7 +1459,7 @@ describe("Schema Support", () => {
           },
           children: [
             { type: "text", value: "single" },
-            childrenArrayCell,
+            childrenArrayCell.getAsLink(),
             "or just text",
           ],
         });
