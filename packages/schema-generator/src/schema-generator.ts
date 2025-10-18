@@ -77,6 +77,54 @@ export class SchemaGenerator implements ISchemaGenerator {
   }
 
   /**
+   * Generate schema from a synthetic TypeNode that doesn't resolve to a proper Type.
+   * Used by transformers that create synthetic type structures programmatically.
+   *
+   * This method creates a shared context and uses formatChildType to ensure proper
+   * $ref and $defs handling across all properties.
+   */
+  public generateSchemaFromSyntheticTypeNode(
+    typeNode: ts.TypeNode,
+    checker: ts.TypeChecker,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  ): SchemaDefinition {
+    // Create context similar to generateSchema
+    // Note: We use a dummy 'any' type for cycle detection since we don't have a real Type
+    const dummyType = checker.getAnyType();
+    const cycles = this.getCycles(dummyType, checker);
+    const context: GenerationContext = {
+      // Immutable context
+      typeChecker: checker,
+      cyclicTypes: cycles.types,
+      cyclicNames: cycles.names,
+
+      // Accumulating state
+      definitions: {},
+      emittedRefs: new Set(),
+      anonymousNames: new WeakMap(),
+      anonymousNameCounter: 0,
+
+      // Stack state
+      definitionStack: new Set(),
+      inProgressNames: new Set(),
+
+      // Optional context
+      typeNode,
+    };
+
+    // Analyze the TypeNode structure using shared context
+    const schema = this.analyzeTypeNodeStructure(
+      typeNode,
+      checker,
+      context,
+      typeRegistry,
+    );
+
+    // Build final schema with $schema and $defs
+    return this.buildFinalSchemaForSynthetic(schema, context);
+  }
+
+  /**
    * Format a nested/child type within the current active context. This preserves
    * definition/$ref behavior (including cycles) and ensures non-root usages can
    * return $ref where appropriate.
@@ -272,7 +320,7 @@ export class SchemaGenerator implements ISchemaGenerator {
   ): SchemaDefinition {
     const { definitions, emittedRefs } = context;
 
-    // If no definitions were created or used, return simple schema
+    // If no definitions were created or used, return simple schema without $schema
     if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
       return rootSchema;
     }
@@ -295,12 +343,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
     if (typeof base === "boolean") {
-      return base
-        ? { $schema: "https://json-schema.org/draft/2020-12/schema" }
-        : {
-          $schema: "https://json-schema.org/draft/2020-12/schema",
-          not: true,
-        };
+      return base;
     }
 
     // Object schema: attach only the definitions actually referenced by the
@@ -486,5 +529,137 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (allDefs[name]) subset[name] = allDefs[name];
     }
     return subset;
+  }
+
+  /**
+   * Internal helper to analyze synthetic TypeNode structure.
+   * Uses formatChildType for properties to share context properly.
+   */
+  private analyzeTypeNodeStructure(
+    typeNode: ts.TypeNode,
+    checker: ts.TypeChecker,
+    context: GenerationContext,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  ): SchemaDefinition {
+    // Handle TypeLiteral nodes (object types)
+    if (ts.isTypeLiteralNode(typeNode)) {
+      const properties: Record<string, SchemaDefinition> = {};
+      const required: string[] = [];
+
+      for (const member of typeNode.members) {
+        if (
+          ts.isPropertySignature(member) &&
+          member.name &&
+          ts.isIdentifier(member.name) &&
+          member.type
+        ) {
+          const propName = member.name.text;
+
+          // First, check if this property's TypeNode is in the typeRegistry
+          let propType: ts.Type | undefined;
+          if (typeRegistry && typeRegistry.has(member.type)) {
+            propType = typeRegistry.get(member.type);
+          } else {
+            // Try to get Type from the property's TypeNode
+            const resolvedType = checker.getTypeFromTypeNode(member.type);
+            if (!(resolvedType.flags & ts.TypeFlags.Any)) {
+              propType = resolvedType;
+            }
+          }
+
+          let propSchema: SchemaDefinition;
+          if (propType && !(propType.flags & ts.TypeFlags.Any)) {
+            // Use formatChildType - shares context!
+            propSchema = this.formatChildType(propType, context, member.type);
+          } else {
+            // Recurse on TypeNode structure
+            propSchema = this.analyzeTypeNodeStructure(
+              member.type,
+              checker,
+              context,
+              typeRegistry,
+            );
+          }
+
+          properties[propName] = propSchema;
+
+          // Add to required if not optional
+          if (!member.questionToken) {
+            required.push(propName);
+          }
+        }
+      }
+
+      const schema: SchemaDefinition = {
+        type: "object",
+        properties,
+      };
+
+      if (required.length > 0) {
+        schema.required = required;
+      }
+
+      return schema;
+    }
+
+    // Handle keyword types (string, number, boolean, etc.)
+    switch (typeNode.kind) {
+      case ts.SyntaxKind.StringKeyword:
+        return { type: "string" };
+      case ts.SyntaxKind.NumberKeyword:
+        return { type: "number" };
+      case ts.SyntaxKind.BooleanKeyword:
+        return { type: "boolean" };
+      case ts.SyntaxKind.NullKeyword:
+        return { type: "null" };
+      case ts.SyntaxKind.UndefinedKeyword:
+      case ts.SyntaxKind.VoidKeyword:
+      case ts.SyntaxKind.AnyKeyword:
+      case ts.SyntaxKind.UnknownKeyword:
+        // Accept any value
+        return true as SchemaDefinition;
+    }
+
+    // For other TypeNode kinds, try to resolve as Type
+    const type = checker.getTypeFromTypeNode(typeNode);
+    if (!(type.flags & ts.TypeFlags.Any)) {
+      // Successfully resolved - use formatChildType to share context
+      return this.formatChildType(type, context, typeNode);
+    }
+
+    // Fallback: accept any value
+    return true as SchemaDefinition;
+  }
+
+  /**
+   * Build final schema for synthetic TypeNode with $schema and $defs
+   */
+  private buildFinalSchemaForSynthetic(
+    rootSchema: SchemaDefinition,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const { definitions, emittedRefs } = context;
+
+    // Handle boolean schemas (rare, but supported by JSON Schema)
+    if (typeof rootSchema === "boolean") {
+      return rootSchema;
+    }
+
+    // If no definitions were created or used, return simple schema with $schema
+    if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
+      return {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        ...(rootSchema as Record<string, unknown>),
+      } as SchemaDefinition;
+    }
+
+    // Object schema: attach only the definitions actually referenced
+    const filtered = this.collectReferencedDefinitions(rootSchema, definitions);
+    const out: Record<string, unknown> = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      ...(rootSchema as Record<string, unknown>),
+    };
+    if (Object.keys(filtered).length > 0) out.$defs = filtered;
+    return out as SchemaDefinition;
   }
 }

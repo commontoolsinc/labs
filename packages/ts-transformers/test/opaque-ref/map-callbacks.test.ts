@@ -17,6 +17,7 @@ interface Charm {
 
 interface State {
   charms: Charm[];
+  defaultName: string;
 }
 
 export default recipe<State>("CharmList", (state) => {
@@ -27,7 +28,7 @@ export default recipe<State>("CharmList", (state) => {
           {state.charms.map((charm: any, index: number) => (
             <li key={charm.id}>
               <span class="number">{index + 1}</span>
-              <span class="name">{charm[NAME] || "Unnamed"}</span>
+              <span class="name">{charm[NAME] || state.defaultName}</span>
             </li>
           ))}
         </ul>
@@ -44,14 +45,30 @@ describe("OpaqueRef map callbacks", () => {
       types: { "commontools.d.ts": commontools },
     });
 
+    // Map callback should be transformed to recipe with schema for captured defaultName
+    assertStringIncludes(
+      output,
+      "__ctHelpers.recipe({",
+    );
+    assertStringIncludes(
+      output,
+      "({ element, index, params: { defaultName } }) =>",
+    );
+    assertStringIncludes(
+      output,
+      "{ defaultName: state.defaultName }",
+    );
+    // Index parameter still gets derive wrapping for the arithmetic operation
     assertStringIncludes(
       output,
       "__ctHelpers.derive(index, index => index + 1)",
     );
+    // element[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
       output,
-      '__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")',
+      "element[NAME] || defaultName",
     );
+    // ifElse still gets derive for the negation
     assertStringIncludes(
       output,
       "ifElse(__ctHelpers.derive(state.charms.length, _v1 => !_v1)",

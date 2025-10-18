@@ -5,8 +5,9 @@ import {
   Transformer,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commontools/schema-generator";
+import { visitEachChildWithJsx } from "../ast/mod.ts";
 
-let generateSchema: ReturnType<typeof createSchemaTransformerV2> | undefined;
+let schemaTransformer: ReturnType<typeof createSchemaTransformerV2> | undefined;
 
 export class SchemaGeneratorTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -14,7 +15,7 @@ export class SchemaGeneratorTransformer extends Transformer {
   }
 
   transform(context: TransformationContext): ts.SourceFile {
-    if (!generateSchema) generateSchema = createSchemaTransformerV2();
+    if (!schemaTransformer) schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;
     const { logger, typeRegistry } = context.options;
 
@@ -48,12 +49,28 @@ export class SchemaGeneratorTransformer extends Transformer {
           optionsObj = evaluateObjectLiteral(arg0, checker);
         }
 
-        const schema = generateSchema!(type, checker, typeArg);
+        // If Type resolved to 'any' and we have a synthetic TypeNode, use new method
+        let schema: unknown;
+        if (
+          (type.flags & ts.TypeFlags.Any) &&
+          typeArg.pos === -1 &&
+          typeArg.end === -1
+        ) {
+          // Synthetic TypeNode path - use new method that shares context properly
+          schema = schemaTransformer!.generateSchemaFromSyntheticTypeNode(
+            typeArg,
+            checker,
+            typeRegistry,
+          );
+        } else {
+          // Normal Type path
+          schema = schemaTransformer!.generateSchema(type, checker, typeArg);
+        }
 
         // Handle boolean schemas (true/false) - can't spread them
         const finalSchema = typeof schema === "boolean"
           ? schema
-          : { ...schema, ...optionsObj };
+          : { ...(schema as Record<string, unknown>), ...optionsObj };
         const schemaAst = createSchemaAst(finalSchema, context.factory);
 
         const constAssertion = context.factory.createAsExpression(
@@ -75,7 +92,7 @@ export class SchemaGeneratorTransformer extends Transformer {
         return satisfiesExpression;
       }
 
-      return ts.visitEachChild(node, visit, transformation);
+      return visitEachChildWithJsx(node, visit, transformation);
     };
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;
