@@ -862,7 +862,9 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     const prefixItems = isObject(schema) && Array.isArray(schema["prefixItems"])
       ? schema["prefixItems"]
       : [];
-    const items = isObject(schema) && schema["items"] ? schema["items"] : true;
+    const items = isObject(schema) && schema["items"] !== undefined
+      ? schema["items"]
+      : true;
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
     ) {
