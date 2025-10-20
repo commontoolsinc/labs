@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { render, VNode } from "../src/index.ts";
-import { MockDoc } from "../src/utils.ts";
+import { MockDoc } from "./utils.ts";
 import {
   type Cell,
   createBuilder,
