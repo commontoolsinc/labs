@@ -22,8 +22,10 @@ type Input = {
 
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
-  content: Default<string, "">;
   backlinks: MentionableCharm[];
+
+  /** The content of the note */
+  content: Default<string, "">;
   editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
@@ -78,6 +80,7 @@ const handleNewBacklink = handler<
   }
 });
 
+/** This edits the content */
 const handleEditContent = handler<
   { detail: { value: string } },
   { content: Cell<string> }

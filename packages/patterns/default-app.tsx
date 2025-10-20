@@ -197,6 +197,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       ),
       sidebarUI: (
         <div>
+          {/* TODO(bf): why any? */}
           {omnibot.ui.attachmentsAndTools as any}
           {omnibot.ui.chatLog as any}
         </div>
