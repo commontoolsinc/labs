@@ -6,6 +6,67 @@ import * as domhandler from "domhandler";
 import * as domserializer from "dom-serializer";
 import { RenderOptions } from "./render.ts";
 
+/**
+ * Converts a React-style CSS object to a CSS string.
+ * Supports vendor prefixes, pixel value shorthand, and comprehensive CSS properties.
+ * @param styleObject - The style object with React-style camelCase properties
+ * @returns A CSS string suitable for the style attribute
+ */
+const styleObjectToCssString = (styleObject: Record<string, any>): string => {
+  return Object.entries(styleObject)
+    .map(([key, value]) => {
+      // Skip if value is null or undefined
+      if (value == null) return "";
+
+      // Convert camelCase to kebab-case, handling vendor prefixes
+      let cssKey = key;
+
+      // Handle vendor prefixes (WebkitTransform -> -webkit-transform)
+      if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
+        cssKey = "-" + key;
+      }
+
+      // Convert camelCase to kebab-case
+      cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
+
+      // Convert value to string
+      let cssValue = value;
+
+      // Add 'px' suffix to numeric values for properties that need it
+      // Exceptions: properties that accept unitless numbers
+      const unitlessProperties = new Set([
+        "animation-iteration-count",
+        "column-count",
+        "fill-opacity",
+        "flex-grow",
+        "flex-shrink",
+        "font-weight",
+        "line-height",
+        "opacity",
+        "order",
+        "orphans",
+        "stroke-opacity",
+        "widows",
+        "z-index",
+        "zoom",
+      ]);
+
+      if (
+        typeof value === "number" &&
+        !unitlessProperties.has(cssKey) &&
+        value !== 0
+      ) {
+        cssValue = `${value}px`;
+      } else {
+        cssValue = String(value);
+      }
+
+      return `${cssKey}: ${cssValue}`;
+    })
+    .filter((s) => s !== "")
+    .join("; ");
+};
+
 function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
   return {
     document,
@@ -15,6 +76,19 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       value: unknown,
     ) {
       const el = element as any;
+
+      // Handle style object specially - convert to CSS string
+      if (
+        key === "style" &&
+        el.attribs &&
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        const cssString = styleObjectToCssString(value as Record<string, any>);
+        el.attribs["style"] = cssString;
+        return;
+      }
 
       // Handle data-* attributes specially - they need to be set as HTML attributes
       // to populate the dataset property correctly

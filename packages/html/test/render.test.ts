@@ -406,6 +406,268 @@ describe("serializableEvent", () => {
   });
 });
 
+describe("style object support", () => {
+  it("converts React-style object to CSS string", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          backgroundColor: "red",
+          fontSize: 16,
+          padding: "10px",
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("background-color: red"),
+      true,
+      "Should convert backgroundColor to background-color",
+    );
+    assert.equal(
+      style?.includes("font-size: 16px"),
+      true,
+      "Should add px to numeric fontSize",
+    );
+    assert.equal(
+      style?.includes("padding: 10px"),
+      true,
+      "Should preserve string values",
+    );
+    cancel();
+  });
+
+  it("handles unitless numeric properties", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          opacity: 0.5,
+          zIndex: 10,
+          flexGrow: 1,
+          lineHeight: 1.5,
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("opacity: 0.5"),
+      true,
+      "opacity should be unitless",
+    );
+    assert.equal(
+      style?.includes("z-index: 10"),
+      true,
+      "z-index should be unitless",
+    );
+    assert.equal(
+      style?.includes("flex-grow: 1"),
+      true,
+      "flex-grow should be unitless",
+    );
+    assert.equal(
+      style?.includes("line-height: 1.5"),
+      true,
+      "line-height should be unitless",
+    );
+    cancel();
+  });
+
+  it("handles vendor prefixes", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          WebkitTransform: "rotate(45deg)",
+          MozAppearance: "none",
+          msUserSelect: "none",
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("-webkit-transform: rotate(45deg)"),
+      true,
+      "Should handle WebkitTransform",
+    );
+    assert.equal(
+      style?.includes("-moz-appearance: none"),
+      true,
+      "Should handle MozAppearance",
+    );
+    assert.equal(
+      style?.includes("-ms-user-select: none"),
+      true,
+      "Should handle msUserSelect",
+    );
+    cancel();
+  });
+
+  it("handles zero values without units", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          margin: 0,
+          padding: 0,
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("margin: 0"),
+      true,
+      "Should handle zero margin",
+    );
+    assert.equal(
+      style?.includes("padding: 0"),
+      true,
+      "Should handle zero padding",
+    );
+    cancel();
+  });
+
+  it("handles null and undefined values", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          color: "blue",
+          backgroundColor: null,
+          fontSize: undefined,
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(style?.includes("color: blue"), true, "Should include color");
+    assert.equal(
+      style?.includes("background-color"),
+      false,
+      "Should skip null values",
+    );
+    assert.equal(
+      style?.includes("font-size"),
+      false,
+      "Should skip undefined values",
+    );
+    cancel();
+  });
+
+  it("handles complex CSS values", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+          backgroundImage: "linear-gradient(to right, red, blue)",
+          transform: "translate3d(10px, 20px, 0)",
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1)"),
+      true,
+      "Should handle box-shadow",
+    );
+    assert.equal(
+      style?.includes("background-image: linear-gradient(to right, red, blue)"),
+      true,
+      "Should handle gradients",
+    );
+    assert.equal(
+      style?.includes("transform: translate3d(10px, 20px, 0)"),
+      true,
+      "Should handle transforms",
+    );
+    cancel();
+  });
+
+  it("handles style object alongside other props", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        id: "styled-div",
+        className: "test-class",
+        style: {
+          color: "red",
+          fontSize: 14,
+        },
+        "data-test": "value",
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("id"), "styled-div");
+    // Use getAttribute for className in mock DOM
+    // @ts-ignore: attribs exists on mock element
+    assert.equal(div.attribs.className, "test-class");
+    assert.equal(div.getAttribute("data-test"), "value");
+    const style = div.getAttribute("style");
+    assert.equal(style?.includes("color: red"), true);
+    assert.equal(style?.includes("font-size: 14px"), true);
+    cancel();
+  });
+
+  it("handles empty style object", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {},
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(style, "", "Empty style object should result in empty string");
+    cancel();
+  });
+});
+
 describe("dataset attributes", () => {
   it("sets data-* attributes using setAttribute", () => {
     const { renderOptions, document } = mock;
