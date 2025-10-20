@@ -1,5 +1,14 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, NAME, recipe, UI } from "commontools";
+import {
+  Cell,
+  Default,
+  derive,
+  handler,
+  lift,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
 
 const DISABLED_VIA_UI = "Disabled via UI";
 
@@ -112,9 +121,9 @@ function StatusIcon(
   );
 }
 
-function getRenderData(
+const getRenderData = lift((
   charm: BGCharmEntry,
-) {
+) => {
   const {
     integration,
     space: rawSpace,
@@ -150,7 +159,7 @@ Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
     integration,
     name,
   };
-}
+});
 
 const css = `
 .bg-charm-container {
