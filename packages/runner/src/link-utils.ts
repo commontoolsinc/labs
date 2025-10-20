@@ -549,8 +549,8 @@ export function createDataCellURI(
   const json = JSON.stringify({
     value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   });
-  const base64 = btoa(json);
-  return `data:application/json;charset=utf-8;base64,${base64}`;
+  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
+  return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
 
 /**
