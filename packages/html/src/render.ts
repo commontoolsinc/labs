@@ -353,6 +353,7 @@ const styleObjectToCssString = (styleObject: Record<string, any>): string => {
         "animation-iteration-count",
         "column-count",
         "fill-opacity",
+        "flex",
         "flex-grow",
         "flex-shrink",
         "font-weight",

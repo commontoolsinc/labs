@@ -452,6 +452,7 @@ describe("style object support", () => {
         style: {
           opacity: 0.5,
           zIndex: 10,
+          flex: 1,
           flexGrow: 1,
           lineHeight: 1.5,
         },
@@ -472,6 +473,7 @@ describe("style object support", () => {
       true,
       "z-index should be unitless",
     );
+    assert.equal(style?.includes("flex: 1"), true, "flex should be unitless");
     assert.equal(
       style?.includes("flex-grow: 1"),
       true,
