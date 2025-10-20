@@ -680,6 +680,8 @@ describe("style object support", () => {
           "--opacity": 0.5,
           "--columns": 3,
           "--primary-color": "#ff0000",
+          "--MyAccent": "blue",
+          "--THEME-Color": "green",
         },
       },
       children: [],
@@ -707,6 +709,16 @@ describe("style object support", () => {
       style?.includes("--primary-color: #ff0000"),
       true,
       "CSS variables should preserve string values",
+    );
+    assert.equal(
+      style?.includes("--MyAccent: blue"),
+      true,
+      "CSS variables should preserve case sensitivity",
+    );
+    assert.equal(
+      style?.includes("--THEME-Color: green"),
+      true,
+      "CSS variables should preserve mixed case",
     );
     cancel();
   });

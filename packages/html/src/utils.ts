@@ -21,13 +21,16 @@ const styleObjectToCssString = (styleObject: Record<string, any>): string => {
       // Convert camelCase to kebab-case, handling vendor prefixes
       let cssKey = key;
 
-      // Handle vendor prefixes (WebkitTransform -> -webkit-transform)
-      if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
-        cssKey = "-" + key;
-      }
+      // CSS custom properties (--*) are case-sensitive and should not be transformed
+      if (!key.startsWith("--")) {
+        // Handle vendor prefixes (WebkitTransform -> -webkit-transform)
+        if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
+          cssKey = "-" + key;
+        }
 
-      // Convert camelCase to kebab-case
-      cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
+        // Convert camelCase to kebab-case
+        cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
+      }
 
       // Convert value to string
       let cssValue = value;
