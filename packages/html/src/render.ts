@@ -369,6 +369,7 @@ const styleObjectToCssString = (styleObject: Record<string, any>): string => {
 
       if (
         typeof value === "number" &&
+        !cssKey.startsWith("--") && // CSS custom properties should never get px
         !unitlessProperties.has(cssKey) &&
         value !== 0
       ) {

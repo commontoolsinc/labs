@@ -668,6 +668,48 @@ describe("style object support", () => {
     assert.equal(style, "", "Empty style object should result in empty string");
     cancel();
   });
+
+  it("handles CSS custom properties (variables) without adding px", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {
+        style: {
+          "--scale": 2,
+          "--opacity": 0.5,
+          "--columns": 3,
+          "--primary-color": "#ff0000",
+        },
+      },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const style = div.getAttribute("style");
+    assert.equal(
+      style?.includes("--scale: 2"),
+      true,
+      "CSS variables should not get px suffix",
+    );
+    assert.equal(
+      style?.includes("--opacity: 0.5"),
+      true,
+      "CSS variables should preserve decimal values",
+    );
+    assert.equal(
+      style?.includes("--columns: 3"),
+      true,
+      "CSS variables should preserve numeric values",
+    );
+    assert.equal(
+      style?.includes("--primary-color: #ff0000"),
+      true,
+      "CSS variables should preserve string values",
+    );
+    cancel();
+  });
 });
 
 describe("dataset attributes", () => {
