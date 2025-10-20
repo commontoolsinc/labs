@@ -1,59 +1,40 @@
 /// <cts-enable />
-import {
-  Default,
-  derive,
-  lift,
-  NAME,
-  OpaqueRef,
-  recipe,
-  UI,
-} from "commontools";
+import { Default, derive, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 interface ShoppingItem {
-  name: string;
-  checked: Default<boolean, false>;
-  category: Default<string, "Other">;
+  title: string;
+  done: Default<boolean, false>;
+  category: Default<string, "Uncategorized">;
 }
 
 interface CategorizedListInput {
-  title: Default<string, "Shopping List (By Category)">;
+  title: Default<string, "Shopping List (by Category)">;
   items: Default<ShoppingItem[], []>;
 }
 
-interface CategorizedListOutput extends CategorizedListInput {
-  itemsByCategory: Record<string, ShoppingItem[]>;
-}
-
-// Group items by category using lift
-const groupByCategory = lift((itemsArray: ShoppingItem[]) => {
-  const grouped: Record<string, ShoppingItem[]> = {};
-
-  for (const item of itemsArray) {
-    const category = item.category || "Other";
-    if (!grouped[category]) {
-      grouped[category] = [];
-    }
-    grouped[category].push(item);
-  }
-
-  return grouped;
-});
-
-// Get items for a specific category
-const getItemsForCategory = lift(
-  (grouped: Record<string, ShoppingItem[]>, category: string) => {
-    return grouped[category] || [];
-  },
-);
+interface CategorizedListOutput extends CategorizedListInput {}
 
 export default recipe<CategorizedListInput, CategorizedListOutput>(
-  "shopping-list-categorized",
+  "Shopping List (Categorized)",
   ({ title, items }) => {
-    const itemsByCategory = groupByCategory(items);
+    // Group items by category
+    const groupedItems = derive(items, (itemsList) => {
+      const groups: Record<string, ShoppingItem[]> = {};
+
+      for (const item of itemsList) {
+        const category = item.category || "Uncategorized";
+        if (!groups[category]) {
+          groups[category] = [];
+        }
+        groups[category].push(item);
+      }
+
+      return groups;
+    });
 
     // Get sorted category names
-    const categories = derive(itemsByCategory, (grouped) => {
-      return Object.keys(grouped).sort();
+    const categories = derive(groupedItems, (groups) => {
+      return Object.keys(groups).sort();
     });
 
     return {
@@ -62,53 +43,32 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
         <common-vstack gap="md" style="padding: 1rem; max-width: 600px;">
           <ct-input
             $value={title}
-            placeholder="List title"
+            placeholder="Shopping list title"
             customStyle="font-size: 24px; font-weight: bold;"
           />
 
-          <ct-card>
-            <common-vstack gap="lg">
-              {categories.map((category) => (
+          <common-vstack gap="md">
+            {categories.map((category) => (
+              <ct-card>
+                <h3 style="margin-top: 0;">{category}</h3>
                 <common-vstack gap="sm">
-                  <h3 style="margin: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 0.25rem;">
-                    {category}
-                  </h3>
-                  <common-vstack gap="xs">
-                    {itemsByCategory[category].map(
-                      (item: OpaqueRef<ShoppingItem>) => (
-                        <common-hstack
-                          gap="sm"
-                          style="align-items: center; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;"
-                        >
-                          <ct-checkbox $checked={item.checked} />
-                          <span
-                            style={
-                              item.checked
-                                ? "text-decoration: line-through; color: #999; flex: 1;"
-                                : "flex: 1;"
-                            }
-                          >
-                            {item.name}
-                          </span>
-                        </common-hstack>
-                      ),
-                    )}
-                  </common-vstack>
+                  {(groupedItems[category] ?? []).map((item: OpaqueRef<ShoppingItem>) => (
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <ct-checkbox $checked={item.done}>
+                        <span style={item.done ? "text-decoration: line-through; color: #999;" : ""}>
+                          {item.title}
+                        </span>
+                      </ct-checkbox>
+                    </div>
+                  ))}
                 </common-vstack>
-              ))}
-            </common-vstack>
-
-            {derive(items, (itemsArray) => itemsArray.length === 0 && (
-              <p style="text-align: center; color: #999; padding: 2rem;">
-                No items yet. Add items in the main shopping list.
-              </p>
+              </ct-card>
             ))}
-          </ct-card>
+          </common-vstack>
         </common-vstack>
       ),
       title,
       items,
-      itemsByCategory,
     };
   },
 );

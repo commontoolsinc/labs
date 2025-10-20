@@ -1,317 +1,237 @@
 # Pattern Development Feedback
 
-This document captures feedback for maintainers about unclear aspects of the pattern development documentation and examples, based on developing the shopping list patterns.
+Based on experience building shopping list patterns, here's feedback for improving documentation and examples.
 
-## Issues Encountered and Suggestions
+## Key Gaps in Documentation/Examples
 
-### 1. Array Mutation Patterns
+### 1. Bidirectional Binding Pattern Needs Prominence
 
-**Problem**: The `list-operations.tsx` example shows using `items.set([...items.get(), newItem])` pattern, but the preferred pattern is `items.push(newItem)` and `items.set(items.get().toSpliced(index, 1))`.
+The `$checked` and `$value` pattern for automatic two-way binding is extremely powerful but underemphasized. I initially wrote handlers for every checkbox/input change before learning these props handle updates automatically.
 
-**Suggestion**:
-- Update examples to show preferred array mutation methods
-- Document that `toSpliced()` is the preferred way to remove items from arrays
-- Add a clear section in the docs showing:
-  ```typescript
-  // Adding items - preferred
-  items.push(newItem);
+**Recommend:**
+- Add a prominent example showing `$checked` and `$value` with array items
+- Show the contrast: handler-based updates vs bidirectional binding
+- Explain when you DO need handlers (side effects, validation) vs when you don't (simple value updates)
 
-  // Removing items - preferred
-  const currentItems = items.get();
-  const index = currentItems.findIndex((el) => itemCell.equals(el));
-  if (index >= 0) {
-    items.set(currentItems.toSpliced(index, 1));
+**Example to include:**
+```tsx
+// ❌ Unnecessary - handler for simple value update
+const toggle = handler<{detail: {checked: boolean}}, {item: Cell<Item>}>(
+  ({detail}, {item}) => {
+    item.set({...item.get(), done: detail.checked});
   }
+);
+<ct-checkbox checked={item.done} onct-change={toggle({item})} />
 
-  // Avoid
-  items.set([...items.get(), newItem]);
-  items.set(items.get().filter((_, i) => i !== index));
-  ```
+// ✅ Preferred - bidirectional binding handles it
+<ct-checkbox $checked={item.done} />
+```
 
-### 2. Bidirectional Binding Power
+### 2. OpaqueRef Type Annotation in Maps is Non-Obvious
 
-**Problem**: The `ct-checkbox-cell.tsx` example shows using an `onChange` handler with a checkbox, which suggests handlers are always needed. The power of bidirectional binding (`$checked={item.checked}` automatically updating the cell) wasn't clear.
+When using bidirectional binding with `.map()`, you need to add `OpaqueRef<T>` type annotation or it won't type-check:
 
-**Suggestion**:
-- Add a prominent example showing bidirectional binding without handlers
-- Document explicitly: "When using `$checked={}`, `$value={}`, or other `$prop` bindings, the cell is automatically updated when the user interacts with the component. No onChange handler is needed."
-- Show a comparison:
-  ```typescript
-  // Simple case - bidirectional binding (preferred)
-  <ct-checkbox $checked={item.checked} />
+```tsx
+items.map((item: OpaqueRef<ShoppingItem>) => (
+  <ct-checkbox $checked={item.done}>
+    <span>{item.title}</span>
+  </ct-checkbox>
+))
+```
 
-  // Complex case - when you need additional logic
-  const toggle = handler((_event, { item }: { item: Cell<Item> }) => {
-    item.checked.set(!item.checked.get());
-    // Additional side effects here
-  });
-  <ct-checkbox $checked={item.checked} onChange={toggle({ item })} />
-  ```
+**Recommend:**
+- Document this pattern explicitly
+- Add to the TypeScript tips section
+- Include in array mapping examples
 
-### 3. Handler Factory Calling Pattern
+### 3. When NOT to Use Built-in Components
 
-**Problem**: Initial code used two-parameter handler calls like `removeItem({ items }, { index })`, but the correct pattern is single-parameter with all context: `removeItem({ items, item })`.
+I initially used `ct-list` but it only supports `{title, done}` schema. There's no clear guidance on when to use built-in components vs manual rendering for custom data structures.
 
-**Suggestion**:
-- Clarify in docs: "Handler factories are called with a single object containing all the context they need"
-- Show the pattern clearly:
-  ```typescript
-  const removeItem = handler(
-    (_event, { items, item }: { items: Cell<Item[]>; item: Cell<Item> }) => {
-      // handler implementation
-    }
+**Recommend:**
+- Document the exact schema requirements for `ct-list`, `ct-select`, etc.
+- Show an example of manual rendering for custom fields
+- Clarify the trade-offs
+
+**Example:**
+```tsx
+// ct-list requires {title: string, done?: boolean}
+interface CtListItem {
+  title: string;
+  done?: boolean;
+}
+
+// For custom fields, render manually:
+interface ShoppingItem {
+  title: string;
+  done: boolean;
+  category: string; // ← custom field, can't use ct-list
+}
+
+// Manual rendering required:
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  <div>
+    <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+    <ct-input $value={item.category} />
+  </div>
+))}
+```
+
+### 4. Simplify JSX Patterns in Examples
+
+Current examples might over-use `derive()` and `ifElse()`:
+- **derive()**: Often unnecessary when accessing reactive values directly
+- **ifElse()**: Can be replaced with ternary operators in JSX attributes
+
+**Current pattern (overly complex):**
+```tsx
+{derive(item, (i) =>
+  ifElse(
+    i.done,
+    <span style="text-decoration: line-through;">
+      {i.title}
+    </span>,
+    <span>{i.title}</span>
+  )
+)}
+```
+
+**Simpler pattern:**
+```tsx
+<span style={item.done ? "text-decoration: line-through;" : ""}>
+  {item.title}
+</span>
+```
+
+**Recommend:**
+- Update examples to show the simpler patterns first
+- Reserve `derive()` examples for cases where transformation is actually needed
+- Show `ifElse()` primarily for conditional rendering of large blocks, not simple attributes
+
+**When derive() IS needed:**
+```tsx
+// ✅ Good use - actual transformation
+const groupedItems = derive(items, (list) => {
+  const groups: Record<string, Item[]> = {};
+  for (const item of list) {
+    const category = item.category || "Uncategorized";
+    if (!groups[category]) groups[category] = [];
+    groups[category].push(item);
+  }
+  return groups;
+});
+```
+
+### 5. Inline Expressions Over Intermediate Variables
+
+Examples should favor inline expressions like `(array ?? []).map(...)` over extracting to variables first, unless clarity genuinely improves.
+
+**Example:**
+```tsx
+// ❌ Unnecessary intermediate variable
+{derive(groupedItems, (groups) => {
+  const categoryItems = groups[category] || [];
+  return (
+    <div>
+      {categoryItems.map(item => ...)}
+    </div>
   );
+})}
 
-  // Called with single context object
-  <ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
-  ```
+// ✅ Inline expression
+<div>
+  {(groupedItems[category] ?? []).map(item => ...)}
+</div>
+```
 
-### 4. Avoid Index-Based Operations
+### 6. Remove Unnecessary Keys
 
-**Problem**: Not documented that passing item references is preferred over indices.
+Examples include `key={index}` in maps where it's not needed. This might confuse users about when keys are actually required.
 
-**Suggestion**:
-- Add a "Best Practices" section stating:
-  - "Prefer passing direct item references over indices"
-  - "Use `cell.equals(other)` to compare cells for equality"
-  - Show the pattern:
-    ```typescript
-    items.map((item: OpaqueRef<Item>) => (
-      <ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
-    ))
-    ```
+**Recommend:**
+- Remove `key` from examples unless demonstrating reordering/reconciliation
+- Document when keys ARE needed (dynamic reordering, performance optimization)
 
-### 5. No DOM Access Restriction
+### 7. Array Mutation Patterns
 
-**Problem**: The restriction on DOM access (no `document.getElementById()`, etc.) isn't clearly documented.
+Better examples of updating array items. Show both patterns and when to use each:
 
-**Suggestion**:
-- Add a prominent warning in the docs: "⚠️ DOM access is not allowed in patterns. Use cells to capture and manage all state."
-- Document the input pattern:
-  ```typescript
-  // Create cells for input state
-  const name = cell("");
-  const category = cell("Other");
+**Pattern A: Direct mutation with bidirectional binding**
+```tsx
+// For simple value updates
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  <ct-checkbox $checked={item.done}>
+    {item.title}
+  </ct-checkbox>
+))}
+```
 
-  // Bind to inputs
-  <ct-input $value={name} placeholder="Name" />
-  <ct-select $value={category}>...</ct-select>
+**Pattern B: Handler with array reconstruction**
+```tsx
+// For complex operations (remove, reorder)
+const removeItem = handler<unknown, {items: Cell<Item[]>, index: number}>(
+  (_, {items, index}) => {
+    items.set(items.get().filter((_, i) => i !== index));
+  }
+);
+```
 
-  // Access in handlers
-  const addItem = handler((_event, { name, category }) => {
-    const nameValue = name.get();
-    // ...
-  });
-  ```
+## Documentation Structure Suggestion
 
-### 6. lift vs derive Usage
+Consider a "Common Patterns" section with:
 
-**Problem**: When to use `lift` to create a factory vs `derive` wasn't clear.
+### Essential Patterns to Document
 
-**Suggestion**:
-- Document the distinction:
-  - `lift`: Creates a reusable function that can be called multiple times with different inputs
-  - `derive`: Directly computes a value from cells
-- Show examples:
-  ```typescript
-  // lift - create a reusable factory
-  const groupByCategory = lift((items: Item[]) => {
-    // transformation logic
-  });
-  const grouped = groupByCategory(items);
+1. **Simple list with checkboxes (bidirectional binding)**
+   - Basic CRUD operations
+   - Add/remove items
+   - Toggle states
 
-  // derive - direct computation
-  const categories = derive(itemsByCategory, (grouped) => {
-    return Object.keys(grouped).sort();
-  });
-  ```
+2. **Filtered/grouped views of the same data**
+   - Using `derive()` for transformations
+   - Multiple views of same underlying data
+   - Category/tag grouping
 
-### 7. [ID] Requirement Confusion
+3. **Master-detail patterns (multiple charms sharing data via links)**
+   - Linking charms together
+   - Shared state across charms
+   - Data flow patterns
 
-**Problem**: The `list-operations.tsx` example heavily uses `[ID]` on items, suggesting it's always needed. The docs say it's "only needed when creating referencable data from within a lift," but this wasn't clear.
+4. **When to use handlers vs bidirectional binding**
+   - Decision matrix
+   - Performance considerations
+   - Side effects and validation
 
-**Suggestion**:
-- Clarify in examples when `[ID]` is actually needed
-- Update `list-operations.tsx` to note: "Note: `[ID]` is used here because [specific reason]. For most patterns, you don't need it."
-- Document clearly: "Only add `[ID]` to your interface when creating data URIs or when you need stable references within `lift` functions"
+5. **TypeScript tips for reactive data in JSX**
+   - `OpaqueRef<T>` type annotations
+   - Type inference limitations
+   - Common type errors and fixes
 
-### 8. OpaqueRef Typing
+## Example: Graduated Complexity
 
-**Problem**: Type errors occur when mapping over items without typing as `OpaqueRef<T>`, but this isn't documented.
+The shopping list pattern demonstrates all these concepts:
 
-**Suggestion**:
-- Add to docs: "When mapping over cell arrays, type the parameter as `OpaqueRef<T>` to avoid type errors"
-- Show the pattern:
-  ```typescript
-  {items.map((item: OpaqueRef<ShoppingItem>) => (
-    // item rendering
-  ))}
-  ```
+**Level 1: Basic List**
+- Bidirectional binding with `$checked` and `$value`
+- Array mapping with proper types
+- Simple add/remove operations
 
-### 9. ct-select API
+**Level 2: Categorized View**
+- Using `derive()` for grouping transformation
+- Multiple views of same data
+- Inline expressions vs intermediate variables
 
-**Problem**: The `ct-select.tsx` example is minimal and doesn't show that it uses an `items` attribute (an array of `{ label, value }` objects) rather than `<option>` elements like standard HTML selects.
+**Level 3: Linked Charms**
+- Two separate charms sharing the same items array
+- Updates in one reflected in the other
+- Practical use of `ct charm link`
 
-**Suggestion**:
-- Update `ct-select.tsx` example to show the correct usage pattern
-- Document clearly:
-  ```typescript
-  // Correct - use items attribute with array of {label, value} objects
-  <ct-select
-    $value={category}
-    items={[
-      { label: "Produce", value: "Produce" },
-      { label: "Dairy", value: "Dairy" },
-      { label: "Other", value: "Other" },
-    ]}
-  />
+This provides a natural learning progression from simple to complex patterns.
 
-  // Note: value can be any type, not just strings
-  <ct-select
-    $value={selectedId}
-    items={[
-      { label: "First Item", value: 1 },
-      { label: "Second Item", value: 2 },
-    ]}
-  />
+## Additional Resources Needed
 
-  // Incorrect - option elements don't work
-  <ct-select $value={category}>
-    <option value="Produce">Produce</option>
-  </ct-select>
-  ```
-
-### 10. Module-Level lift and handler Definitions
-
-**Problem**: Examples don't emphasize that `lift` and `handler` should be defined at module scope (outside the recipe function) rather than closing over variables in the module scope.
-
-**Suggestion**:
-- Document the best practice: "Define `handler` and `lift` functions at module level for reusability and performance"
-- Show the pattern:
-  ```typescript
-  // Correct - module level
-  const addItem = handler(
-    (_event, { items, name }: { items: Cell<Item[]>; name: Cell<string> }) => {
-      // handler implementation
-    }
-  );
-
-  const groupByCategory = lift((items: Item[]) => {
-    // transformation logic
-  });
-
-  export default recipe("my-recipe", ({ items }) => {
-    const grouped = groupByCategory(items);
-    // ...
-  });
-
-  // Incorrect - inside recipe function
-  export default recipe("my-recipe", ({ items }) => {
-    const addItem = handler((_event, { items }) => { /* ... */ });
-    const grouped = lift((items) => { /* ... */ })(items);
-    // This creates new function instances on each evaluation
-  });
-  ```
-
-### 11. Handler Parameter Types
-
-**Problem**: It's unclear when to use `Cell<T[]>` vs `Cell<Array<Cell<T>>>` in handler signatures.
-
-**Suggestion**:
-- Document clearly: "In handler parameters, use `Cell<T[]>` where T is the plain type"
-- Explain the difference:
-  ```typescript
-  // Correct - handler parameter types
-  const handler = handler(
-    (_event, { items }: { items: Cell<ShoppingItem[]> }) => {
-      const itemsArray = items.get(); // ShoppingItem[]
-      // work with plain array
-    }
-  );
-
-  // When iterating in JSX, items are wrapped
-  {items.map((item: OpaqueRef<ShoppingItem>) => (
-    // item is a cell-like reference here
-  ))}
-  ```
-
-### 12. Property Access on Derived Objects
-
-**Problem**: Not documented that you can directly access properties on derived objects in JSX.
-
-**Suggestion**:
-- Show that object properties can be accessed directly:
-  ```typescript
-  const itemsByCategory = groupByCategory(items);
-  // Returns Record<string, Item[]>
-
-  // Direct property access works
-  {itemsByCategory[categoryName].map((item) => ...)}
-
-  // No need for helper functions or derive
-  ```
-
-### 13. Variable Scoping in Nested Iterations
-
-**Problem**: Using `derive()` or accessing outer variables inside `.map()` callbacks doesn't work as expected.
-
-**Suggestion**:
-- Document this limitation clearly
-- Show workarounds:
-  ```typescript
-  // Doesn't work - can't access `category` from outer map
-  {categories.map((category) => (
-    {derive(items, (arr) => arr.filter(i => i.category === category))}
-  ))}
-
-  // Works - use property access or pre-computed values
-  const itemsByCategory = groupByCategory(items);
-  {categories.map((category) => (
-    {itemsByCategory[category].map(...)}
-  ))}
-  ```
-
-### 14. Testing Patterns Before Deployment
-
-**Problem**: No clear workflow documented for iterative pattern development and testing.
-
-**Suggestion**:
-- Add a "Development Workflow" section:
-  1. `./dist/ct dev pattern.tsx --no-run` - Check syntax
-  2. `./dist/ct dev pattern.tsx` - Test execution locally
-  3. `./dist/ct charm new --space test-space pattern.tsx` - Deploy to test space
-  4. Iterate using `./dist/ct charm setsrc` to update without creating new charms
-- Document common error patterns and solutions
-
-### 15. Lift Currying Behavior
-
-**Problem**: Not clear that `lift` creates curried functions when multiple parameters are used.
-
-**Suggestion**:
-- Document the currying behavior:
-  ```typescript
-  // lift with multiple parameters creates curried function
-  const fn = lift((a: string, b: number) => `${a}: ${b}`);
-
-  // Call with currying
-  const result = fn("count")(42); // "count: 42"
-
-  // NOT: fn("count", 42) - this won't work
-  ```
-- In many cases, direct property access or single-parameter lifts are clearer
-
-## Summary
-
-The core concepts are solid, but the examples and documentation could better highlight:
-1. Preferred patterns (push/toSpliced over manual set)
-2. The power of bidirectional binding
-3. Restrictions (no DOM access)
-4. Type annotations needed (OpaqueRef)
-5. When to use specific features ([ID], lift vs derive)
-6. Handler parameter type patterns (Cell<T[]> vs Cell<Array<Cell<T>>>)
-7. Direct property access capabilities on derived values
-8. Variable scoping limitations in nested iterations
-9. Development and testing workflow
-10. Currying behavior of multi-parameter lift functions
-
-These improvements would significantly reduce the learning curve for new pattern developers.
+1. **Video walkthrough** of building a simple pattern from scratch
+2. **Common errors** reference (with solutions)
+3. **Performance tips** (when to optimize, when not to)
+4. **Testing patterns** (how to test recipes with ct dev)
+5. **Debugging guide** (common issues and how to debug them)

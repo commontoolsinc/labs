@@ -1,19 +1,10 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  Default,
-  handler,
-  NAME,
-  OpaqueRef,
-  recipe,
-  UI,
-} from "commontools";
+import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 interface ShoppingItem {
-  name: string;
-  checked: Default<boolean, false>;
-  category: Default<string, "Other">;
+  title: string;
+  done: Default<boolean, false>;
+  category: Default<string, "Uncategorized">;
 }
 
 interface ShoppingListInput {
@@ -23,122 +14,72 @@ interface ShoppingListInput {
 
 interface ShoppingListOutput extends ShoppingListInput {}
 
-// Handler to add a new item
-const addItem = handler(
-  (
-    _event,
-    { items, name, category }: {
-      items: Cell<ShoppingItem[]>;
-      name: Cell<string>;
-      category: Cell<string>;
-    },
-  ) => {
-    const nameValue = name.get();
-    if (nameValue.trim()) {
-      items.push({
-        name: nameValue,
-        category: category.get(),
-        checked: false,
-      });
-      name.set("");
-      category.set("Other");
-    }
-  },
-);
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Cell<ShoppingItem[]> }
+>(({ detail }, { items }) => {
+  const itemName = detail?.message?.trim();
+  if (!itemName) return;
 
-// Handler to remove an item
-const removeItem = handler(
-  (
-    _event,
-    { items, item }: {
-      items: Cell<Array<Cell<ShoppingItem>>>;
-      item: Cell<ShoppingItem>;
-    },
-  ) => {
-    const currentItems = items.get();
-    const index = currentItems.findIndex((el) => item.equals(el));
-    if (index >= 0) {
-      items.set(currentItems.toSpliced(index, 1));
-    }
-  },
-);
+  const currentItems = items.get();
+  items.set([...currentItems, { title: itemName, done: false, category: "Uncategorized" }]);
+});
+
+const removeItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]>; index: number }
+>((_event, { items, index }) => {
+  const currentItems = items.get();
+  items.set(currentItems.filter((_, i) => i !== index));
+});
 
 export default recipe<ShoppingListInput, ShoppingListOutput>(
-  "shopping-list",
+  "Shopping List",
   ({ title, items }) => {
-    // Input cells for adding new items
-    const newItemName = cell("");
-    const newItemCategory = cell("Other");
-
     return {
       [NAME]: title,
       [UI]: (
         <common-vstack gap="md" style="padding: 1rem; max-width: 600px;">
           <ct-input
             $value={title}
-            placeholder="List title"
+            placeholder="Shopping list title"
             customStyle="font-size: 24px; font-weight: bold;"
           />
 
           <ct-card>
-            <h3>Items</h3>
+            <h3 style="margin-top: 0;">Items</h3>
             <common-vstack gap="sm">
-              {items.map((item: OpaqueRef<ShoppingItem>) => (
-                <common-hstack
-                  gap="sm"
-                  style="align-items: center; padding: 0.5rem; border-bottom: 1px solid #eee;"
-                >
-                  <ct-checkbox $checked={item.checked} />
-                  <common-vstack gap="xs" style="flex: 1;">
-                    <span
-                      style={item.checked
-                        ? "text-decoration: line-through; color: #999;"
-                        : ""}
-                    >
-                      {item.name}
+              {items.map((item: OpaqueRef<ShoppingItem>, index) => (
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <ct-checkbox $checked={item.done}>
+                    <span style={item.done ? "text-decoration: line-through; color: #999;" : ""}>
+                      {item.title}
                     </span>
-                    <small style="color: #666;">
-                      Category: {item.category}
-                    </small>
-                  </common-vstack>
+                  </ct-checkbox>
+                  <ct-input
+                    $value={item.category}
+                    placeholder="Category"
+                    customStyle="flex: 1; max-width: 150px;"
+                  />
                   <ct-button
-                    size="small"
-                    onClick={removeItem({ items, item })}
+                    onClick={removeItem({ items, index })}
+                    appearance="text"
+                    customStyle="color: #999;"
                   >
-                    Remove
+                    ×
                   </ct-button>
-                </common-hstack>
+                </div>
               ))}
             </common-vstack>
 
-            <common-hstack gap="sm" style="margin-top: 1rem;">
-              <ct-input
-                $value={newItemName}
-                placeholder="Item name"
-                style="flex: 1;"
+            <div style="margin-top: 1rem;">
+              <ct-message-input
+                placeholder="Add new item..."
+                button-text="Add"
+                appearance="rounded"
+                onct-send={addItem({ items })}
               />
-              <ct-select
-                $value={newItemCategory}
-                items={[
-                  { label: "Produce", value: "Produce" },
-                  { label: "Dairy", value: "Dairy" },
-                  { label: "Meat", value: "Meat" },
-                  { label: "Bakery", value: "Bakery" },
-                  { label: "Pantry", value: "Pantry" },
-                  { label: "Other", value: "Other" },
-                ]}
-                style="flex: 0 0 150px;"
-              />
-              <ct-button
-                onClick={addItem({
-                  items,
-                  name: newItemName,
-                  category: newItemCategory,
-                })}
-              >
-                Add Item
-              </ct-button>
-            </common-hstack>
+            </div>
           </ct-card>
         </common-vstack>
       ),
