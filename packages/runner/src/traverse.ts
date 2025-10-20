@@ -858,13 +858,16 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const arrayObj = [];
-    const schema = schemaContext.schema as Immutable<JSONObject>;
+    const schema = schemaContext.schema;
+    const prefixItems = isObject(schema) && Array.isArray(schema["prefixItems"])
+      ? schema["prefixItems"]
+      : [];
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
     ) {
-      const itemSchema = isObject(schema["items"])
-        ? schema["items"] as JSONSchema
-        : typeof (schema["items"]) === "boolean"
+      const itemSchema = (index < prefixItems.length)
+        ? prefixItems[index]
+        : isObject(schema) && schema["items"] !== undefined
         ? schema["items"]
         : true;
       const curDoc = {

@@ -78,7 +78,7 @@ export type JSONSchemaObj = {
     readonly then?: JSONSchema;
     readonly else?: JSONSchema;
     readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
-    readonly prefixItems?: (JSONSchema)[];
+    readonly prefixItems?: readonly (JSONSchema)[];
     readonly items?: Readonly<JSONSchema>;
     readonly contains?: JSONSchema;
     readonly properties?: Readonly<Record<string, JSONSchema>>;
