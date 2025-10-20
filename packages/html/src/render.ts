@@ -327,7 +327,9 @@ const listen = (
  * @param styleObject - The style object with React-style camelCase properties
  * @returns A CSS string suitable for the style attribute
  */
-const styleObjectToCssString = (styleObject: Record<string, any>): string => {
+export const styleObjectToCssString = (
+  styleObject: Record<string, any>,
+): string => {
   return Object.entries(styleObject)
     .map(([key, value]) => {
       // Skip if value is null or undefined
