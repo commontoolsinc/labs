@@ -1005,8 +1005,7 @@ describe("link-resolution", () => {
 
       // When we resolve a circular reference, it should return undefined
       // (the empty document resolves to undefined)
-      const value = cellA.get();
-      expect(value).toBeUndefined();
+      expect(() => cellA.get()).toThrow();
 
       // Case 2: Mutual references A -> B -> A
       const cellB = runtime.getCell<any>(
@@ -1024,8 +1023,8 @@ describe("link-resolution", () => {
       cellB.setRaw(linkToA);
 
       // Both should resolve to undefined
-      expect(cellA.get()).toBeUndefined();
-      expect(cellB.get()).toBeUndefined();
+      expect(() => cellA.get()).toThrow();
+      expect(() => cellB.get()).toThrow();
     });
 
     it("detects cycle when resolving link to its own subpath", async () => {
@@ -1056,15 +1055,10 @@ describe("link-resolution", () => {
       });
 
       try {
-        const resolved = await Promise.race([
-          resolutionPromise,
-          timeoutPromise,
-        ]);
-
-        // This creates: A -> A/foo -> A/foo/foo -> A/foo/foo/foo -> ...
-        // The iteration limit should catch this and return the empty document
-        expect(resolved.id).toBe("data:application/json,{}");
-        expect(resolved.space).toBe("did:null:null");
+        await expect(Promise.race([resolutionPromise, timeoutPromise])).rejects
+          .toThrow(
+            "Link resolution iteration limit reached",
+          );
       } finally {
         // Clean up the timeout if it was set
         if (timeoutId !== undefined) {
@@ -1095,8 +1089,7 @@ describe("link-resolution", () => {
       cellA.setRaw({ x: linkToBy });
       cellB.setRaw({ y: linkToAx });
 
-      const value = cellA.key("x").get();
-      expect(value).toBeUndefined();
+      expect(() => cellA.key("x").get()).toThrow();
     });
 
     it("shows data URI when resolving cyclic links", () => {
@@ -1114,13 +1107,13 @@ describe("link-resolution", () => {
 
       // When we resolve this link at a low level, it should return the empty document
       // with a data: URI indicating the cycle was detected
-      const resolved = resolveLink(
-        tx,
-        cellA.getAsNormalizedFullLink(),
-        "value",
-      );
-      expect(resolved.id).toBe("data:application/json,{}");
-      expect(resolved.space).toBe("did:null:null");
+      expect(() =>
+        resolveLink(
+          tx,
+          cellA.getAsNormalizedFullLink(),
+          "value",
+        )
+      ).toThrow();
     });
 
     it("allows non-cyclic references to the same cell", () => {

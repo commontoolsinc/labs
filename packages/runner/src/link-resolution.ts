@@ -70,15 +70,17 @@ export function resolveLink(
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
-      logger.warn(`Link resolution iteration limit reached`);
-      return createEmptyResolvedFullLink(link); // = return link to empty document
+      logger.error(`Link resolution iteration limit reached`);
+      throw new Error(`Link resolution iteration limit reached`);
     }
 
     // Detect cycles.
     const key = JSON.stringify([link.space, link.id, link.path]);
     if (seen.has(key)) {
-      logger.warn(`Link cycle detected ${key}`);
-      return createEmptyResolvedFullLink(link); // = return link to empty document
+      logger.error(`Link cycle detected ${key} [${JSON.stringify([...seen])}]`);
+      throw new Error(
+        `Link cycle detected at ${key} [${JSON.stringify([...seen])}]`,
+      );
     }
     seen.add(key);
 
@@ -257,16 +259,4 @@ export function readMaybeLink(
   } else {
     return undefined;
   }
-}
-
-function createEmptyResolvedFullLink(
-  link: NormalizedFullLink,
-): ResolvedFullLink {
-  return {
-    ...link,
-    id: "data:application/json,{}",
-    path: [],
-    type: "application/json",
-    space: "did:null:null",
-  } satisfies NormalizedFullLink as unknown as ResolvedFullLink;
 }
