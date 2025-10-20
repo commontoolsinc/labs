@@ -25,6 +25,10 @@ const space = signer.did();
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
 function expectType<T, _U extends T>() {}
+// Helper types so we can generate compile time errors if a type is any
+type ExpectNotAny<T> = 0 extends (1 & T) ? ["Expected non-any type"] : true;
+type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends
+  readonly (infer ElementType)[] ? ElementType : never;
 
 describe("Schema-to-TS Type Conversion", () => {
   let frame: Frame;
@@ -245,6 +249,37 @@ describe("Schema-to-TS Type Conversion", () => {
     };
 
     expectType<ExpectedRecursive, RecursiveSchema>();
+  });
+
+  it("should handle $ref to root in $defs", () => {
+    type RecursiveSchema = Schema<{
+      $defs: {
+        Root: {
+          type: "object";
+          properties: {
+            name: { type: "string" };
+            children: {
+              type: "array";
+              items: { $ref: "#/$defs/Root" };
+            };
+          };
+        };
+      };
+      $ref: "#/$defs/Root";
+    }>;
+
+    // This is a recursive type, so we can't easily define the expected type
+    // But we can verify it has the expected structure
+    type ExpectedRecursive = {
+      name?: string;
+      children?: ExpectedRecursive[];
+    };
+
+    expectType<ExpectedRecursive, RecursiveSchema>();
+    // deno-lint-ignore ban-types
+    type ChildType = ArrayElementType<RecursiveSchema["children"] & {}>;
+    // This will generate a compile time error if the ChildType is any
+    expectType<true, ExpectNotAny<ChildType>>();
   });
 
   it("should handle additionalProperties", () => {
