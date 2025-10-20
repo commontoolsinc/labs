@@ -8,7 +8,11 @@ import { createCell, isCell, isStream } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  createDataCellURI,
+  type NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
   isQueryResultForDereferencing,
@@ -737,20 +741,6 @@ export function validateAndTransform(
 
     // Now process elements after adding the array to seen
     for (let i = 0; i < value.length; i++) {
-      // If the element on the array is a link, we follow that link so the
-      // returned object is the current item at that location (otherwise the
-      // link would refer to "Nth element"). This is important when turning
-      // returned objects back into cells: We want to then refer to the actual
-      // object by default, not the array location.
-      //
-      // This makes
-      // ```ts
-      // const array = [...cell.get()];
-      // array.splice(index, 1);
-      // cell.set(array);
-      // ```
-      // work as expected.
-      // Handle boolean items values for element schema
       let elementSchema: JSONSchema;
       if (resolvedSchema.items === true) {
         // items: true means allow any item type
@@ -772,13 +762,56 @@ export function validateAndTransform(
         path: [...link.path, String(i)],
         schema: elementSchema,
       };
-      const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
+
+      // If the element on the array is a link, we follow that link so the
+      // returned object is the current item at that location (otherwise the
+      // link would refer to "Nth element"). This is important when turning
+      // returned objects back into cells: We want to then refer to the actual
+      // object by default, not the array location.
+      //
+      // If the element is an object, but not a link, we create an immutable
+      // cell to hold the object, except when it is requested as Cell. While
+      // this means updates aren't propagated, it seems like the right trade-off
+      // for stability of links and the ability to mutate them without creating
+      // loops (see below).
+      //
+      // This makes
+      // ```ts
+      // const array = [...cell.get()];
+      // array.splice(index, 1);
+      // cell.set(array);
+      // ```
+      // work as expected. Handle boolean items values for element schema
+      const maybeLink = parseLink(value[i], link);
       if (maybeLink) {
         elementLink = {
           ...maybeLink,
           schema: elementLink.schema,
           rootSchema: elementLink.rootSchema,
         };
+      } else if (
+        isRecord(value[i]) &&
+        // TODO(seefeld): Should factor this out, but we should just fully
+        // normalize schemas, etc.
+        !(isObject(elementSchema) &&
+          (elementSchema.asCell || elementSchema.asStream ||
+            (Array.isArray(elementSchema?.anyOf) &&
+              elementSchema.anyOf.every((option) =>
+                option.asCell || option.asStream
+              )) ||
+            (Array.isArray(elementSchema?.oneOf) &&
+              elementSchema.oneOf.every((option) =>
+                option.asCell || option.asStream
+              ))))
+      ) {
+        elementLink = {
+          id: createDataCellURI(value[i], link),
+          path: [],
+          schema: elementSchema,
+          rootSchema: elementLink.rootSchema,
+          space: link.space,
+          type: "application/json",
+        } satisfies NormalizedFullLink;
       }
 
       result[i] = validateAndTransform(
