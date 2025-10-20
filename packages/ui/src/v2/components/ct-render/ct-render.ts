@@ -1,7 +1,6 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
-import { isCell } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
 

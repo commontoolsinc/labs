@@ -10,7 +10,6 @@ import {
   Opaque,
   OpaqueRef,
   recipe,
-  Stream,
   UI,
   wish,
 } from "commontools";
