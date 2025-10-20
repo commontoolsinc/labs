@@ -2,7 +2,7 @@
 
 ## Handler Function Structure
 
-Handlers in CommonTools follow a specific three-parameter pattern:
+Handlers in CommonTools follow a specific pattern that creates a factory function:
 
 ```typescript
 const myHandler = handler(
@@ -17,6 +17,31 @@ type EventSchema = ...
 type StateSchema = ...
 const myHandler = handler<EventSchema, StateSchema>(handlerFunction);
 ```
+
+### Handler Factory Calling Pattern
+
+**Important:** Handler factories are called with a **single object** containing all the context they need. This is partial application of the state.
+
+```typescript
+// ✅ CORRECT - Single object with all context
+const removeItem = handler(
+  (_event, { items, item }: { items: Cell<Item[]>; item: Cell<Item> }) => {
+    const currentItems = items.get();
+    const index = currentItems.findIndex((el) => items.key(el).equals(item));
+    if (index >= 0) {
+      items.set(currentItems.toSpliced(index, 1));
+    }
+  }
+);
+
+// Called with single context object
+<ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
+
+// ❌ INCORRECT - Multiple parameters
+<ct-button onClick={removeItem({ items }, { item })}>Remove</ct-button>
+```
+
+The handler receives the event from the UI as the first parameter, and your bound state as the second parameter. This allows you to merge discrete UI events with reactive cells that are always changing.
 
 ## Common Handler Patterns
 
@@ -66,6 +91,38 @@ const updateTitle = handler<
 - **Parameter naming**: Use descriptive names or `_` prefix for unused parameters
 
 Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as `e` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
+
+### Handler Parameter Type Patterns
+
+Understanding when to use `Cell<T[]>` vs `Cell<Array<Cell<T>>>` is crucial:
+
+```typescript
+// ✅ CORRECT - In handler parameters, use Cell<T[]> where T is the plain type
+const addItem = handler(
+  (_event, { items }: { items: Cell<ShoppingItem[]> }) => {
+    const itemsArray = items.get(); // ShoppingItem[]
+    itemsArray.push({ name: "New Item", checked: false });
+  }
+);
+
+// When you call .get() on Cell<ShoppingItem[]>, you get ShoppingItem[]
+// This is the plain array of plain objects
+
+// When iterating in JSX, items are wrapped as OpaqueRef
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  // item is a cell-like reference here
+  <ct-checkbox $checked={item.checked} />
+))}
+
+// ❌ AVOID - Don't use Cell<Array<Cell<T>>> in handler signatures
+const addItem = handler(
+  (_event, { items }: { items: Cell<Array<Cell<ShoppingItem>>> }) => {
+    // This is confusing and usually wrong
+  }
+);
+```
+
+**Rule of thumb:** In handler type signatures, use `Cell<T[]>` for array parameters. The Cell wraps the entire array, not individual elements.
 
 #### Event Parameter Patterns
 

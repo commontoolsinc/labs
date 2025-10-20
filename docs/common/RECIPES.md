@@ -231,7 +231,140 @@ logic.
 
 2. **Use `Cell<>` for Handler State**: When defining handler state types, use `Cell<>` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
 
-3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
+3. **⚠️ No DOM Access Allowed**: DOM access is not allowed in patterns. Use cells to capture and manage all state instead:
+
+   ```typescript
+   // ❌ DON'T DO THIS - DOM access won't work
+   const addItem = handler((_, { items }) => {
+     const input = document.getElementById('item-input');
+     const value = input.value; // This won't work!
+     items.push({ title: value });
+   });
+
+   // ✅ DO THIS - Use cells for input state
+   const name = cell("");
+   const category = cell("Other");
+
+   // Bind to inputs
+   <ct-input $value={name} placeholder="Name" />
+   <ct-select $value={category}>...</ct-select>
+
+   // Access in handlers
+   const addItem = handler((_event, { items, name, category }) => {
+     const nameValue = name.get();
+     if (nameValue.trim()) {
+       items.push({ name: nameValue, category: category.get() });
+       name.set("");
+     }
+   });
+   ```
+
+4. **Prefer Array Methods Over Manual Reconstruction**: Use built-in array methods for cleaner, more efficient code:
+
+   ```typescript
+   // ✅ PREFER - Adding items
+   const addItem = handler((_, { items, newItem }) => {
+     items.push(newItem.get());
+   });
+
+   // ✅ PREFER - Removing items with toSpliced
+   const removeItem = handler((_, { items, item }) => {
+     const currentItems = items.get();
+     const index = currentItems.findIndex((el) => items.key(el).equals(item));
+     if (index >= 0) {
+       items.set(currentItems.toSpliced(index, 1));
+     }
+   });
+
+   // ❌ AVOID - Manual array reconstruction
+   const addItem = handler((_, { items, newItem }) => {
+     items.set([...items.get(), newItem.get()]);
+   });
+
+   // ❌ AVOID - Filter for removal (less explicit)
+   const removeItem = handler((_, { items, item }) => {
+     items.set(items.get().filter((i) => i !== item));
+   });
+   ```
+
+   **Why toSpliced?** It's more explicit about what's being removed (index and count) and integrates better with Cell equality checking.
+
+5. **Prefer Item References Over Indices**: When working with arrays, pass direct item references instead of indices:
+
+   ```typescript
+   // ✅ DO THIS - Pass item reference
+   {items.map((item: OpaqueRef<ShoppingItem>) => (
+     <ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
+   ))}
+
+   const removeItem = handler((_, { items, item }) => {
+     const currentItems = items.get();
+     const index = currentItems.findIndex((el) => items.key(el).equals(item));
+     if (index >= 0) {
+       items.set(currentItems.toSpliced(index, 1));
+     }
+   });
+
+   // ❌ AVOID - Pass index
+   {items.map((item, index) => (
+     <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
+   ))}
+   ```
+
+   **Why?** Using `cell.equals(other)` is more reliable than index-based operations, especially when items are reordered or modified.
+
+6. **Define Handlers and Lifts at Module Level**: Place `handler` and `lift` definitions outside the recipe function for reusability and performance:
+
+   ```typescript
+   // ✅ CORRECT - Module level
+   const addItem = handler(
+     (_event, { items, name }: { items: Cell<Item[]>; name: Cell<string> }) => {
+       if (name.get().trim()) {
+         items.push({ title: name.get() });
+         name.set("");
+       }
+     }
+   );
+
+   const groupByCategory = lift((items: Item[]) => {
+     return items.reduce((acc, item) => {
+       if (!acc[item.category]) acc[item.category] = [];
+       acc[item.category].push(item);
+       return acc;
+     }, {} as Record<string, Item[]>);
+   });
+
+   export default recipe("my-recipe", ({ items, name }) => {
+     const grouped = groupByCategory(items);
+     return {
+       [UI]: <ct-button onClick={addItem({ items, name })}>Add</ct-button>,
+       grouped,
+     };
+   });
+
+   // ❌ INCORRECT - Inside recipe function
+   export default recipe("my-recipe", ({ items, name }) => {
+     const addItem = handler((_event, { items, name }) => { /* ... */ });
+     const grouped = lift((items) => { /* ... */ })(items);
+     // This creates new function instances on each evaluation
+   });
+   ```
+
+7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays, type the parameter to avoid type errors:
+
+   ```typescript
+   // ✅ CORRECT - Type as OpaqueRef
+   {items.map((item: OpaqueRef<ShoppingItem>) => (
+     <div>{item.name}</div>
+   ))}
+
+   // ❌ INCORRECT - Missing type leads to errors
+   {items.map((item) => (
+     <div>{item.name}</div> // May cause type errors
+   ))}
+   ```
+
+8. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
    ternary operators, or any other conditionals inside a recipe function - they
    won't work properly because they immediately evaluate data instead of
    creating reactive nodes:
@@ -298,7 +431,97 @@ logic.
    });
    ```
 
-4. **Reference Data Instead of Copying**: When transforming data, reference the
+9. **Understand lift vs derive**: Know when to use each reactive function:
+
+   ```typescript
+   // lift - Creates a reusable function that can be called multiple times
+   const groupByCategory = lift((items: Item[]) => {
+     return items.reduce((acc, item) => {
+       if (!acc[item.category]) acc[item.category] = [];
+       acc[item.category].push(item);
+       return acc;
+     }, {} as Record<string, Item[]>);
+   });
+
+   // Call it with different inputs
+   const grouped1 = groupByCategory(items);
+   const grouped2 = groupByCategory(otherItems);
+
+   // derive - Directly computes a value from cells (convenience wrapper)
+   const categories = derive(itemsByCategory, (grouped) => {
+     return Object.keys(grouped).sort();
+   });
+
+   // These are equivalent:
+   const result1 = derive({ x, y }, ({ x, y }) => x + y);
+   const result2 = lift(({ x, y }) => x + y)({ x, y });
+   ```
+
+   **When to use lift:** When you need a reusable transformation function that you'll call with different inputs.
+
+   **When to use derive:** When you're computing a single value from specific cells.
+
+10. **Access Properties Directly on Derived Objects**: You can access properties on derived objects without additional helpers:
+
+    ```typescript
+    const itemsByCategory = groupByCategory(items);
+    // Returns Record<string, Item[]>
+
+    // ✅ DO THIS - Direct property access works
+    {categories.map((categoryName) => (
+      <div>
+        <h3>{categoryName}</h3>
+        {itemsByCategory[categoryName].map((item) => (
+          <div>{item.name}</div>
+        ))}
+      </div>
+    ))}
+
+    // ❌ NOT NEEDED - Don't create unnecessary helpers
+    const getCategoryItems = lift((grouped, category) => grouped[category]);
+    {itemsByCategory[categoryName].map((item) => ...)}
+    ```
+
+11. **Understand Variable Scoping Limitations**: Variables from outer scopes don't work as expected inside `.map()` callbacks:
+
+    ```typescript
+    // ❌ DOESN'T WORK - Can't access `category` from outer map
+    {categories.map((category) => (
+      {derive(items, (arr) => arr.filter(i => i.category === category))}
+      // category is not accessible here
+    ))}
+
+    // ✅ WORKS - Use property access or pre-computed values
+    const itemsByCategory = groupByCategory(items);
+    {categories.map((category) => (
+      {itemsByCategory[category].map((item) => (
+        <div>{item.name}</div>
+      ))}
+    ))}
+    ```
+
+12. **Understand lift Currying with Multiple Parameters**: Multi-parameter lift creates curried functions:
+
+    ```typescript
+    // lift with multiple parameters creates curried function
+    const formatValue = lift((label: string, value: number) => `${label}: ${value}`);
+
+    // ✅ CORRECT - Call with currying
+    const result = formatValue("count")(42); // "count: 42"
+
+    // ❌ INCORRECT - This won't work
+    const result = formatValue("count", 42);
+
+    // Usually better to use single parameter with object
+    const formatValue = lift(({ label, value }: { label: string; value: number }) =>
+      `${label}: ${value}`
+    );
+    const result = formatValue({ label: "count", value: 42 });
+    ```
+
+    **Recommendation:** In most cases, direct property access or single-parameter lifts are clearer than multi-parameter curried functions.
+
+13. **Reference Data Instead of Copying**: When transforming data, reference the
    original objects rather than copying all their properties. This maintains
    reactivity and creates cleaner code:
 
@@ -470,6 +693,55 @@ results:
    ```
 
 ## Advanced Type Concepts
+
+### When to Use [ID]
+
+The `[ID]` symbol is often seen in examples, but it's only needed in specific cases:
+
+```typescript
+import { ID } from "commontools";
+
+interface Item {
+  [ID]: number;  // Only add this when you need it!
+  title: string;
+}
+```
+
+**When [ID] is needed:**
+- Creating data URIs for items (for stable references across network)
+- Creating referenceable data from within a `lift` function
+- When you need stable identity for items that might be modified
+
+**When [ID] is NOT needed:**
+- Simple arrays of objects in your recipe
+- Items that are only displayed, not referenced elsewhere
+- Most basic CRUD operations
+
+```typescript
+// ❌ NOT NEEDED for basic lists
+interface TodoItem {
+  [ID]: number;  // Unnecessary here
+  title: string;
+  done: boolean;
+}
+
+// ✅ CORRECT for basic lists
+interface TodoItem {
+  title: string;
+  done: boolean;
+}
+
+// ✅ NEEDED when creating data URIs
+const createItem = lift((title: string) => {
+  return {
+    [ID]: Math.random(),  // Needed for stable reference
+    title,
+    done: false,
+  };
+});
+```
+
+**Important:** The `list-operations.tsx` example uses `[ID]` because it demonstrates advanced array manipulation features. For most patterns, you don't need it.
 
 ### TypeScript to Runtime Schema
 

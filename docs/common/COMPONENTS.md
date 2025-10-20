@@ -22,30 +22,85 @@ Notice how handlers are bound to the cell from the input schema _in_ the VDOM de
 
 (For even more detail, see `HANDLERS.md`)
 
+# Bidirectional Binding with $ Prefix
+
+Many CommonTools components support **bidirectional binding** through the `$` prefix. This powerful feature automatically updates cells when users interact with components, eliminating the need for explicit onChange handlers in most cases.
+
+## How Bidirectional Binding Works
+
+When you use `$checked={}`, `$value={}`, or other `$prop` bindings, the component automatically updates the cell when the user interacts with it. **No onChange handler is needed.**
+
+```tsx
+// ✅ SIMPLE CASE - Bidirectional binding (preferred)
+<ct-checkbox $checked={item.checked} />
+<ct-input $value={title} />
+<ct-select $value={category} items={[...]} />
+
+// The cell is automatically updated when:
+// - User checks/unchecks the checkbox
+// - User types in the input
+// - User selects from the dropdown
+```
+
+## When to Use Handlers vs Bidirectional Binding
+
+### Simple Case: Use Bidirectional Binding
+
+```tsx
+// Just sync the UI with the cell - no additional logic needed
+<ct-checkbox $checked={item.checked} />
+```
+
+### Complex Case: Use Handler for Additional Logic
+
+```tsx
+// When you need to run additional code on changes
+const toggle = handler(
+  (_event, { item }: { item: Cell<Item> }) => {
+    item.checked.set(!item.checked.get());
+    // Additional side effects here
+    console.log("Item toggled:", item);
+    saveToBackend(item);
+  }
+);
+
+<ct-checkbox $checked={item.checked} onChange={toggle({ item })} />
+```
+
+**Note:** Even when using a handler, you can still use `$checked` for the binding. The `$` binding handles reading and writing the value, while `onChange` lets you add extra logic.
+
 # ct-input
 
-Some components can work with a cell directly, as well as using handlers.
+The `ct-input` component demonstrates bidirectional binding perfectly:
 
 ```tsx
 type InputSchema = { value: Cell<string> };
 type OutputSchema = { value: Cell<string> };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ value }) => {
-  // Here we know the type of the event and can use the `detail` to get the value
-  const handleChange = handler<{ detail: { value: string } }, { value: Cell<string> }>((event, { value }) => {
+  // Option 1: Bidirectional binding (simplest)
+  const simpleInput = <ct-input $value={value} />;
+
+  // Option 2: With handler for additional logic
+  const handleChange = handler<
+    { detail: { value: string } },
+    { value: Cell<string> }
+  >((event, { value }) => {
     value.set(event.detail.value);
+    console.log("Value changed:", event.detail.value);
   });
+  const inputWithHandler = <ct-input value={value} onct-input={handleChange({ value })} />;
 
   return {
     [UI]: <div>
-      <ct-input value={value} onct-input={handleChange({ value })} />
-      <ct-input $value={value} />
+      {simpleInput}
+      {inputWithHandler}
     </div>,
   };
 });
 ```
 
-These two inputs are functionally equivalent. They both update the cell with the value from the input event, providing a cell via the `$` prefix allows the component to call `.set()` on the cell internally - reducing boilerplate.
+Both inputs update the cell, but the second one logs changes. Use the simple bidirectional binding unless you need the extra logic.
 
 ### Validation
 
@@ -83,6 +138,94 @@ const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) =>
   };
 });
 ```
+
+# ct-select
+
+The `ct-select` component creates a dropdown selector. **Important:** It uses an `items` attribute with an array of `{ label, value }` objects, **not** HTML `<option>` elements.
+
+```tsx
+type CategoryInput = {
+  category: Default<string, "Other">;
+};
+
+const MyRecipe = recipe<CategoryInput, CategoryInput>("MyRecipe", ({ category }) => {
+  return {
+    [UI]: (
+      <ct-select
+        $value={category}
+        items={[
+          { label: "Produce", value: "Produce" },
+          { label: "Dairy", value: "Dairy" },
+          { label: "Meat", value: "Meat" },
+          { label: "Other", value: "Other" },
+        ]}
+      />
+    ),
+    category,
+  };
+});
+```
+
+## ct-select API Details
+
+### items attribute
+
+The `items` attribute takes an array of objects with `label` and `value` properties:
+
+```tsx
+// ✅ CORRECT - Use items attribute
+<ct-select
+  $value={selectedValue}
+  items={[
+    { label: "Display Text 1", value: "actual_value_1" },
+    { label: "Display Text 2", value: "actual_value_2" },
+  ]}
+/>
+
+// ❌ INCORRECT - Don't use <option> elements
+<ct-select $value={selectedValue}>
+  <option value="actual_value_1">Display Text 1</option>
+  <option value="actual_value_2">Display Text 2</option>
+</ct-select>
+```
+
+### Values can be any type
+
+The `value` property doesn't have to be a string - it can be any type:
+
+```tsx
+// Numeric values
+<ct-select
+  $value={selectedId}
+  items={[
+    { label: "First Item", value: 1 },
+    { label: "Second Item", value: 2 },
+    { label: "Third Item", value: 3 },
+  ]}
+/>
+
+// Boolean values
+<ct-select
+  $value={isEnabled}
+  items={[
+    { label: "Enabled", value: true },
+    { label: "Disabled", value: false },
+  ]}
+/>
+
+// Object values
+<ct-select
+  $value={selectedUser}
+  items={users.map(user => ({
+    label: user.name,
+    value: user,
+  }))}
+/>
+```
+
+### Bidirectional binding
+
+Like other components, `ct-select` supports bidirectional binding with the `$value` prefix, automatically updating the cell when the user selects an option.
 
 # ct-list
 

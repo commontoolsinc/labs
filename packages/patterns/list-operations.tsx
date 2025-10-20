@@ -11,6 +11,10 @@ import {
   UI,
 } from "commontools";
 
+// NOTE: This example uses [ID] to demonstrate advanced array manipulation features
+// and ensure stable references when items are inserted/removed at the front of the array.
+// For most basic list patterns, you DON'T need [ID] - see shopping-list.tsx for a
+// simpler example without [ID].
 interface Item {
   [ID]: number;
   title: string;

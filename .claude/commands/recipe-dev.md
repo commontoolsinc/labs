@@ -46,6 +46,79 @@ Before working on recipes it is recommended to search for `COMPONENTS.md` and `R
 
 Read `HANDLERS.md` when confused about event handler errors.
 
+## Development Workflow Best Practices
+
+When developing and testing patterns iteratively, follow this workflow:
+
+### Step-by-Step Development Process
+
+1. **Check Syntax** (Optional - only if requested or deployment fails):
+   ```bash
+   ./dist/ct dev pattern.tsx --no-run
+   ```
+   This validates TypeScript/JSX syntax without executing the pattern.
+
+2. **Test Execution Locally** (Optional):
+   ```bash
+   ./dist/ct dev pattern.tsx
+   ```
+   This runs the pattern in a local test environment. Useful for catching runtime errors.
+
+3. **Deploy to Test Space**:
+   ```bash
+   ./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] pattern.tsx
+   ```
+   Deployment will automatically compile and validate the recipe. Record the CHARM_ID returned.
+
+4. **Iterate with setsrc**:
+   ```bash
+   ./dist/ct charm setsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] pattern.tsx
+   ```
+   Update the charm without creating a new one. Much faster for iteration.
+
+5. **Inspect and Debug**:
+   ```bash
+   # View charm data and outputs
+   ./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id]
+
+   # Get specific field values
+   ./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] items/0/name
+
+   # Set test data
+   echo '{"name": "Test Item"}' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] testData
+   ```
+
+### Common Error Patterns and Solutions
+
+**Type Errors:**
+- Missing `OpaqueRef<T>` type on array map parameters
+- Using `Cell<Array<Cell<T>>>` instead of `Cell<T[]>` in handlers
+- Forgetting to import `ID` when using `[ID]`
+
+**Runtime Errors:**
+- Trying to use DOM access (`document.getElementById`)
+- Using conditionals (if/ternary) instead of `ifElse`
+- Calling `llm()` from within handlers or lift functions
+
+**Deployment Errors:**
+- Import path issues (use relative imports like `./file.tsx`)
+- Missing dependencies in the recipe
+- Syntax errors that weren't caught locally
+
+**Data Not Updating:**
+- Forgetting `$` prefix for bidirectional binding
+- Handler not being called (check event names match)
+- Cell not being passed to handler correctly
+
+### Tips for Efficient Development
+
+- **Don't pre-test syntax** unless deployment fails - the deployment process validates automatically
+- **Use `inspect` frequently** to understand current state
+- **Use `get/set` commands** to manually test data transformations
+- **Keep handler definitions at module level** for better reusability
+- **Start simple** then add complexity incrementally
+- **Check example patterns** in `packages/patterns/` for reference
+
 #### Workflow A: Modifying Existing Recipes
 
 **Get recipe source:**
