@@ -259,16 +259,48 @@ logic.
    });
    ```
 
-4. **Prefer Array Methods Over Manual Reconstruction**: Use built-in array methods for cleaner, more efficient code:
+4. **Array Mutation Patterns - Two Approaches**: Choose the right pattern based on what you're doing:
+
+   **Pattern A: Bidirectional Binding for Simple Value Updates**
+
+   For updating individual item properties, use bidirectional binding:
 
    ```typescript
-   // ✅ PREFER - Adding items
-   const addItem = handler((_, { items, newItem }) => {
-     items.push(newItem.get());
+   // ✅ PATTERN A - No handler needed for simple property updates
+   {items.map((item: OpaqueRef<ShoppingItem>) => (
+     <div>
+       <ct-checkbox $checked={item.done}>
+         {item.title}
+       </ct-checkbox>
+       <ct-input $value={item.category} />
+     </div>
+   ))}
+   ```
+
+   The cells update automatically when users interact with the UI. No handler needed!
+
+   **Pattern B: Handlers for Structural Changes**
+
+   For adding, removing, or reordering items, use handlers:
+
+   ```typescript
+   // ✅ PATTERN B - Handler for adding items
+   const addItem = handler<
+     { detail: { message: string } },
+     { items: Cell<ShoppingItem[]> }
+   >(({ detail }, { items }) => {
+     const itemName = detail?.message?.trim();
+     if (!itemName) return;
+
+     const currentItems = items.get();
+     items.set([...currentItems, { title: itemName, done: false }]);
    });
 
-   // ✅ PREFER - Removing items with toSpliced
-   const removeItem = handler((_, { items, item }) => {
+   // ✅ PATTERN B - Handler for removing items
+   const removeItem = handler<
+     unknown,
+     { items: Cell<ShoppingItem[]>; item: OpaqueRef<ShoppingItem> }
+   >((_event, { items, item }) => {
      const currentItems = items.get();
      const index = currentItems.findIndex((el) => items.key(el).equals(item));
      if (index >= 0) {
@@ -276,18 +308,16 @@ logic.
      }
    });
 
-   // ❌ AVOID - Manual array reconstruction
-   const addItem = handler((_, { items, newItem }) => {
-     items.set([...items.get(), newItem.get()]);
-   });
-
-   // ❌ AVOID - Filter for removal (less explicit)
-   const removeItem = handler((_, { items, item }) => {
-     items.set(items.get().filter((i) => i !== item));
-   });
+   // Usage
+   <ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
    ```
 
    **Why toSpliced?** It's more explicit about what's being removed (index and count) and integrates better with Cell equality checking.
+
+   **Decision Guide:**
+   - **Simple property updates** (checking box, changing text): Use bidirectional binding
+   - **Structural changes** (add, remove, reorder): Use handlers
+   - **Complex operations** (validation, side effects): Use handlers
 
 5. **Prefer Item References Over Indices**: When working with arrays, pass direct item references instead of indices:
 
@@ -350,27 +380,56 @@ logic.
    });
    ```
 
-7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays, type the parameter to avoid type errors:
+7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays with bidirectional binding, you **must** add the `OpaqueRef<T>` type annotation to make it type-check correctly:
 
    ```typescript
-   // ✅ CORRECT - Type as OpaqueRef
+   // ✅ CORRECT - Type as OpaqueRef for bidirectional binding
    {items.map((item: OpaqueRef<ShoppingItem>) => (
-     <div>{item.name}</div>
+     <div>
+       <ct-checkbox $checked={item.done}>
+         <span>{item.title}</span>
+       </ct-checkbox>
+       <ct-input $value={item.category} />
+     </div>
    ))}
 
-   // ❌ INCORRECT - Missing type leads to errors
+   // ❌ INCORRECT - Missing type leads to type errors with $-props
    {items.map((item) => (
-     <div>{item.name}</div> // May cause type errors
+     <ct-checkbox $checked={item.done} /> // Type error!
    ))}
    ```
 
-8. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
-   ternary operators, or any other conditionals inside a recipe function - they
-   won't work properly because they immediately evaluate data instead of
-   creating reactive nodes:
+   **Why is this needed?** When you use `.map()` on a Cell array, TypeScript cannot always infer the correct type for bidirectional binding properties. The `OpaqueRef<T>` annotation tells TypeScript that each item is a cell-like reference that supports property access and bidirectional binding.
+
+8. **Understand When Conditionals Work in JSX**: Ternary operators work fine in JSX **attributes**, but you need `ifElse()` for conditional **rendering** and **data transformations**:
 
    ```typescript
-   // DON'T DO THIS - if statements don't work in recipes
+   // ✅ TERNARIES WORK - In JSX attributes (simple values)
+   <span style={item.done ? "text-decoration: line-through;" : ""}>
+     {item.title}
+   </span>
+
+   <div class={isActive ? "active" : "inactive"}>
+     Content
+   </div>
+
+   // ❌ DON'T USE - Ternaries for conditional rendering
+   const tableHeader = (
+     <tr>
+       <th>Name</th>
+       {settings.showDetails ? <th>Details</th> : null} // This won't work!
+     </tr>
+   );
+
+   // ✅ USE ifElse - For conditional rendering
+   const tableHeader = (
+     <tr>
+       <th>Name</th>
+       {ifElse(settings.showDetails, <th>Details</th>, null)}
+     </tr>
+   );
+
+   // ❌ DON'T USE - if statements in data transformations
    const result = emails.map((email) => {
      if (email.hasContent) { // This won't work!
        return processEmail(email);
@@ -379,23 +438,7 @@ logic.
      }
    });
 
-   // DON'T DO THIS EITHER - ternary operators also don't work
-   const tableHeader = (
-     <tr>
-       <th>Name</th>
-       {settings.showDetails ? <th>Details</th> : null} // This won't work!
-     </tr>
-   );
-
-   // DON'T DO THIS - ternaries in string templates don't work
-   const prompt = str`
-     Process this data
-     ${
-     settings.includeTimestamp ? "Include timestamps" : "No timestamps"
-   } // This won't work!
-   `;
-
-   // DO THIS INSTEAD - use ifElse function for conditionals in data flow
+   // ✅ USE ifElse - For data transformations
    const result = emails.map((email) =>
      ifElse(
        email.hasContent,
@@ -403,33 +446,12 @@ logic.
        () => ({ email, empty: true }),
      )
    );
-
-   // USE ifElse IN JSX TOO
-   const tableHeader = (
-     <tr>
-       <th>Name</th>
-       {ifElse(settings.showDetails, <th>Details</th>, null)}
-     </tr>
-   );
-
-   // USE ifElse IN STRING TEMPLATES
-   const includeTimestampText = ifElse(
-     settings.includeTimestamp,
-     "Include timestamps",
-     "No timestamps",
-   );
-   const prompt = str`
-     Process this data
-     ${includeTimestampText}
-   `;
-
-   // WHEN APPROPRIATE - skip conditionals entirely
-   // and let LLM handle edge cases:
-   const result = emails.map((email) => {
-     const processed = processWithLLM(email);
-     return { email, result: processed };
-   });
    ```
+
+   **Rule of thumb:**
+   - **Ternaries in attributes**: ✅ Works great for simple string/number values
+   - **Ternaries for elements**: ❌ Use `ifElse()` instead
+   - **if statements**: ❌ Never work, use `ifElse()` instead
 
 9. **Understand lift vs derive**: Know when to use each reactive function:
 
@@ -482,7 +504,85 @@ logic.
     {itemsByCategory[categoryName].map((item) => ...)}
     ```
 
-11. **Understand Variable Scoping Limitations**: Variables from outer scopes don't work as expected inside `.map()` callbacks:
+11. **Prefer Inline Expressions Over Intermediate Variables**: Use inline expressions like `(array ?? []).map(...)` instead of extracting to variables, unless clarity genuinely improves:
+
+    ```typescript
+    // ✅ PREFERRED - Inline expression is clear and concise
+    <div>
+      {(groupedItems[category] ?? []).map((item: OpaqueRef<Item>) => (
+        <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+      ))}
+    </div>
+
+    // ❌ AVOID - Unnecessary intermediate variable
+    {derive(groupedItems, (groups) => {
+      const categoryItems = groups[category] || [];
+      return (
+        <div>
+          {categoryItems.map(item => ...)}
+        </div>
+      );
+    })}
+
+    // ✅ GOOD USE - When expression is complex or reused
+    const sortedItems = derive(items, (list) => {
+      return list
+        .filter(item => !item.done)
+        .sort((a, b) => a.priority - b.priority)
+        .slice(0, 10);
+    });
+
+    // Now use sortedItems multiple times
+    <div>Count: {sortedItems.length}</div>
+    <div>{sortedItems.map(...)}</div>
+    ```
+
+    **When to use intermediate variables:**
+    - The expression is complex (multiple operations)
+    - The value is used multiple times
+    - Extracting improves readability significantly
+
+    **When to use inline:**
+    - Simple property access or null coalescing
+    - Single use
+    - The expression is self-explanatory
+
+12. **Remove Unnecessary Keys**: Don't add `key` attributes unless you need them for dynamic reordering or reconciliation:
+
+    ```typescript
+    // ❌ AVOID - Unnecessary key attribute
+    {items.map((item: OpaqueRef<Item>, index) => (
+      <div key={index}>
+        <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+      </div>
+    ))}
+
+    // ✅ PREFERRED - No key needed for simple rendering
+    {items.map((item: OpaqueRef<Item>) => (
+      <div>
+        <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+      </div>
+    ))}
+
+    // ✅ WHEN KEYS ARE NEEDED - For dynamic reordering or performance
+    {sortableItems.map((item: OpaqueRef<Item>) => (
+      <draggable-item key={item.id}>
+        <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+      </draggable-item>
+    ))}
+    ```
+
+    **When keys ARE needed:**
+    - Items can be reordered by user
+    - Items are frequently added/removed at arbitrary positions
+    - You're experiencing performance issues with list updates
+
+    **When keys are NOT needed:**
+    - Simple, static rendering
+    - Items only added to end or removed from end
+    - Most basic list patterns
+
+13. **Understand Variable Scoping Limitations**: Variables from outer scopes don't work as expected inside `.map()` callbacks:
 
     ```typescript
     // ❌ DOESN'T WORK - Can't access `category` from outer map

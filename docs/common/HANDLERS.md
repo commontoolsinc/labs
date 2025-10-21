@@ -1,5 +1,26 @@
 # CommonTools Handler Patterns Guide
 
+## When Do You Need Handlers?
+
+**Important:** Many UI updates don't need handlers at all! CommonTools components support **bidirectional binding** with the `$` prefix, which automatically updates cells when users interact with components.
+
+### Quick Decision Guide
+
+| Task | Solution | Example |
+|------|----------|---------|
+| Update checkbox | ✅ Bidirectional binding | `<ct-checkbox $checked={item.done} />` |
+| Update text input | ✅ Bidirectional binding | `<ct-input $value={item.title} />` |
+| Update dropdown | ✅ Bidirectional binding | `<ct-select $value={item.category} items={...} />` |
+| Add item to list | ❌ Need handler | `addItem` handler with `items.set([...])` |
+| Remove item from list | ❌ Need handler | `removeItem` handler with `toSpliced()` |
+| Validate input | ❌ Need handler (or derive) | Handler with validation logic |
+| Call API on change | ❌ Need handler | Handler with fetch/save logic |
+| Log changes | ❌ Need handler | Handler with logging |
+
+**Rule of thumb:** If you're just syncing UI ↔ cell with no additional logic, use bidirectional binding. If you need side effects, validation, or structural changes (add/remove), use handlers.
+
+See `COMPONENTS.md` for detailed bidirectional binding examples.
+
 ## Handler Function Structure
 
 Handlers in CommonTools follow a specific pattern that creates a factory function:

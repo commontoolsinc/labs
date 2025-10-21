@@ -26,6 +26,8 @@ Notice how handlers are bound to the cell from the input schema _in_ the VDOM de
 
 Many CommonTools components support **bidirectional binding** through the `$` prefix. This powerful feature automatically updates cells when users interact with components, eliminating the need for explicit onChange handlers in most cases.
 
+**This is one of the most important patterns to understand when building recipes.** Most UI updates can be handled with bidirectional binding alone, making your code simpler and easier to maintain.
+
 ## How Bidirectional Binding Works
 
 When you use `$checked={}`, `$value={}`, or other `$prop` bindings, the component automatically updates the cell when the user interacts with it. **No onChange handler is needed.**
@@ -42,32 +44,112 @@ When you use `$checked={}`, `$value={}`, or other `$prop` bindings, the componen
 // - User selects from the dropdown
 ```
 
+## Bidirectional Binding with Array Items
+
+When working with arrays, bidirectional binding works seamlessly with mapped items:
+
+```tsx
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+  category: Default<string, "Other">;
+}
+
+// In your recipe
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  <div>
+    <ct-checkbox $checked={item.done}>
+      <span>{item.title}</span>
+    </ct-checkbox>
+    <ct-input $value={item.category} />
+  </div>
+))}
+```
+
+**Important:** Notice the `OpaqueRef<ShoppingItem>` type annotation. This is required when using `.map()` with bidirectional binding to ensure proper type checking.
+
 ## When to Use Handlers vs Bidirectional Binding
+
+### Decision Matrix
+
+| Scenario | Use Bidirectional Binding | Use Handler |
+|----------|--------------------------|-------------|
+| Simple value updates | ✅ Yes | ❌ No |
+| Checkbox toggle | ✅ Yes | ❌ No |
+| Text input | ✅ Yes | ❌ No |
+| Dropdown selection | ✅ Yes | ❌ No |
+| Need validation | ❌ No | ✅ Yes |
+| Need side effects (logging, API calls) | ❌ No | ✅ Yes |
+| Complex state transformations | ❌ No | ✅ Yes |
 
 ### Simple Case: Use Bidirectional Binding
 
 ```tsx
-// Just sync the UI with the cell - no additional logic needed
-<ct-checkbox $checked={item.checked} />
+// ❌ AVOID - Unnecessary handler for simple value update
+const toggle = handler<{detail: {checked: boolean}}, {item: Cell<Item>}>(
+  ({detail}, {item}) => {
+    item.set({...item.get(), done: detail.checked});
+  }
+);
+<ct-checkbox checked={item.done} onct-change={toggle({item})} />
+
+// ✅ PREFERRED - Bidirectional binding handles it
+<ct-checkbox $checked={item.done} />
 ```
+
+The bidirectional binding version is:
+- **Simpler**: No handler definition needed
+- **Less code**: One line instead of five
+- **More maintainable**: Less surface area for bugs
+- **Just as powerful**: The update happens automatically
 
 ### Complex Case: Use Handler for Additional Logic
 
 ```tsx
-// When you need to run additional code on changes
+// ✅ CORRECT - Handler needed for side effects
 const toggle = handler(
   (_event, { item }: { item: Cell<Item> }) => {
-    item.checked.set(!item.checked.get());
-    // Additional side effects here
+    const currentValue = item.done.get();
+    item.done.set(!currentValue);
+
+    // Additional side effects
     console.log("Item toggled:", item);
     saveToBackend(item);
+    trackAnalytics("item_toggled", { done: !currentValue });
   }
 );
 
-<ct-checkbox $checked={item.checked} onChange={toggle({ item })} />
+<ct-checkbox $checked={item.done} onChange={toggle({ item })} />
 ```
 
 **Note:** Even when using a handler, you can still use `$checked` for the binding. The `$` binding handles reading and writing the value, while `onChange` lets you add extra logic.
+
+### Validation Example
+
+For validation, consider using two cells: a raw input cell and a validated derived cell:
+
+```tsx
+// Raw input with bidirectional binding
+const rawInput = cell("");
+
+<ct-input $value={rawInput} />
+
+// Validated output using derive
+const validatedValue = derive(rawInput, (value) => {
+  if (value.length < 3) return null;
+  if (!value.match(/^[a-z]+$/i)) return null;
+  return value;
+});
+
+// Show validation status
+{ifElse(
+  derive(validatedValue, (v) => v !== null),
+  <span style="color: green;">✓ Valid</span>,
+  <span style="color: red;">✗ Must be 3+ letters</span>
+)}
+```
+
+This approach separates concerns: bidirectional binding handles the UI sync, while derive handles validation logic.
 
 # ct-input
 
@@ -229,11 +311,20 @@ Like other components, `ct-select` supports bidirectional binding with the `$val
 
 # ct-list
 
-When working with a list of objects, of any kind, if they have `title` properties you can display and manage them via a `ct-list` component.
+The `ct-list` component provides a convenient way to display and manage lists, but it has **specific schema requirements**.
+
+## Schema Requirements
+
+`ct-list` requires items to have a `title` property and optionally a `done` property:
 
 ```tsx
-type Item = { title: string };
-type ListSchema = { items: Cell<Item[]> };
+// ✅ CORRECT - Items match ct-list schema
+interface CtListItem {
+  title: string;      // Required
+  done?: boolean;     // Optional
+}
+
+type ListSchema = { items: Cell<CtListItem[]> };
 
 const MyRecipe = recipe<ListSchema, ListSchema>("MyRecipe", ({ items }) => {
   return {
@@ -244,6 +335,43 @@ const MyRecipe = recipe<ListSchema, ListSchema>("MyRecipe", ({ items }) => {
   };
 });
 ```
+
+## When NOT to Use ct-list
+
+If your data has custom fields beyond `title` and `done`, you **cannot** use `ct-list`. You must render manually:
+
+```tsx
+// ❌ CANNOT use ct-list - has custom fields
+interface ShoppingItem {
+  title: string;
+  done: boolean;
+  category: string;  // ← Custom field
+  quantity: number;  // ← Custom field
+}
+
+// ✅ CORRECT - Manual rendering for custom fields
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  <div>
+    <ct-checkbox $checked={item.done}>
+      {item.title}
+    </ct-checkbox>
+    <ct-input $value={item.category} placeholder="Category" />
+    <ct-input $value={item.quantity} type="number" placeholder="Qty" />
+  </div>
+))}
+```
+
+## Trade-offs
+
+**Use ct-list when:**
+- Your items only need `title` and optionally `done`
+- You want a quick, pre-styled list component
+- You don't need custom rendering
+
+**Use manual rendering when:**
+- You have custom fields
+- You need custom styling or layout
+- You need fine-grained control over interactions
 
 # ct-message-input
 
