@@ -1,15 +1,38 @@
 import { css, html, LitElement } from "lit";
 import { property, state } from "lit/decorators.js";
 
+const DEFAULT_SIDEBAR_WIDTH = 320;
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 600;
+
 export class XOmniLayout extends LitElement {
   static override styles = css`
     :host {
       display: grid;
-      grid-template-columns: 1fr 0;
       grid-template-rows: 1fr;
       height: 100%;
       width: 100%;
       overflow: hidden;
+      transition: grid-template-columns 0.3s ease;
+      position: relative;
+    }
+
+    /* Desktop: sidebar displaces content */
+    @media (min-width: 769px) {
+      :host {
+        grid-template-columns: 1fr;
+      }
+
+      :host([sidebar-open]) {
+        grid-template-columns: 1fr var(--sidebar-width, 320px);
+      }
+    }
+
+    /* Mobile: sidebar overlays content */
+    @media (max-width: 768px) {
+      :host {
+        grid-template-columns: 1fr;
+      }
     }
 
     .main {
@@ -20,66 +43,75 @@ export class XOmniLayout extends LitElement {
     }
 
     .sidebar-container {
-      grid-column: 2;
-      grid-row: 1;
       position: relative;
-      overflow: visible;
-      width: 0;
-    }
-
-    .sidebar-container.hidden {
+      overflow: hidden;
       display: none;
     }
 
-    .sidebar {
-      position: absolute;
-      top: 0;
-      right: 0;
-      height: 100%;
-      width: 320px;
-      background-color: var(--ct-theme-color-surface, #f1f5f9);
-      border-left: 2px solid var(--ct-theme-color-border, #e5e7eb);
-      transform: translateX(0);
-      transition: transform 0.3s ease;
-      overflow: auto;
+    /* Desktop: grid positioning */
+    @media (min-width: 769px) {
+      .sidebar-container.visible {
+        display: block;
+        grid-column: 2;
+        grid-row: 1;
+      }
     }
 
-    .sidebar.closed {
-      transform: translateX(calc(100% - 48px));
+    /* Mobile: overlay positioning within content area */
+    @media (max-width: 768px) {
+      .sidebar-container.visible {
+        display: block;
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 320px;
+        z-index: 100;
+        box-shadow: -4px 0 8px rgba(0, 0, 0, 0.1);
+      }
+    }
+
+    .sidebar {
+      height: 100%;
+      width: 100%;
+      background-color: white;
+      border-left: var(--border-width, 2px) solid var(--border-color, #000);
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .resize-handle {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: col-resize;
+      background: transparent;
+      z-index: 10;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .resize-handle:hover,
+    .resize-handle.dragging {
+      background: var(--border-color, #000);
+      opacity: 0.2;
+    }
+
+    /* Hide resize handle on mobile */
+    @media (max-width: 768px) {
+      .resize-handle {
+        display: none;
+      }
     }
 
     .sidebar-content {
-      position: relative;
-      height: 100%;
-      width: 100%;
-      padding: 48px 16px 16px 16px;
-    }
-
-    .toggle-button {
-      position: absolute;
-      top: 8px;
-      left: 8px;
-      background-color: var(--ct-theme-color-background, #ffffff);
-      border: 2px solid var(--ct-theme-color-border, #e5e7eb);
-      border-radius: 4px;
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      font-size: 16px;
-      z-index: 10;
-      transition: all 0.2s ease;
-    }
-
-    .toggle-button:hover {
-      background-color: var(--ct-theme-color-surface-hover, #e2e8f0);
-      transform: scale(1.05);
-    }
-
-    .toggle-button:active {
-      transform: scale(0.95);
+      flex: 1;
+      min-height: 0;
+      padding: 1rem;
+      box-sizing: border-box;
     }
 
     .fab {
@@ -90,11 +122,20 @@ export class XOmniLayout extends LitElement {
     }
   `;
 
-  @property({ type: Boolean })
-  sidebarOpen = true;
+  @property({ type: Boolean, reflect: true, attribute: "sidebar-open" })
+  sidebarOpen = false;
 
   @state()
   private hasSidebarContent = false;
+
+  @state()
+  private sidebarWidth = DEFAULT_SIDEBAR_WIDTH;
+
+  @state()
+  private isResizing = false;
+
+  private resizeStartX = 0;
+  private resizeStartWidth = 0;
 
   override firstUpdated() {
     const slot = this.shadowRoot?.querySelector(
@@ -108,8 +149,11 @@ export class XOmniLayout extends LitElement {
     }
   }
 
-  private toggleSidebar() {
-    this.sidebarOpen = !this.sidebarOpen;
+  override updated(changedProperties: Map<string, unknown>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("sidebarWidth")) {
+      this.style.setProperty("--sidebar-width", `${this.sidebarWidth}px`);
+    }
   }
 
   #updateSidebarContent(slot: HTMLSlotElement) {
@@ -124,21 +168,61 @@ export class XOmniLayout extends LitElement {
     this.hasSidebarContent = hasContent;
   }
 
+  private handleResizeStart = (e: PointerEvent) => {
+    e.preventDefault();
+    this.isResizing = true;
+    this.resizeStartX = e.clientX;
+    this.resizeStartWidth = this.sidebarWidth;
+
+    const handle = e.target as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("dragging");
+
+    document.addEventListener("pointermove", this.handleResizeMove);
+    document.addEventListener("pointerup", this.handleResizeEnd);
+  };
+
+  private handleResizeMove = (e: PointerEvent) => {
+    if (!this.isResizing) return;
+
+    const delta = this.resizeStartX - e.clientX;
+    const newWidth = Math.min(
+      MAX_SIDEBAR_WIDTH,
+      Math.max(MIN_SIDEBAR_WIDTH, this.resizeStartWidth + delta),
+    );
+
+    this.sidebarWidth = newWidth;
+  };
+
+  private handleResizeEnd = (e: PointerEvent) => {
+    if (!this.isResizing) return;
+
+    this.isResizing = false;
+    const handle = this.shadowRoot?.querySelector(
+      ".resize-handle",
+    ) as HTMLElement;
+    if (handle) {
+      handle.classList.remove("dragging");
+    }
+
+    document.removeEventListener("pointermove", this.handleResizeMove);
+    document.removeEventListener("pointerup", this.handleResizeEnd);
+  };
+
   override render() {
+    const showSidebar = this.hasSidebarContent && this.sidebarOpen;
+
     return html`
       <div class="main">
         <slot name="main"></slot>
       </div>
-      <div class="sidebar-container ${this.hasSidebarContent ? "" : "hidden"}">
-        <div class="sidebar ${this.sidebarOpen ? "" : "closed"}">
+      <div class="sidebar-container ${showSidebar ? "visible" : ""}">
+        <div class="sidebar">
+          <div
+            class="resize-handle"
+            @pointerdown="${this.handleResizeStart}"
+          ></div>
           <div class="sidebar-content">
-            <button
-              class="toggle-button"
-              @click="${this.toggleSidebar}"
-              title="${this.sidebarOpen ? "Close sidebar" : "Open sidebar"}"
-            >
-              ${this.sidebarOpen ? "✕" : "☰"}
-            </button>
             <slot name="sidebar"></slot>
           </div>
         </div>

@@ -1,8 +1,10 @@
 /// <cts-enable />
 import {
   Cell,
+  cell,
   derive,
   handler,
+  ifElse,
   NAME,
   navigateTo,
   recipe,
@@ -105,6 +107,10 @@ export const Sidebar = recipe<void, VNode>("Sidebar", () => {
   return <aside>Wow, a sidebar!</aside>;
 });
 
+const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
+  value.set(!value.get());
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -113,6 +119,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
+    const fabExpanded = cell(false);
 
     const omnibot = Chatbot({
       messages: [],
@@ -129,6 +136,12 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             alt
             preventDefault
             onct-keybind={spawnChatList()}
+          />
+
+          <ct-keybind
+            code="Escape"
+            preventDefault
+            onct-keybind={toggle({ value: fabExpanded })}
           />
 
           <ct-vstack gap="4" padding="6">
@@ -202,7 +215,11 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           {omnibot.ui.chatLog as any}
         </div>
       ),
-      fabUI: omnibot.ui.promptInput,
+      fabUI: ifElse(
+        fabExpanded,
+        omnibot.ui.promptInput,
+        <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
+      ),
     };
   },
 );

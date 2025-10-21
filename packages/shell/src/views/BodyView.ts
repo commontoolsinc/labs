@@ -54,8 +54,14 @@ export class XBodyView extends BaseView {
   @property()
   showShellCharmListView = false;
 
+  @property({ type: Boolean })
+  showSidebar = false;
+
   @state()
   private creatingDefaultPattern = false;
+
+  @state()
+  private hasSidebarContent = false;
 
   private _charms = new Task(this, {
     task: async ([rt]) => {
@@ -166,9 +172,23 @@ export class XBodyView extends BaseView {
       defaultCell,
     );
 
+    // Update sidebar content detection
+    const hasSidebarContent = !!sidebarCell;
+    if (this.hasSidebarContent !== hasSidebarContent) {
+      this.hasSidebarContent = hasSidebarContent;
+      // Notify parent of sidebar content changes
+      this.dispatchEvent(
+        new CustomEvent("sidebar-content-change", {
+          detail: { hasSidebarContent },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+
     return html`
       <div class="content">
-        <x-omni-layout>
+        <x-omni-layout .sidebarOpen="${this.showSidebar}">
           ${mainContent} ${sidebarCell
             ? html`
               <ct-render slot="sidebar" .cell="${sidebarCell}"></ct-render>
