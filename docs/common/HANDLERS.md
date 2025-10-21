@@ -1,22 +1,60 @@
 # CommonTools Handler Patterns Guide
 
+## When Do You Need Handlers?
+
+**Important:** Many UI updates don't need handlers at all! CommonTools components support **bidirectional binding** with the `$` prefix, which automatically updates cells when users interact with components.
+
+### Quick Decision Guide
+
+| Task | Solution | Example |
+|------|----------|---------|
+| Update checkbox | ✅ Bidirectional binding | `<ct-checkbox $checked={item.done} />` |
+| Update text input | ✅ Bidirectional binding | `<ct-input $value={item.title} />` |
+| Update dropdown | ✅ Bidirectional binding | `<ct-select $value={item.category} items={...} />` |
+| Add item to list | ❌ Need handler | `addItem` handler with `items.set([...])` |
+| Remove item from list | ❌ Need handler | `removeItem` handler with `toSpliced()` |
+| Validate input | ❌ Need handler (or derive) | Handler with validation logic |
+| Call API on change | ❌ Need handler | Handler with fetch/save logic |
+| Log changes | ❌ Need handler | Handler with logging |
+
+**Rule of thumb:** If you're just syncing UI ↔ cell with no additional logic, use bidirectional binding. If you need side effects, validation, or structural changes (add/remove), use handlers.
+
+See `COMPONENTS.md` for detailed bidirectional binding examples.
+
 ## Handler Function Structure
 
-Handlers in CommonTools follow a specific three-parameter pattern:
+Handlers in CommonTools follow a specific pattern that creates a factory function:
 
 ```typescript
-const myHandler = handler(
-  eventSchema,   // What data comes from UI events
-  stateSchema,   // What data the handler needs to operate on
-  handlerFunction // The actual function that executes
-);
-
-// or
-
 type EventSchema = ...
 type StateSchema = ...
 const myHandler = handler<EventSchema, StateSchema>(handlerFunction);
 ```
+
+### Handler Factory Calling Pattern
+
+**Important:** Handler factories are called with a **single object** containing all the context they need. This is partial application of the state.
+
+```typescript
+// ✅ CORRECT - Single object with all context
+const removeItem = handler(
+  (_event, { items, item }: { items: Cell<Item[]>; item: Cell<Item> }) => {
+    const currentItems = items.get();
+    const index = currentItems.findIndex((el) => item.equals(el as any));
+    if (index >= 0) {
+      items.set(currentItems.toSpliced(index, 1));
+    }
+  }
+);
+
+// Called with single context object
+<ct-button onClick={removeItem({ items, item })}>Remove</ct-button>
+
+// ❌ INCORRECT - Multiple parameters
+<ct-button onClick={removeItem({ items }, { item })}>Remove</ct-button>
+```
+
+The handler receives the event from the UI as the first parameter, and your bound state as the second parameter. This allows you to merge discrete UI events with reactive cells that are always changing.
 
 ## Common Handler Patterns
 
@@ -67,6 +105,210 @@ const updateTitle = handler<
 
 Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as `e` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
 
+### Handler Parameter Type Patterns
+
+Understanding when to use `Cell<T[]>` vs `Cell<Array<Cell<T>>>` is crucial for avoiding type errors. **The simple rule: always use `Cell<T[]>` in handler parameters.**
+
+## Critical Rule: Cell<T[]> for Arrays
+
+In handler type signatures, the Cell wraps the **entire array**, not individual elements:
+
+```typescript
+// ✅ CORRECT - Cell wraps the entire array
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
+>((_event, { items }) => {
+  const currentItems = items.get();  // Returns ShoppingItem[]
+  items.set([...currentItems, { title: "New", done: false }]);
+});
+
+// ✅ CORRECT - Nested cell types to access cell methods in sub-items
+const removeItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<ShoppingItem>>>, item: Cell<ShoppingItem> }
+>(
+  const currentItems = items.get();
+  // Calls Cell.equals on the individual cell in the list:
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index !== -1) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
+);
+
+// ❌ WRONG - Don't use OpaqueRef in handler parameters
+const addItem = handler<
+  unknown,
+  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
+>(/* ... */);
+```
+
+## Understanding the Type Contexts
+
+There are **four different contexts** where array types appear differently:
+
+```typescript
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+// Context 1: In recipe input/output types
+interface Input {
+  items: Default<ShoppingItem[], []>;  // Plain type in schema
+}
+
+// Context 2: In handler parameters - Cell<ShoppingItem[]>
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }
+>((_event, { items }) => {
+  items.push({ title: "New", done: false });
+});
+
+export default recipe<Input, Input>(
+  "Shopping List",
+  ({ items }) => {  // Context 3: items is OpaqueRef<ShoppingItem[]>
+
+    return {
+      [UI]: (
+        <div>
+          {/* Context 4: In JSX .map() - OpaqueRef<ShoppingItem> */}
+          {items.map((item: OpaqueRef<ShoppingItem>) => (
+            <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+          ))}
+          <ct-button onClick={addItem({ items })}>Add</ct-button>
+        </div>
+      ),
+      items,  // Context 2 again: OpaqueRef<ShoppingItem[]>
+    };
+  },
+);
+```
+
+## Mental Model: The Box Analogy
+
+Think of types this way:
+
+| Type | Mental Model | Where Used | Example |
+|------|--------------|------------|---------|
+| `Cell<T[]>` | A **box** containing an array | Handler params, recipe params, returns | `items: Cell<ShoppingItem[]>` |
+| `T[]` | The **plain array** inside the box | Result of `.get()` | `const arr = items.get()` returns `ShoppingItem[]` |
+| `OpaqueRef<T>` | A **cell-like reference** to each item | In JSX `.map()` | `items.map((item: OpaqueRef<ShoppingItem>) => ...)` |
+| `T` | A **plain object** | Inside plain arrays | `{ title: "Milk", done: false }` |
+
+### How They Transform
+
+```typescript
+const items: Cell<ShoppingItem[]>  // Handler receives this
+
+// Open the box with .get()
+const plainArray: ShoppingItem[] = items.get();
+
+// In JSX, .map() wraps each item
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  // item is NOT a plain ShoppingItem
+  // item is NOT a Cell<ShoppingItem>
+  // item IS an OpaqueRef<ShoppingItem>
+  <ct-checkbox $checked={item.done} />
+))}
+```
+
+## Why This Matters
+
+**Different contexts require different types:**
+
+1. **Handler parameters need `Cell<T[]>`** - so you can call `.get()` and `.set()`
+2. **JSX .map() needs `OpaqueRef<T>`** - for bidirectional binding to work
+3. **Recipe schemas use plain `T[]`** - to define the data structure
+
+**Common mistake:**
+
+```typescript
+// ❌ WRONG - Trying to use JSX type in handler
+const addItem = handler<
+  unknown,
+  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // Wrong!
+>(/* ... */);
+
+// ✅ CORRECT - Handler uses Cell<T[]>
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }  // Correct!
+>(/* ... */);
+```
+
+## Complete Example with All Contexts
+
+```typescript
+/// <cts-enable />
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+// Schema uses plain types
+interface Input {
+  items: Default<ShoppingItem[], []>;
+}
+
+// Handler parameter: Cell<T[]>
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
+>(({ detail }, { items }) => {
+  const message = detail?.message?.trim();
+  if (!message) return;
+
+  // Prefer .push() to add items to ShoppingItem[]
+  items.push({ title: message, done: false });
+});
+
+const removeItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
+>((_event, { items, item }) => {
+  const currentItems = items.get();
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
+});
+
+export default recipe<Input, Input>("Shopping List", ({ items }) => {
+  // items here is OpaqueRef<ShoppingItem[]>
+
+  return {
+    [UI]: (
+      <div>
+        {/* In .map(): OpaqueRef<ShoppingItem> */}
+        {items.map((item: OpaqueRef<ShoppingItem>) => (
+          <div>
+            <ct-checkbox $checked={item.done}>
+              {item.title}
+            </ct-checkbox>
+            <ct-button onClick={removeItem({ items, item })}>×</ct-button>
+          </div>
+        ))}
+        <ct-message-input onct-send={addItem({ items })} />
+      </div>
+    ),
+    items,  // Return OpaqueRef<ShoppingItem[]>
+  };
+});
+```
+
+## Quick Reference
+
+**When writing handler type signatures:**
+
+- ✅ DO: `{ items: Cell<ShoppingItem[]> }`
+- ✅ DO: `{ items: Cell<Array<Cell<ShoppingItem>>> }`
+- ✅ DO: `{ items: ShoppingItem[] }` (for read-only uses)
+- ❌ DON'T: `{ items: Cell<OpaqueRef<ShoppingItem>[]> }`
+
+**Rule of thumb:** In handler type signatures, use `Cell<T[]>` for array parameters. The Cell wraps the entire array, not individual elements.
+
 #### Event Parameter Patterns
 
 You can handle the event parameter in different ways depending on your needs:
@@ -84,14 +326,11 @@ const updateTitle = handler<
 
 // Option 2: Use full event object when you need multiple properties
 const handleComplexEvent = handler<
-  { detail: { value: string }, target: HTMLElement, timestamp: number }, 
+  { detail: { value: string } }, 
   { data: Cell<any> }
 >(
   (e, { data }) => {
-    // Access multiple event properties
-    console.log('Event timestamp:', e.timestamp);
-    console.log('Target element:', e.target);
-    data.set({ value: e.detail.value, element: e.target.tagName });
+    data.set({ value: e.detail.value });
   }
 );
 
@@ -178,10 +417,10 @@ const addItem = handler<
 ```typescript
 const updatePageContent = handler<
   { detail: { value: string } }, 
-  { pages: Record<string, string>, currentPage: string }
+  { pages: Cell<Record<string, string>>, currentPage: string }
 >(
   ({ detail }, { pages, currentPage }) => {
-    pages[currentPage] = detail.value;
+    pages.key(currentPage).set(detail.value);
   }
 );
 ```
@@ -203,21 +442,6 @@ const addItemWithTimestamp = handler<
       done: false,
       createdAt: createTimestamp()
     });
-  }
-);
-```
-
-### Conditional State Updates
-```typescript
-const toggleItem = handler<
-  Record<string, never>, 
-  { item: { id: string }, items: Cell<Array<{ id: string, done: boolean }>> }
->(
-  (_, { item, items }) => {
-    const index = items.get().findIndex(i => i.id === item.id);
-    if (index !== -1) {
-      items.get()[index].done = !items.get()[index].done;
-    }
   }
 );
 ```
@@ -291,7 +515,7 @@ const handler = handler<{
 
 // ✅ Better: Simple clicks rarely need event data
 const handler = handler<Record<string, never>, any>(
-  (ev, state) => { ... }
+  (_, state) => { ... }
 );
 ```
 
