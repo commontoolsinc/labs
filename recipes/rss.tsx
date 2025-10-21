@@ -1,16 +1,16 @@
 /// <cts-enable />
 import {
-  type Cell,
   cell,
   Default,
-  handler,
-  ID,
+  derive,
+  fetchData,
+  lift,
   NAME,
   recipe,
   str,
   UI,
 } from "commontools";
-import { DOMParser, type Element } from "dom-parser";
+import { DOMParser, type Element } from "./dom-parser.ts";
 
 interface Settings {
   feedUrl: Default<string, "">;
@@ -27,32 +27,13 @@ type FeedItem = {
   content: string;
 };
 
-const updateLimit = handler<
-  { detail: { value: string } },
-  { limit: Cell<number> }
->(({ detail }, { limit }) => {
-  limit.set(parseInt(detail?.value ?? "100") || 0);
-});
-
-const updateFeedUrl = handler<
-  { detail: { value: string } },
-  { feedUrl: Cell<string> }
->(
-  ({ detail }, { feedUrl }) => {
-    feedUrl.set(detail?.value ?? "");
-  },
-);
-
-async function fetchRSSFeed(
-  feedUrl: string,
+function parseRSSFeed(
+  textXML: string,
   maxResults: number = 100,
-  currentItems: Cell<FeedItem[]>,
-) {
-  const response = await fetch(feedUrl);
-  const text = await response.text();
+  existingIds: Set<string>,
+): FeedItem[] {
   const parser = new DOMParser();
-  const doc = parser.parseFromString(text, "text/xml");
-
+  const doc = parser.parseFromString(textXML, "text/xml");
   // Helper function to get text content from an element
   const getTextContent = (element: Element | null, tagName: string) => {
     const el = element?.getElementsByTagName(tagName)[0];
@@ -69,10 +50,10 @@ async function fetchRSSFeed(
     return el?.getAttribute(attrName) || "";
   };
 
-  const retreivedItems: FeedItem[] = [];
+  const retrievedItems: FeedItem[] = [];
 
   // Check if it's an Atom feed
-  const isAtom = doc.querySelector("feed") !== null;
+  const isAtom = doc.getElementsByTagName("feed").length !== 0;
 
   if (isAtom) {
     // Parse Atom feed
@@ -85,7 +66,7 @@ async function fetchRSSFeed(
       const id = getTextContent(entry, "id") || Math.random().toString(36);
 
       // Skip if we already have this item
-      if (currentItems.get().some((item) => item.id === id)) {
+      if (existingIds.has(id)) {
         continue;
       }
 
@@ -107,7 +88,7 @@ async function fetchRSSFeed(
       const pubDate = getTextContent(entry, "published") ||
         getTextContent(entry, "updated");
 
-      retreivedItems.push({
+      retrievedItems.push({
         id,
         title: getTextContent(entry, "title"),
         link,
@@ -128,11 +109,11 @@ async function fetchRSSFeed(
         getTextContent(item, "link") ||
         Math.random().toString(36);
 
-      if (currentItems.get().some((existingItem) => existingItem.id === id)) {
+      if (existingIds.has(id)) {
         continue;
       }
 
-      retreivedItems.push({
+      retrievedItems.push({
         id,
         title: getTextContent(item, "title"),
         link: getTextContent(item, "link"),
@@ -145,31 +126,36 @@ async function fetchRSSFeed(
     }
   }
 
-  if (retreivedItems.length > 0) {
-    retreivedItems.forEach((item) => {
-      (item as any)[ID] = item.id; // FIXME(ja): how to do this better?
-    });
-    currentItems.push(...retreivedItems);
-  }
+  return retrievedItems;
 }
 
-const feedUpdater = handler<unknown, {
-  items: Cell<FeedItem[]>;
+const feedUpdater = lift<{
+  items: FeedItem[];
   settings: Settings;
-}>(async (_event, { settings, items }) => {
+}>(({ settings, items }) => {
   if (!settings.feedUrl) {
     console.warn("no feed URL provided");
     return;
   }
 
-  return await fetchRSSFeed(
-    settings.feedUrl,
-    settings.limit,
-    items,
+  const query = fetchData({ url: settings.feedUrl, mode: "text" });
+  return derive(
+    { items, result: query.result, limit: settings.limit },
+    ({ result, limit, items }) => {
+      if (!result || typeof result !== "string") return;
+      const newEntries = parseRSSFeed(
+        result as string,
+        limit,
+        new Set(items.map((item) => item.id)),
+      );
+      items.push(...newEntries);
+    },
   );
 });
 
-export default recipe<{ settings: Settings }>(
+export default recipe<
+  { settings: Default<Settings, { feedUrl: ""; limit: 100 }> }
+>(
   "rss importer",
   ({ settings }) => {
     const items = cell<FeedItem[]>([]);
@@ -179,30 +165,26 @@ export default recipe<{ settings: Settings }>(
     return {
       [NAME]: str`RSS/Atom Feed Importer ${settings.feedUrl}`,
       [UI]: (
-        <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
-          <h2 style="font-size: 20px; font-weight: bold;">
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexDirection: "column",
+            padding: "25px",
+          }}
+        >
+          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
             Feed Items: {items.length}
           </h2>
 
           <common-hstack gap="sm">
             <common-vstack gap="sm">
               <div>
-                <label>Import Limit</label>
-                <common-input
-                  customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
-                  value={settings.limit}
-                  placeholder="number of items to import"
-                  oncommon-input={updateLimit({ limit: settings.limit })}
-                />
-              </div>
-
-              <div>
                 <label>Feed URL</label>
-                <common-input
+                <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
-                  value={settings.feedUrl}
+                  $value={settings.feedUrl}
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
-                  oncommon-input={updateFeedUrl({ feedUrl: settings.feedUrl })}
                 />
               </div>
               <common-updater $state={settings} integration="rss" />
@@ -212,21 +194,21 @@ export default recipe<{ settings: Settings }>(
             <table>
               <thead>
                 <tr>
-                  <th style="padding: 10px;">DATE</th>
-                  <th style="padding: 10px;">TITLE</th>
-                  <th style="padding: 10px;">AUTHOR</th>
+                  <th style={{ padding: "10px" }}>DATE</th>
+                  <th style={{ padding: "10px" }}>TITLE</th>
+                  <th style={{ padding: "10px" }}>AUTHOR</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
                   <tr>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{item.pubDate}&nbsp;
                     </td>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{item.title}&nbsp;
                     </td>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{item.author}&nbsp;
                     </td>
                   </tr>
