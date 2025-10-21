@@ -55,7 +55,7 @@ The simplest and most common pattern: a list where users can check items and edi
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI, cell } from "commontools";
 
 interface ShoppingItem {
   title: string;
