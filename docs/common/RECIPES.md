@@ -292,8 +292,7 @@ logic.
      const itemName = detail?.message?.trim();
      if (!itemName) return;
 
-     const currentItems = items.get();
-     items.set([...currentItems, { title: itemName, done: false }]);
+     items.push({ title: itemName, done: false });
    });
 
    // ✅ PATTERN B - Handler for removing items
@@ -836,29 +835,7 @@ interface Item {
 
 ❌ **Only add [ID] when you need:**
 
-#### 1. Creating Data URIs for Network References
-
-When items need stable references across the network:
-
-```typescript
-import { ID } from "commontools";
-
-interface NetworkItem {
-  [ID]: number;  // Needed for stable cross-network reference
-  title: string;
-  data: string;
-}
-
-const createReferenceable = lift((title: string) => {
-  return {
-    [ID]: Date.now(),  // Stable ID for URI creation
-    title,
-    data: "content",
-  };
-});
-```
-
-#### 2. Creating Items Within lift Functions
+#### 1. Creating Items Within lift Functions
 
 When generating new items inside `lift`:
 
@@ -892,7 +869,7 @@ const insertAtStart = handler<unknown, { items: Cell<ReorderableItem[]> }>(
 
 **Note:** Even for reordering, try without [ID] first. Many reordering scenarios work fine without it.
 
-## Examples: With and Without [ID]
+## Examples: Most of the time you don't need [ID]
 
 ### Example 1: Basic Shopping List (No [ID] Needed)
 
@@ -911,8 +888,7 @@ const addItem = handler<
   const itemName = detail?.message?.trim();
   if (!itemName) return;
 
-  const currentItems = items.get();
-  items.set([...currentItems, { title: itemName, done: false, category: "Uncategorized" }]);
+  items.push(currentItems, { title: itemName, done: false, category: "Uncategorized" });
 });
 
 const removeItem = handler<
@@ -935,19 +911,15 @@ This works perfectly without [ID] because:
 ### Example 2: When You Actually Need [ID]
 
 ```typescript
-// ✅ CORRECT - [ID] needed for data URIs and cross-charm references
-import { ID } from "commontools";
-
 interface ReferencedNote {
-  [ID]: number;  // Needed because notes reference each other
   title: string;
   content: string;
-  backlinks: number[];  // References to other note IDs
+  // References to other notes are just object references:
+  backlinks: ReferencedNote[];
 }
 
 const createNote = lift((title: string, content: string) => {
   return {
-    [ID]: Date.now(),  // Stable ID for backlinking
     title,
     content,
     backlinks: [],
@@ -957,29 +929,18 @@ const createNote = lift((title: string, content: string) => {
 // Notes can now reference each other by ID
 const addBacklink = handler<
   unknown,
-  { note: Cell<ReferencedNote>; targetId: number }
->((_event, { note, targetId }) => {
-  const current = note.get();
-  note.set({
-    ...current,
-    backlinks: [...current.backlinks, targetId],
-  });
+  { note: Cell<ReferencedNote>; target: ReferencedNote }
+>((_event, { note, target }) => {
+  // .key to select a subset of the cell, .push to just change that
+  note.key("backlinks").push(target);
 });
 ```
-
-## Trade-offs
-
-| Approach | Pros | Cons | When to Use |
-|----------|------|------|-------------|
-| **Without [ID]** (recommended) | • Simpler code<br>• Less boilerplate<br>• Easier to understand<br>• Works for 90% of cases | • May have issues with front-insertion in some cases<br>• No stable cross-network references | • Todo lists<br>• Shopping lists<br>• Simple CRUD<br>• Display-only data<br>• Most basic patterns |
-| **With [ID]** (when needed) | • Stable references<br>• Handles all operations<br>• Cross-network linking<br>• Complex reordering | • More complex code<br>• Requires ID management<br>• More boilerplate | • Data URIs<br>• Backlinking systems<br>• Cross-charm references<br>• Complex drag-and-drop<br>• Generating items in `lift` |
 
 ## Rule of Thumb
 
 **Start without `[ID]`. Only add it if:**
-1. You're creating data URIs for cross-network references
-2. You're generating new items within a `lift` function
-3. You encounter specific bugs with item identity during complex operations
+1. You're generating new items within a `lift` function that have to be
+   references elsewhere.
 
 **Don't add `[ID]` just because you see it in examples.** The `list-operations.tsx` example demonstrates advanced features, but your basic shopping list, todo list, or simple CRUD pattern doesn't need it.
 
@@ -1015,7 +976,8 @@ with methods:
 
 - `cell.get()`: Get the current value
 - `cell.set(newValue)`: Set a new value
-- `cell.update(fn)`: Update using a function
+- `cell.key(property)`: Navigate into the cell, selecting a property
+- `cell.update({ [key]: value })`: Update only these keys
 
 This allows for more control over state updates, including:
 
