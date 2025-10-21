@@ -165,12 +165,8 @@ export class CTRender extends BaseElement {
   }
 
   private _isSubPath(cell: Cell<unknown>): boolean {
-    try {
-      const link = cell.getAsNormalizedFullLink();
-      return Array.isArray(link?.path) && link.path.length > 0;
-    } catch {
-      return false;
-    }
+    const link = cell.getAsNormalizedFullLink();
+    return Array.isArray(link?.path) && link.path.length > 0;
   }
 
   private async _renderCell() {
