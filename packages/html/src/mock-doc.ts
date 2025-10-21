@@ -4,7 +4,7 @@
 import * as htmlparser2 from "htmlparser2";
 import * as domhandler from "domhandler";
 import * as domserializer from "dom-serializer";
-import { RenderOptions } from "./render.ts";
+import { RenderOptions, styleObjectToCssString } from "./render.ts";
 
 function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
   return {
@@ -15,6 +15,19 @@ function renderOptionsFromDoc(document: globalThis.Document): RenderOptions {
       value: unknown,
     ) {
       const el = element as any;
+
+      // Handle style object specially - convert to CSS string
+      if (
+        key === "style" &&
+        el.attribs &&
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        const cssString = styleObjectToCssString(value as Record<string, any>);
+        el.attribs["style"] = cssString;
+        return;
+      }
 
       // Handle data-* attributes specially - they need to be set as HTML attributes
       // to populate the dataset property correctly

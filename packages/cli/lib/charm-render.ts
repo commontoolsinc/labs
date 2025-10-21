@@ -4,7 +4,7 @@ import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
 import { getLogger } from "@commontools/utils/logger";
-import { MockDoc } from "@commontools/html/utils";
+import { MockDoc } from "../../html/src/mock-doc.ts";
 
 const logger = getLogger("charm-render", { level: "info", enabled: false });
 
