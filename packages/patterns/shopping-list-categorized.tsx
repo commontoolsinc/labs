@@ -2,26 +2,29 @@
 import { Default, derive, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 interface ShoppingItem {
-  title: string;
+  name: string;
   done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
+  category: Default<string, "Other">;
 }
 
-interface CategorizedListInput {
+interface CategorizedShoppingListInput {
   items: Default<ShoppingItem[], []>;
 }
 
-interface CategorizedListOutput extends CategorizedListInput {}
+interface CategorizedShoppingListOutput extends CategorizedShoppingListInput {}
 
-export default recipe<CategorizedListInput, CategorizedListOutput>(
-  "Shopping List (by Category)",
+export default recipe<
+  CategorizedShoppingListInput,
+  CategorizedShoppingListOutput
+>(
+  "Shopping List (By Category)",
   ({ items }) => {
     // Group items by category using derive
     const groupedItems = derive(items, (itemsList) => {
       const groups: Record<string, ShoppingItem[]> = {};
 
       for (const item of itemsList) {
-        const category = item.category || "Uncategorized";
+        const category = item.category || "Other";
         if (!groups[category]) {
           groups[category] = [];
         }
@@ -39,18 +42,43 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
     return {
       [NAME]: "Shopping List (by Category)",
       [UI]: (
-        <div>
-          <h3>By Category</h3>
+        <div style={{ padding: "1rem", maxWidth: "600px" }}>
+          <h2>Shopping List by Category</h2>
           {categories.map((category) => (
-            <div style={{ marginBottom: "1rem" }}>
-              <h4>{category}</h4>
-              {(groupedItems[category] ?? []).map((item: OpaqueRef<ShoppingItem>) => (
-                <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
-                    {item.title}
-                  </span>
-                </ct-checkbox>
-              ))}
+            <div style={{ marginBottom: "1.5rem" }}>
+              <h3
+                style={{
+                  marginTop: 0,
+                  color: "#666",
+                  fontSize: "14px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                  borderBottom: "2px solid #eee",
+                  paddingBottom: "0.5rem",
+                }}
+              >
+                {category}
+              </h3>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  marginTop: "0.75rem",
+                }}
+              >
+                {(groupedItems[category] ?? []).map((
+                  item: OpaqueRef<ShoppingItem>,
+                ) => (
+                  <ct-checkbox $checked={item.done}>
+                    <span
+                      style={item.done ? "text-decoration: line-through;" : ""}
+                    >
+                      {item.name}
+                    </span>
+                  </ct-checkbox>
+                ))}
+              </div>
             </div>
           ))}
         </div>

@@ -1,9 +1,18 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
+import {
+  Cell,
+  Default,
+  handler,
+  NAME,
+  OpaqueRef,
+  recipe,
+  UI,
+} from "commontools";
 
 interface ShoppingItem {
-  title: string;
+  name: string;
   done: Default<boolean, false>;
+  category: Default<string, "Other">;
 }
 
 interface ShoppingListInput {
@@ -20,7 +29,11 @@ const addItem = handler<
   if (!itemName) return;
 
   const currentItems = items.get();
-  items.set([...currentItems, { title: itemName, done: false }]);
+  items.set([...currentItems, {
+    name: itemName,
+    done: false,
+    category: "Other",
+  }]);
 });
 
 const removeItem = handler<
@@ -32,21 +45,30 @@ const removeItem = handler<
 });
 
 export default recipe<ShoppingListInput, ShoppingListOutput>(
-  "Shopping List (Basic)",
+  "Shopping List",
   ({ items }) => {
     return {
       [NAME]: "Shopping List",
       [UI]: (
-        <div>
-          <h3>Shopping List</h3>
-          <div>
+        <div style={{ padding: "1rem", maxWidth: "600px" }}>
+          <h2>Shopping List</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {items.map((item: OpaqueRef<ShoppingItem>, index) => (
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div
+                style={{ display: "flex", gap: "8px", alignItems: "center" }}
+              >
                 <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
-                    {item.title}
+                  <span
+                    style={item.done ? { textDecoration: "line-through" } : {}}
+                  >
+                    {item.name}
                   </span>
                 </ct-checkbox>
+                <ct-input
+                  $value={item.category}
+                  placeholder="Category"
+                  customStyle="width: 120px;"
+                />
                 <ct-button onClick={removeItem({ items, index })}>×</ct-button>
               </div>
             ))}
