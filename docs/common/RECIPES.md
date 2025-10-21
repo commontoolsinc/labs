@@ -302,7 +302,7 @@ logic.
      { items: Cell<ShoppingItem[]>; item: OpaqueRef<ShoppingItem> }
    >((_event, { items, item }) => {
      const currentItems = items.get();
-     const index = currentItems.findIndex((el) => items.key(el).equals(item));
+     const index = currentItems.findIndex((_, idx) => items.key(idx).equals(item));
      if (index >= 0) {
        items.set(currentItems.toSpliced(index, 1));
      }
@@ -329,7 +329,7 @@ logic.
 
    const removeItem = handler((_, { items, item }) => {
      const currentItems = items.get();
-     const index = currentItems.findIndex((el) => items.key(el).equals(item));
+     const index = currentItems.findIndex((_, idx) => items.key(idx).equals(item));
      if (index >= 0) {
        items.set(currentItems.toSpliced(index, 1));
      }
