@@ -3,7 +3,7 @@ import { h, UI, VNode } from "@commontools/api";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { serializableEvent } from "../src/render.ts";
-import { MockDoc } from "./utils.ts";
+import { MockDoc } from "../src/utils.ts";
 
 let mock: MockDoc;
 

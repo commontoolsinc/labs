@@ -1,5 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { MockDoc } from "./utils.ts";
+import { MockDoc } from "../src/utils.ts";
 import { assert } from "@std/assert";
 
 describe("MockDoc", () => {
