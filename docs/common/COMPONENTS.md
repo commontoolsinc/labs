@@ -119,10 +119,14 @@ const toggle = handler(
   }
 );
 
-<ct-checkbox $checked={item.done} onChange={toggle({ item })} />
+<ct-checkbox $checked={item.done} onct-change={toggle({ item })} />
 ```
 
-**Note:** Even when using a handler, you can still use `$checked` for the binding. The `$` binding handles reading and writing the value, while `onChange` lets you add extra logic.
+**Note:** Even when using a handler, you can still use `$checked` for the
+binding. The `$` binding handles reading and writing the value, while `onChange`
+lets you add extra logic. Note that the actual name for the `onChange`
+handler may be different depending on the component being used. For example,
+<ct-checkbox> uses `onct-change`. Consult the component for details.
 
 ### Validation Example
 

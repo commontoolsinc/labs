@@ -654,7 +654,7 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
     item.set({ ...current, done: !current.done });
   }
 );
-<ct-checkbox checked={item.done} onChange={toggleDone({ item })} />
+<ct-checkbox checked={item.done} onct-change={toggleDone({ item })} />
 
 // ✅ PREFERRED - Bidirectional binding handles it
 <ct-checkbox $checked={item.done} />
