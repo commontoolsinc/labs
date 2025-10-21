@@ -48,7 +48,7 @@ const myHandler = handler<EventSchema, StateSchema>(handlerFunction);
 const removeItem = handler(
   (_event, { items, item }: { items: Cell<Item[]>; item: Cell<Item> }) => {
     const currentItems = items.get();
-    const index = currentItems.findIndex((el) => items.key(el).equals(item));
+    const index = currentItems.findIndex((_, idx) => items.key(idx).equals(item));
     if (index >= 0) {
       items.set(currentItems.toSpliced(index, 1));
     }
