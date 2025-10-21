@@ -81,10 +81,10 @@ const addItem = handler<
 
 const removeItem = handler<
   unknown,
-  { items: Cell<ShoppingItem[]>; item: Cell<ShoppingItem> }
+  { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
 >((_event, { items, item }) => {
   const currentItems = items.get();
-  const index = currentItems.findIndex((el) => item.equals(el as any));
+  const index = currentItems.findIndex((el) => item.equals(el));
   if (index >= 0) {
     items.set(currentItems.toSpliced(index, 1));
   }
@@ -237,12 +237,11 @@ const addItem = handler<
   const itemName = detail?.message?.trim();
   if (!itemName) return;
 
-  const currentItems = items.get();
-  items.set([...currentItems, {
+  items.push({
     title: itemName,
     done: false,
     category: newCategory.get(),
-  }]);
+  });
 });
 
 export default recipe<EditorInput, EditorOutput>(
@@ -299,11 +298,11 @@ This would be the Level 2 categorized view from above. When you link them:
 - ✅ Charms can be developed and tested independently
 - ✅ Data flows through the link connection
 
-## Level 4: Pattern Composition with ct-render
+## Level 4: Pattern Composition
 
 When you want to display multiple patterns together that share the same data **within a single recipe** (without deploying separate charms), use pattern composition.
 
-**Key Concept**: Use `$cell={pattern}` not `charm={pattern}` to render composed patterns.
+**Key Concept**: Just reference the other instances directly: {view}.
 
 ```typescript
 /// <cts-enable />
@@ -335,11 +334,11 @@ export default recipe<ComposedInput, ComposedInput>(
           {/* ✅ CORRECT - Use $cell not charm */}
           <div style={{ flex: 1 }}>
             <h3>Basic View</h3>
-            <ct-render $cell={basicView} />
+            {basicView}
           </div>
           <div style={{ flex: 1 }}>
             <h3>By Category</h3>
-            <ct-render $cell={categoryView} />
+            {categoryView}
           </div>
         </div>
       ),
@@ -352,23 +351,9 @@ export default recipe<ComposedInput, ComposedInput>(
 **What to notice:**
 - ✅ `ShoppingList({ items })` creates a pattern instance (a cell containing the pattern's output)
 - ✅ Both patterns receive the same `items` cell reference
-- ✅ `<ct-render $cell={basicView} />` - note the `$cell` attribute
+- ✅ `<div>...{basicView}</div>` - note the `basicView` use
 - ✅ Changes in one view automatically update the other (they share the same cell)
 - ✅ No charm deployment needed - all composed within one recipe
-- ❌ Don't use `charm={...}` or `pattern={...}` - use `$cell={...}`
-
-**Common mistakes:**
-
-```typescript
-// ❌ WRONG - Using charm attribute doesn't work
-<ct-render charm={basicView} />
-
-// ❌ WRONG - Using pattern attribute doesn't work
-<ct-render pattern={basicView} />
-
-// ✅ CORRECT - Use $cell for bidirectional binding
-<ct-render $cell={basicView} />
-```
 
 **When to use Pattern Composition vs Linked Charms:**
 
@@ -378,8 +363,6 @@ export default recipe<ComposedInput, ComposedInput>(
 | Independent charms with data flow | Linked Charms (Level 3) |
 | Reusable components within a recipe | Pattern Composition (Level 4) |
 | Separate deployments that communicate | Linked Charms (Level 3) |
-
-See `packages/patterns/ct-render.tsx` for a working example and `COMPONENTS.md` for ct-render API details.
 
 ## Common Pattern: Search/Filter with Inline Logic
 
@@ -477,7 +460,7 @@ Don't optimize prematurely! Most patterns perform well without optimization. Con
 ```typescript
 // ❌ AVOID - Deriving entire sorted list when you only need count
 const sortedItems = derive(items, (list) => {
-  return list.sort((a, b) => a.priority - b.priority);
+  return list.toSorted((a, b) => a.priority - b.priority);
 });
 const itemCount = derive(sortedItems, (list) => list.length);
 
@@ -485,16 +468,17 @@ const itemCount = derive(sortedItems, (list) => list.length);
 const itemCount = derive(items, (list) => list.length);
 ```
 
-2. **Use index-based removal when you have the index**
+2. **Avoid index-based removal, pass item references**
 
 ```typescript
 // ✅ EFFICIENT - Already have the index from map
-{items.map((item: OpaqueRef<Item>, index) => (
-  <ct-button onClick={removeItem({ items, index })}>×</ct-button>
+{items.map((item: OpaqueRef<Item>) => (
+  <ct-button onClick={removeItem({ items, item })}>×</ct-button>
 ))}
 
-const removeItem = handler((_, { items, index }) => {
-  items.set(items.get().toSpliced(index, 1));
+const removeItem = handler((_, { items, item }: { items: Cell<Array<Cell<Item>>>, item: Cell<Item>}) => {
+  const index = items.get.findIndex((el) => el.equals(item))
+  if (index !== -1) items.set(items.get().toSpliced(index, 1));
 });
 ```
 
@@ -522,11 +506,14 @@ const removeItem = handler((_, { items, item }) => { /* ... */ });
 **Issue: Bidirectional binding not updating**
 
 ```typescript
-// ❌ WRONG - Forgot $ prefix
+// ❌ WRONG - Forgot $ prefix and no handler
 <ct-checkbox checked={item.done} />
 
-// ✅ CORRECT
+// ✅ CORRECT - Bidirectional binding via $
 <ct-checkbox $checked={item.done} />
+
+// ✅ CORRECT - Onedirectional binding, handler handles changes
+<ct-checkbox checked={item.done} onct-change={toggle(item)} />
 ```
 
 **Issue: Type error with .map()**
@@ -583,26 +570,7 @@ const groupedItems = derive(items, (list) => {
 
 These are the most frequent mistakes developers make when building patterns:
 
-#### 1. Using `charm` Instead of `$cell` with ct-render
-
-**This is the #1 most common mistake with pattern composition.**
-
-```typescript
-// ❌ WRONG - Using charm attribute doesn't work
-<ct-render charm={myPattern} />
-
-// ❌ WRONG - Using pattern attribute doesn't work
-<ct-render pattern={myPattern} />
-
-// ✅ CORRECT - Use $cell attribute
-<ct-render $cell={myPattern} />
-```
-
-**Why this happens:** The `ct-render` component requires the `$cell` attribute for bidirectional binding with pattern instances. Without it, the pattern won't render or update properly.
-
-**When you'll see this:** When composing multiple patterns together in a single recipe.
-
-#### 2. Forgetting Type Annotations in .map()
+#### 1. Forgetting Type Annotations in .map()
 
 ```typescript
 // ❌ WRONG - Missing type annotation
@@ -621,7 +589,7 @@ These are the most frequent mistakes developers make when building patterns:
 
 **When to add it:** Always, in every `.map()` call on a Cell array in JSX.
 
-#### 3. Mixing Style Syntax (String vs Object)
+#### 2. Mixing Style Syntax (String vs Object)
 
 ```typescript
 // ❌ WRONG - String style on HTML element
@@ -647,10 +615,11 @@ These are the most frequent mistakes developers make when building patterns:
 
 **Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
 
-#### 4. Using Handlers Instead of Bidirectional Binding
+#### 3. Using Handlers Instead of Bidirectional Binding
 
 ```typescript
 // ❌ AVOID - Unnecessary handler for simple toggle
+// ❌ AVOID - Rewriting the whole array instead of just toggling one item
 const toggleDone = handler<unknown, { item: Cell<Item> }>(
   (_, { item }) => {
     const current = item.get();
@@ -667,7 +636,7 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
 
 **Remember:** If you're just syncing UI ↔ data, use `$` binding. Only use handlers for side effects, validation, or structural changes.
 
-#### 5. Trying to Use [ID] When You Don't Need It
+#### 4. Trying to Use [ID] When You Don't Need It
 
 ```typescript
 // ❌ UNNECESSARY - [ID] not needed for basic lists
@@ -692,21 +661,13 @@ interface TodoItem {
 - Most basic CRUD operations
 
 **When you DO need [ID]:**
-- Creating data URIs for items (stable references across network)
 - Creating referenceable data from within a `lift` function
-- Stable identity for items that might be modified
 
 See RECIPES.md for detailed [ID] guidance.
 
-#### 6. Incorrect Handler Type Parameters
+#### 5. Incorrect Handler Type Parameters
 
 ```typescript
-// ❌ WRONG - Nested Cell types
-const addItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>> }
->(/* ... */);
-
 // ❌ WRONG - OpaqueRef in handler parameters
 const addItem = handler<
   unknown,
@@ -721,9 +682,15 @@ const addItem = handler<
   const arr = items.get();  // arr is ShoppingItem[]
   items.set([...arr, { title: "New", done: false }]);
 });
+
+// ✅ CORRECT - Cell<Array<T>>>
+const addItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<ShoppingItem>>> }
+>(/* ... */);
 ```
 
-**Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array.
+**Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array. You can make the elements cells as well, e.g. to access `.equals`, `.set`, `.update`, etc. directly
 
 ## Testing Patterns and Development Workflow
 
@@ -906,7 +873,7 @@ Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to 
 
 ### Handler Type Parameters
 
-**Critical Rule**: In handler type signatures, always use `Cell<T[]>` for array parameters, never `Cell<Array<Cell<T>>>`.
+**Critical Rule**: Never write `OpaqueRef<...>` in a handler signature.
 
 ```typescript
 // ✅ CORRECT - Cell wraps the entire array
@@ -918,10 +885,10 @@ const addItem = handler<
   items.set([...currentItems, { title: "New", done: false }]);
 });
 
-// ❌ WRONG - Don't use nested Cell types
+// ✅ CORRECT - Nested cells are supported
 const addItem = handler<
   unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>> }  // ← Confusing and wrong!
+  { items: Cell<Array<Cell<ShoppingItem>>> }  // ← Cell of Cell[]
 >(/* ... */);
 
 // ❌ WRONG - Don't use OpaqueRef in handler parameters
@@ -929,45 +896,6 @@ const addItem = handler<
   unknown,
   { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
 >(/* ... */);
-```
-
-### Understanding the Type Contexts
-
-There are three different contexts where types appear:
-
-```typescript
-interface ShoppingItem {
-  title: string;
-  done: Default<boolean, false>;
-}
-
-// 1. In recipe parameters: Cell<ShoppingItem[]>
-export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
-  "Shopping List",
-  ({ items }) => {  // items is Cell<ShoppingItem[]>
-
-    // 2. In handler parameters: Cell<ShoppingItem[]>
-    const addItem = handler<
-      unknown,
-      { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
-    >((_event, { items }) => {
-      const arr = items.get();  // arr is ShoppingItem[]
-      items.set([...arr, { title: "New", done: false }]);
-    });
-
-    return {
-      [UI]: (
-        <div>
-          {/* 3. In JSX .map(): OpaqueRef<ShoppingItem> */}
-          {items.map((item: OpaqueRef<ShoppingItem>) => (
-            <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-          ))}
-        </div>
-      ),
-      items,  // 4. In recipe returns: Cell<ShoppingItem[]>
-    };
-  },
-);
 ```
 
 ### Mental Model
