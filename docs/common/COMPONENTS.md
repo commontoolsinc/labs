@@ -108,25 +108,25 @@ The bidirectional binding version is:
 ```tsx
 // ✅ CORRECT - Handler needed for side effects
 const toggle = handler(
-  (_event, { item }: { item: Cell<Item> }) => {
+  (_event, { item }: { item: Cell<Item>, items: Item[], max: number }) => {
     const currentValue = item.done.get();
-    item.done.set(!currentValue);
+    const doneCount = items.filter(item => item.done).length;
 
-    // Additional side effects
-    console.log("Item toggled:", item);
-    saveToBackend(item);
-    trackAnalytics("item_toggled", { done: !currentValue });
+    if (currentValue || max === undefined || doneCount < max) {
+      item.done.set(!currentValue);
+    } else {
   }
 );
 
-<ct-checkbox $checked={item.done} onct-change={toggle({ item })} />
+<ct-checkbox $checked={item.done} onct-change={toggle({ items, item, max = 3 })} />
 ```
 
-**Note:** Even when using a handler, you can still use `$checked` for the
-binding. The `$` binding handles reading and writing the value, while `onChange`
-lets you add extra logic. Note that the actual name for the `onChange`
-handler may be different depending on the component being used. For example,
-<ct-checkbox> uses `onct-change`. Consult the component for details.
+**Note:** When using a handler, use `checked` for the binding, without the $, as
+one-directional binding.
+
+Note that the actual name for the `onChange` handler may be different depending
+on the component being used. For example, <ct-checkbox> uses `onct-change`.
+Consult the component for details.
 
 ### Validation Example
 
@@ -146,11 +146,10 @@ const validatedValue = derive(rawInput, (value) => {
 });
 
 // Show validation status
-{ifElse(
-  derive(validatedValue, (v) => v !== null),
-  <span style={{ color: "green" }}>✓ Valid</span>,
+{v !== null ?
+  <span style={{ color: "green" }}>✓ Valid</span> :
   <span style={{ color: "red" }}>✗ Must be 3+ letters</span>
-)}
+}
 ```
 
 This approach separates concerns: bidirectional binding handles the UI sync, while derive handles validation logic.
@@ -208,11 +207,6 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 |--------------|--------------|-----------------|---------|
 | HTML (`div`, `span`, `button`) | Object | camelCase | `style={{ flex: 1, backgroundColor: "#fff" }}` |
 | Custom (`common-*`, `ct-*`) | String | kebab-case | `style="flex: 1; background-color: #fff;"` |
-
-## Why the Difference?
-
-- **HTML elements** are processed by the JSX transformer which expects React-style object syntax
-- **Custom elements** are web components that accept CSS strings as attributes
 
 ## Mixed Usage Example
 
@@ -282,43 +276,6 @@ const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ value }) => {
 ```
 
 Both inputs update the cell, but the second one logs changes. Use the simple bidirectional binding unless you need the extra logic.
-
-### Validation
-
-One reason to prefer a handler is validation of the value. This is a good idea, but you can _also_ consider using two cells. A raw input cell and a validated cell derived from the former, e.g.
-
-```tsx
-type InputSchema = { rawValue: Cell<string> };
-type OutputSchema = { validatedValue: string | null };
-
-const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) => {
-  // Example 1: Using full event object
-  // Here we destructure the event for convenience/brevity
-  const handleChange = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail: { value } }, { rawValue }) => {
-    rawValue.set(value);
-  });
-
-  // Example 2: Destructuring specific event properties (often cleaner)
-  const handleChangeDestructured = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail: { value } }, { rawValue }) => {
-    rawValue.set(value);
-  });
-
-  // Example 3: When event data isn't needed
-  const handleReset = handler<never, { rawValue: Cell<string> }>((_ , { rawValue }) => {
-    rawValue.set("");
-  });
-
-  const validatedValue = derive(rawValue, v => v.length > 0 ? v : null);
-
-  return {
-    [UI]: <div>
-      <ct-input $value={rawValue} onChange={handleChange({ rawValue })} />
-      <ct-button onClick={handleReset({ rawValue })}>Reset</ct-button>
-    </div>,
-    validatedValue
-  };
-});
-```
 
 # ct-select
 
@@ -666,7 +623,7 @@ const counter = Counter({ value: state.value });
 **When to use each:**
 - **Direct interpolation** (`{counter}`): Simple cases, most concise
 - **JSX component syntax** (`<Counter />`): When you want it to look like a component
-- **ct-render** (`<ct-render $cell={counter} />`): When you need explicit control or the pattern is stored in a variable
+- **ct-render** (`<ct-render $cell={counter} />`): When the pattern wasn't instantiated from within this pattern but was passed in or was stored in a list.
 
 ## Pattern Composition vs Linked Charms
 

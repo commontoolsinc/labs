@@ -26,14 +26,6 @@ See `COMPONENTS.md` for detailed bidirectional binding examples.
 Handlers in CommonTools follow a specific pattern that creates a factory function:
 
 ```typescript
-const myHandler = handler(
-  eventSchema,   // What data comes from UI events
-  stateSchema,   // What data the handler needs to operate on
-  handlerFunction // The actual function that executes
-);
-
-// or
-
 type EventSchema = ...
 type StateSchema = ...
 const myHandler = handler<EventSchema, StateSchema>(handlerFunction);
@@ -131,11 +123,18 @@ const addItem = handler<
   items.set([...currentItems, { title: "New", done: false }]);
 });
 
-// ❌ WRONG - Don't use nested Cell types
-const addItem = handler<
+// ✅ CORRECT - Nested cell types to access cell methods in sub-items
+const removeItem = handler<
   unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>> }  // ← Confusing and wrong!
->(/* ... */);
+  { items: Cell<Array<Cell<ShoppingItem>>>, item: Cell<ShoppingItem> }
+>(
+  const currentItems = items.get();
+  // Calls Cell.equals on the individual cell in the list:
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index !== -1) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
+);
 
 // ❌ WRONG - Don't use OpaqueRef in handler parameters
 const addItem = handler<
@@ -159,18 +158,17 @@ interface Input {
   items: Default<ShoppingItem[], []>;  // Plain type in schema
 }
 
+// Context 2: In handler parameters - Cell<ShoppingItem[]>
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }
+>((_event, { items }) => {
+  items.push({ title: "New", done: false });
+});
+
 export default recipe<Input, Input>(
   "Shopping List",
-  ({ items }) => {  // Context 2: items is Cell<ShoppingItem[]>
-
-    // Context 3: In handler parameters - Cell<ShoppingItem[]>
-    const addItem = handler<
-      unknown,
-      { items: Cell<ShoppingItem[]> }
-    >((_event, { items }) => {
-      const arr = items.get();  // arr is ShoppingItem[]
-      items.set([...arr, { title: "New", done: false }]);
-    });
+  ({ items }) => {  // Context 3: items is OpaqueRef<ShoppingItem[]>
 
     return {
       [UI]: (
@@ -182,7 +180,7 @@ export default recipe<Input, Input>(
           <ct-button onClick={addItem({ items })}>Add</ct-button>
         </div>
       ),
-      items,  // Context 2 again: Cell<ShoppingItem[]>
+      items,  // Context 2 again: OpaqueRef<ShoppingItem[]>
     };
   },
 );
@@ -262,26 +260,23 @@ const addItem = handler<
   const message = detail?.message?.trim();
   if (!message) return;
 
-  // .get() returns ShoppingItem[]
-  const currentItems: ShoppingItem[] = items.get();
-
-  // .set() accepts ShoppingItem[]
-  items.set([...currentItems, { title: message, done: false }]);
+  // Prefer .push() to add items to ShoppingItem[]
+  items.push({ title: message, done: false });
 });
 
 const removeItem = handler<
   unknown,
-  { items: Cell<ShoppingItem[]>; item: Cell<ShoppingItem> }
+  { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
 >((_event, { items, item }) => {
   const currentItems = items.get();
-  const index = currentItems.findIndex((el) => item.equals(el as any));
+  const index = currentItems.findIndex((el) => el.equals(item));
   if (index >= 0) {
     items.set(currentItems.toSpliced(index, 1));
   }
 });
 
 export default recipe<Input, Input>("Shopping List", ({ items }) => {
-  // items here is Cell<ShoppingItem[]>
+  // items here is OpaqueRef<ShoppingItem[]>
 
   return {
     [UI]: (
@@ -298,7 +293,7 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
         <ct-message-input onct-send={addItem({ items })} />
       </div>
     ),
-    items,  // Return Cell<ShoppingItem[]>
+    items,  // Return OpaqueRef<ShoppingItem[]>
   };
 });
 ```
@@ -308,9 +303,9 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
 **When writing handler type signatures:**
 
 - ✅ DO: `{ items: Cell<ShoppingItem[]> }`
-- ❌ DON'T: `{ items: Cell<Array<Cell<ShoppingItem>>> }`
+- ✅ DO: `{ items: Cell<Array<Cell<ShoppingItem>>> }`
+- ✅ DO: `{ items: ShoppingItem[] }` (for read-only uses)
 - ❌ DON'T: `{ items: Cell<OpaqueRef<ShoppingItem>[]> }`
-- ❌ DON'T: `{ items: ShoppingItem[] }` (missing Cell wrapper)
 
 **Rule of thumb:** In handler type signatures, use `Cell<T[]>` for array parameters. The Cell wraps the entire array, not individual elements.
 
@@ -331,14 +326,11 @@ const updateTitle = handler<
 
 // Option 2: Use full event object when you need multiple properties
 const handleComplexEvent = handler<
-  { detail: { value: string }, target: HTMLElement, timestamp: number }, 
+  { detail: { value: string } }, 
   { data: Cell<any> }
 >(
   (e, { data }) => {
-    // Access multiple event properties
-    console.log('Event timestamp:', e.timestamp);
-    console.log('Target element:', e.target);
-    data.set({ value: e.detail.value, element: e.target.tagName });
+    data.set({ value: e.detail.value });
   }
 );
 
@@ -425,10 +417,10 @@ const addItem = handler<
 ```typescript
 const updatePageContent = handler<
   { detail: { value: string } }, 
-  { pages: Record<string, string>, currentPage: string }
+  { pages: Cell<Record<string, string>>, currentPage: string }
 >(
   ({ detail }, { pages, currentPage }) => {
-    pages[currentPage] = detail.value;
+    pages.key(currentPage).set(detail.value);
   }
 );
 ```
@@ -450,21 +442,6 @@ const addItemWithTimestamp = handler<
       done: false,
       createdAt: createTimestamp()
     });
-  }
-);
-```
-
-### Conditional State Updates
-```typescript
-const toggleItem = handler<
-  Record<string, never>, 
-  { item: { id: string }, items: Cell<Array<{ id: string, done: boolean }>> }
->(
-  (_, { item, items }) => {
-    const index = items.get().findIndex(i => i.id === item.id);
-    if (index !== -1) {
-      items.get()[index].done = !items.get()[index].done;
-    }
   }
 );
 ```
@@ -538,7 +515,7 @@ const handler = handler<{
 
 // ✅ Better: Simple clicks rarely need event data
 const handler = handler<Record<string, never>, any>(
-  (ev, state) => { ... }
+  (_, state) => { ... }
 );
 ```
 
