@@ -8,6 +8,7 @@ import {
   NAME,
   navigateTo,
   Opaque,
+  OpaqueRef,
   recipe,
   UI,
   wish,
@@ -20,8 +21,11 @@ type Input = {
 
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
-  content: Default<string, "">;
   backlinks: MentionableCharm[];
+
+  /** The content of the note */
+  content: Default<string, "">;
+  editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
 const _updateTitle = handler<
@@ -74,6 +78,16 @@ const handleNewBacklink = handler<
     mentionable.push(detail.charm as unknown as MentionableCharm);
   }
 });
+
+/** This edits the content */
+const handleEditContent = handler<
+  { detail: { value: string } },
+  { content: Cell<string> }
+>(
+  ({ detail }, { content }) => {
+    content.set(detail.value);
+  },
+);
 
 const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   (_, { charm }) => {
@@ -140,6 +154,7 @@ const Note = recipe<Input, Output>(
       content,
       mentioned,
       backlinks,
+      editContent: handleEditContent({ content }),
     };
   },
 );

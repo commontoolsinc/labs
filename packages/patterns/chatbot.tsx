@@ -10,9 +10,11 @@ import {
   handler,
   llmDialog,
   NAME,
+  navigateTo,
   recipe,
   Stream,
   UI,
+  VNode,
   wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
@@ -134,6 +136,11 @@ type ChatOutput = {
   title?: string;
   attachments: Array<PromptAttachment>;
   tools: any;
+  ui: {
+    chatLog: VNode;
+    promptInput: VNode;
+    attachmentsAndTools: VNode;
+  };
 };
 
 export const TitleGenerator = recipe<
@@ -184,6 +191,26 @@ function getMentionable() {
   );
 }
 
+const navigateToAttachment = handler<
+  { id: string },
+  { allAttachments: Array<PromptAttachment> }
+>(({ id }, { allAttachments }) => {
+  const attachment = allAttachments.find((a) => a.id === id);
+
+  return navigateTo(attachment?.charm);
+});
+
+const listAttachments = handler<
+  { result: Cell<string> },
+  { allAttachments: Array<PromptAttachment> }
+>(({ result }, { allAttachments }) => {
+  result.set(JSON.stringify(allAttachments.map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
+    type: attachment.type,
+  }))));
+});
+
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme }) => {
@@ -208,12 +235,25 @@ export default recipe<ChatInput, ChatOutput>(
       return tools;
     });
 
+    const attachmentTools = {
+      navigateToAttachment: {
+        description:
+          "Navigate to a mentionable by its ID in the attachments array.",
+        handler: navigateToAttachment({ allAttachments }),
+      },
+      listAttachments: {
+        description: "List all attachments in the attachments array.",
+        handler: listAttachments({ allAttachments }),
+      },
+    };
+
     // Merge static and dynamic tools
     const mergedTools = derive(
-      [tools, dynamicTools],
-      ([staticTools, dynamic]: [any, any]) => ({
+      [tools, dynamicTools, attachmentTools],
+      ([staticTools, dynamic, attachments]: [any, any, any]) => ({
         ...staticTools,
         ...dynamic,
+        ...attachments,
       }),
     );
 
@@ -242,46 +282,58 @@ export default recipe<ChatInput, ChatOutput>(
 
     const title = TitleGenerator({ model, messages });
 
+    const promptInput = (
+      <div slot="footer">
+        <ct-prompt-input
+          placeholder="Ask the LLM a question..."
+          pending={pending}
+          $mentionable={mentionable}
+          onct-send={sendMessage({ addMessage, allAttachments })}
+          onct-stop={cancelGeneration}
+          onct-attachment-add={addAttachment({ allAttachments })}
+          onct-attachment-remove={removeAttachment({ allAttachments })}
+        />
+        <ct-select
+          items={items}
+          $value={model}
+        />
+      </div>
+    );
+
+    const chatLog = (
+      <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+        <ct-chat
+          theme={theme}
+          $messages={messages}
+          pending={pending}
+          tools={flattenedTools}
+        />
+      </ct-vscroll>
+    );
+
+    const attachmentsAndTools = (
+      <ct-hstack gap="normal">
+        <ct-attachments-bar
+          attachments={allAttachments}
+          removable
+          onct-remove={removeAttachment({ allAttachments })}
+        />
+        <ct-tools-chip tools={flattenedTools} />
+      </ct-hstack>
+    );
+
     return {
       [NAME]: title,
       [UI]: (
         <ct-screen>
           <ct-vstack slot="header">
             <ct-heading level={4}>{title}</ct-heading>
-            <ct-hstack gap="normal">
-              <ct-attachments-bar
-                attachments={allAttachments}
-                removable
-                onct-remove={removeAttachment({ allAttachments })}
-              />
-              <ct-tools-chip tools={flattenedTools} />
-            </ct-hstack>
+            {attachmentsAndTools}
           </ct-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <ct-chat
-              theme={theme}
-              $messages={messages}
-              pending={pending}
-              tools={flattenedTools}
-            />
-          </ct-vscroll>
+          {chatLog}
 
-          <div slot="footer">
-            <ct-prompt-input
-              placeholder="Ask the LLM a question..."
-              pending={pending}
-              $mentionable={mentionable}
-              onct-send={sendMessage({ addMessage, allAttachments })}
-              onct-stop={cancelGeneration}
-              onct-attachment-add={addAttachment({ allAttachments })}
-              onct-attachment-remove={removeAttachment({ allAttachments })}
-            />
-            <ct-select
-              items={items}
-              $value={model}
-            />
-          </div>
+          {promptInput}
         </ct-screen>
       ),
       messages,
@@ -291,6 +343,11 @@ export default recipe<ChatInput, ChatOutput>(
       title,
       attachments: allAttachments,
       tools: flattenedTools,
+      ui: {
+        chatLog,
+        promptInput,
+        attachmentsAndTools,
+      },
     };
   },
 );

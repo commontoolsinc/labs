@@ -15,6 +15,7 @@ export interface AppState {
   showShellCharmListView?: boolean;
   showDebuggerView?: boolean;
   showQuickJumpView?: boolean;
+  showSidebar?: boolean;
 }
 
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
@@ -58,6 +59,10 @@ export function applyCommand(
     }
     case "set-show-quick-jump-view": {
       next.showQuickJumpView = command.show;
+      break;
+    }
+    case "set-show-sidebar": {
+      next.showSidebar = command.show;
       break;
     }
   }
