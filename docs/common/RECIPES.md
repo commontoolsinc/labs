@@ -917,16 +917,19 @@ const addItem = handler<
 
 const removeItem = handler<
   unknown,
-  { items: Cell<ShoppingItem[]>; index: number }
->((_event, { items, index }) => {
+  { items: Cell<ShoppingItem[]>; item: Cell<ShoppingItem> }
+>((_event, { items, item }) => {
   const currentItems = items.get();
-  items.set(currentItems.toSpliced(index, 1));
+  const index = currentItems.findIndex((el) => item.equals(el as any));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
 });
 ```
 
 This works perfectly without [ID] because:
 - Items are added to the end
-- Removal uses index from `.map()`
+- Removal uses item references with `.equals()`
 - No cross-network references needed
 
 ### Example 2: When You Actually Need [ID]

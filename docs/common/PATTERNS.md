@@ -81,10 +81,13 @@ const addItem = handler<
 
 const removeItem = handler<
   unknown,
-  { items: Cell<ShoppingItem[]>; index: number }
->((_event, { items, index }) => {
+  { items: Cell<ShoppingItem[]>; item: Cell<ShoppingItem> }
+>((_event, { items, item }) => {
   const currentItems = items.get();
-  items.set(currentItems.toSpliced(index, 1));
+  const index = currentItems.findIndex((el) => item.equals(el as any));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
 });
 
 export default recipe<ShoppingListInput, ShoppingListOutput>(
@@ -96,14 +99,14 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
         <div>
           <h2>Shopping List</h2>
           <div>
-            {items.map((item: OpaqueRef<ShoppingItem>, index) => (
+            {items.map((item: OpaqueRef<ShoppingItem>) => (
               <div style="display: flex; gap: 8px; align-items: center;">
                 <ct-checkbox $checked={item.done}>
                   <span style={item.done ? "text-decoration: line-through;" : ""}>
                     {item.title}
                   </span>
                 </ct-checkbox>
-                <ct-button onClick={removeItem({ items, index })}>×</ct-button>
+                <ct-button onClick={removeItem({ items, item })}>×</ct-button>
               </div>
             ))}
           </div>
