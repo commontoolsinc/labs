@@ -600,7 +600,7 @@ logic.
     ))}
     ```
 
-12. **Understand lift Currying with Multiple Parameters**: Multi-parameter lift creates curried functions:
+14. **Understand lift Currying with Multiple Parameters**: Multi-parameter lift creates curried functions:
 
     ```typescript
     // lift with multiple parameters creates curried function
@@ -621,7 +621,7 @@ logic.
 
     **Recommendation:** In most cases, direct property access or single-parameter lifts are clearer than multi-parameter curried functions.
 
-13. **Reference Data Instead of Copying**: When transforming data, reference the
+15. **Reference Data Instead of Copying**: When transforming data, reference the
    original objects rather than copying all their properties. This maintains
    reactivity and creates cleaner code:
 
@@ -642,7 +642,7 @@ logic.
    }));
    ```
 
-5. **Use Reactive String Templates**: Use the `str` template literal to create
+16. **Use Reactive String Templates**: Use the `str` template literal to create
    reactive strings that update when their inputs change:
 
    ```typescript
@@ -650,20 +650,20 @@ logic.
      str`Hello ${user.name}, you have ${notifications.count} notifications`;
    ```
 
-6. **Keep Logic Inside Recipes**: Place as much logic as possible inside recipe
+17. **Keep Logic Inside Recipes**: Place as much logic as possible inside recipe
    functions or the `map` function. This creates a cleaner reactive system where
    data flow is transparent.
 
-7. **Leverage Framework Reactivity**: Let the framework track changes and
+18. **Leverage Framework Reactivity**: Let the framework track changes and
    updates. Avoid manually tracking which items have been processed or creating
    complex state management patterns.
 
-8. **Composition**: Build complex flows by composing smaller recipes.
+19. **Composition**: Build complex flows by composing smaller recipes.
 
-9. **Minimize Side Effects**: Side effects should be managed through handlers
+20. **Minimize Side Effects**: Side effects should be managed through handlers
    rather than directly in recipes.
 
-10. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
+21. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
 
 ## Type Best Practices
 
