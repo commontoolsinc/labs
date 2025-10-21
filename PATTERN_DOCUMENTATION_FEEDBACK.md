@@ -1,16 +1,22 @@
 # Pattern Documentation Feedback
 
-**Date**: 2025-10-20
-**Context**: Feedback based on implementing shopping list patterns (basic, categorized, and composed views)
-**Author**: Pattern developer working through real-world examples
+**Date**: 2025-10-20 **Context**: Feedback based on implementing shopping list
+patterns (basic, categorized, and composed views) **Author**: Pattern developer
+working through real-world examples
 
 ---
 
 ## Executive Summary
 
-After building three shopping list patterns from scratch—a basic list, a category-grouped view, and a composed pattern displaying both side-by-side—I've identified several documentation gaps that significantly slowed development. While the existing PATTERNS.md and tutorial docs are helpful, critical details about pattern composition, TypeScript typing, and style attributes were either missing or buried in unrelated examples.
+After building three shopping list patterns from scratch—a basic list, a
+category-grouped view, and a composed pattern displaying both side-by-side—I've
+identified several documentation gaps that significantly slowed development.
+While the existing PATTERNS.md and tutorial docs are helpful, critical details
+about pattern composition, TypeScript typing, and style attributes were either
+missing or buried in unrelated examples.
 
-This feedback focuses on specific improvements that would help developers move faster and avoid common pitfalls.
+This feedback focuses on specific improvements that would help developers move
+faster and avoid common pitfalls.
 
 ---
 
@@ -18,16 +24,19 @@ This feedback focuses on specific improvements that would help developers move f
 
 ### 1.1 Pattern Composition with `ct-render`
 
-**Current State**: The `chatbot-note-composed.tsx` example exists but is complex and hard to extract the core pattern from.
+**Current State**: The `chatbot-note-composed.tsx` example exists but is complex
+and hard to extract the core pattern from.
 
 **Gap**: No clear, minimal example showing:
+
 - How to compose two patterns together
-- The difference between `<ct-render charm={...}>` (wrong) and `<ct-render $cell={...}>` (correct)
+- The difference between `<ct-render charm={...}>` (wrong) and
+  `<ct-render $cell={...}>` (correct)
 - How data sharing works between composed patterns
 
 **Suggested Addition to PATTERNS.md**:
 
-```typescript
+````typescript
 ## Level 4: Pattern Composition with ct-render
 
 When you want to display multiple patterns together that share the same data, use pattern composition.
@@ -74,9 +83,10 @@ export default recipe<ComposedInput, any>(
     };
   },
 );
-```
+````
 
 **What to notice:**
+
 - ✅ `ShoppingList({ items })` creates a pattern instance
 - ✅ Both patterns receive the same `items` cell reference
 - ✅ `<ct-render $cell={basicView} />` - note the `$cell` attribute
@@ -84,6 +94,7 @@ export default recipe<ComposedInput, any>(
 - ❌ Don't use `charm={...}` or `pattern={...}` - use `$cell={...}`
 
 **Common mistake:**
+
 ```typescript
 // ❌ WRONG - This doesn't work
 <ct-render charm={basicView} />
@@ -91,8 +102,8 @@ export default recipe<ComposedInput, any>(
 // ✅ CORRECT
 <ct-render $cell={basicView} />
 ```
-```
 
+````
 **Why This Helps**: This is the number one thing that blocked me. The `$cell` syntax is not documented anywhere clearly, and I only found it by reading the chatbot example carefully.
 
 ---
@@ -135,23 +146,26 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
     ))}
   </div>
 ))}
-```
+````
 
 **What to notice:**
+
 - ✅ `groupedItems[category]` - direct property access on derived object
 - ✅ `(groupedItems[category] ?? [])` - inline null coalescing for safety
 - ✅ No intermediate `derive` needed for property access
 - ✅ Type annotation `OpaqueRef<ShoppingItem>` required in inner map
 
 **When to use this pattern:**
+
 - You have a derived object (Record, Map-like structure)
 - You need to access its properties in a loop
 - The property access is simple (no complex transformations)
 
 **When NOT to use this pattern:**
-- If you need to filter or transform the property value, use another `derive`
-```
 
+- If you need to filter or transform the property value, use another `derive`
+
+````
 **Why This Helps**: I spent time trying to figure out if I needed another `derive()` call or if direct access would work. This pattern is powerful but not documented.
 
 ---
@@ -184,11 +198,13 @@ When using `.map()` on cells in JSX, TypeScript needs explicit type annotations 
 {items.map((item: OpaqueRef<ShoppingItem>) => (
   <ct-checkbox $checked={item.checked}>{item.name}</ct-checkbox>
 ))}
-```
+````
 
 ### Why OpaqueRef?
 
-Items in a `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to the Cell system. This enables:
+Items in a `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection
+to the Cell system. This enables:
+
 - Bidirectional binding (`$checked`, `$value`)
 - Reactive updates when the item changes
 - Type-safe property access
@@ -197,26 +213,35 @@ Items in a `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection t
 
 ```typescript
 // Both parameters need types when using index
-{items.map((item: OpaqueRef<ShoppingItem>, index: number) => (
-  <div>
-    <span>{index + 1}. {item.name}</span>
-    <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
-  </div>
-))}
+{
+  items.map((item: OpaqueRef<ShoppingItem>, index: number) => (
+    <div>
+      <span>{index + 1}. {item.name}</span>
+      <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
+    </div>
+  ));
+}
 ```
 
 ### Common Errors and Solutions
 
 **Error**: "Property 'X' does not exist on type 'OpaqueRef<unknown>'"
+
 ```typescript
 // ❌ Missing type annotation
-{items.map((item) => <span>{item.name}</span>)}
+{
+  items.map((item) => <span>{item.name}</span>);
+}
 
 // ✅ Add OpaqueRef<YourType>
-{items.map((item: OpaqueRef<ShoppingItem>) => <span>{item.name}</span>)}
+{
+  items.map((item: OpaqueRef<ShoppingItem>) => <span>{item.name}</span>);
+}
 ```
 
-**Error**: "Type 'OpaqueRef<ShoppingItem>' is not assignable to type 'Cell<boolean>'"
+**Error**: "Type 'OpaqueRef<ShoppingItem>' is not assignable to type
+'Cell<boolean>'"
+
 ```typescript
 // ❌ Wrong - trying to bind the whole item
 <ct-checkbox $checked={item} />
@@ -224,8 +249,8 @@ Items in a `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection t
 // ✅ Correct - bind the property
 <ct-checkbox $checked={item.checked} />
 ```
-```
 
+````
 **Why This Helps**: This was a source of multiple TypeScript errors. The connection between `.map()`, `OpaqueRef`, and bidirectional binding needs to be explicit.
 
 ---
@@ -259,11 +284,12 @@ HTML elements (`div`, `span`, `button`, etc.) use JavaScript object syntax:
 <div style="flex: 1; padding: 1rem;">
   {/* TypeScript error: Type 'string' is not assignable to type 'CSSProperties' */}
 </div>
-```
+````
 
 ### Custom Elements: String Syntax
 
-CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) use CSS string syntax:
+CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.)
+use CSS string syntax:
 
 ```typescript
 // ✅ CORRECT - String syntax for custom elements
@@ -283,14 +309,16 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 
 ### Quick Reference
 
-| Element Type | Style Syntax | Example |
-|--------------|--------------|---------|
-| HTML (`div`, `span`, `button`) | Object | `style={{ flex: 1 }}` |
-| Custom (`common-hstack`, `ct-card`) | String | `style="flex: 1;"` |
+| Element Type                        | Style Syntax | Example               |
+| ----------------------------------- | ------------ | --------------------- |
+| HTML (`div`, `span`, `button`)      | Object       | `style={{ flex: 1 }}` |
+| Custom (`common-hstack`, `ct-card`) | String       | `style="flex: 1;"`    |
 
 ### Why the Difference?
 
-HTML elements are processed by the JSX transformer which expects React-style object syntax. Custom elements are web components that accept CSS strings as attributes.
+HTML elements are processed by the JSX transformer which expects React-style
+object syntax. Custom elements are web components that accept CSS strings as
+attributes.
 
 ### Mixed Usage
 
@@ -301,10 +329,10 @@ HTML elements are processed by the JSX transformer which expects React-style obj
       Label
     </span>
   </common-vstack>
-</div>
-```
+</div>;
 ```
 
+````
 **Why This Helps**: I got multiple TypeScript errors mixing these up. This is a fundamental thing that should be clearly documented.
 
 ---
@@ -345,9 +373,10 @@ const removeItem = handler<unknown, { items: Cell<ShoppingItem[]>; index: number
     <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
   </div>
 ))}
-```
+````
 
 **When this works fine:**
+
 - Adding items to the end
 - Removing items by button click
 - Editing items in place
@@ -356,6 +385,7 @@ const removeItem = handler<unknown, { items: Cell<ShoppingItem[]>; index: number
 ### Advanced Pattern with [ID] (Only When Needed)
 
 Use `[ID]` only when you need stable references for:
+
 - Inserting items at the beginning of arrays
 - Complex drag-and-drop reordering
 - Maintaining references when items move positions
@@ -364,7 +394,7 @@ Use `[ID]` only when you need stable references for:
 import { ID } from "commontools";
 
 interface ShoppingItem {
-  [ID]: number;  // Stable identifier
+  [ID]: number; // Stable identifier
   name: string;
   checked: Default<boolean, false>;
 }
@@ -373,20 +403,21 @@ const insertAtStart = handler<unknown, { items: Cell<ShoppingItem[]> }>(
   (_, { items }) => {
     const current = items.get();
     items.set([{ [ID]: Date.now(), name: "New", checked: false }, ...current]);
-  }
+  },
 );
 ```
 
 ### Trade-offs
 
-| Approach | Pros | Cons |
-|----------|------|------|
+| Approach                  | Pros                                                 | Cons                                 |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------ |
 | Index-based (recommended) | Simpler code, less boilerplate, easier to understand | May have issues with front-insertion |
-| [ID]-based | Stable references, handles all operations | More complex, requires ID management |
+| [ID]-based                | Stable references, handles all operations            | More complex, requires ID management |
 
-**Rule of thumb**: Start without `[ID]`. Only add it if you encounter specific bugs with front-insertion or item identity.
-```
+**Rule of thumb**: Start without `[ID]`. Only add it if you encounter specific
+bugs with front-insertion or item identity.
 
+````
 **Why This Helps**: I was confused seeing `[ID]` in examples and wondering if I needed it. Clear guidance on when to use which approach would save time.
 
 ---
@@ -429,7 +460,7 @@ const addItem = handler<
   unknown,
   { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
 >(/* ... */);
-```
+````
 
 **Understanding the Types**
 
@@ -454,36 +485,37 @@ interface ShoppingItem {
 // 1. Handler parameter typing
 const addItem = handler<
   unknown,
-  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
+  { items: Cell<ShoppingItem[]> } // ← Cell<ShoppingItem[]>
 >((_event, { items }) => {
   items.set([...items.get(), { name: "New", checked: false }]);
 });
 
 export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
   "Shopping List",
-  ({ items }) => {  // ← items is Cell<ShoppingItem[]>
+  ({ items }) => { // ← items is Cell<ShoppingItem[]>
     return {
       [UI]: (
         <div>
           {/* 2. JSX .map() typing */}
-          {items.map((item: OpaqueRef<ShoppingItem>) => (  // ← OpaqueRef<ShoppingItem>
+          {items.map((item: OpaqueRef<ShoppingItem>) => ( // ← OpaqueRef<ShoppingItem>
             <ct-checkbox $checked={item.checked}>{item.name}</ct-checkbox>
           ))}
           <ct-button onClick={addItem({ items })}>Add</ct-button>
         </div>
       ),
-      items,  // 3. Return typing ← Cell<ShoppingItem[]>
+      items, // 3. Return typing ← Cell<ShoppingItem[]>
     };
   },
 );
 ```
 
 **Mental Model**:
+
 - Think of `Cell<T[]>` as a box containing an array
 - When you open the box (`.get()`), you get `T[]`
 - When you iterate in JSX (`.map()`), each item becomes `OpaqueRef<T>`
-```
 
+````
 **Why This Helps**: This was confusing initially. The relationship between Cell, OpaqueRef, and plain types needs to be crystal clear.
 
 ---
@@ -509,20 +541,22 @@ If yes, use bidirectional binding:
 <ct-checkbox $checked={item.done} />
 <ct-input $value={item.name} />
 <ct-select $value={item.category} items={[...]} />
-```
+````
 
 Only use handlers when you need:
+
 - Side effects (logging, API calls)
 - Validation logic
 - Structural changes (add/remove from arrays)
 
-**This is the most important pattern to learn.** Most of your UI updates will use bidirectional binding, not handlers.
+**This is the most important pattern to learn.** Most of your UI updates will
+use bidirectional binding, not handlers.
 
 ---
 
 [Rest of the document...]
-```
 
+````
 **Why This Helps**: I initially wrote handlers for everything, then learned about bidirectional binding. Starting with this principle would have saved significant time.
 
 ---
@@ -566,7 +600,7 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
     items,
   };
 });
-```
+````
 
 ### 2. Test Locally (2 minutes)
 
@@ -579,6 +613,7 @@ Fix any syntax errors before moving on.
 ### 3. Add Interactivity (10-15 minutes)
 
 Add one feature at a time:
+
 ```typescript
 // Add bidirectional binding first
 <ct-checkbox $checked={item.checked}>
@@ -625,8 +660,8 @@ When something doesn't work:
 2. **Inspect the data** - Use `charm inspect` to see current state
 3. **Simplify** - Comment out code until it works, then add back gradually
 4. **Check types** - Most errors are type-related (OpaqueRef, Cell, etc.)
-```
 
+````
 **Why This Helps**: Having a clear workflow would have helped me move faster and avoid getting stuck.
 
 ---
@@ -649,11 +684,13 @@ When something doesn't work:
 
 // ✅ CORRECT - Use $cell
 <ct-render $cell={myPattern} />
-```
+````
 
-This is the most common mistake when composing patterns. The `ct-render` component requires the `$cell` attribute for bidirectional binding with pattern instances.
-```
+This is the most common mistake when composing patterns. The `ct-render`
+component requires the `$cell` attribute for bidirectional binding with pattern
+instances.
 
+````
 ---
 
 ### 5.2 Forgetting Type Annotations in `.map()`
@@ -674,13 +711,14 @@ This is the most common mistake when composing patterns. The `ct-render` compone
 {items.map((item: OpaqueRef<ShoppingItem>) => (
   <ct-checkbox $checked={item.checked} />
 ))}
-```
+````
 
-**Why this happens**: TypeScript can't infer the type of items in a Cell array. You must explicitly annotate the parameter with `OpaqueRef<YourType>`.
+**Why this happens**: TypeScript can't infer the type of items in a Cell array.
+You must explicitly annotate the parameter with `OpaqueRef<YourType>`.
 
 **When to add it**: Always, in every `.map()` call on a Cell array in JSX.
-```
 
+````
 ---
 
 ### 5.3 Mixing Style Syntax
@@ -710,11 +748,12 @@ This is the most common mistake when composing patterns. The `ct-render` compone
 <common-hstack style="flex: 1;">
   {/* Works! */}
 </common-hstack>
-```
+````
 
-**Rule**: HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" for details.
-```
+**Rule**: HTML elements use object styles, custom elements use string styles.
+See "Styling: String vs Object Syntax" for details.
 
+````
 ---
 
 ## 6. Specific Documentation Additions
@@ -729,7 +768,7 @@ Add as Level 4 in PATTERNS.md (after Level 3: Linked Charms):
 When you want to display multiple patterns together that share the same data, without deploying separate charms.
 
 [Include the full example from section 1.1 above]
-```
+````
 
 ---
 
@@ -737,27 +776,32 @@ When you want to display multiple patterns together that share the same data, wi
 
 Add to PATTERNS.md or create TYPESCRIPT.md:
 
-```markdown
+````markdown
 # TypeScript Quick Reference for Patterns
 
 ## Type Annotations Cheat Sheet
 
 ### In Handler Parameters
+
 ```typescript
-handler<EventType, { items: Cell<ShoppingItem[]> }>
+handler<EventType, { items: Cell<ShoppingItem[]> }>;
 ```
+````
 
 ### In JSX .map()
+
 ```typescript
 items.map((item: OpaqueRef<ShoppingItem>, index: number) => ...)
 ```
 
 ### In Recipe Parameters
+
 ```typescript
-recipe<{ items: Default<ShoppingItem[], []> }, Output>
+recipe<{ items: Default<ShoppingItem[], []> }, Output>;
 ```
 
 ### Style Attributes
+
 ```typescript
 // HTML elements
 <div style={{ flex: 1 }} />
@@ -767,8 +811,8 @@ recipe<{ items: Default<ShoppingItem[], []> }, Output>
 ```
 
 [Include more from section 3 above]
-```
 
+````
 ---
 
 ### 6.3 Enhanced COMPONENTS.md: ct-render Section
@@ -800,7 +844,7 @@ export default recipe("Composed Pattern", ({ items }) => {
     ),
   };
 });
-```
+````
 
 ## Important: Use $cell not charm
 
@@ -831,9 +875,10 @@ return {
 };
 ```
 
-Both patterns receive the same cell reference, so updates in one automatically appear in the other.
-```
+Both patterns receive the same cell reference, so updates in one automatically
+appear in the other.
 
+```
 ---
 
 ## 7. Priority Recommendations
@@ -924,3 +969,4 @@ Most importantly, these suggestions come from real development experience, not t
 6. Consider a "Common Errors" troubleshooting page
 
 Thank you for maintaining this documentation. I hope this feedback helps improve the developer experience for future pattern creators.
+```
