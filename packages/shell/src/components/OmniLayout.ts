@@ -122,7 +122,7 @@ export class XOmniLayout extends LitElement {
     }
   `;
 
-  @property({ type: Boolean, reflect: true, attribute: "sidebar-open" })
+  @property({ type: Boolean })
   sidebarOpen = false;
 
   @state()
@@ -153,6 +153,19 @@ export class XOmniLayout extends LitElement {
     super.updated(changedProperties);
     if (changedProperties.has("sidebarWidth")) {
       this.style.setProperty("--sidebar-width", `${this.sidebarWidth}px`);
+    }
+
+    // Only show sidebar grid column when both open AND has content
+    if (
+      changedProperties.has("sidebarOpen") ||
+      changedProperties.has("hasSidebarContent")
+    ) {
+      const shouldExpand = this.sidebarOpen && this.hasSidebarContent;
+      if (shouldExpand) {
+        this.setAttribute("sidebar-open", "");
+      } else {
+        this.removeAttribute("sidebar-open");
+      }
     }
   }
 
