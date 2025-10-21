@@ -40,7 +40,13 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
               Enable Simple Feature
             </ct-checkbox>
 
-            <p>Value: {ifElse(simpleEnabled, "✓ Enabled", "⚠ Disabled")}</p>
+            <p id="feature-status">
+              {ifElse(
+                simpleEnabled,
+                "✓ Feature is enabled!",
+                "⚠ Feature is disabled",
+              )}
+            </p>
           </ct-card>
 
           <ct-card>
