@@ -165,15 +165,10 @@ export class CTRender extends BaseElement {
     // 1. Being passed a UI cell directly (e.g., cell.key(UI))
     // 2. Being passed a root charm cell (extract UI subcell)
     let uiCell = cell;
-    try {
-      const uiSubcell = cell.key(UI as never);
-      if (uiSubcell.get() !== undefined) {
-        this._log("extracting UI subcell from root charm cell");
-        uiCell = uiSubcell;
-      }
-    } catch (error) {
-      // If we can't read the UI subcell, just use the cell as-is
-      this._log("no UI subcell found, using cell as-is");
+    const uiSubcell = (cell as Cell<{ [UI]: unknown }>).key(UI);
+    if (uiSubcell.get() !== undefined) {
+      this._log("extracting UI subcell from root charm cell");
+      uiCell = uiSubcell;
     }
 
     this._log("rendering UI");
