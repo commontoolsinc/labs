@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
 export class XOmniLayout extends LitElement {
   static override styles = css`
@@ -25,6 +25,10 @@ export class XOmniLayout extends LitElement {
       position: relative;
       overflow: visible;
       width: 0;
+    }
+
+    .sidebar-container.hidden {
+      display: none;
     }
 
     .sidebar {
@@ -89,8 +93,35 @@ export class XOmniLayout extends LitElement {
   @property({ type: Boolean })
   sidebarOpen = true;
 
+  @state()
+  private hasSidebarContent = false;
+
+  override firstUpdated() {
+    const slot = this.shadowRoot?.querySelector(
+      'slot[name="sidebar"]',
+    ) as HTMLSlotElement | null;
+    if (slot) {
+      this.#updateSidebarContent(slot);
+      slot.addEventListener("slotchange", () => {
+        this.#updateSidebarContent(slot);
+      });
+    }
+  }
+
   private toggleSidebar() {
     this.sidebarOpen = !this.sidebarOpen;
+  }
+
+  #updateSidebarContent(slot: HTMLSlotElement) {
+    const nodes = slot.assignedNodes({ flatten: true });
+    const hasContent = nodes.some((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) return true;
+      if (node.nodeType === Node.TEXT_NODE) {
+        return (node.textContent ?? "").trim().length > 0;
+      }
+      return false;
+    });
+    this.hasSidebarContent = hasContent;
   }
 
   override render() {
@@ -98,7 +129,7 @@ export class XOmniLayout extends LitElement {
       <div class="main">
         <slot name="main"></slot>
       </div>
-      <div class="sidebar-container">
+      <div class="sidebar-container ${this.hasSidebarContent ? "" : "hidden"}">
         <div class="sidebar ${this.sidebarOpen ? "" : "closed"}">
           <div class="sidebar-content">
             <button
