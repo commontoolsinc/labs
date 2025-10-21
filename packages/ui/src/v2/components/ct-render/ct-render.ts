@@ -3,6 +3,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
+import { UI } from "@commontools/api";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -160,8 +161,23 @@ export class CTRender extends BaseElement {
 
     await cell.sync();
 
+    // Support both usage patterns:
+    // 1. Being passed a UI cell directly (e.g., cell.key(UI))
+    // 2. Being passed a root charm cell (extract UI subcell)
+    let uiCell = cell;
+    try {
+      const uiSubcell = cell.key(UI as never);
+      if (uiSubcell.get() !== undefined) {
+        this._log("extracting UI subcell from root charm cell");
+        uiCell = uiSubcell;
+      }
+    } catch (error) {
+      // If we can't read the UI subcell, just use the cell as-is
+      this._log("no UI subcell found, using cell as-is");
+    }
+
     this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, cell as Cell);
+    this._cleanup = render(this._renderContainer, uiCell as Cell);
   }
 
   private _isSubPath(cell: Cell<unknown>): boolean {
