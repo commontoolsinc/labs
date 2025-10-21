@@ -77,11 +77,20 @@ function resolveExpressionKind(
     if (kind) return kind;
   }
 
-  if (
-    ts.isPropertyAccessExpression(target) &&
-    target.name.text === "map"
-  ) {
-    return { kind: "array-map" };
+  if (ts.isPropertyAccessExpression(target)) {
+    const name = target.name.text;
+    if (name === "map" || name === "mapWithPattern") {
+      return { kind: "array-map" };
+    }
+    if (name === "derive") {
+      return { kind: "derive" };
+    }
+    if (name === "ifElse") {
+      return { kind: "ifElse" };
+    }
+    if (BUILDER_SYMBOL_NAMES.has(name)) {
+      return { kind: "builder", builderName: name };
+    }
   }
 
   const type = checker.getTypeAtLocation(target);
@@ -178,7 +187,7 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  if (name === "map") {
+  if (name === "map" || name === "mapWithPattern") {
     return { kind: "array-map", symbol: resolved };
   }
 
@@ -228,7 +237,10 @@ function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
 
 function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (declaration.name.text !== "map") return false;
+  if (
+    declaration.name.text !== "map" &&
+    declaration.name.text !== "mapWithPattern"
+  ) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;

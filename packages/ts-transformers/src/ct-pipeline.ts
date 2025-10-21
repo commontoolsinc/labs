@@ -3,6 +3,7 @@ import {
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
+import { ClosureTransformer } from "./closures/transformer.ts";
 import { Pipeline, TransformationOptions } from "./core/mod.ts";
 
 export class CommonToolsTransformerPipeline extends Pipeline {
@@ -12,6 +13,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       ...options,
     };
     super([
+      new ClosureTransformer(ops),
       new SchemaInjectionTransformer(ops),
       new OpaqueRefJSXTransformer(ops),
       new SchemaGeneratorTransformer(ops),

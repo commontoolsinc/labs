@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursion variants", () => {
   it("simple recursive: next?: Node", async () => {
@@ -10,7 +10,7 @@ describe("Schema: Recursion variants", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = asObjectSchema(gen.generateSchema(type, checker));
     expect(result.$ref).toBe("#/$defs/Node");
     const defs = result.$defs as Record<string, any>;
     expect(defs).toBeDefined();
@@ -25,7 +25,9 @@ describe("Schema: Recursion variants", () => {
       interface Node { value: string; children?: Node[] }
     `;
     const { type, checker } = await getTypeFromCode(code, "Node");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/Node");
     const d = s.$defs as any;
     const node = d.Node;
@@ -40,7 +42,9 @@ describe("Schema: Recursion variants", () => {
       interface C { a: A }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;
     expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
@@ -54,7 +58,9 @@ describe("Schema: Recursion variants", () => {
       interface B { a?: A }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     expect(s.$ref).toBe("#/$defs/A");
     const defs = s.$defs as any;
     expect(defs.A?.properties?.b?.$ref).toBe("#/$defs/B");
