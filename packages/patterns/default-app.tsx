@@ -10,7 +10,6 @@ import {
   recipe,
   str,
   UI,
-  VNode,
   wish,
 } from "commontools";
 
