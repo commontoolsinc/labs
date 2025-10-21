@@ -115,33 +115,199 @@ Notice how handlers are bound to the cell from the input schema _in_ the VDOM de
 
 ### Handler Parameter Type Patterns
 
-Understanding when to use `Cell<T[]>` vs `Cell<Array<Cell<T>>>` is crucial:
+Understanding when to use `Cell<T[]>` vs `Cell<Array<Cell<T>>>` is crucial for avoiding type errors. **The simple rule: always use `Cell<T[]>` in handler parameters.**
+
+## Critical Rule: Cell<T[]> for Arrays
+
+In handler type signatures, the Cell wraps the **entire array**, not individual elements:
 
 ```typescript
-// ✅ CORRECT - In handler parameters, use Cell<T[]> where T is the plain type
-const addItem = handler(
-  (_event, { items }: { items: Cell<ShoppingItem[]> }) => {
-    const itemsArray = items.get(); // ShoppingItem[]
-    itemsArray.push({ name: "New Item", checked: false });
-  }
-);
+// ✅ CORRECT - Cell wraps the entire array
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
+>((_event, { items }) => {
+  const currentItems = items.get();  // Returns ShoppingItem[]
+  items.set([...currentItems, { title: "New", done: false }]);
+});
 
-// When you call .get() on Cell<ShoppingItem[]>, you get ShoppingItem[]
-// This is the plain array of plain objects
+// ❌ WRONG - Don't use nested Cell types
+const addItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<ShoppingItem>>> }  // ← Confusing and wrong!
+>(/* ... */);
 
-// When iterating in JSX, items are wrapped as OpaqueRef
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  // item is a cell-like reference here
-  <ct-checkbox $checked={item.checked} />
-))}
+// ❌ WRONG - Don't use OpaqueRef in handler parameters
+const addItem = handler<
+  unknown,
+  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
+>(/* ... */);
+```
 
-// ❌ AVOID - Don't use Cell<Array<Cell<T>>> in handler signatures
-const addItem = handler(
-  (_event, { items }: { items: Cell<Array<Cell<ShoppingItem>>> }) => {
-    // This is confusing and usually wrong
-  }
+## Understanding the Type Contexts
+
+There are **four different contexts** where array types appear differently:
+
+```typescript
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+// Context 1: In recipe input/output types
+interface Input {
+  items: Default<ShoppingItem[], []>;  // Plain type in schema
+}
+
+export default recipe<Input, Input>(
+  "Shopping List",
+  ({ items }) => {  // Context 2: items is Cell<ShoppingItem[]>
+
+    // Context 3: In handler parameters - Cell<ShoppingItem[]>
+    const addItem = handler<
+      unknown,
+      { items: Cell<ShoppingItem[]> }
+    >((_event, { items }) => {
+      const arr = items.get();  // arr is ShoppingItem[]
+      items.set([...arr, { title: "New", done: false }]);
+    });
+
+    return {
+      [UI]: (
+        <div>
+          {/* Context 4: In JSX .map() - OpaqueRef<ShoppingItem> */}
+          {items.map((item: OpaqueRef<ShoppingItem>) => (
+            <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
+          ))}
+          <ct-button onClick={addItem({ items })}>Add</ct-button>
+        </div>
+      ),
+      items,  // Context 2 again: Cell<ShoppingItem[]>
+    };
+  },
 );
 ```
+
+## Mental Model: The Box Analogy
+
+Think of types this way:
+
+| Type | Mental Model | Where Used | Example |
+|------|--------------|------------|---------|
+| `Cell<T[]>` | A **box** containing an array | Handler params, recipe params, returns | `items: Cell<ShoppingItem[]>` |
+| `T[]` | The **plain array** inside the box | Result of `.get()` | `const arr = items.get()` returns `ShoppingItem[]` |
+| `OpaqueRef<T>` | A **cell-like reference** to each item | In JSX `.map()` | `items.map((item: OpaqueRef<ShoppingItem>) => ...)` |
+| `T` | A **plain object** | Inside plain arrays | `{ title: "Milk", done: false }` |
+
+### How They Transform
+
+```typescript
+const items: Cell<ShoppingItem[]>  // Handler receives this
+
+// Open the box with .get()
+const plainArray: ShoppingItem[] = items.get();
+
+// In JSX, .map() wraps each item
+{items.map((item: OpaqueRef<ShoppingItem>) => (
+  // item is NOT a plain ShoppingItem
+  // item is NOT a Cell<ShoppingItem>
+  // item IS an OpaqueRef<ShoppingItem>
+  <ct-checkbox $checked={item.done} />
+))}
+```
+
+## Why This Matters
+
+**Different contexts require different types:**
+
+1. **Handler parameters need `Cell<T[]>`** - so you can call `.get()` and `.set()`
+2. **JSX .map() needs `OpaqueRef<T>`** - for bidirectional binding to work
+3. **Recipe schemas use plain `T[]`** - to define the data structure
+
+**Common mistake:**
+
+```typescript
+// ❌ WRONG - Trying to use JSX type in handler
+const addItem = handler<
+  unknown,
+  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // Wrong!
+>(/* ... */);
+
+// ✅ CORRECT - Handler uses Cell<T[]>
+const addItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]> }  // Correct!
+>(/* ... */);
+```
+
+## Complete Example with All Contexts
+
+```typescript
+/// <cts-enable />
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+// Schema uses plain types
+interface Input {
+  items: Default<ShoppingItem[], []>;
+}
+
+// Handler parameter: Cell<T[]>
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
+>(({ detail }, { items }) => {
+  const message = detail?.message?.trim();
+  if (!message) return;
+
+  // .get() returns ShoppingItem[]
+  const currentItems: ShoppingItem[] = items.get();
+
+  // .set() accepts ShoppingItem[]
+  items.set([...currentItems, { title: message, done: false }]);
+});
+
+const removeItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]>; index: number }  // ← Cell<ShoppingItem[]>
+>((_event, { items, index }) => {
+  const currentItems = items.get();
+  items.set(currentItems.toSpliced(index, 1));
+});
+
+export default recipe<Input, Input>("Shopping List", ({ items }) => {
+  // items here is Cell<ShoppingItem[]>
+
+  return {
+    [UI]: (
+      <div>
+        {/* In .map(): OpaqueRef<ShoppingItem> */}
+        {items.map((item: OpaqueRef<ShoppingItem>, index: number) => (
+          <div>
+            <ct-checkbox $checked={item.done}>
+              {item.title}
+            </ct-checkbox>
+            <ct-button onClick={removeItem({ items, index })}>×</ct-button>
+          </div>
+        ))}
+        <ct-message-input onct-send={addItem({ items })} />
+      </div>
+    ),
+    items,  // Return Cell<ShoppingItem[]>
+  };
+});
+```
+
+## Quick Reference
+
+**When writing handler type signatures:**
+
+- ✅ DO: `{ items: Cell<ShoppingItem[]> }`
+- ❌ DON'T: `{ items: Cell<Array<Cell<ShoppingItem>>> }`
+- ❌ DON'T: `{ items: Cell<OpaqueRef<ShoppingItem>[]> }`
+- ❌ DON'T: `{ items: ShoppingItem[] }` (missing Cell wrapper)
 
 **Rule of thumb:** In handler type signatures, use `Cell<T[]>` for array parameters. The Cell wraps the entire array, not individual elements.
 

@@ -796,7 +796,7 @@ results:
 
 ### When to Use [ID]
 
-The `[ID]` symbol is often seen in examples, but it's only needed in specific cases:
+The `[ID]` symbol is often seen in examples, but **most patterns don't need it**. Only add `[ID]` when you have specific identity and stability requirements.
 
 ```typescript
 import { ID } from "commontools";
@@ -807,41 +807,178 @@ interface Item {
 }
 ```
 
-**When [ID] is needed:**
-- Creating data URIs for items (for stable references across network)
-- Creating referenceable data from within a `lift` function
-- When you need stable identity for items that might be modified
+## Decision Guide: Do You Need [ID]?
 
-**When [ID] is NOT needed:**
-- Simple arrays of objects in your recipe
-- Items that are only displayed, not referenced elsewhere
-- Most basic CRUD operations
+**Start without [ID]**. Only add it if you encounter specific bugs or have one of the use cases below.
+
+### When [ID] is NOT Needed (Most Cases)
+
+✅ **Use simple interfaces without [ID] for:**
+
+- **Basic lists and CRUD operations**
+  ```typescript
+  interface ShoppingItem {
+    title: string;
+    done: boolean;
+    category: string;
+  }
+  ```
+
+- **Items that are only displayed, not referenced**
+- **Adding items to the end of arrays**
+- **Removing items by button click (using index)**
+- **Editing items in place**
+- **Most todo lists, shopping lists, and simple data displays**
+
+**Why you don't need it:** The framework handles reactivity and updates correctly for these common cases without requiring stable identifiers.
+
+### When [ID] IS Needed (Specific Cases)
+
+❌ **Only add [ID] when you need:**
+
+#### 1. Creating Data URIs for Network References
+
+When items need stable references across the network:
 
 ```typescript
-// ❌ NOT NEEDED for basic lists
-interface TodoItem {
-  [ID]: number;  // Unnecessary here
+import { ID } from "commontools";
+
+interface NetworkItem {
+  [ID]: number;  // Needed for stable cross-network reference
   title: string;
-  done: boolean;
+  data: string;
 }
 
-// ✅ CORRECT for basic lists
-interface TodoItem {
-  title: string;
-  done: boolean;
-}
-
-// ✅ NEEDED when creating data URIs
-const createItem = lift((title: string) => {
+const createReferenceable = lift((title: string) => {
   return {
-    [ID]: Math.random(),  // Needed for stable reference
+    [ID]: Date.now(),  // Stable ID for URI creation
     title,
-    done: false,
+    data: "content",
   };
 });
 ```
 
-**Important:** The `list-operations.tsx` example uses `[ID]` because it demonstrates advanced array manipulation features. For most patterns, you don't need it.
+#### 2. Creating Items Within lift Functions
+
+When generating new items inside `lift`:
+
+```typescript
+const generateItems = lift((count: number) => {
+  return Array.from({ length: count }, (_, i) => ({
+    [ID]: i,  // Needed for stable references
+    title: `Item ${i}`,
+  }));
+});
+```
+
+#### 3. Complex Reordering or Front-Insertion
+
+When you need to insert items at the beginning of arrays or have complex drag-and-drop:
+
+```typescript
+interface ReorderableItem {
+  [ID]: number;  // Needed for stable identity during reordering
+  title: string;
+  position: number;
+}
+
+const insertAtStart = handler<unknown, { items: Cell<ReorderableItem[]> }>(
+  (_, { items }) => {
+    const current = items.get();
+    items.set([{ [ID]: Date.now(), title: "New", position: 0 }, ...current]);
+  }
+);
+```
+
+**Note:** Even for reordering, try without [ID] first. Many reordering scenarios work fine without it.
+
+## Examples: With and Without [ID]
+
+### Example 1: Basic Shopping List (No [ID] Needed)
+
+```typescript
+// ✅ SIMPLE - No [ID] needed
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+  category: Default<string, "Uncategorized">;
+}
+
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Cell<ShoppingItem[]> }
+>(({ detail }, { items }) => {
+  const itemName = detail?.message?.trim();
+  if (!itemName) return;
+
+  const currentItems = items.get();
+  items.set([...currentItems, { title: itemName, done: false, category: "Uncategorized" }]);
+});
+
+const removeItem = handler<
+  unknown,
+  { items: Cell<ShoppingItem[]>; index: number }
+>((_event, { items, index }) => {
+  const currentItems = items.get();
+  items.set(currentItems.toSpliced(index, 1));
+});
+```
+
+This works perfectly without [ID] because:
+- Items are added to the end
+- Removal uses index from `.map()`
+- No cross-network references needed
+
+### Example 2: When You Actually Need [ID]
+
+```typescript
+// ✅ CORRECT - [ID] needed for data URIs and cross-charm references
+import { ID } from "commontools";
+
+interface ReferencedNote {
+  [ID]: number;  // Needed because notes reference each other
+  title: string;
+  content: string;
+  backlinks: number[];  // References to other note IDs
+}
+
+const createNote = lift((title: string, content: string) => {
+  return {
+    [ID]: Date.now(),  // Stable ID for backlinking
+    title,
+    content,
+    backlinks: [],
+  };
+});
+
+// Notes can now reference each other by ID
+const addBacklink = handler<
+  unknown,
+  { note: Cell<ReferencedNote>; targetId: number }
+>((_event, { note, targetId }) => {
+  const current = note.get();
+  note.set({
+    ...current,
+    backlinks: [...current.backlinks, targetId],
+  });
+});
+```
+
+## Trade-offs
+
+| Approach | Pros | Cons | When to Use |
+|----------|------|------|-------------|
+| **Without [ID]** (recommended) | • Simpler code<br>• Less boilerplate<br>• Easier to understand<br>• Works for 90% of cases | • May have issues with front-insertion in some cases<br>• No stable cross-network references | • Todo lists<br>• Shopping lists<br>• Simple CRUD<br>• Display-only data<br>• Most basic patterns |
+| **With [ID]** (when needed) | • Stable references<br>• Handles all operations<br>• Cross-network linking<br>• Complex reordering | • More complex code<br>• Requires ID management<br>• More boilerplate | • Data URIs<br>• Backlinking systems<br>• Cross-charm references<br>• Complex drag-and-drop<br>• Generating items in `lift` |
+
+## Rule of Thumb
+
+**Start without `[ID]`. Only add it if:**
+1. You're creating data URIs for cross-network references
+2. You're generating new items within a `lift` function
+3. You encounter specific bugs with item identity during complex operations
+
+**Don't add `[ID]` just because you see it in examples.** The `list-operations.tsx` example demonstrates advanced features, but your basic shopping list, todo list, or simple CRUD pattern doesn't need it.
 
 ### TypeScript to Runtime Schema
 

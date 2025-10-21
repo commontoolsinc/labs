@@ -151,6 +151,101 @@ const validatedValue = derive(rawInput, (value) => {
 
 This approach separates concerns: bidirectional binding handles the UI sync, while derive handles validation logic.
 
+# Styling: String vs Object Syntax
+
+Different element types accept different style syntax in CommonTools JSX. This is a common source of TypeScript errors.
+
+## HTML Elements: Object Syntax
+
+HTML elements (`div`, `span`, `button`, etc.) use JavaScript object syntax for styles:
+
+```tsx
+// ✅ CORRECT - Object syntax for HTML elements
+<div style={{ flex: 1, padding: "1rem", marginBottom: "0.5rem" }}>
+  <span style={{ color: "red", fontWeight: "bold" }}>Error</span>
+  <button style={{ backgroundColor: "#007bff", color: "white" }}>
+    Submit
+  </button>
+</div>
+
+// ❌ WRONG - String syntax doesn't work on HTML elements
+<div style="flex: 1; padding: 1rem;">
+  {/* TypeScript error: Type 'string' is not assignable to type 'CSSProperties' */}
+</div>
+```
+
+**Properties use camelCase**: `backgroundColor`, `fontSize`, `marginBottom`
+
+## Custom Elements: String Syntax
+
+CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) use CSS string syntax:
+
+```tsx
+// ✅ CORRECT - String syntax for custom elements
+<common-hstack gap="sm" style="align-items: center; padding: 1rem;">
+  <common-vstack gap="md" style="flex: 1; max-width: 600px;">
+    <ct-card style="border: 1px solid #ccc; padding: 0.5rem;">
+      Content here
+    </ct-card>
+  </common-vstack>
+</common-hstack>
+
+// ❌ WRONG - Object syntax causes errors on custom elements
+<common-hstack style={{ alignItems: "center" }}>
+  {/* Error: Custom elements expect string styles */}
+</common-hstack>
+```
+
+**Properties use kebab-case**: `background-color`, `font-size`, `margin-bottom`
+
+## Quick Reference Table
+
+| Element Type | Style Syntax | Property Format | Example |
+|--------------|--------------|-----------------|---------|
+| HTML (`div`, `span`, `button`) | Object | camelCase | `style={{ flex: 1, backgroundColor: "#fff" }}` |
+| Custom (`common-*`, `ct-*`) | String | kebab-case | `style="flex: 1; background-color: #fff;"` |
+
+## Why the Difference?
+
+- **HTML elements** are processed by the JSX transformer which expects React-style object syntax
+- **Custom elements** are web components that accept CSS strings as attributes
+
+## Mixed Usage Example
+
+```tsx
+// You'll often mix both types in one recipe
+<div style={{ display: "flex", gap: "1rem" }}>
+  <common-vstack gap="md" style="flex: 1; padding: 1rem;">
+    <span style={{ color: "#333", fontSize: "14px" }}>
+      Label Text
+    </span>
+    <ct-button>Click Me</ct-button>
+  </common-vstack>
+</div>
+```
+
+## Common Errors and Solutions
+
+**Error**: `Type 'string' is not assignable to type 'CSSProperties'`
+
+```tsx
+// ❌ Problem: Using string on HTML element
+<div style="display: flex;">
+
+// ✅ Solution: Use object syntax
+<div style={{ display: "flex" }}>
+```
+
+**Error**: Styles not applying to custom elements
+
+```tsx
+// ❌ Problem: Using object on custom element
+<common-hstack style={{ padding: "1rem" }}>
+
+// ✅ Solution: Use string syntax
+<common-hstack style="padding: 1rem;">
+```
+
 # ct-input
 
 The `ct-input` component demonstrates bidirectional binding perfectly:
@@ -455,3 +550,174 @@ export default recipe<PageInput, PageResult>(
   },
 );
 ```
+
+# ct-render
+
+The `ct-render` component displays pattern instances within another pattern. Use this for **pattern composition** - combining multiple patterns together in a single recipe.
+
+## Basic Usage
+
+```tsx
+import { recipe, UI, NAME } from "commontools";
+import MyPattern from "./my-pattern.tsx";
+
+export default recipe("Composed Pattern", ({ items }) => {
+  // Create pattern instance
+  const patternInstance = MyPattern({ items });
+
+  return {
+    [NAME]: "Composed Pattern",
+    [UI]: (
+      <div>
+        {/* Render the pattern */}
+        <ct-render $cell={patternInstance} />
+      </div>
+    ),
+  };
+});
+```
+
+## Critical: Use $cell not charm
+
+This is the most common mistake when using ct-render:
+
+```tsx
+// ❌ WRONG - Using charm attribute doesn't work
+<ct-render charm={patternInstance} />
+
+// ❌ WRONG - Using pattern attribute doesn't work
+<ct-render pattern={patternInstance} />
+
+// ✅ CORRECT - Use $cell for bidirectional binding
+<ct-render $cell={patternInstance} />
+```
+
+**Why `$cell`?** The `$cell` attribute enables bidirectional binding with the pattern instance. When the pattern's internal state changes, the parent pattern automatically sees those changes through the shared cell reference.
+
+## Multiple Patterns Sharing Data
+
+A common use case is displaying the same data in different ways:
+
+```tsx
+import { recipe, UI, NAME, Default } from "commontools";
+import ListView from "./list-view.tsx";
+import GridView from "./grid-view.tsx";
+
+interface Item {
+  title: string;
+  done: Default<boolean, false>;
+}
+
+interface Input {
+  items: Default<Item[], []>;
+}
+
+export default recipe<Input, Input>("Multi-View", ({ items }) => {
+  // Both patterns receive the same items cell
+  const listView = ListView({ items });
+  const gridView = GridView({ items });
+
+  return {
+    [NAME]: "Multi-View",
+    [UI]: (
+      <div style={{ display: "flex", gap: "1rem" }}>
+        <div style={{ flex: 1 }}>
+          <h3>List View</h3>
+          <ct-render $cell={listView} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h3>Grid View</h3>
+          <ct-render $cell={gridView} />
+        </div>
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+**What happens:**
+- Both patterns receive the same `items` cell reference
+- Changes in ListView automatically appear in GridView
+- Changes in GridView automatically appear in ListView
+- The parent pattern's `items` also stays in sync
+
+## Alternative Rendering Methods
+
+There are three equivalent ways to render a pattern instance:
+
+```tsx
+const counter = Counter({ value: state.value });
+
+// Method 1: Direct interpolation (simplest)
+<div>{counter}</div>
+
+// Method 2: JSX component syntax
+<Counter value={state.value} />
+
+// Method 3: Explicit ct-render (most explicit)
+<ct-render $cell={counter} />
+```
+
+**When to use each:**
+- **Direct interpolation** (`{counter}`): Simple cases, most concise
+- **JSX component syntax** (`<Counter />`): When you want it to look like a component
+- **ct-render** (`<ct-render $cell={counter} />`): When you need explicit control or the pattern is stored in a variable
+
+## Pattern Composition vs Linked Charms
+
+Understanding when to use ct-render vs charm linking:
+
+| Scenario | Use |
+|----------|-----|
+| Multiple views of same data in one recipe | ct-render (Pattern Composition) |
+| Components reused within a recipe | ct-render (Pattern Composition) |
+| Independent charms that communicate | Linked Charms (separate deployments) |
+| Separate deployments with data flow | Linked Charms |
+
+## Complete Example
+
+See `packages/patterns/composed-simple.tsx` for a minimal, complete example of pattern composition with ct-render.
+
+```tsx
+/// <cts-enable />
+import { Default, NAME, recipe, UI } from "commontools";
+import ShoppingListBasic from "./shopping-list-basic.tsx";
+import ShoppingListCategorized from "./shopping-list-categorized.tsx";
+
+interface ShoppingItem {
+  title: string;
+  done: Default<boolean, false>;
+  category: Default<string, "Uncategorized">;
+}
+
+interface ComposedInput {
+  items: Default<ShoppingItem[], []>;
+}
+
+export default recipe<ComposedInput, ComposedInput>(
+  "Shopping List - Both Views",
+  ({ items }) => {
+    // Create pattern instances that share the same items cell
+    const basicView = ShoppingListBasic({ items });
+    const categoryView = ShoppingListCategorized({ items });
+
+    return {
+      [NAME]: "Shopping List - Both Views",
+      [UI]: (
+        <div style={{ display: "flex", gap: "2rem" }}>
+          <div style={{ flex: 1 }}>
+            <ct-render $cell={basicView} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <ct-render $cell={categoryView} />
+          </div>
+        </div>
+      ),
+      items,
+    };
+  },
+);
+```
+
+For more details on pattern composition, see the "Level 4: Pattern Composition" section in `PATTERNS.md`.
