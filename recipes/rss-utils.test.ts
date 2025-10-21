@@ -1,5 +1,6 @@
 import { DOMParser } from "./dom-parser.ts";
-import { assert } from "@std/assert";
+import { assert, assertObjectMatch } from "@std/assert";
+import { FeedItem, parseRSSFeed } from "./rss-utils.ts";
 
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xml:lang="en-US" xmlns="http://www.w3.org/2005/Atom">
@@ -38,7 +39,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 </feed>
 `;
 
-Deno.test("DOMParser parsers XML", () => {
+Deno.test("DOMParser/XML", () => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xml, "text/xml");
   const entries = doc.getElementsByTagName("entry");
@@ -59,4 +60,25 @@ Deno.test("DOMParser parsers XML", () => {
       "Disruption with some GitHub services",
     "Get textContent",
   );
+});
+
+Deno.test("parseRSSFeed()", () => {
+  const entries = parseRSSFeed(
+    xml,
+    5,
+    new Set(["tag:www.githubstatus.com,2005:Incident/26833707"]),
+  );
+  assert(
+    entries.length === 2,
+    "Expecting 2 entries after filtering one existing",
+  );
+  assertObjectMatch(entries[0], {
+    author: "",
+    id: "tag:www.githubstatus.com,2005:Incident/26837586",
+    pubDate: "2025-10-21T17:39:34Z",
+    title: "Disruption with some GitHub services",
+    link: "https://www.githubstatus.com/incidents/v61nk2fpysnq",
+    content:
+      "&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;17:39&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Resolved&lt;/strong&gt; - This incident has been resolved. Thank you for your patience and understanding as we addressed this issue. A detailed root cause analysis will be shared as soon as it is available.&lt;/p&gt;&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;17:18&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Update&lt;/strong&gt; - Mitigation continues, the impact is limited to Enterprise Cloud customers who have configured SAML at the organization level.&lt;/p&gt;&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;17:11&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Update&lt;/strong&gt; - We continuing to work on mitigation of this issue.&lt;/p&gt;&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;16:33&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Update&lt;/strong&gt; - We’ve identified the issue affecting some users with SAML/OIDC authentication and are actively working on mitigation. Some users may not be able to authenticate during this time.&lt;/p&gt;&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;16:03&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Update&lt;/strong&gt; - We're seeing issues for a small amount of customers with SAML/OIDC authentication for GitHub.com users. We are investigating.&lt;/p&gt;&lt;p&gt;&lt;small&gt;Oct &lt;var data-var='date'&gt;21&lt;/var&gt;, &lt;var data-var='time'&gt;16:00&lt;/var&gt; UTC&lt;/small&gt;&lt;br&gt;&lt;strong&gt;Investigating&lt;/strong&gt; - We are currently investigating this issue.&lt;/p&gt;",
+  } as FeedItem);
 });
