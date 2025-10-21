@@ -148,8 +148,8 @@ const validatedValue = derive(rawInput, (value) => {
 // Show validation status
 {ifElse(
   derive(validatedValue, (v) => v !== null),
-  <span style="color: green;">✓ Valid</span>,
-  <span style="color: red;">✗ Must be 3+ letters</span>
+  <span style={{ color: "green" }}>✓ Valid</span>,
+  <span style={{ color: "red" }}>✗ Must be 3+ letters</span>
 )}
 ```
 

@@ -100,9 +100,9 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
           <h2>Shopping List</h2>
           <div>
             {items.map((item: OpaqueRef<ShoppingItem>) => (
-              <div style="display: flex; gap: 8px; align-items: center;">
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? "text-decoration: line-through;" : ""}>
+                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
                     {item.title}
                   </span>
                 </ct-checkbox>
@@ -183,11 +183,11 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
         <div>
           <h2>Shopping List by Category</h2>
           {categories.map((category) => (
-            <div style="margin-bottom: 1rem;">
+            <div style={{ marginBottom: "1rem" }}>
               <h3>{category}</h3>
               {(groupedItems[category] ?? []).map((item: OpaqueRef<ShoppingItem>) => (
                 <ct-checkbox $checked={item.done}>
-                  <span style={item.done ? "text-decoration: line-through;" : ""}>
+                  <span style={item.done ? { textDecoration: "line-through" } : {}}>
                     {item.title}
                   </span>
                 </ct-checkbox>
