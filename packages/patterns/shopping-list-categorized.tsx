@@ -72,7 +72,9 @@ export default recipe<
                 ) => (
                   <ct-checkbox $checked={item.done}>
                     <span
-                      style={item.done ? { textDecoration: "line-through" } : {}}
+                      style={item.done
+                        ? { textDecoration: "line-through" }
+                        : {}}
                     >
                       {item.name}
                     </span>
