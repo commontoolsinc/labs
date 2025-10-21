@@ -97,16 +97,6 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
-export const Fab = recipe<void, VNode>("FAB", () => {
-  return (
-    <ct-message-input placeholder="Type something..." buttonText="Omnibot" />
-  );
-});
-
-export const Sidebar = recipe<void, VNode>("Sidebar", () => {
-  return <aside>Wow, a sidebar!</aside>;
-});
-
 const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
   value.set(!value.get());
 });
