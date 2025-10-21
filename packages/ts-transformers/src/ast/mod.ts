@@ -5,12 +5,7 @@ export {
   isEventHandlerJsxAttribute,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
-export {
-  getExpressionText,
-  getMemberSymbol,
-  isFunctionParameter,
-  visitEachChildWithJsx,
-} from "./utils.ts";
+export { getMemberSymbol, isFunctionParameter } from "./utils.ts";
 export {
   getTypeReferenceArgument,
   inferParameterType,

@@ -8,7 +8,6 @@ import {
   lift,
   NAME,
   navigateTo,
-  OpaqueRef,
   recipe,
   UI,
 } from "commontools";
@@ -108,20 +107,16 @@ export default recipe("Charms Launcher", () => {
     storedCellRef: cell(),
   });
 
-  // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
-  // Without this, TypeScript infers `any` and the closure transformer won't detect it
-  const typedCellRef = cellRef as OpaqueRef<any[]>;
-
   return {
     [NAME]: "Charms Launcher",
     [UI]: (
       <div>
         <h3>Stored Charms:</h3>
         {ifElse(
-          !typedCellRef?.length,
+          !cellRef?.length,
           <div>No charms created yet</div>,
           <ul>
-            {typedCellRef.map((charm: any, index: number) => (
+            {cellRef.map((charm: any, index: number) => (
               <li>
                 <ct-button
                   onClick={goToCharm({ charm })}

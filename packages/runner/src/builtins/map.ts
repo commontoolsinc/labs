@@ -6,12 +6,8 @@ import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
- * Implementation of built-in map module. Unlike regular modules, this will be
+ * Implemention of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
- *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to recipe
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to recipe
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -19,8 +15,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  * 1. Create a doc to store the result.
  * 2. Create a handler to update the result doc when the input doc changes.
  * 3. Create a handler to update the result doc when the op doc changes.
- * 4. Create a handler to update the result doc when the params doc changes (closure mode).
- * 5. For each value in the input doc, create a handler to update the result
+ * 4. For each value in the input doc, create a handler to update the result
  *    doc when the value changes.
  *
  * TODO: Optimization depends on javascript objects and not lookslike objects.
@@ -29,14 +24,12 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  *
  * @param list - A doc containing an array of values to map over.
  * @param op - A recipe to apply to each value.
- * @param params - Optional object containing captured variables from outer scope (closure mode).
  * @returns A doc containing the mapped values.
  */
 export function map(
   inputsCell: Cell<{
     list: any[];
     op: Recipe;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -69,13 +62,12 @@ export function map(
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
-    const { list, op, params } = inputsCell.asSchema(
+    const { list, op } = inputsCell.asSchema(
       {
         type: "object",
         properties: {
           list: { type: "array", items: { asCell: true } },
           op: { asCell: true },
-          params: { type: "object" },
         },
         required: ["list", "op"],
         additionalProperties: false,
@@ -119,26 +111,14 @@ export function map(
         undefined,
         tx,
       );
-      // Determine which mode we're in based on presence of params
-      const recipeInputs = params !== undefined
-        ? {
-          // Closure mode: include params
-          element: inputsCell.key("list").key(initializedUpTo),
-          index: initializedUpTo,
-          array: inputsCell.key("list"),
-          params: inputsCell.key("params"),
-        }
-        : {
-          // Legacy mode: no params
-          element: inputsCell.key("list").key(initializedUpTo),
-          index: initializedUpTo,
-          array: inputsCell.key("list"),
-        };
-
       runtime.runner.run(
         tx,
         opRecipe,
-        recipeInputs,
+        {
+          element: inputsCell.key("list").key(initializedUpTo),
+          index: initializedUpTo,
+          array: inputsCell.key("list"),
+        },
         resultCell,
       );
       resultCell.getSourceCell()!.setSourceCell(parentCell);

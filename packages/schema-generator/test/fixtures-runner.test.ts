@@ -79,9 +79,7 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
   const code = await Deno.readTextFile(inputPath);
   const { type, checker, typeNode } = await getTypeFromCode(code, TYPE_NAME);
   const transformer = createSchemaTransformerV2();
-  const normalized = normalizeSchema(
-    transformer.generateSchema(type, checker, typeNode),
-  );
+  const normalized = normalizeSchema(transformer(type, checker, typeNode));
   const serialized = JSON.stringify(normalized, null, 2) + "\n";
   return { normalized, serialized };
 }

@@ -7,10 +7,11 @@ interface TodoItem {
 }
 
 export default recipe<{ items: TodoItem[] }>("Test Map", ({ items }) => {
-  // Map on opaque ref arrays should be transformed to mapWithPattern
+  // This should NOT be transformed to items.get().map()
+  // because OpaqueRef has its own map method
   const mapped = items.map((item) => item.title);
 
-  // This should also be transformed
+  // This should also work without transformation
   const filtered = items.map((item, index) => ({
     title: item.title,
     done: item.done,

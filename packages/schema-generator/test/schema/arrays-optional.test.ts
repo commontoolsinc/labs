@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Arrays and optional properties", () => {
   it("marks optional array property as not required", async () => {
@@ -10,7 +10,7 @@ describe("Schema: Arrays and optional properties", () => {
     `;
     const { type, checker, typeNode } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    const result = gen(type, checker, typeNode);
     expect(result.type).toBe("object");
     const ids = result.properties?.ids as Record<string, unknown>;
     expect(ids.type).toBe("array");
@@ -26,17 +26,11 @@ describe("Schema: Arrays and optional properties", () => {
     const a = await getTypeFromCode(code, "A");
     const b = await getTypeFromCode(code, "B");
     const gen = createSchemaTransformerV2();
-    const sa = asObjectSchema(
-      gen.generateSchema(a.type, a.checker, a.typeNode),
-    );
-    const sb = asObjectSchema(
-      gen.generateSchema(b.type, b.checker, b.typeNode),
-    );
-    const saItems = sa.properties?.items as any;
-    expect(saItems?.type).toBe("array");
-    expect(saItems?.items?.type).toBe("string");
-    const sbItems = sb.properties?.items as any;
-    expect(sbItems?.type).toBe("array");
-    expect(sbItems?.items?.type).toBe("string");
+    const sa = gen(a.type, a.checker, a.typeNode);
+    const sb = gen(b.type, b.checker, b.typeNode);
+    expect(sa.properties?.items?.type).toBe("array");
+    expect(sa.properties?.items?.items?.type).toBe("string");
+    expect(sb.properties?.items?.type).toBe("array");
+    expect(sb.properties?.items?.items?.type).toBe("string");
   });
 });

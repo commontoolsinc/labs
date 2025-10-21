@@ -49,11 +49,11 @@
     }
   },
   "required": [
-    "aliasedCell",
-    "aliasedDefault",
-    "aliasedStream",
-    "directCell",
     "directDefault",
-    "directStream"
+    "directCell",
+    "directStream",
+    "aliasedDefault",
+    "aliasedCell",
+    "aliasedStream"
   ]
 }

@@ -1,7 +1,6 @@
 import ts from "typescript";
 import { StaticCacheFS } from "@commontools/static";
 import { isObject } from "@commontools/utils/types";
-import type { JSONSchemaObj } from "@commontools/api";
 
 // Cache for TypeScript library definitions
 let typeLibsCache: Record<string, string> | undefined;
@@ -147,31 +146,14 @@ export async function getTypeFromCode(
     : { type: foundType, checker };
 }
 
-export function normalizeSchema<T extends Record<string, unknown> | boolean>(
+export function normalizeSchema<T extends Record<string, unknown>>(
   schema: T,
 ): T {
-  // Boolean schemas are valid and should pass through unchanged
-  if (typeof schema === "boolean") {
-    return schema;
-  }
   const clone: any = JSON.parse(JSON.stringify(schema));
   // Strip top-level $schema noise
   delete clone.$schema;
   // Canonicalize recursively
   return deepCanonicalize(clone) as T;
-}
-
-/**
- * Type assertion helper for tests that know they're working with object schemas.
- * Use this when the test context guarantees the schema is an object, not a boolean.
- */
-export function asObjectSchema<T>(schema: T): T & JSONSchemaObj {
-  if (typeof schema === "boolean") {
-    throw new Error(
-      `Expected object schema but got boolean: ${schema}`,
-    );
-  }
-  return schema as T & JSONSchemaObj;
 }
 
 function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {

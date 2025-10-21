@@ -130,27 +130,7 @@ export default recipe({
 
         {/* Filter then map */}
         <ul>
-          {__ctHelpers.derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter((x) => x > _v2)).mapWithPattern(__ctHelpers.recipe({
-            $schema: "https://json-schema.org/draft/2020-12/schema",
-            type: "object",
-            properties: {
-                element: {
-                    type: "number",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        factor: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["factor"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { factor } }) => (<li>Value: {__ctHelpers.derive({ element, factor }, ({ element: element, factor: factor }) => element * factor)}</li>)), { factor: state.factor })}
+          {__ctHelpers.derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter((x) => x > _v2)).map((x) => (<li>Value: {__ctHelpers.derive({ x, state_factor: state.factor }, ({ x: x, state_factor: _v2 }) => x * _v2)}</li>))}
         </ul>
 
         {/* Multiple filters */}
@@ -179,20 +159,7 @@ export default recipe({
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<li>{__ctHelpers.derive(element, element => element.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
+          {state.names.map((name) => (<li>{__ctHelpers.derive(name, name => name.trim().toLowerCase().replace(" ", "-"))}</li>))}
         </ul>
 
         {/* Reduce with reactive accumulator */}
@@ -234,32 +201,7 @@ export default recipe({
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            age: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "age", "active"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<li>{__ctHelpers.ifElse(element.active, __ctHelpers.derive(element.name, _v1 => _v1.toUpperCase()), __ctHelpers.derive(element.name, _v1 => _v1.toLowerCase()))}</li>)), {})}
+          {state.users.map((u) => (<li>{__ctHelpers.ifElse(u.active, __ctHelpers.derive(u.name, _v1 => _v1.toUpperCase()), __ctHelpers.derive(u.name, _v1 => _v1.toLowerCase()))}</li>))}
         </ul>
 
         {/* Some/every with reactive predicates */}

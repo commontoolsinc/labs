@@ -128,10 +128,6 @@ declare module "@commontools/api" {
         array: T,
       ) => Opaque<S>,
     ): Opaque<S[]>;
-    mapWithPattern<S>(
-      op: Recipe,
-      params: Record<string, any>,
-    ): Opaque<S[]>;
     toJSON(): unknown;
     [Symbol.iterator](): Iterator<T>;
     [Symbol.toPrimitive](hint: string): T;

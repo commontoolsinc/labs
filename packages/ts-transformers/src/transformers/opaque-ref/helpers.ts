@@ -4,7 +4,6 @@ import { createDeriveCall } from "../builtins/derive.ts";
 import {
   type DataFlowAnalysis,
   detectCallKind,
-  getExpressionText,
   type NormalizedDataFlow,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
@@ -89,8 +88,7 @@ function resolvesToParameterOfKind(
   let current: ts.Expression = expression;
   let symbol: ts.Symbol | undefined;
   let isRootIdentifierOnly = true;
-
-  // Traverse to find root identifier
+  const allowPropertyTraversal = kind === "array-map";
   while (true) {
     if (ts.isIdentifier(current)) {
       symbol = checker.getSymbolAtLocation(current);
@@ -101,8 +99,9 @@ function resolvesToParameterOfKind(
       ts.isElementAccessExpression(current) ||
       ts.isCallExpression(current)
     ) {
-      // Any traversal means this is not just the root identifier
-      isRootIdentifierOnly = false;
+      if (!allowPropertyTraversal) {
+        isRootIdentifierOnly = false;
+      }
       current = current.expression;
       continue;
     }
@@ -121,14 +120,11 @@ function resolvesToParameterOfKind(
   if (!symbol) return false;
   const declarations = symbol.getDeclarations();
   if (!declarations) return false;
-
-  // Only match the root identifier itself (e.g., `state` or `element`),
-  // not property accesses (e.g., `state.count` or `element.price`)
-  return isRootIdentifierOnly &&
-    declarations.some((declaration) =>
-      ts.isParameter(declaration) &&
-      getOpaqueCallKindForParameter(declaration, checker) === kind
-    );
+  return declarations.some((declaration) =>
+    ts.isParameter(declaration) &&
+    getOpaqueCallKindForParameter(declaration, checker) === kind &&
+    (kind === "array-map" || isRootIdentifierOnly)
+  );
 }
 
 function resolvesToMapParameter(
@@ -273,11 +269,13 @@ export function createDeriveCallForExpression(
   };
   for (const entry of plan.entries) {
     const canonical = entry.dataFlow.expression;
-    const canonicalText = getExpressionText(canonical);
+    const canonicalText = canonical.getText(canonical.getSourceFile());
     addRef(canonical);
     for (const occurrence of entry.dataFlow.occurrences) {
       const normalized = normalizeForCanonical(occurrence.expression);
-      if (getExpressionText(normalized) === canonicalText) {
+      if (
+        normalized.getText(normalized.getSourceFile()) === canonicalText
+      ) {
         addRef(normalized);
       }
     }

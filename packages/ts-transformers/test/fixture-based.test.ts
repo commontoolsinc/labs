@@ -48,27 +48,11 @@ const configs: FixtureConfig[] = [
       { pattern: /with-opaque-ref/, name: "OpaqueRef integration" },
     ],
   },
-  {
-    directory: "closures",
-    describe: "Closure Transformation",
-    formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
-    groups: [
-      { pattern: /^map-/, name: "Map callbacks" },
-      { pattern: /^event-/, name: "Event handlers" },
-      { pattern: /^lift-/, name: "Generic closures" },
-    ],
-  },
 ];
 
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 const FIXTURES_ROOT = "./test/fixtures";
-
-// Environment variable filtering for faster iteration
-// Usage: FIXTURE=map-array-destructured deno task test
-// Or: FIXTURE_PATTERN="array.*destructured" deno task test
-const fixtureFilter = Deno.env.get("FIXTURE");
-const fixturePattern = Deno.env.get("FIXTURE_PATTERN");
 
 for (const config of configs) {
   const suiteConfig = {
@@ -76,17 +60,6 @@ for (const config of configs) {
     rootDir: `${FIXTURES_ROOT}/${config.directory}`,
     expectedPath: ({ stem, extension }: { stem: string; extension: string }) =>
       `${stem}.expected${extension}`,
-    skip: (fixture: { baseName: string }) => {
-      if (fixtureFilter && fixture.baseName !== fixtureFilter) {
-        return true;
-      }
-      if (
-        fixturePattern && !new RegExp(fixturePattern).test(fixture.baseName)
-      ) {
-        return true;
-      }
-      return false;
-    },
     async execute(fixture: { relativeInputPath: string }) {
       return await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,

@@ -11,5 +11,4 @@ export {
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
-export { ClosureTransformer } from "./closures/transformer.ts";
 export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";

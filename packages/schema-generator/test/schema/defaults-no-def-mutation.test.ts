@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import { getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Default<T,V> does not mutate shared definitions", () => {
   it("two props using same named type with different defaults", async () => {
@@ -15,7 +15,7 @@ describe("Schema: Default<T,V> does not mutate shared definitions", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const s = asObjectSchema(gen.generateSchema(type, checker));
+    const s = gen(type, checker);
 
     const a = s.properties?.a as any;
     const b = s.properties?.b as any;

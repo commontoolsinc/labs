@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { getExpressionText, type NormalizedDataFlow } from "../../ast/mod.ts";
+import type { NormalizedDataFlow } from "../../ast/mod.ts";
 
 export interface BindingPlanEntry {
   readonly dataFlow: NormalizedDataFlow;
@@ -21,8 +21,7 @@ function deriveBaseName(
     return expression.text;
   }
   if (ts.isPropertyAccessExpression(expression)) {
-    // Use getExpressionText to handle both regular and synthetic nodes
-    return getExpressionText(expression).replace(/\./g, "_");
+    return expression.getText().replace(/\./g, "_");
   }
   return `ref${index + 1}`;
 }

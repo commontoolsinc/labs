@@ -67,18 +67,4 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
   ): SchemaDefinition;
-
-  /**
-   * Generate schema from a synthetic TypeNode that doesn't resolve to a proper Type.
-   * Used by transformers that create synthetic type structures programmatically.
-   *
-   * @param typeNode - Synthetic TypeNode to analyze
-   * @param checker - TypeScript type checker
-   * @param typeRegistry - Optional WeakMap of Node → Type for registered synthetic nodes
-   */
-  generateSchemaFromSyntheticTypeNode(
-    typeNode: ts.TypeNode,
-    checker: ts.TypeChecker,
-    typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  ): SchemaDefinition;
 }
