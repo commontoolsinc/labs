@@ -18,6 +18,7 @@ import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
+import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -112,7 +113,17 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
     const omnibot = Chatbot({
       messages: [],
-      tools: undefined,
+      tools: {
+        searchWeb: {
+          pattern: searchWeb,
+        },
+        readWebpage: {
+          pattern: readWebpage,
+        },
+        calculator: {
+          pattern: calculator,
+        },
+      },
     });
 
     return {
