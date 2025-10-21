@@ -8,6 +8,7 @@ import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { isVNode, type VNode } from "@commontools/html";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { setLLMUrl } from "@commontools/llm";
 
 export interface EntryConfig {
   mainPath: string;
@@ -42,6 +43,7 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 }
 
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
+  setLLMUrl(config.apiUrl);
   const session = await makeSession(config);
   // Use a const ref object so we can assign later while keeping const binding
   const charmManagerRef: { current?: CharmManager } = {};
