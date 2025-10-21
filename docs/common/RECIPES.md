@@ -299,10 +299,10 @@ logic.
    // ✅ PATTERN B - Handler for removing items
    const removeItem = handler<
      unknown,
-     { items: Cell<ShoppingItem[]>; item: OpaqueRef<ShoppingItem> }
+     { items: Cell<ShoppingItem[]>; item: Cell<ShoppingItem> }
    >((_event, { items, item }) => {
      const currentItems = items.get();
-     const index = currentItems.findIndex((_, idx) => items.key(idx).equals(item));
+     const index = currentItems.findIndex((el) => item.equals(el as any));
      if (index >= 0) {
        items.set(currentItems.toSpliced(index, 1));
      }
@@ -329,7 +329,7 @@ logic.
 
    const removeItem = handler((_, { items, item }) => {
      const currentItems = items.get();
-     const index = currentItems.findIndex((_, idx) => items.key(idx).equals(item));
+     const index = currentItems.findIndex((el) => item.equals(el as any));
      if (index >= 0) {
        items.set(currentItems.toSpliced(index, 1));
      }
