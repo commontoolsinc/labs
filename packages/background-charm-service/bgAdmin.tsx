@@ -85,42 +85,6 @@ function fromNow(then: Date): string {
   return `${Math.floor(then.getFullYear() - now.getFullYear())} `;
 }
 
-function StatusIcon(
-  { status, disabledAt }: { status?: string; disabledAt?: number },
-) {
-  let color;
-  let title = status;
-  const SUCCESS = `#4CAF50`;
-  const UNKNOWN = `#FFC107`;
-  const DISABLED = `#9E9E9E`;
-  const FAILURE = `#F44336`;
-  if (!disabledAt) {
-    if (status === "Success") {
-      color = SUCCESS;
-      title = "Running";
-    } else {
-      color = UNKNOWN;
-    }
-  } else {
-    if (status === DISABLED_VIA_UI) {
-      color = DISABLED;
-    } else {
-      color = FAILURE;
-    }
-  }
-  return (
-    <div
-      title={title}
-      style={{
-        backgroundColor: color,
-        width: "20px",
-        borderRadius: "20px",
-      }}
-    >
-    </div>
-  );
-}
-
 const getRenderData = lift((
   charm: BGCharmEntry,
 ) => {
@@ -152,7 +116,6 @@ Last run ${lastRunDate ? fromNow(lastRunDate) : "never"} ${
   }`;
 
   return {
-    status,
     statusDisplay,
     disabledAt,
     details,
@@ -217,8 +180,6 @@ export default recipe<InputSchema, ResultSchema>(
           <div className="bg-charm-container">
             {charms.map((charm) => {
               const {
-                status,
-                disabledAt,
                 details,
                 name,
                 integration,
@@ -231,8 +192,33 @@ export default recipe<InputSchema, ResultSchema>(
                       onClick={toggleCharm({ charm })}
                       type="button"
                     >
-                      <StatusIcon status={status} disabledAt={disabledAt}>
-                      </StatusIcon>
+                      {derive(charm, ({ status, disabledAt }) => {
+                        const SUCCESS = `#4CAF50`;
+                        const UNKNOWN = `#FFC107`;
+                        const DISABLED = `#9E9E9E`;
+                        const FAILURE = `#F44336`;
+                        const statusColor = disabledAt === 0
+                          ? status === "Success" ? SUCCESS : UNKNOWN
+                          : status === DISABLED_VIA_UI
+                          ? DISABLED
+                          : FAILURE;
+                        const statusTitle =
+                          disabledAt === 0 && status === "Success"
+                            ? "Running"
+                            : status;
+                        return (
+                          <div
+                            title={statusTitle}
+                            style={{
+                              backgroundColor: statusColor,
+                              width: "20px",
+                              height: "20px",
+                              borderRadius: "20px",
+                            }}
+                          >
+                          </div>
+                        );
+                      })}
                     </button>
                   </div>
                   <div className="name ellipsis" title={details}>
