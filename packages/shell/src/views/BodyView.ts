@@ -90,10 +90,6 @@ export class XBodyView extends BaseView {
     const spaceName = this.rt
       ? this.rt.cc().manager().getSpaceName()
       : undefined;
-    const defaultPattern = charms
-      ? DefaultPattern.getDefaultPattern(charms)
-      : undefined;
-
     if (!charms) {
       return html`
         <div class="content">
@@ -115,7 +111,12 @@ export class XBodyView extends BaseView {
       `;
     }
 
-    if (!defaultPattern) {
+    const defaultPattern = charms
+      ? DefaultPattern.getDefaultPattern(charms)
+      : undefined;
+    const activeCharm = this.activeCharm;
+
+    if (!defaultPattern && !activeCharm) {
       return this.creatingDefaultPattern
         ? html`
           <div class="content">
@@ -140,8 +141,7 @@ export class XBodyView extends BaseView {
         `;
     }
 
-    const defaultCell = defaultPattern.getCell();
-    const activeCharm = this.activeCharm;
+    const defaultCell = defaultPattern?.getCell();
 
     const mainContent = activeCharm
       ? html`
@@ -149,9 +149,11 @@ export class XBodyView extends BaseView {
           <ct-render .cell="${activeCharm.getCell()}"></ct-render>
         </common-charm>
       `
-      : html`
+      : defaultCell
+      ? html`
         <ct-render slot="main" .cell="${defaultCell}"></ct-render>
-      `;
+      `
+      : null;
 
     const sidebarCell = this._selectSlotCell(
       activeCharm,
@@ -193,7 +195,12 @@ export class XBodyView extends BaseView {
       }
     }
 
-    return defaultCell ? defaultCell.key(key as never) : undefined;
+    if (!defaultCell) {
+      return undefined;
+    }
+
+    const fallbackCell = defaultCell.key(key as never);
+    return this._cellHasRenderableUi(fallbackCell) ? fallbackCell : undefined;
   }
 
   private _cellHasRenderableUi(cell: Cell<unknown>): boolean {
