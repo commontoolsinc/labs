@@ -51,7 +51,7 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
             </p>
             <ct-checkbox
               $checked={trackedEnabled}
-              onChange={toggleWithLogging({ enabled: trackedEnabled })}
+              onct-change={toggleWithLogging({ enabled: trackedEnabled })}
             >
               Enable Tracked Feature
             </ct-checkbox>
