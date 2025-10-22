@@ -223,8 +223,13 @@ const addAttachmentTool = handler<
 >(({ mentionableName }, { mentionable, allAttachments }) => {
   const charm = mentionable.find((c) => c[NAME] === mentionableName);
 
+  // borrowed from `ct-prompt-input` to match
+  const id = `attachment-${Date.now()}-${
+    Math.random().toString(36).substring(2, 9)
+  }`;
+
   allAttachments.push({
-    id: "abc123",
+    id,
     name: mentionableName,
     type: "mention",
     charm,
