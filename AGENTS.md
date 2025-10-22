@@ -2,10 +2,10 @@
 
 ## Recipe/Pattern Development
 
-If you are developing recipes/patterns (they mean the same thing), you MUST read
-ALL of the following documentation AND follow the workflow below:
+If you are developing recipes/patterns (they mean the same thing), use Claude
+Skills (recipe-dev) to do the work.
 
-### Required Documentation (read all 6 files)
+### Useful Recipe/Pattern documentation
 
 - `docs/common/RECIPE_DEV_DEPLOY.md` - Building, debugging, and deploying
   recipes step-by-step
@@ -19,21 +19,8 @@ ALL of the following documentation AND follow the workflow below:
   applications, including common mistakes and debugging tips
 - `docs/common/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
-- `docs/common/UI_TESTING.md` - Optional: How to work with shadow dom in our
-  integration tests
-
-### Development Workflow (add these steps to your todo list)
-
-1. Read all 6 required documentation files listed above
-2. Review example patterns in `packages/patterns/` for reference
-3. Build your recipe incrementally, starting simple
-4. Consult the 6 .md files if you are stuck
-5. Deploy and test your recipe
-6. **FINAL STEP: Review your code against all 6 .md files above to verify
-   correctness and check for improvements**
-
-**Important:** Step 5 is MANDATORY before declaring work complete. Do not skip
-this verification step.
+- `docs/common/UI_TESTING.md` - How to work with shadow dom in our integration
+  tests
 
 **Important:** Ignore the top level `recipes` folder - it is defunct.
 
