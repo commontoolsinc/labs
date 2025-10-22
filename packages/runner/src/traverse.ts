@@ -18,7 +18,7 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import { isAnyCellLink, parseLink } from "./link-utils.ts";
+import { isAnyCellLink, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import type {
   Activity,
   CommitError,
@@ -43,6 +43,7 @@ import type {
 import { resolve } from "./storage/transaction/attestation.ts";
 import { IExtendedStorageTransaction } from "./runtime.ts";
 import { MIME } from "@commontools/memory/interface";
+import { JSONSchemaObj } from "@commontools/api";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -310,23 +311,127 @@ interface OptJSONObject {
   [key: string]: OptJSONValue;
 }
 
+// Create objects based on the data and schema (in the link)
+// I think this callback system is a bit of a kludge, but it lets me
+// use the core traversal together with different object types for the runner.
+export interface IObjectCreator {
+  createObject(
+    link: NormalizedFullLink,
+  ): unknown;
+  // In the SchemaObjectTraverser system, we don't need to annotate the object
+  // In the validateAndTransform system, we may add the toCell and toOpaqueRef
+  // functions
+  annotateObject<T>(
+    link: NormalizedFullLink,
+    value: T,
+  ): T;
+  // In the SchemaObjectTraverser system, we'll copy the object's value into
+  // the new version
+  // In the validateAndTransform system, we'll skip these properties
+  addOptionalProperty(
+    obj: Record<string, Immutable<OptJSONValue>>,
+    key: string,
+    value: JSONValue,
+  ): void;
+
+  // In the SchemaObjectTraverser system, we don't need to apply defaults
+  // In the validateAndTransform system, we apply defaults from the schema
+  // This should also handle annotation of the default value if needed.
+  applyDefault<T>(link: NormalizedFullLink, value: T): T | undefined;
+}
+
+class TransformObjectCreator implements IObjectCreator {
+  addOptionalProperty(
+    _obj: Record<string, Immutable<OptJSONValue>>,
+    _key: string,
+    _value: JSONValue,
+  ) {
+    // noop
+  }
+  annotateObject<T>(
+    _link: NormalizedFullLink,
+    value: T,
+  ): T {
+    // return annotateWithBackToCellSymbols(result, runtime, link, tx);
+    return value;
+  }
+  applyDefault<T>(
+    _link: NormalizedFullLink,
+    value: T,
+  ): T {
+    // return processDefaultValue(runtime, tx, link, value);
+    return value;
+  }
+  // This is an early pass to see if we should just craete a proxy or cell
+  // If not, we will actually resolve our links to get to our values.
+  createObject(
+    link: NormalizedFullLink,
+  ): object | undefined {
+    // If we have a schema with an asCell or asStream (or if our anyOf values
+    // do), we should create a cell here.
+    // If we don't have a schema, we should create a query result proxy.
+    // if (link.schema === undefined) {
+    //   return createQueryResultProxy(this.runtime, this.tx, link);
+    // } else if (
+    //   isObject(link.schema) &&
+    //   (link.schema["asCell"] || link.schema["asStream"])
+    // ) {
+    //   return createCell(this.runtime, link, this.tx);
+    // }
+    return undefined;
+  }
+}
+
+class StandardObjectCreator implements IObjectCreator {
+  addOptionalProperty(
+    obj: Record<string, Immutable<OptJSONValue>>,
+    key: string,
+    value: JSONValue,
+  ) {
+    obj[key] = value;
+  }
+  annotateObject<T>(
+    _link: NormalizedFullLink,
+    value: T,
+  ): T {
+    return value;
+  }
+  applyDefault<T>(
+    _link: NormalizedFullLink,
+    _value: T,
+  ): T | undefined {
+    return undefined;
+  }
+  createObject(
+    link: NormalizedFullLink,
+  ): unknown {
+    return undefined;
+  }
+}
+
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
+    protected objectCreator: IObjectCreator = new StandardObjectCreator(),
+    protected recurseCells = true,
   ) {}
   abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
 
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
+   * If the doc's value is undefined, this will return undefined (or
+   * defaultValue if provided).
+   * Otherwise, it will return the fully traversed object.
    *
    * @param doc
    * @param space
    * @param tracker
    * @param schemaTracker
+   * @param defaultValue optional default value
    * @returns
    */
   protected traverseDAG(
@@ -334,15 +439,25 @@ export abstract class BaseObjectTraverser {
     space: MemorySpace,
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
+    defaultValue?: JSONValue,
   ): Immutable<JSONValue> | undefined {
-    if (isPrimitive(doc.value)) {
+    if (doc.value === undefined) {
+      // If we have a default, annotate it and return it
+      // Otherwise, return null
+      return defaultValue != undefined
+        ? this.objectCreator.applyDefault(
+          { ...doc.address, space },
+          defaultValue,
+        )
+        : null;
+    } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
       using t = tracker.include(doc.value, SchemaAll, doc);
       if (t === null) {
         return null;
       }
-      return doc.value.map((item, index) =>
+      const newValue = doc.value.map((item, index) =>
         this.traverseDAG(
           {
             ...doc,
@@ -355,8 +470,16 @@ export abstract class BaseObjectTraverser {
           space,
           tracker,
           schemaTracker,
-        )
-      ) as Immutable<JSONValue>[];
+          isObject(defaultValue) && Array.isArray(defaultValue) &&
+            index < defaultValue.length
+            ? defaultValue[index] as JSONValue
+            : undefined,
+        )!
+      );
+      return this.objectCreator.annotateObject(
+        { ...doc.address, space },
+        newValue,
+      );
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
@@ -373,13 +496,19 @@ export abstract class BaseObjectTraverser {
         if (newDoc.value === undefined) {
           return null;
         }
-        return this.traverseDAG(newDoc, space, tracker, schemaTracker);
+        return this.traverseDAG(
+          newDoc,
+          space,
+          tracker,
+          schemaTracker,
+          defaultValue,
+        );
       } else {
         using t = tracker.include(doc.value, SchemaAll, doc);
         if (t === null) {
           return null;
         }
-        return Object.fromEntries(
+        const newValue = Object.fromEntries(
           Object.entries(doc.value as JSONObject).map(([k, value]) => [
             k,
             this.traverseDAG(
@@ -391,9 +520,16 @@ export abstract class BaseObjectTraverser {
               space,
               tracker,
               schemaTracker,
-            ),
+              isObject(defaultValue) && !Array.isArray(defaultValue)
+                ? (defaultValue as JSONObject)[k] as JSONValue
+                : undefined,
+            )!,
           ]),
-        ) as Immutable<JSONValue>;
+        );
+        return this.objectCreator.annotateObject(
+          { ...doc.address, space },
+          newValue,
+        );
       }
     } else {
       logger.error(() => ["Encountered unexpected object: ", doc.value]);
@@ -844,29 +980,10 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
     }
   }
 
-  traverseWithSchemaContext(
-    doc: IAttestation,
+  private resolveRefSchema(
     schemaContext: Readonly<SchemaContext>,
-  ): Immutable<OptJSONValue> {
-    if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
-      // A value of true or {} means we match anything
-      // Resolve the rest of the doc, and return
-      return this.traverseDAG(
-        doc,
-        this.space,
-        this.tracker,
-        this.schemaTracker,
-      );
-    } else if (schemaContext.schema === false) {
-      // This value rejects all objects - just return
-      return undefined;
-    } else if (typeof schemaContext.schema !== "object") {
-      logger.warn(
-        () => ["Invalid schema is not an object", schemaContext.schema],
-      );
-      return undefined;
-    }
-    if ("$ref" in schemaContext.schema) {
+  ): Readonly<SchemaContext> | undefined {
+    if (isObject(schemaContext.schema) && "$ref" in schemaContext.schema) {
       const schemaRef = schemaContext.schema["$ref"];
       if (!isObject(schemaContext.rootSchema)) {
         logger.warn(
@@ -891,7 +1008,45 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
         rootSchema: schemaContext.rootSchema,
       };
     }
-    const schemaObj = schemaContext.schema as Immutable<JSONObject>;
+    return schemaContext;
+  }
+
+  traverseWithSchemaContext(
+    doc: IAttestation,
+    schemaContext: Readonly<SchemaContext>,
+  ): Immutable<OptJSONValue> {
+    // Handle any top-level $ref in the schema
+    const resolved = this.resolveRefSchema(schemaContext);
+    if (resolved === undefined) {
+      return undefined;
+    }
+    schemaContext = resolved;
+    if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
+      const defaultValue = isObject(schemaContext.schema)
+        ? schemaContext.schema["default"]
+        : undefined;
+      // A value of true or {} means we match anything
+      // Resolve the rest of the doc, and return
+      return this.traverseDAG(
+        doc,
+        this.space,
+        this.tracker,
+        this.schemaTracker,
+        defaultValue,
+      );
+    } else if (
+      schemaContext.schema === false ||
+      isObject(schemaContext.schema) && schemaContext.schema["not"] === true
+    ) {
+      // This value rejects all objects - just return
+      return undefined;
+    } else if (typeof schemaContext.schema !== "object") {
+      logger.warn(
+        () => ["Invalid schema is not an object", schemaContext.schema],
+      );
+      return undefined;
+    }
+    const schemaObj = schemaContext.schema;
     if (doc.value === null) {
       return this.isValidType(schemaObj, "null") ? doc.value : undefined;
     } else if (isString(doc.value)) {
@@ -904,6 +1059,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
         if (t === null) {
           return null;
         }
+        // FIXME: annotate
         return this.traverseArrayWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -921,6 +1077,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
         if (t === null) {
           return null;
         }
+        // FIXME: annotate
         return this.traverseObjectWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -946,20 +1103,17 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
     return true;
   }
 
+  // Returned object should be annotated and have defaults applied
   private traverseArrayWithSchema(
     doc: IAttestation,
-    schemaContext: SchemaContext,
+    schemaContext: SchemaContext & { schema: JSONSchemaObj },
   ): Immutable<OptJSONValue> {
     const arrayObj = [];
-    const schema = schemaContext.schema as Immutable<JSONObject>;
+    const schema = schemaContext.schema as JSONSchemaObj;
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
     ) {
-      const itemSchema = isObject(schema["items"])
-        ? schema["items"] as JSONSchema
-        : typeof (schema["items"]) === "boolean"
-        ? schema["items"]
-        : true;
+      const itemSchema = schema["items"] ?? true;
       const curDoc = {
         ...doc,
         address: {
@@ -983,32 +1137,35 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
       }
       arrayObj.push(val);
     }
-    return arrayObj;
+    return this.objectCreator.annotateObject({
+      ...doc.address,
+      space: this.space,
+    }, arrayObj);
   }
 
+  // Returned object should be annotated and have defaults applied
   private traverseObjectWithSchema(
     doc: IAttestation,
-    schemaContext: SchemaContext,
+    schemaContext: SchemaContext & { schema: JSONSchemaObj },
   ): Immutable<OptJSONValue> {
     const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
-    const schema = schemaContext.schema as Immutable<JSONObject>;
+    const schema = schemaContext.schema;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
-      const schemaProperties = schema["properties"] as
-        | Record<string, JSONSchema>
-        | undefined;
+      const schemaProperties = isObject(schema)
+        ? schema["properties"]
+        : undefined;
       const propSchema =
         (isObject(schemaProperties) && propKey in schemaProperties)
           ? schemaProperties[propKey]
-          : (isObject(schema["additionalProperties"]) ||
-              typeof schema["additionalProperties"] === "boolean")
-          ? schema["additionalProperties"] as JSONSchema
+          : (isObject(schema) && schema["additionalProperties"] !== undefined)
+          ? schema["additionalProperties"]
           : undefined;
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, we treat this specially, where we
       // don't invalidate the object, but also don't descend down
       // into that property.
       if (propSchema === undefined) {
-        filteredObj[propKey] = propValue;
+        this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
         continue;
       }
       const val = this.traverseWithSchemaContext({
@@ -1027,7 +1184,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
       }
     }
     // Check that all required fields are present
-    if ("required" in schema) {
+    if (isObject(schema) && "required" in schema) {
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
@@ -1037,7 +1194,10 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
         }
       }
     }
-    return filteredObj;
+    return this.objectCreator.annotateObject({
+      ...doc.address,
+      space: this.space,
+    }, filteredObj);
   }
 
   // This just has a schemaContext, since the portion of the doc.address.path

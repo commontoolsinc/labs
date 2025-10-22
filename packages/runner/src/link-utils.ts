@@ -130,9 +130,7 @@ export function isSigilWriteRedirectLink(
 export function isAnyCellLink(
   value: any,
 ): value is SigilLink | LegacyJSONCellLink | LegacyAlias {
-  return isLegacyCellLink(value) || isJSONCellLink(value) ||
-    isSigilLink(value) ||
-    isLegacyAlias(value);
+  return isJSONCellLink(value) || isSigilLink(value) || isLegacyAlias(value);
 }
 
 /**

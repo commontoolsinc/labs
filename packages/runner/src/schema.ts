@@ -743,7 +743,7 @@ export function validateAndTransform(
       } else if (resolvedSchema.items === false) {
         // items: false means no additional items allowed
         // This should technically be an error, but for compatibility we'll use empty schema
-        elementSchema = {};
+        elementSchema = false;
       } else if (resolvedSchema.items) {
         // items is a JSONSchema object
         elementSchema = resolvedSchema.items;
@@ -777,19 +777,19 @@ export function validateAndTransform(
   }
 
   // For primitive types, return as is
-  if (
-    value === undefined && isObject(resolvedSchema) &&
-    resolvedSchema.default !== undefined
-  ) {
-    const result = processDefaultValue(
-      runtime,
-      tx,
-      { ...link, schema: resolvedSchema },
-      resolvedSchema.default,
-    );
-    seen.push([seenKey, result]);
-    return result; // processDefaultValue already annotates with back to cell
-  }
+  // if (
+  //   value === undefined && isObject(resolvedSchema) &&
+  //   resolvedSchema.default !== undefined
+  // ) {
+  //   const result = processDefaultValue(
+  //     runtime,
+  //     tx,
+  //     { ...link, schema: resolvedSchema },
+  //     resolvedSchema.default,
+  //   );
+  //   seen.push([seenKey, result]);
+  //   return result; // processDefaultValue already annotates with back to cell
+  // }
 
   // Add the current value to seen before returning
   seen.push([seenKey, value]);
