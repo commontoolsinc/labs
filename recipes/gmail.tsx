@@ -811,7 +811,14 @@ const updateGmailFilterQuery = handler<
   },
 );
 
-export default recipe<{ settings: Settings; auth: Auth }>(
+export default recipe<{
+  settings: Default<Settings, {
+    gmailFilterQuery: "in:INBOX";
+    limit: 100;
+    historyId: "";
+  }>;
+  auth: Auth;
+}>(
   "gmail",
   ({ settings, auth }) => {
     const emails = cell<Confidential<Email[]>>([]);
@@ -825,11 +832,18 @@ export default recipe<{ settings: Settings; auth: Auth }>(
         derive(auth, (auth) => auth?.user?.email || "unauthorized")
       }`,
       [UI]: (
-        <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
-          <h2 style="font-size: 20px; font-weight: bold;">
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexDirection: "column",
+            padding: "25px",
+          }}
+        >
+          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
             {auth?.user?.email}
           </h2>
-          <h2 style="font-size: 20px; font-weight: bold;">
+          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
             Imported email count: {derive(emails, (emails) => emails.length)}
           </h2>
 
@@ -882,31 +896,37 @@ export default recipe<{ settings: Settings; auth: Auth }>(
             <table>
               <thead>
                 <tr>
-                  <th style="padding: 10px;">DATE</th>
-                  <th style="padding: 10px;">SUBJECT</th>
-                  <th style="padding: 10px;">LABEL</th>
-                  <th style="padding: 10px;">CONTENT</th>
+                  <th style={{ padding: "10px" }}>DATE</th>
+                  <th style={{ padding: "10px" }}>SUBJECT</th>
+                  <th style={{ padding: "10px" }}>LABEL</th>
+                  <th style={{ padding: "10px" }}>CONTENT</th>
                 </tr>
               </thead>
               <tbody>
                 {emails.map((email) => (
                   <tr>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{email.date}&nbsp;
                     </td>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{email.subject}&nbsp;
                     </td>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       &nbsp;{derive(
                         email,
                         (email) => email?.labelIds?.join(", "),
                       )}&nbsp;
                     </td>
-                    <td style="border: 1px solid black; padding: 10px;">
+                    <td style={{ border: "1px solid black", padding: "10px" }}>
                       <details>
                         <summary>Show Markdown</summary>
-                        <pre style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                        <pre
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            maxHeight: "300px",
+                            overflowY: "auto",
+                          }}
+                        >
                           {email.markdownContent}
                         </pre>
                       </details>
