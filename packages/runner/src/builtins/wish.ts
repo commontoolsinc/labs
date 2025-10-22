@@ -24,12 +24,11 @@ function resolveWishTarget(
   runtime: IRuntime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
-): Cell<unknown> | undefined {
-  const path = resolution.path ? [...resolution.path] : [];
+): Cell<any> | undefined {
   return runtime.getCellFromEntityId(
     space,
     resolution.entityId,
-    path,
+    resolution.path,
     undefined,
     tx,
   );
@@ -122,13 +121,12 @@ export function wish(
       return;
     }
 
-    let resolvedCell = baseCell;
+    let resolvedCell = baseCell.withTx(tx);
     for (const segment of parsed.path) {
-      resolvedCell = resolvedCell.withTx(tx).key(
-        segmentToPropertyKey(segment) as never,
-      );
+      resolvedCell = resolvedCell.key(segmentToPropertyKey(segment));
     }
+    resolvedCell = resolvedCell.resolveAsCell();
 
-    sendResult(tx, resolvedCell.withTx(tx));
+    sendResult(tx, resolvedCell);
   };
 }
