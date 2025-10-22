@@ -24,12 +24,11 @@ function resolveWishTarget(
   runtime: IRuntime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
-): Cell<unknown> | undefined {
-  const path = resolution.path ? [...resolution.path] : [];
+): Cell<any> | undefined {
   return runtime.getCellFromEntityId(
     space,
     resolution.entityId,
-    path,
+    resolution.path,
     undefined,
     tx,
   );
