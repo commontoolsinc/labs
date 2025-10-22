@@ -67,7 +67,7 @@ export default recipe<Input, Input>("My Recipe", ({ items }) => {
     [NAME]: "My Recipe",
     [UI]: (
       <div>
-        {items.map((item: OpaqueRef<Item>) => (
+        {items.map((item) => (
           <div>{item.title}</div>
         ))}
       </div>
@@ -82,7 +82,7 @@ export default recipe<Input, Input>("My Recipe", ({ items }) => {
 Add bidirectional binding for simple updates:
 
 ```typescript
-{items.map((item: OpaqueRef<Item>) => (
+{items.map((item) => (
   <ct-checkbox $checked={item.done}>
     {item.title}
   </ct-checkbox>
@@ -258,15 +258,15 @@ See `RECIPES.md` for reactive programming details.
 
 ### Type Annotations
 
-**Always annotate `.map()` parameters:**
+**Type annotations in `.map()` are now automatic:**
 
 ```typescript
-{items.map((item: OpaqueRef<Item>) => (
+{items.map((item) => (
   <ct-checkbox $checked={item.done} />
 ))}
 ```
 
-**Why:** TypeScript can't infer types for bidirectional binding without annotation.
+**Good news:** TypeScript now automatically infers the correct type - no manual annotation needed!
 
 See `PATTERNS.md` for common patterns.
 

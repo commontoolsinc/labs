@@ -50,7 +50,7 @@ The simplest and most common pattern: a list where users can check items and edi
 
 **Key Concepts:**
 - Bidirectional binding with `$checked` and `$value`
-- `OpaqueRef<T>` type annotation in `.map()`
+- Automatic type inference in `.map()` (no manual type annotation needed!)
 - Simple add/remove operations with handlers
 
 ```typescript
@@ -99,7 +99,7 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
         <div>
           <h2>Shopping List</h2>
           <div>
-            {items.map((item: OpaqueRef<ShoppingItem>) => (
+            {items.map((item) => (
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <ct-checkbox $checked={item.done}>
                   <span style={item.done ? { textDecoration: "line-through" } : {}}>
@@ -126,7 +126,7 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
 **What to notice:**
 - ✅ `$checked` automatically updates `item.done` - no handler needed
 - ✅ Ternary operator in `style` attribute works fine
-- ✅ `OpaqueRef<ShoppingItem>` type annotation on map parameter
+- ✅ Type inference automatically works in `.map()` - no type annotation needed!
 - ✅ Handlers only for structural changes (add/remove)
 
 ## Level 2: Filtered and Grouped Views
@@ -185,7 +185,7 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
           {categories.map((category) => (
             <div style={{ marginBottom: "1rem" }}>
               <h3>{category}</h3>
-              {(groupedItems[category] ?? []).map((item: OpaqueRef<ShoppingItem>) => (
+              {(groupedItems[category] ?? []).map((item) => (
                 <ct-checkbox $checked={item.done}>
                   <span style={item.done ? { textDecoration: "line-through" } : {}}>
                     {item.title}
@@ -377,7 +377,7 @@ const searchQuery = cell("");
     const query = searchQuery.get().toLowerCase();
     return item.title.toLowerCase().includes(query);
   })
-  .map((item: OpaqueRef<Item>) => (
+  .map((item) => (
     <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
   ))
 }
@@ -398,7 +398,7 @@ const filteredItems = derive({ items, searchQuery }, ({ items, searchQuery }) =>
 });
 
 // Now map over filteredItems
-{filteredItems.map((item: OpaqueRef<Item>) => (
+{filteredItems.map((item) => (
   <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
 ))}
 
@@ -472,7 +472,7 @@ const itemCount = derive(items, (list) => list.length);
 
 ```typescript
 // ✅ EFFICIENT - Already have the index from map
-{items.map((item: OpaqueRef<Item>) => (
+{items.map((item) => (
   <ct-button onClick={removeItem({ items, item })}>×</ct-button>
 ))}
 
@@ -486,7 +486,7 @@ const removeItem = handler((_, { items, item }: { items: Cell<Array<Cell<Item>>>
 
 ```typescript
 // ❌ AVOID - Creates new handler instance for each item
-{items.map((item: OpaqueRef<Item>) => {
+{items.map((item) => {
   const remove = handler(() => { /* ... */ });
   return <ct-button onClick={remove}>×</ct-button>;
 })}
@@ -494,7 +494,7 @@ const removeItem = handler((_, { items, item }: { items: Cell<Array<Cell<Item>>>
 // ✅ CORRECT - Handler defined at module level
 const removeItem = handler((_, { items, item }) => { /* ... */ });
 
-{items.map((item: OpaqueRef<Item>) => (
+{items.map((item) => (
   <ct-button onClick={removeItem({ items, item })}>×</ct-button>
 ))}
 ```
@@ -519,10 +519,10 @@ const removeItem = handler((_, { items, item }) => { /* ... */ });
 **Issue: Type error with .map()**
 
 ```typescript
-// ❌ WRONG - Missing type annotation
+// ✅ Type inference now works automatically - no annotation needed!
 {items.map((item) => <ct-checkbox $checked={item.done} />)}
 
-// ✅ CORRECT
+// ✅ Explicit type annotation still works if you prefer
 {items.map((item: OpaqueRef<Item>) => <ct-checkbox $checked={item.done} />)}
 ```
 
@@ -570,24 +570,24 @@ const groupedItems = derive(items, (list) => {
 
 These are the most frequent mistakes developers make when building patterns:
 
-#### 1. Forgetting Type Annotations in .map()
+#### 1. Type Inference in .map() (Now Automatic!)
 
 ```typescript
-// ❌ WRONG - Missing type annotation
+// ✅ Type inference now works automatically!
 {items.map((item) => (
   <ct-checkbox $checked={item.done} />
-  // Error: Property 'done' does not exist on type 'OpaqueRef<unknown>'
+  // Types are automatically inferred - no annotation needed!
 ))}
 
-// ✅ CORRECT - Add type annotation
+// ✅ Explicit annotation still works if you prefer being explicit
 {items.map((item: OpaqueRef<ShoppingItem>) => (
   <ct-checkbox $checked={item.done} />
 ))}
 ```
 
-**Why this happens:** TypeScript can't infer the type of items in a Cell array. You must explicitly annotate the parameter with `OpaqueRef<YourType>`.
+**Good news:** With recent type improvements, TypeScript now automatically infers the correct type for items in `.map()` callbacks. You no longer need to manually add `OpaqueRef<T>` type annotations!
 
-**When to add it:** Always, in every `.map()` call on a Cell array in JSX.
+**When to use explicit types:** Only if you want to be extra explicit or if you encounter edge cases where inference doesn't work.
 
 #### 2. Mixing Style Syntax (String vs Object)
 
@@ -711,7 +711,7 @@ export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
     [NAME]: "Shopping List",
     [UI]: (
       <div>
-        {items.map((item: OpaqueRef<ShoppingItem>) => (
+        {items.map((item) => (
           <div>{item.title}</div>
         ))}
       </div>
@@ -814,7 +814,7 @@ Understanding TypeScript typing in patterns is crucial for avoiding common error
 
 ### Type Annotations in .map()
 
-**The Rule**: Always annotate the item parameter when using `.map()` on a Cell array in JSX.
+**The Rule (Updated!)**: Type annotations are now **optional** - TypeScript automatically infers the correct type!
 
 ```typescript
 interface ShoppingItem {
@@ -822,19 +822,19 @@ interface ShoppingItem {
   done: Default<boolean, false>;
 }
 
-// ❌ WRONG - TypeScript can't infer the type
+// ✅ SIMPLE - Type inference works automatically (recommended!)
 {items.map((item) => (
   <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-  // Error: Property 'done' does not exist on type 'OpaqueRef<unknown>'
+  // Types are automatically inferred!
 ))}
 
-// ✅ CORRECT - Explicit type annotation
+// ✅ EXPLICIT - You can still annotate if you prefer
 {items.map((item: OpaqueRef<ShoppingItem>) => (
   <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
 ))}
 
-// ✅ CORRECT - With index parameter
-{items.map((item: OpaqueRef<ShoppingItem>, index: number) => (
+// ✅ With index parameter (type inference still works)
+{items.map((item, index) => (
   <div>
     <span>{index + 1}. {item.title}</span>
     <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
@@ -851,13 +851,13 @@ Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to 
 
 ### Common Type Errors and Solutions
 
-**Error**: "Property 'X' does not exist on type 'OpaqueRef<unknown>'"
+**Note**: With automatic type inference, this error is now rare! If you do encounter it:
 
 ```typescript
-// ❌ Problem: Missing type annotation
-{items.map((item) => <span>{item.name}</span>)}
+// ✅ Type inference handles this automatically now
+{items.map((item) => <span>{item.title}</span>)}
 
-// ✅ Solution: Add OpaqueRef<YourType>
+// ✅ Or add explicit type if needed in edge cases
 {items.map((item: OpaqueRef<ShoppingItem>) => <span>{item.title}</span>)}
 ```
 
@@ -945,7 +945,7 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 {categories.map((category) => (
   <div>
     <h3>{category}</h3>
-    {(groupedItems[category] ?? []).map((item: OpaqueRef<ShoppingItem>) => (
+    {(groupedItems[category] ?? []).map((item) => (
       <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
     ))}
   </div>
@@ -956,14 +956,14 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 - ✅ `groupedItems[category]` - direct property access works on derived objects
 - ✅ `(groupedItems[category] ?? [])` - inline null coalescing for safety
 - ✅ No intermediate `derive` needed for simple property access
-- ✅ Type annotation `OpaqueRef<ShoppingItem>` required in inner map
+- ✅ Type inference works automatically, even in nested maps!
 
 ## Summary
 
 **Level 1 patterns:**
 - Bidirectional binding for simple UI updates
 - Handlers for structural changes (add/remove)
-- `OpaqueRef<T>` type annotations
+- Automatic type inference in `.map()` (no manual annotations needed!)
 
 **Level 2 patterns:**
 - `derive()` for data transformations
