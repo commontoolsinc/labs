@@ -23,10 +23,8 @@ import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
 import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 
-export type Charm = {
+type MinimalCharm = {
   [NAME]?: string;
-  [UI]?: unknown;
-  [key: string]: any;
 };
 
 type CharmsListInput = void;
@@ -43,7 +41,7 @@ interface CharmsListOutput {
 
 const visit = handler<
   Record<string, never>,
-  { charm: any }
+  { charm: Cell<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -51,20 +49,19 @@ const visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: any;
-    allCharms: Cell<any[]>;
+    charm: Cell<MinimalCharm>;
+    allCharms: Cell<MinimalCharm[]>;
   }
 >((_, state) => {
-  const charmName = state.charm[NAME];
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => c[NAME] === charmName);
+  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
-    console.log("charmListCopy before", charmListCopy);
+    console.log("charmListCopy before", charmListCopy.length);
     charmListCopy.splice(index, 1);
-    console.log("charmListCopy after", charmListCopy);
-    state.allCharms.set(charmListCopy);
+    console.log("charmListCopy after", charmListCopy.length);
+    state.allCharms.resolveAsCell().set(charmListCopy);
   }
 });
 
@@ -238,29 +235,28 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 </tr>
               </thead>
               <tbody>
-                {derive(allCharms, (allCharms) =>
-                  allCharms.map((charm: any) => (
-                    <tr>
-                      <td>{charm[NAME] || "Untitled Charm"}</td>
-                      <td>
-                        <ct-hstack gap="2">
-                          <ct-button
-                            size="sm"
-                            onClick={visit({ charm })}
-                          >
-                            Visit
-                          </ct-button>
-                          <ct-button
-                            size="sm"
-                            variant="destructive"
-                            onClick={removeCharm({ charm, allCharms })}
-                          >
-                            Remove
-                          </ct-button>
-                        </ct-hstack>
-                      </td>
-                    </tr>
-                  )))}
+                {allCharms.map((charm) => (
+                  <tr>
+                    <td>{charm?.[NAME] || "Untitled Charm"}</td>
+                    <td>
+                      <ct-hstack gap="2">
+                        <ct-button
+                          size="sm"
+                          onClick={visit({ charm })}
+                        >
+                          Visit
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="destructive"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          Remove
+                        </ct-button>
+                      </ct-hstack>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </ct-table>
           </ct-vstack>
@@ -268,7 +264,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       ),
       sidebarUI: (
         <div>
-          {/* TODO(bf): why any? */}
+          {/* TODO(bf): Remove once we fix types to not require ReactNode */}
           {omnibot.ui.attachmentsAndTools as any}
           {omnibot.ui.chatLog as any}
         </div>
