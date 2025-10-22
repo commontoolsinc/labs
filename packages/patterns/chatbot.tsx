@@ -181,16 +181,6 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-// function getMentionable() {
-//   return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
-//     wish<MentionableCharm[]>(
-//       "/backlinksIndex/mentionable",
-//       [],
-//     ) as unknown as Cell<MentionableCharm[]>,
-//     (i) => i,
-//   );
-// }
-
 const navigateToAttachment = handler<
   { id: string },
   { allAttachments: Array<PromptAttachment> }
