@@ -39,15 +39,16 @@ const service = new BackgroundCharmService({
   workerTimeoutMs,
 });
 
-const shutdown = () => {
-  // @ts-ignore: Object is possibly 'undefined'
-  service.stop().then(() => {
-    Deno.exit(0);
-  });
-};
+function shutdown(service: BackgroundCharmService) {
+  return () => {
+    service.stop().then(() => {
+      Deno.exit(0);
+    });
+  };
+}
 
-Deno.addSignalListener("SIGINT", shutdown);
-Deno.addSignalListener("SIGTERM", shutdown);
+Deno.addSignalListener("SIGINT", shutdown(service));
+Deno.addSignalListener("SIGTERM", shutdown(service));
 
 service.initialize().then(() => {
   console.log("Background Charm Service started successfully");
