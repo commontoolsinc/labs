@@ -51,7 +51,7 @@ Begin with minimal viable recipe:
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -67,7 +67,7 @@ export default recipe<Input, Input>("My Recipe", ({ items }) => {
     [NAME]: "My Recipe",
     [UI]: (
       <div>
-        {items.map((item: OpaqueRef<Item>) => (
+        {items.map((item) => (
           <div>{item.title}</div>
         ))}
       </div>
@@ -82,7 +82,7 @@ export default recipe<Input, Input>("My Recipe", ({ items }) => {
 Add bidirectional binding for simple updates:
 
 ```typescript
-{items.map((item: OpaqueRef<Item>) => (
+{items.map((item) => (
   <ct-checkbox $checked={item.done}>
     {item.title}
   </ct-checkbox>
@@ -137,7 +137,6 @@ See "Deployment Workflow" section below.
 ### Common Error Categories
 
 **Type Errors** (see `HANDLERS.md` for details):
-- Missing `OpaqueRef<T>` annotation in `.map()`
 - Wrong style syntax (object vs string, see `COMPONENTS.md`)
 - Using `Cell<OpaqueRef<T>[]>` instead of `Cell<T[]>` in handlers
 - Forgetting `Cell<>` wrapper in handler state types
@@ -167,7 +166,6 @@ See "Deployment Workflow" section below.
 
 | Error Message | Check |
 |---------------|-------|
-| "Property X does not exist on type 'OpaqueRef<unknown>'" | Missing `OpaqueRef<T>` in `.map()` - See `HANDLERS.md` |
 | "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element - See `COMPONENTS.md` |
 | Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `HANDLERS.md` |
 | Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
@@ -256,20 +254,6 @@ const grouped = groupByCategory(items);
 
 See `RECIPES.md` for reactive programming details.
 
-### Type Annotations
-
-**Always annotate `.map()` parameters:**
-
-```typescript
-{items.map((item: OpaqueRef<Item>) => (
-  <ct-checkbox $checked={item.done} />
-))}
-```
-
-**Why:** TypeScript can't infer types for bidirectional binding without annotation.
-
-See `PATTERNS.md` for common patterns.
-
 ## Multi-File Recipes
 
 When building complex recipes across multiple files:
@@ -306,8 +290,6 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 - Test syntax before deploying (unless deployment fails)
 - Add multiple features before testing
 - Use handlers for simple value updates
-- Forget `OpaqueRef<T>` annotations in `.map()`
-- Duplicate content from `docs/common/` - reference it instead
 
 ## Documentation Map
 

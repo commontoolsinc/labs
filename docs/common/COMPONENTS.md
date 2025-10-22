@@ -56,7 +56,7 @@ interface ShoppingItem {
 }
 
 // In your recipe
-{items.map((item: OpaqueRef<ShoppingItem>) => (
+{items.map((item) => (
   <div>
     <ct-checkbox $checked={item.done}>
       <span>{item.title}</span>
@@ -65,8 +65,6 @@ interface ShoppingItem {
   </div>
 ))}
 ```
-
-**Important:** Notice the `OpaqueRef<ShoppingItem>` type annotation. This is required when using `.map()` with bidirectional binding to ensure proper type checking.
 
 ## When to Use Handlers vs Bidirectional Binding
 
@@ -406,7 +404,7 @@ interface ShoppingItem {
 }
 
 // ✅ CORRECT - Manual rendering for custom fields
-{items.map((item: OpaqueRef<ShoppingItem>) => (
+{items.map((item) => (
   <div>
     <ct-checkbox $checked={item.done}>
       {item.title}

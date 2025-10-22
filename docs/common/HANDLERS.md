@@ -173,8 +173,8 @@ export default recipe<Input, Input>(
     return {
       [UI]: (
         <div>
-          {/* Context 4: In JSX .map() - OpaqueRef<ShoppingItem> */}
-          {items.map((item: OpaqueRef<ShoppingItem>) => (
+          {/* Context 4: In .map() - item is OpaqueRef<ShoppingItem> */}
+          {items.map((item) => (
             <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
           ))}
           <ct-button onClick={addItem({ items })}>Add</ct-button>
@@ -192,9 +192,9 @@ Think of types this way:
 
 | Type | Mental Model | Where Used | Example |
 |------|--------------|------------|---------|
-| `Cell<T[]>` | A **box** containing an array | Handler params, recipe params, returns | `items: Cell<ShoppingItem[]>` |
+| `Cell<T[]>` | A **box** containing an array | Handler params, sometimes lift params, returns | `items: Cell<ShoppingItem[]>` |
 | `T[]` | The **plain array** inside the box | Result of `.get()` | `const arr = items.get()` returns `ShoppingItem[]` |
-| `OpaqueRef<T>` | A **cell-like reference** to each item | In JSX `.map()` | `items.map((item: OpaqueRef<ShoppingItem>) => ...)` |
+| `OpaqueRef<T>` | A **cell-like reference** to each item | Recipe params, in `.map()` | `items.map((item) => ...)` |
 | `T` | A **plain object** | Inside plain arrays | `{ title: "Milk", done: false }` |
 
 ### How They Transform
@@ -205,11 +205,9 @@ const items: Cell<ShoppingItem[]>  // Handler receives this
 // Open the box with .get()
 const plainArray: ShoppingItem[] = items.get();
 
-// In JSX, .map() wraps each item
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  // item is NOT a plain ShoppingItem
-  // item is NOT a Cell<ShoppingItem>
-  // item IS an OpaqueRef<ShoppingItem>
+// In recipe, arguments, cells and map parameters are OpaqueRef<>
+{items.map((item) => (
+  // item's type is automatically inferred as OpaqueRef<ShoppingItem>
   <ct-checkbox $checked={item.done} />
 ))}
 ```
@@ -219,7 +217,7 @@ const plainArray: ShoppingItem[] = items.get();
 **Different contexts require different types:**
 
 1. **Handler parameters need `Cell<T[]>`** - so you can call `.get()` and `.set()`
-2. **JSX .map() needs `OpaqueRef<T>`** - for bidirectional binding to work
+2. **JSX .map() has `OpaqueRef<T>`** - for bidirectional binding to work (automatically inferred!)
 3. **Recipe schemas use plain `T[]`** - to define the data structure
 
 **Common mistake:**
@@ -281,8 +279,8 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
   return {
     [UI]: (
       <div>
-        {/* In .map(): OpaqueRef<ShoppingItem> */}
-        {items.map((item: OpaqueRef<ShoppingItem>) => (
+        {/* Also in .map(), inferred as OpaqueRef<ShoppingItem> */}
+        {items.map((item) => (
           <div>
             <ct-checkbox $checked={item.done}>
               {item.title}

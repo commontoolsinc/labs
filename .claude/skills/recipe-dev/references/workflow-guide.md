@@ -111,7 +111,6 @@ echo '{"title": "Test Item"}' | ./dist/ct charm set --identity claude.key --api-
 ### Common Error Patterns
 
 **Type Errors:**
-- Missing `OpaqueRef<T>` in `.map()` - See `HANDLERS.md`
 - Wrong style syntax (object vs string) - See `COMPONENTS.md`
 - Using `Cell<OpaqueRef<T>[]>` in handlers instead of `Cell<T[]>` - See `HANDLERS.md`
 
