@@ -26,6 +26,7 @@ import {
 } from "./common-tools.tsx";
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
+import { schemaifyWish } from "./wish.tsx";
 
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
@@ -164,10 +165,6 @@ const navigateToNote = handler<
 type BacklinksIndex = {
   mentionable: MentionableCharm[];
 };
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
-}
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
