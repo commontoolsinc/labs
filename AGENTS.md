@@ -19,6 +19,8 @@ Skills (recipe-dev) to do the work.
   applications, including common mistakes and debugging tips
 - `docs/common/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `packages/patterns/INDEX.md` - Catalog of all pattern examples with summaries,
+  data types, and keywords
 - `docs/common/UI_TESTING.md` - How to work with shadow dom in our integration
   tests
 
