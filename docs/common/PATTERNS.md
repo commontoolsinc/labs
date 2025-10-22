@@ -516,16 +516,6 @@ const removeItem = handler((_, { items, item }) => { /* ... */ });
 <ct-checkbox checked={item.done} onct-change={toggle(item)} />
 ```
 
-**Issue: Type error with .map()**
-
-```typescript
-// ✅ Type inference now works automatically - no annotation needed!
-{items.map((item) => <ct-checkbox $checked={item.done} />)}
-
-// ✅ Explicit type annotation still works if you prefer
-{items.map((item: OpaqueRef<Item>) => <ct-checkbox $checked={item.done} />)}
-```
-
 **Issue: Filtering/sorting not updating**
 
 ```typescript
@@ -570,26 +560,7 @@ const groupedItems = derive(items, (list) => {
 
 These are the most frequent mistakes developers make when building patterns:
 
-#### 1. Type Inference in .map() (Now Automatic!)
-
-```typescript
-// ✅ Type inference now works automatically!
-{items.map((item) => (
-  <ct-checkbox $checked={item.done} />
-  // Types are automatically inferred - no annotation needed!
-))}
-
-// ✅ Explicit annotation still works if you prefer being explicit
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  <ct-checkbox $checked={item.done} />
-))}
-```
-
-**Good news:** With recent type improvements, TypeScript now automatically infers the correct type for items in `.map()` callbacks. You no longer need to manually add `OpaqueRef<T>` type annotations!
-
-**When to use explicit types:** Only if you want to be extra explicit or if you encounter edge cases where inference doesn't work.
-
-#### 2. Mixing Style Syntax (String vs Object)
+#### 1. Mixing Style Syntax (String vs Object)
 
 ```typescript
 // ❌ WRONG - String style on HTML element
@@ -615,7 +586,7 @@ These are the most frequent mistakes developers make when building patterns:
 
 **Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
 
-#### 3. Using Handlers Instead of Bidirectional Binding
+#### 2. Using Handlers Instead of Bidirectional Binding
 
 ```typescript
 // ❌ AVOID - Unnecessary handler for simple toggle
@@ -636,7 +607,7 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
 
 **Remember:** If you're just syncing UI ↔ data, use `$` binding. Only use handlers for side effects, validation, or structural changes.
 
-#### 4. Trying to Use [ID] When You Don't Need It
+#### 3. Trying to Use [ID] When You Don't Need It
 
 ```typescript
 // ❌ UNNECESSARY - [ID] not needed for basic lists
@@ -665,7 +636,7 @@ interface TodoItem {
 
 See RECIPES.md for detailed [ID] guidance.
 
-#### 5. Incorrect Handler Type Parameters
+#### 4. Incorrect Handler Type Parameters
 
 ```typescript
 // ❌ WRONG - OpaqueRef in handler parameters
@@ -812,36 +783,6 @@ When something doesn't work:
 
 Understanding TypeScript typing in patterns is crucial for avoiding common errors.
 
-### Type Annotations in .map()
-
-**The Rule (Updated!)**: Type annotations are now **optional** - TypeScript automatically infers the correct type!
-
-```typescript
-interface ShoppingItem {
-  title: string;
-  done: Default<boolean, false>;
-}
-
-// ✅ SIMPLE - Type inference works automatically (recommended!)
-{items.map((item) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-  // Types are automatically inferred!
-))}
-
-// ✅ EXPLICIT - You can still annotate if you prefer
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-))}
-
-// ✅ With index parameter (type inference still works)
-{items.map((item, index) => (
-  <div>
-    <span>{index + 1}. {item.title}</span>
-    <ct-button onClick={removeItem({ items, index })}>Remove</ct-button>
-  </div>
-))}
-```
-
 ### Why OpaqueRef?
 
 Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to the Cell system. This enables:
@@ -849,17 +790,9 @@ Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to 
 - **Reactive updates** when the item changes
 - **Type-safe property access**
 
+**Good news**: Type annotations are now automatic - just write `items.map(item => ...)` and TypeScript infers the correct type!
+
 ### Common Type Errors and Solutions
-
-**Note**: With automatic type inference, this error is now rare! If you do encounter it:
-
-```typescript
-// ✅ Type inference handles this automatically now
-{items.map((item) => <span>{item.title}</span>)}
-
-// ✅ Or add explicit type if needed in edge cases
-{items.map((item: OpaqueRef<ShoppingItem>) => <span>{item.title}</span>)}
-```
 
 **Error**: "Type 'OpaqueRef<ShoppingItem>' is not assignable to type 'Cell<boolean>'"
 
@@ -903,7 +836,7 @@ const addItem = handler<
 Think of it this way:
 - **Cell<T[]>**: A box containing an array (handler params, recipe params, returns)
 - **T[]**: The plain array inside the box (result of `.get()`)
-- **OpaqueRef<T>**: A cell-like reference to each item (in JSX `.map()`)
+- **OpaqueRef<T>**: A cell-like reference to each item (in JSX `.map()`, auto-inferred!)
 
 ### Style Attribute Types
 
