@@ -56,6 +56,84 @@ const removeItem = handler(
 
 The handler receives the event from the UI as the first parameter, and your bound state as the second parameter. This allows you to merge discrete UI events with reactive cells that are always changing.
 
+## ❌ CRITICAL: Never Create Handler Bindings Inside derive()
+
+**This is one of the most common mistakes when building recipes.** Handler bindings must happen at the recipe level, not inside reactive contexts like `derive()`.
+
+### The Problem
+
+When you create UI with handler bindings inside `derive()`, you're in a reactive context where Cells are wrapped as `OpaqueRef` objects. Handler bindings expect real `Cell` objects, not `OpaqueRef` wrappers. This causes a `ReadOnlyAddressError` when the handler tries to write to what it thinks is a read-only reference.
+
+### ❌ WRONG: Handler Binding Inside derive()
+
+```typescript
+// This will cause ReadOnlyAddressError!
+const mySection = derive(extractionResult, (result) => {
+  if (!result) return null;
+
+  return (
+    <ct-vstack>
+      <pre>{JSON.stringify(result, null, 2)}</pre>
+      <ct-button onClick={applyData({ data: extractionResult })}>
+        Apply
+      </ct-button>  {/* ❌ extractionResult is OpaqueRef here, not Cell! */}
+    </ct-vstack>
+  );
+});
+
+// In UI:
+{mySection}
+```
+
+**Error you'll see:**
+```
+ReadOnlyAddressError: Cannot write to read-only address
+```
+
+### ✅ RIGHT: Use ifElse() for Conditional UI with Handlers
+
+```typescript
+// Derive only the data you need to display
+const resultText = derive(extractionResult, (result) => {
+  if (!result) return "";
+  return JSON.stringify(result, null, 2);
+});
+
+// Derive a boolean for conditional rendering
+const hasResult = derive(
+  extractionResult,
+  (result) => result !== null
+);
+
+// In UI - handler binding happens at recipe level
+{ifElse(
+  hasResult,
+  (
+    <ct-vstack>
+      <pre>{resultText}</pre>
+      <ct-button onClick={applyData({ data: extractionResult })}>
+        Apply
+      </ct-button>  {/* ✅ extractionResult is Cell here! */}
+    </ct-vstack>
+  ),
+  null
+)}
+```
+
+### The Golden Rule
+
+**Derive data, not UI with handlers.**
+
+- ✅ `derive()` for computed **values** (strings, numbers, booleans, arrays)
+- ✅ `ifElse()` for conditional **UI with handlers**
+- ❌ Never create handler bindings inside `derive()`, `map()`, or other reactive contexts
+
+### Why This Happens
+
+Inside `derive()` (and similar reactive transformations), the reactive system wraps Cells as `OpaqueRef` objects to track dependencies. When you try to pass this wrapped reference to a handler binding, the handler receives an `OpaqueRef` instead of a `Cell`. Later, when the handler executes and tries to call `.set()` on what it thinks is a Cell, it's actually trying to write to a read-only reference wrapper.
+
+The fix is simple: keep handler bindings at the recipe body level where Cells are properly accessible, and use `ifElse()` for conditional rendering.
+
 ## Common Handler Patterns
 
 ### 1. Simple Click Handler (No Event Data)
@@ -535,13 +613,49 @@ const handler = handler<Record<string, never>, any>(
 }
 ```
 
+## Troubleshooting Common Handler Errors
+
+### ReadOnlyAddressError when clicking buttons
+
+**Symptom:** Clicking a button throws `ReadOnlyAddressError: Cannot write to read-only address`
+
+**Cause:** Handler binding was created inside a reactive context like `derive()`, where Cells are wrapped as `OpaqueRef` objects.
+
+**Solution:** Move the handler binding outside of `derive()`. Use `ifElse()` for conditional rendering instead of deriving entire UI sections with handlers.
+
+**See:** The section above titled "❌ CRITICAL: Never Create Handler Bindings Inside derive()" for detailed examples.
+
+### Handler not firing when button clicked
+
+**Symptom:** Button click does nothing, no console errors
+
+**Common causes:**
+1. **Wrong event name** - Check you're using the right event (e.g., `onClick` vs `onct-click`)
+2. **Handler not bound** - Make sure you're calling the handler factory: `onClick={myHandler({ cells })}` not `onClick={myHandler}`
+3. **Missing cells in context** - Verify all cells the handler needs are passed in the binding object
+
+### Type errors with handler parameters
+
+**Symptom:** TypeScript errors about Cell types or OpaqueRef types
+
+**Solution:** Always use `Cell<T[]>` in handler type signatures, never `Cell<OpaqueRef<T>[]>`. See the "Critical Rule: Cell<T[]> for Arrays" section above.
+
+### Data not updating after handler runs
+
+**Symptom:** Handler executes but UI doesn't update
+
+**Common causes:**
+1. **Forgot to call `.set()`** - Make sure you're using `cell.set(newValue)`, not `cell = newValue`
+2. **Mutating without triggering update** - If you mutate an object/array, you may need to call `.set()` with a new reference
+3. **Wrong cell passed** - Double-check you're modifying the cell you think you are
+
 ## Debugging Handlers
 
 ### Console-based Debugging
 ```typescript
 // In recipes, use console logging for debugging
 const addItem = handler<
-  { detail: { value: string } }, 
+  { detail: { value: string } },
   { items: Cell<any[]> }
 >(
   ({ detail }, { items }) => {
