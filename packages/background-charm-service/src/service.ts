@@ -57,11 +57,11 @@ export class BackgroundCharmService {
     this.charmsCell.sink((cs) => this.ensureCharms(cs));
   }
 
-  stop() {
+  stop(): Promise<PromiseSettledResult<void>[]> {
     // FIXME(ja): stop listening to the charms cell ?
     if (!this.isRunning) {
       console.log("Service is not running");
-      return;
+      return Promise.resolve([]);
     }
 
     const promises = Array.from(this.charmSchedulers.values()).map(
