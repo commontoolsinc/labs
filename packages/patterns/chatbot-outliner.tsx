@@ -53,11 +53,11 @@ const handleCharmLinkClick = handler<
 });
 
 function getMentionable() {
-  return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
+  return derive<MentionableCharm[], MentionableCharm[]>(
     wish<MentionableCharm[]>(
       "/backlinksIndex/mentionable",
       [],
-    ) as unknown as Cell<MentionableCharm[]>,
+    ),
     (i) => i,
   );
 }
