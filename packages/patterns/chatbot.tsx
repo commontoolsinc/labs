@@ -15,7 +15,6 @@ import {
   Stream,
   UI,
   VNode,
-  wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 import { schemaifyWish } from "./wish.tsx";

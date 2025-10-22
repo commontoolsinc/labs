@@ -4,14 +4,11 @@ import {
   Cell,
   cell,
   Default,
-  derive,
   handler,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
-  wish,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
