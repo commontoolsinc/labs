@@ -66,8 +66,6 @@ interface ShoppingItem {
 ))}
 ```
 
-**Good news:** Type inference now works automatically in `.map()` - no type annotation needed!
-
 ## When to Use Handlers vs Bidirectional Binding
 
 ### Decision Matrix

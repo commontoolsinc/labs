@@ -50,7 +50,6 @@ The simplest and most common pattern: a list where users can check items and edi
 
 **Key Concepts:**
 - Bidirectional binding with `$checked` and `$value`
-- Automatic type inference in `.map()` (no manual type annotation needed!)
 - Simple add/remove operations with handlers
 
 ```typescript
@@ -789,8 +788,6 @@ Items in `.map()` are wrapped as `OpaqueRef<T>` to maintain their connection to 
 - **Bidirectional binding** (`$checked`, `$value`)
 - **Reactive updates** when the item changes
 - **Type-safe property access**
-
-**Good news**: Type annotations are now automatic - just write `items.map(item => ...)` and TypeScript infers the correct type!
 
 ### Common Type Errors and Solutions
 

@@ -173,7 +173,7 @@ export default recipe<Input, Input>(
     return {
       [UI]: (
         <div>
-          {/* Context 4: In JSX .map() - type automatically inferred! */}
+          {/* Context 4: In .map() - item is OpaqueRef<ShoppingItem> */}
           {items.map((item) => (
             <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
           ))}
@@ -192,9 +192,9 @@ Think of types this way:
 
 | Type | Mental Model | Where Used | Example |
 |------|--------------|------------|---------|
-| `Cell<T[]>` | A **box** containing an array | Handler params, recipe params, returns | `items: Cell<ShoppingItem[]>` |
+| `Cell<T[]>` | A **box** containing an array | Handler params, sometimes lift params, returns | `items: Cell<ShoppingItem[]>` |
 | `T[]` | The **plain array** inside the box | Result of `.get()` | `const arr = items.get()` returns `ShoppingItem[]` |
-| `OpaqueRef<T>` | A **cell-like reference** to each item | In JSX `.map()` (auto-inferred!) | `items.map((item) => ...)` |
+| `OpaqueRef<T>` | A **cell-like reference** to each item | Recipe params, in `.map()` | `items.map((item) => ...)` |
 | `T` | A **plain object** | Inside plain arrays | `{ title: "Milk", done: false }` |
 
 ### How They Transform
@@ -205,10 +205,9 @@ const items: Cell<ShoppingItem[]>  // Handler receives this
 // Open the box with .get()
 const plainArray: ShoppingItem[] = items.get();
 
-// In JSX, .map() wraps each item (types automatically inferred!)
+// In recipe, arguments, cells and map parameters are OpaqueRef<>
 {items.map((item) => (
   // item's type is automatically inferred as OpaqueRef<ShoppingItem>
-  // No manual type annotation needed!
   <ct-checkbox $checked={item.done} />
 ))}
 ```
@@ -280,7 +279,7 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
   return {
     [UI]: (
       <div>
-        {/* In .map(): type automatically inferred! */}
+        {/* Also in .map(), inferred as OpaqueRef<ShoppingItem> */}
         {items.map((item) => (
           <div>
             <ct-checkbox $checked={item.done}>
