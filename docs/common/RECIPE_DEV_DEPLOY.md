@@ -153,6 +153,36 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 - Forget `OpaqueRef<T>` annotations in `.map()`
 - Duplicate content from `docs/common/` - reference it instead
 
+## Testing
+After developing the charm, if you have Playwright MCP, you must test the charm with it unless the user asks you not to.
+
+### Navigate to the Charm URL
+
+```javascript
+await page.goto("http://localhost:8000/<SPACE_NAME>/<CHARM_ID>");
+```
+Note: Server may be https://toolshed.saga-castor.ts.net instead.
+
+### Register/Login (First Time Only)
+
+When you first visit, you'll see a login page. Register with a passphrase:
+
+1. Click the "➕ Register" button
+2. Click the "🔑 Generate Passphrase" button
+3. Click the "🔒 I've Saved It - Continue" button
+
+This will log you in and load the charm.
+
+### Test the Charm
+
+Once logged in, you can interact with the charm using Playwright commands.
+
+Then use Playwright to:
+
+1. Navigate to the URL
+2. Complete registration (first time)
+3. Test the charm functionality
+
 ## Deployment
 
 ### Prerequisite: `ct` tool availability
@@ -197,18 +227,18 @@ This tool is used to:
 ./dist/ct dev recipe.tsx --no-run
 
 # 2. Deploy to test space
-./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space test-space recipe.tsx
+./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space recipe.tsx
 # Record the charm ID returned
 
 # 3. Inspect deployed charm
-./dist/ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space test-space --charm [charm-id]
+./dist/ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id]
 ```
 
 #### Iteration Cycle
 
 ```bash
 # Update existing charm (much faster than deploying new)
-./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space test-space --charm [charm-id] recipe.tsx
+./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id] recipe.tsx
 ```
 
 **Note:** Don't pre-test syntax unless deployment fails. The deployment process validates automatically.
@@ -217,7 +247,7 @@ This tool is used to:
 
 ```bash
 # Get source from deployed charm
-./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] ./recipe.tsx
+./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space [space] --charm [id] ./recipe.tsx
 ```
 
 ### Quick Command Reference
@@ -227,16 +257,16 @@ This tool is used to:
 ./dist/ct dev recipe.tsx --no-run
 
 # Deploy new charm
-./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space recipe.tsx
+./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net -s space recipe.tsx
 
 # Update existing charm
-./dist/ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space -c charm-id recipe.tsx
+./dist/ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id recipe.tsx
 
 # Inspect charm
-./dist/ct charm inspect -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space -c charm-id
+./dist/ct charm inspect -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id
 
 # Get source from charm
-./dist/ct charm getsrc -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space -c charm-id output.tsx
+./dist/ct charm getsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id output.tsx
 
 # For full ct command reference, use the ct skill
 ```
