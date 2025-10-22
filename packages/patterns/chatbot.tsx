@@ -11,13 +11,18 @@ import {
   llmDialog,
   NAME,
   navigateTo,
+  Opaque,
   recipe,
   Stream,
   UI,
   VNode,
+  wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
-import { schemaifyWish } from "./wish.tsx";
+
+function schemaifyWish<T>(path: string, def: Opaque<T>) {
+  return derive<T, T>(wish<T>(path, def), (i) => i);
+}
 
 const addAttachment = handler<
   {

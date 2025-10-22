@@ -4,11 +4,14 @@ import {
   Cell,
   cell,
   Default,
+  derive,
   handler,
   NAME,
   navigateTo,
+  Opaque,
   OpaqueRef,
   recipe,
+  wish,
 } from "commontools";
 
 import Chat from "./chatbot.tsx";
@@ -23,7 +26,10 @@ import {
 } from "./common-tools.tsx";
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
-import { schemaifyWish } from "./wish.tsx";
+
+function schemaifyWish<T>(path: string, def: Opaque<T>) {
+  return derive<T, T>(wish<T>(path, def), (i) => i);
+}
 
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
