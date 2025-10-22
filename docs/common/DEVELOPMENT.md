@@ -167,7 +167,7 @@ appropriate e.g. defaults.
 
 ```ts
 enum Model {
-  Default = "default model";
+  Default = "default model",
 }
 
 interface LLMRequest {
@@ -224,7 +224,7 @@ async function run() {
       // ..
     }
   } catch (e) {
-    console.error("There was an error": e);
+    console.error("There was an error", e);
   }
 }
 ```
@@ -307,7 +307,7 @@ export class Cache {
 Or with a functional pattern:
 
 ```ts
-export type Cache = Map;
+export type Cache = Map<string, string>;
 export const get = (cache: Cache, key: string): string | undefined =>
   cache.get(key);
 export const set = (cache: Cache, key: string, value: string) =>
