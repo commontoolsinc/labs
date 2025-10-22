@@ -201,15 +201,24 @@ export class CTRender extends BaseElement {
       // Clean up any previous render
       this._cleanupPreviousRender();
 
-      const isSubPath = this._isSubPath(this.cell);
+      let recipeId: string | undefined;
+      try {
+        recipeId = getRecipeIdFromCharm(this.cell);
+      } catch (error) {
+        this._log(
+          "cell did not resolve to a charm via getRecipeIdFromCharm",
+          error,
+        );
+      }
 
-      if (isSubPath) {
-        this._log("cell is a subpath, rendering directly");
-        await this._renderUiFromCell(this.cell);
+      if (recipeId) {
+        await this._loadAndRenderRecipe(recipeId);
       } else {
-        const recipeId = getRecipeIdFromCharm(this.cell);
-        if (recipeId) {
-          await this._loadAndRenderRecipe(recipeId);
+        const isSubPath = this._isSubPath(this.cell);
+
+        if (isSubPath) {
+          this._log("cell is a subpath, rendering directly");
+          await this._renderUiFromCell(this.cell);
         } else {
           this._log("no recipe id found, rendering cell directly");
           await this._renderUiFromCell(this.cell);
