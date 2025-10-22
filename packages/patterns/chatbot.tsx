@@ -11,6 +11,7 @@ import {
   llmDialog,
   NAME,
   navigateTo,
+  Opaque,
   recipe,
   Stream,
   UI,
@@ -18,6 +19,10 @@ import {
   wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
+
+function schemaifyWish<T>(path: string, def: Opaque<T>) {
+  return derive<T, T>(wish<T>(path, def), (i) => i);
+}
 
 const addAttachment = handler<
   {
@@ -181,16 +186,6 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-function getMentionable() {
-  return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
-    wish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
-      [],
-    ) as unknown as Cell<MentionableCharm[]>,
-    (i) => i,
-  );
-}
-
 const navigateToAttachment = handler<
   { id: string },
   { allAttachments: Array<PromptAttachment> }
@@ -211,12 +206,77 @@ const listAttachments = handler<
   }))));
 });
 
+const addAttachmentTool = handler<
+  {
+    mentionableName: string;
+  },
+  {
+    mentionable: Array<MentionableCharm>;
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>(({ mentionableName }, { mentionable, allAttachments }) => {
+  const charm = mentionable.find((c) => c[NAME] === mentionableName);
+
+  // borrowed from `ct-prompt-input` to match
+  const id = `attachment-${Date.now()}-${
+    Math.random().toString(36).substring(2, 9)
+  }`;
+
+  if (!charm) {
+    throw new Error(
+      `Unknown mentionable "${mentionableName}", cannot add attachment.`,
+    );
+  }
+
+  allAttachments.push({
+    id,
+    name: mentionableName,
+    type: "mention",
+    charm,
+  });
+});
+
+const removeAttachmentTool = handler<
+  {
+    mentionableName: string;
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>(({ mentionableName }, { allAttachments }) => {
+  allAttachments.set(
+    allAttachments.get().filter((attachment) =>
+      attachment.name !== mentionableName
+    ),
+  );
+});
+
+const listMentionable = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { mentionable: MentionableCharm[] }
+>(
+  (args, state) => {
+    try {
+      const namesList = state.mentionable.map((charm) => charm[NAME]);
+      args.result.set(JSON.stringify(namesList));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme }) => {
-    const mentionable = getMentionable();
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
+    const mentionable = schemaifyWish<MentionableCharm[]>(
+      "/backlinksIndex/mentionable",
+      [],
+    );
 
     // Derive tools from attachments
     const dynamicTools = derive(allAttachments, (attachments) => {
@@ -244,6 +304,20 @@ export default recipe<ChatInput, ChatOutput>(
       listAttachments: {
         description: "List all attachments in the attachments array.",
         handler: listAttachments({ allAttachments }),
+      },
+      listMentionable: {
+        description: "List all mentionable NAMEs in the space.",
+        handler: listMentionable({ mentionable }),
+      },
+      addAttachment: {
+        description:
+          "Add a new attachment to the attachments array by its mentionable NAME.",
+        handler: addAttachmentTool({ mentionable, allAttachments }),
+      },
+      removeAttachment: {
+        description:
+          "Remove an attachment from the attachments array by its mentionable NAME.",
+        handler: removeAttachmentTool({ allAttachments }),
       },
     };
 
