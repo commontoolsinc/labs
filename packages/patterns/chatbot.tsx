@@ -222,6 +222,12 @@ const addAttachmentTool = handler<
     Math.random().toString(36).substring(2, 9)
   }`;
 
+  if (!charm) {
+    throw new Error(
+      `Unknown mentionable "${mentionableName}", cannot add attachment.`,
+    );
+  }
+
   allAttachments.push({
     id,
     name: mentionableName,
