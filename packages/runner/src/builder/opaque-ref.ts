@@ -120,8 +120,8 @@ export function opaqueRef<T>(
       },
       map: <S>(
         fn: (
-          element: Opaque<Required<T extends Array<infer U> ? U : T>>,
-          index: Opaque<number>,
+          element: OpaqueRef<Required<T extends Array<infer U> ? U : T>>,
+          index: OpaqueRef<number>,
           array: T,
         ) => Opaque<S>,
       ) => {

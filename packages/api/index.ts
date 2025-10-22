@@ -60,11 +60,11 @@ export interface OpaqueRefMethods<T> {
   setSchema(schema: JSONSchema): void;
   map<S>(
     fn: (
-      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
-      index: Opaque<number>,
-      array: T,
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
     ) => Opaque<S>,
-  ): Opaque<S[]>;
+  ): OpaqueRef<S[]>;
 }
 
 // Factory types

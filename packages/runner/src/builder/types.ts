@@ -123,11 +123,11 @@ declare module "@commontools/api" {
     unsafe_getExternal(): OpaqueRef<T>;
     map<S>(
       fn: (
-        element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
-        index: Opaque<number>,
-        array: T,
+        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+        index: OpaqueRef<number>,
+        array: OpaqueRef<T>,
       ) => Opaque<S>,
-    ): Opaque<S[]>;
+    ): OpaqueRef<S[]>;
     toJSON(): unknown;
     [Symbol.iterator](): Iterator<T>;
     [Symbol.toPrimitive](hint: string): T;
