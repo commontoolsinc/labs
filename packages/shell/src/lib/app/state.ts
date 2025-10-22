@@ -35,6 +35,9 @@ export function applyCommand(
   switch (command.type) {
     case "set-active-charm-id": {
       next.activeCharmId = command.charmId;
+      if (command.charmId) {
+        next.showShellCharmListView = false;
+      }
       break;
     }
     case "set-identity": {
