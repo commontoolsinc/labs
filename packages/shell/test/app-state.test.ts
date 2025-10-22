@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import {
+  applyCommand,
   AppState,
   AppStateSerialized,
-  applyCommand,
   deserialize,
   serialize,
 } from "../src/lib/app/mod.ts";
