@@ -4,10 +4,10 @@ import { createDeriveCall } from "../builtins/derive.ts";
 import {
   type DataFlowAnalysis,
   detectCallKind,
+  getExpressionText,
   type NormalizedDataFlow,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
-import { isFunctionParameter } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 
 function originatesFromIgnoredParameter(
@@ -80,99 +80,11 @@ function getOpaqueCallKindForParameter(
   return undefined;
 }
 
-function resolvesToParameterOfKind(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-  kind: "array-map" | "builder",
-): boolean {
-  let current: ts.Expression = expression;
-  let symbol: ts.Symbol | undefined;
-  let isRootIdentifierOnly = true;
-  const allowPropertyTraversal = kind === "array-map";
-  while (true) {
-    if (ts.isIdentifier(current)) {
-      symbol = checker.getSymbolAtLocation(current);
-      break;
-    }
-    if (
-      ts.isPropertyAccessExpression(current) ||
-      ts.isElementAccessExpression(current) ||
-      ts.isCallExpression(current)
-    ) {
-      if (!allowPropertyTraversal) {
-        isRootIdentifierOnly = false;
-      }
-      current = current.expression;
-      continue;
-    }
-    if (
-      ts.isParenthesizedExpression(current) ||
-      ts.isAsExpression(current) ||
-      ts.isTypeAssertionExpression(current) ||
-      ts.isNonNullExpression(current)
-    ) {
-      current = current.expression;
-      continue;
-    }
-    break;
-  }
-
-  if (!symbol) return false;
-  const declarations = symbol.getDeclarations();
-  if (!declarations) return false;
-  return declarations.some((declaration) =>
-    ts.isParameter(declaration) &&
-    getOpaqueCallKindForParameter(declaration, checker) === kind &&
-    (kind === "array-map" || isRootIdentifierOnly)
-  );
-}
-
-function resolvesToMapParameter(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): boolean {
-  return resolvesToParameterOfKind(expression, checker, "array-map");
-}
-
-function resolvesToBuilderParameter(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): boolean {
-  return resolvesToParameterOfKind(expression, checker, "builder");
-}
-
 export function filterRelevantDataFlows(
   dataFlows: readonly NormalizedDataFlow[],
   analysis: DataFlowAnalysis,
   context: TransformationContext,
 ): NormalizedDataFlow[] {
-  const isParameterExpression = (expression: ts.Expression): boolean => {
-    let current: ts.Expression = expression;
-    while (true) {
-      if (ts.isIdentifier(current)) {
-        return isFunctionParameter(current, context.checker);
-      }
-      if (
-        ts.isPropertyAccessExpression(current) ||
-        ts.isElementAccessExpression(current) ||
-        ts.isCallExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      if (
-        ts.isParenthesizedExpression(current) ||
-        ts.isAsExpression(current) ||
-        ts.isTypeAssertionExpression(current) ||
-        ts.isNonNullExpression(current)
-      ) {
-        current = current.expression;
-        continue;
-      }
-      return false;
-    }
-  };
-
   return dataFlows.filter((dataFlow) => {
     if (
       originatesFromIgnoredParameter(
@@ -184,18 +96,8 @@ export function filterRelevantDataFlows(
     ) {
       return false;
     }
-    if (isParameterExpression(dataFlow.expression)) {
-      if (resolvesToMapParameter(dataFlow.expression, context.checker)) {
-        return true;
-      }
-      if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-        return false;
-      }
-      return false;
-    }
-    if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-      return false;
-    }
+    // Keep all other dataflows, including builder parameters and map parameters
+    // Both are OpaqueRefs that may need to be included in derive calls
     return true;
   });
 }
@@ -269,13 +171,11 @@ export function createDeriveCallForExpression(
   };
   for (const entry of plan.entries) {
     const canonical = entry.dataFlow.expression;
-    const canonicalText = canonical.getText(canonical.getSourceFile());
+    const canonicalText = getExpressionText(canonical);
     addRef(canonical);
     for (const occurrence of entry.dataFlow.occurrences) {
       const normalized = normalizeForCanonical(occurrence.expression);
-      if (
-        normalized.getText(normalized.getSourceFile()) === canonicalText
-      ) {
+      if (getExpressionText(normalized) === canonicalText) {
         addRef(normalized);
       }
     }

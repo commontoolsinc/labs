@@ -65,6 +65,10 @@ export interface OpaqueRefMethods<T> {
       array: OpaqueRef<T>,
     ) => Opaque<S>,
   ): OpaqueRef<S[]>;
+  mapWithPattern<S>(
+    op: Recipe,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]>;
 }
 
 // Factory types

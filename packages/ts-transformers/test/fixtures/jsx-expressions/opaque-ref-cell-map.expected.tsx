@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, recipe, UI, } from "commontools";
+import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
     [NAME]: "Some Simple Recipe",
@@ -93,17 +93,34 @@ export default recipe("Charms Launcher", () => {
         isInitialized: cell(false),
         storedCellRef: cell(),
     });
+    // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
+    // Without this, TypeScript infers `any` and the closure transformer won't detect it
+    const typedCellRef = cellRef as OpaqueRef<any[]>;
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(!cellRef?.length, <div>No charms created yet</div>, <ul>
-            {cellRef.map((charm: any, index: number) => (<li>
-                <ct-button onClick={goToCharm({ charm })}>
+        {ifElse(__ctHelpers.derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+            {typedCellRef.mapWithPattern(__ctHelpers.recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                properties: {
+                    element: true,
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<li>
+                <ct-button onClick={goToCharm({ charm: element })}>
                   Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
-              </li>))}
+                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(element, element => element[NAME] || "Unnamed")}</span>
+              </li>)), {})}
           </ul>)}
 
         <ct-button onClick={createSimpleRecipe({ cellRef })}>
@@ -117,3 +134,4 @@ export default recipe("Charms Launcher", () => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

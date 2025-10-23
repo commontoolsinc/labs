@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Cell types", () => {
   it("handles Cell<string>", async () => {
@@ -11,7 +11,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = asObjectSchema(gen.generateSchema(type, checker));
     const name = result.properties?.name as Record<string, unknown>;
     expect(name).toBeDefined();
     expect(name.type).toBe("string");
@@ -26,12 +26,14 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = asObjectSchema(gen.generateSchema(type, checker));
     const users = result.properties?.users as Record<string, any>;
     expect(users).toBeDefined();
     expect(users.type).toBe("array");
-    expect(users.items?.type).toBe("object");
-    expect(users.items?.properties?.id?.type).toBe("string");
+    const usersItems = users.items as any;
+    expect(usersItems?.type).toBe("object");
+    const usersItemsProps = usersItems?.properties as any;
+    expect(usersItemsProps?.id?.type).toBe("string");
     expect(users.asCell).toBe(true);
   });
 
@@ -43,7 +45,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    const result = gen(type, checker);
+    const result = asObjectSchema(gen.generateSchema(type, checker));
     const prop = result.properties?.value as Record<string, unknown>;
     expect(prop).toBeDefined();
     expect(prop.type).toBe("number");
@@ -60,7 +62,7 @@ describe("Schema: Cell types", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
     const gen = createSchemaTransformerV2();
-    expect(() => gen(type, checker)).toThrow(
+    expect(() => gen.generateSchema(type, checker)).toThrow(
       "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>",
     );
   });

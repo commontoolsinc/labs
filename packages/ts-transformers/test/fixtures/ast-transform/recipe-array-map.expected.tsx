@@ -40,9 +40,25 @@ export default recipe({
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.map((value, index) => (<div>
-                {index}: {value}
-              </div>))}
+            {values.mapWithPattern(__ctHelpers.recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<div>
+                {index}: {element}
+              </div>)), {})}
           </div>
         </div>),
         values,

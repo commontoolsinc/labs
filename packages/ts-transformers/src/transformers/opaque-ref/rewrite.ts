@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { normalizeDataFlows } from "../../ast/mod.ts";
+import { normalizeDataFlows, visitEachChildWithJsx } from "../../ast/mod.ts";
 import type {
   AnalyzeFn,
   Emitter,
@@ -49,10 +49,10 @@ function rewriteChildExpressions(
         }
       }
     }
-    return ts.visitEachChild(child, visitor, context.tsContext);
+    return visitEachChildWithJsx(child, visitor, context.tsContext);
   };
 
-  return ts.visitEachChild(
+  return visitEachChildWithJsx(
     node,
     visitor,
     context.tsContext,

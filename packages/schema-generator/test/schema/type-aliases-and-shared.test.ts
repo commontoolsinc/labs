@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Type aliases and shared types", () => {
   it("handles basic Cell/Stream/Default aliases", async () => {
@@ -27,15 +27,21 @@ describe("Schema: Type aliases and shared types", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "TypeAliasTest");
-    const s = createSchemaTransformerV2()(type, checker);
-    expect(s.properties?.genericCell?.type).toBe("string");
-    expect(s.properties?.genericCell?.asCell).toBe(true);
-    expect(s.properties?.specificCell?.type).toBe("string");
-    expect(s.properties?.specificCell?.asCell).toBe(true);
-    expect(s.properties?.genericStream?.type).toBe("number");
-    expect(s.properties?.genericStream?.asStream).toBe(true);
-    expect(s.properties?.withDefault?.type).toBe("string");
-    expect(s.properties?.withDefault?.default).toBe("hello");
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+    const genericCell = s.properties?.genericCell as any;
+    expect(genericCell?.type).toBe("string");
+    expect(genericCell?.asCell).toBe(true);
+    const specificCell = s.properties?.specificCell as any;
+    expect(specificCell?.type).toBe("string");
+    expect(specificCell?.asCell).toBe(true);
+    const genericStream = s.properties?.genericStream as any;
+    expect(genericStream?.type).toBe("number");
+    expect(genericStream?.asStream).toBe(true);
+    const withDefault = s.properties?.withDefault as any;
+    expect(withDefault?.type).toBe("string");
+    expect(withDefault?.default).toBe("hello");
     const coa = s.properties?.cellOfArray as any;
     expect(coa.type).toBe("array");
     expect(coa.items?.type).toBe("number");
@@ -56,7 +62,9 @@ describe("Schema: Type aliases and shared types", () => {
       interface A { b1: B; b2: B; }
     `;
     const { type, checker } = await getTypeFromCode(code, "A");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
     const b1 = s.properties?.b1 as any;
     const b2 = s.properties?.b2 as any;
     expect(b1.$ref).toBe("#/$defs/B");
