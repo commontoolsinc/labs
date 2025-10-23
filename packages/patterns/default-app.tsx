@@ -105,7 +105,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
     const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
+      wish<MentionableCharm[]>("/allCharms", []),
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });

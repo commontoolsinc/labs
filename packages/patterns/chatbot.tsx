@@ -274,7 +274,7 @@ export default recipe<ChatInput, ChatOutput>(
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
     const mentionable = schemaifyWish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
+      "#/backlinksIndex/mentionable",
       [],
     );
 

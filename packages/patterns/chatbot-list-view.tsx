@@ -227,7 +227,7 @@ export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, theme }) => {
     const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
+      wish<MentionableCharm[]>("/allCharms", []),
       (c) => c,
     );
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
