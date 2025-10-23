@@ -3,19 +3,20 @@
 - [ ] Disable ShadowRef/unsafe_ and see what breaks, ideally remove it
 - [ ] Update Cell API types to already unify them
   - [ ] Create a CellLike<> type with a symbol based brand, with the value be
-    Record<string, boolean>
+    `Record<string, boolean>`
   - [ ] Factor out parts of the cell interfaces along reading, writing, .send
     (for stream-like) and derives (which is currently just .map)
-  - [ ] Define OpaqueRef<>, Cell<> and Stream<> by using these factored out
-    parts, combined with the brand set to `{ opaque: true, read: false, write:
-    false, stream: false }` for OpaqueRef, `{ opaque: false, read: true, write:
-    true, stream: true }` for cell, and `{ opaque: false, read: false, write:
-    false, stream: true }` for Stream. We can go ahead and add ReadonlyCell and
-    WriteonlyCell accordingly as well.
-  - [ ] Alias OpaqueCell<> to OpaqueRef<> (maintain backward compatibility)
-  - [ ] For OpaqueRef we keep the proxy behavior, i.e. each key is an OpaqueRef
-    again.
-  - [ ] Simplify most wrap/unwrap types to use CellLike.
+  - [ ] Define `OpaqueRef<>`, `Cell<>` and `Stream<>` by using these factored
+    out parts, combined with the brand set to `{ opaque: true, read: false,
+    write: false, stream: false }` for `OpaqueRef`, `{ opaque: false, read:
+    true, write: true, stream: true }` for `Cell`, and `{ opaque: false, read:
+    false, write: false, stream: true }` for `Stream`. We can go ahead and add
+    ReadonlyCell and WriteonlyCell accordingly as well.
+  - [ ] Add `ComparableCell<>` that is all `false` above
+  - [ ] Alias `OpaqueCell<>` to `OpaqueRef<>` (maintain backward compatibility)
+  - [ ] For `OpaqueRef` we keep the proxy behavior, i.e. each key is an
+    `OpaqueRef` again.
+  - [ ] Simplify most wrap/unwrap types to use `CellLike`.
 - [ ] Add ability to create a cell without a link yet.
   - [ ] Change constructor for RegularCell to make link optional
   - [ ] Add .for method to set a cause (within current context)
