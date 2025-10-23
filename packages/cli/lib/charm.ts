@@ -506,7 +506,7 @@ export async function callCharmHandler<T = any>(
 }
 
 /**
- * Removes a charm from the space (moves it to trash).
+ * Removes a charm from the space.
  */
 export async function removeCharm(
   config: CharmConfig,

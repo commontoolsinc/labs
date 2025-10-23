@@ -55,6 +55,17 @@ export const charmListSchema = {
   items: { asCell: true },
 } as const satisfies JSONSchema;
 
+export const spaceCellSchema = {
+  type: "object",
+  properties: {
+    allCharms: charmListSchema,
+    defaultPattern: { type: "object", asCell: true },
+    recentCharms: charmListSchema,
+  },
+} as const satisfies JSONSchema;
+
+export type SpaceCell = Schema<typeof spaceCellSchema>;
+
 export const charmLineageSchema = {
   type: "object",
   properties: {
@@ -120,7 +131,7 @@ export class CharmManager {
 
   private charms: Cell<Cell<unknown>[]>;
   private pinnedCharms: Cell<Cell<unknown>[]>;
-  private trashedCharms: Cell<Cell<unknown>[]>;
+  private spaceCell: Cell<SpaceCell>;
 
   /**
    * Promise resolved when the charm manager gets the charm list.
@@ -143,16 +154,20 @@ export class CharmManager {
       "pinned-charms",
       charmListSchema,
     );
-    this.trashedCharms = this.runtime.getCell(
+    this.spaceCell = this.runtime.getCell(
       this.space,
-      "trash",
-      charmListSchema,
+      this.session.name,
+      spaceCellSchema,
     );
+
+    // The space cell's allCharms field should reference the same charms data
+    // This is done by accessing the charms cell through the space cell's schema
+    // The runtime will handle the linkage automatically since we're using the same cause
 
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.trashedCharms),
+      this.spaceCell.sync(),
     ]).then(() => {});
   }
 
@@ -210,47 +225,37 @@ export class CharmManager {
     return this.pinnedCharms;
   }
 
-  getTrash(): Cell<Cell<unknown>[]> {
-    this.syncCharms(this.trashedCharms);
-    return this.trashedCharms;
+  getSpaceCell(): Cell<SpaceCell> {
+    return this.spaceCell;
   }
 
-  async restoreFromTrash(idOrCharm: string | EntityId | Cell<unknown>) {
-    await this.syncCharms(this.trashedCharms);
-    await this.syncCharms(this.charms);
+  /**
+   * Track a charm as recently viewed/interacted with.
+   * Maintains a list of up to 10 most recent charms.
+   * @param charm - The charm to track
+   */
+  async trackRecentCharm(charm: Cell<unknown>): Promise<void> {
+    const id = getEntityId(charm);
+    if (!id) return;
 
-    const error = await this.runtime.editWithRetry((tx) => {
-      const trashedCharms = this.trashedCharms.withTx(tx);
+    await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      const recentCharmsCell = spaceCellWithTx.key("recentCharms");
+      const recentCharms = recentCharmsCell.get() || [];
 
-      const id = getEntityId(idOrCharm);
-      if (!id) return false;
+      // Remove any existing instance of this charm to avoid duplicates
+      const filtered = recentCharms.filter((c) => !isSameEntity(c, id));
 
-      // Find the charm in trash
-      const trashedCharm = trashedCharms.get().find((charm) =>
-        isSameEntity(charm, id)
-      );
+      // Add charm to the beginning of the list
+      const updated = [charm, ...filtered];
 
-      if (!trashedCharm) return false;
+      // Trim to max 10 items
+      const trimmed = updated.slice(0, 10);
 
-      // Remove from trash
-      const newTrashedCharms = filterOutEntity(trashedCharms, id);
-      trashedCharms.set(newTrashedCharms);
-
-      // Add back to charms
-      this.addCharms([trashedCharm], tx);
+      recentCharmsCell.set(trimmed);
     });
 
     await this.runtime.idle();
-
-    return !error;
-  }
-
-  async emptyTrash() {
-    await this.syncCharms(this.trashedCharms);
-    await this.runtime.editWithRetry((tx) => {
-      const trashedCharms = this.trashedCharms.withTx(tx);
-      trashedCharms.set([]);
-    });
   }
 
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
@@ -821,14 +826,12 @@ export class CharmManager {
   }
 
   // note: removing a charm doesn't clean up the charm's cells
-  // Now moves the charm to trash instead of just removing it
   async remove(idOrCharm: string | EntityId | Cell<unknown>) {
     let success = false;
 
     await Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
-      this.syncCharms(this.trashedCharms),
     ]);
 
     const id = getEntityId(idOrCharm);
@@ -838,44 +841,11 @@ export class CharmManager {
 
     return (!await this.runtime.editWithRetry((tx) => {
       const charms = this.charms.withTx(tx);
-      const trashedCharms = this.trashedCharms.withTx(tx);
 
-      // Find the charm in the main list
-      const charm = charms.get().find((c) => isSameEntity(c, id));
-      if (!charm) {
-        success = false;
-      } else {
-        // Move to trash if not already there
-        if (!trashedCharms.get().some((c) => isSameEntity(c, id))) {
-          trashedCharms.push(charm);
-        }
-
-        // Remove from main list
-        const newCharms = filterOutEntity(charms, id);
-        if (newCharms.length !== charms.get().length) {
-          charms.set(newCharms);
-        }
-
-        success = true;
-      }
-    })) && success;
-  }
-
-  // Permanently delete a charm (from trash or directly)
-  async permanentlyDelete(idOrCharm: string | EntityId | Cell<unknown>) {
-    let success;
-
-    await this.syncCharms(this.trashedCharms);
-
-    const id = getEntityId(idOrCharm);
-    if (!id) return false;
-
-    return (!await this.runtime.editWithRetry((tx) => {
-      // Remove from trash if present
-      const trashedCharms = this.trashedCharms.withTx(tx);
-      const newTrashedCharms = filterOutEntity(trashedCharms, id);
-      if (newTrashedCharms.length !== trashedCharms.get().length) {
-        trashedCharms.set(newTrashedCharms);
+      // Remove from main list
+      const newCharms = filterOutEntity(charms, id);
+      if (newCharms.length !== charms.get().length) {
+        charms.set(newCharms);
         success = true;
       } else {
         success = false;

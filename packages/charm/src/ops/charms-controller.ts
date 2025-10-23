@@ -73,9 +73,8 @@ export class CharmsController<T = unknown> {
   async remove(charmId: string): Promise<boolean> {
     this.disposeCheck();
     const removed = await this.#manager.remove(charmId);
-    // Empty trash and ensure full synchronization
+    // Ensure full synchronization
     if (removed) {
-      await this.#manager.emptyTrash();
       await this.#manager.runtime.idle();
       await this.#manager.synced();
     }
