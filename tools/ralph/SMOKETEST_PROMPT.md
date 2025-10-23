@@ -13,20 +13,23 @@ your assigned RALPH_ID
 
 4. Format with `deno fmt` for the changed files.
 
-5. Once all tests pass, check off the completed items in `TASKS.md`:
+5. Once all tests pass, use MCP playwright to test your work
 
-6. git stage and commit with a message
+6. check off the completed items in `TASKS.md`:
 
-7. copy the files you created for the task to /app/smoketest/${RALPH_ID}/
+7. git stage and commit with a message
 
-8. create a summary of your work in the same directory called
+8. copy the files you created for the task to /app/smoketest/${RALPH_ID}/
+
+9. create a summary of your work in the same directory, be sure to include
+   playwright results and what you tested. file location:
    /app/smoketest/${RALPH_ID}/RESULTS.md
 
-9. create a /app/smoketest/${RALPH_ID}/SCORE.txt which has one of the following
-   values based on your results: SUCCESS, PARTIAL, FAILURE
+10. create a /app/smoketest/${RALPH_ID}/SCORE.txt which has one of the following
+    values based on your results: SUCCESS, PARTIAL, FAILURE
 
-10. Add feedback to documentation to `./tools/ralph/LEARNINGS.md`.
+11. Add feedback to documentation to `./tools/ralph/LEARNINGS.md`.
 
-11. Exit
+12. Exit
 
 Please begin.
