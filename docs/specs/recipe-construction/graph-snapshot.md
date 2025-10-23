@@ -1,4 +1,4 @@
-# Graph Snapshot Schema
+# Process Snapshot Schema
 
 > **Status:** This work is **deferred to Phase 2** (see `rollout-plan.md` and
 > `overview.md`). The snapshot format described here will be implemented as part
@@ -8,9 +8,8 @@
 
 - `Runner.setupInternal` currently stores recipe metadata inside the process
   cell (`TYPE`, `argument`, `internal`, `resultRef`). We plan to deprecate
-  `TYPE` while still persisting the originating program reference (rename the
-  `spell` field to `pattern`). The runtime still lacks a persisted view of the
-  concrete nodes it instantiated.
+  `TYPE` while still persisting the originating program reference. The runtime
+  still lacks a persisted view of the concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
   `unwrapOneLevelAndBindtoDoc` so nested recipes and closures work. A snapshot
   that records the resolved nodes makes this machinery obsolete: future runs can
@@ -39,52 +38,75 @@ Store an additional `process` payload on the result cell alongside the existing
 allow future format changes.
 
 ```ts
-interface GraphSnapshotV1 {
+interface ProcessSnapshotV1 {
   version: 1;
   program?: RuntimeProgram;
-  generation?: number; // Incremented each time the runtime rebuilds the graph
-  nodes: Array<ReactiveNodeSnapshot | EventHandlerSnapshot>;
+  generation?: number; // Incremented each time it changes
+  cells: Array<GeneratedCell>;
+  predecessor?: ProcessSnapshotV1;
 }
 
-interface ReactiveNodeSnapshot {
-  module: ReactiveModuleDescriptor;
-  inputs: Record<string, Binding>;
-  output?: CellLink; // Optional; some modules only read
-  argumentSchema?: JSONSchema;
+interface ReactiveNodeNarrowedSchema = {
+  argumentSchema?: JSONSchema; // optional, further constraint on what
+  resultSchema?: JSONSchema;   // the module already says
+}
+
+interface ReactiveNodeArgument = {
+  arguments: JSONArray;
+} & ReactiveNodeNarrowedSchema;
+
+interface HandlerNodeNarrowedSchema = {
+  eventSchema?: JSONSchema; // see above
+  stateSchema?: JSONSchema;
   resultSchema?: JSONSchema;
 }
 
-interface EventHandlerSnapshot {
-  module: EventHandlerDescriptor;
-  inputs: Record<string, Binding>;
-  stream: CellLink; // Event stream destination
-  argumentSchema?: JSONSchema;
+interface HandlerNodeArgument = {
+  stream: SigilLink; // Event stream
+  state?: JSONArray; // Optional state
+} & HandlerNodeNarrowedSchema
+
+interface CurriedArguments = {
+  curried?: { index?: number, value: JSONValue }[];
 }
 
-type Binding = CellLink | JSONValue | Record<string, Binding> | Array<Binding>;
+interface BoxedNodeFactory = { module: NodeFactoryDescriptor }
 
-type ReactiveModuleDescriptor =
+interface BoxedLink = { link: NormalizedLink } // relative to this cell
+
+type GeneratedCell =
+ | BoxedLink
+ | (BoxedLink & BoxedNodeFactory &
+    (ReactiveNodeArgument | HandlerNodeArgument) & CurriedArgument);
+
+type NodeFactoryDescriptor =
+  | ((
+    | {
+      type: "javascript";
+      implementation: string;
+    }
+    | {
+      type: "ref";
+      ref: string;
+    }) & (
+    | {
+      argumentSchema: JSONSchema;
+      resultSchema: JSONSchema;
+    }
+    | {
+      eventSchema: JSONSchema;
+      stateSchema: JSONSchema;
+      resultSchema?: JSONSchema;
+    }))
   | {
-    type: "ref";
-    ref: string;
-    argumentSchema: JSONSchema;
-    resultSchema?: JSONSchema;
+    type: "program";
+    program: RuntimeProgram; // Resolves to a node factory with schemas, etc.
   }
-  | {
-    type: "javascript";
-    implementation: string | { file: string; export: string };
-    argumentSchema: JSONSchema;
-    resultSchema?: JSONSchema;
-    metadata?: Record<string, JSONValue>;
-  };
-
-type EventHandlerDescriptor = ReactiveModuleDescriptor & { handler: true };
 ```
 
 - Notes:
 
-  - Only nodes are serialized; cells and links are implied by the cell links
-    used in `inputs`, `output`, or `stream`.
+  - .
   - `CellLink` reuses the normalized link format the runtime already
     understands.
   - `Binding` supports nested structures so aliases into deeply nested inputs
@@ -148,5 +170,3 @@ type EventHandlerDescriptor = ReactiveModuleDescriptor & { handler: true };
   run timestamps) or should that remain derived at runtime?
 - How do we store large schemas efficiently? Option: store a content hash in the
   snapshot and persist the full schema in a shared manifest keyed by hash.
-- What is the cleanest way to encode the `pattern` reference alongside the
-  snapshot so older runtimes can ignore it while newer ones rely on it?

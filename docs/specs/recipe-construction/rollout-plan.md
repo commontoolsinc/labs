@@ -40,10 +40,11 @@
   context write those down, with schemas used.
   - [ ] Set `source` in context, so that created cells copy it and write it as
     metadata.
-  - [ ] Add a helper for causes to complain about duplicates
   - [ ] Keep track of all created cells, make sure to track those as well for
     the recipe creation in lift/handler, so we don't need to return them in e.g.
     a handler.
+  - [ ] Add a helper for cause generation that checks that no other created cell
+    already has that cause.
 - [ ] In lift/handler, change how recipes are invoked to directly go off the
   created graph.
   - [ ] For each created cell (as that's always the case when introducing a
@@ -76,7 +77,6 @@
   - [ ] Implement `nodeFactory@1` sigil format for shipping factories
   - [ ] Add `.curry(value, argIndex)` method for partial application
   - [ ] Support rehydration of serialized factories from cells/events
-  - [ ] Enable factories to be passed across spaces
   - [ ] Ensure currying metadata is preserved during serialization
 
 ## Open Questions
