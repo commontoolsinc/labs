@@ -107,7 +107,7 @@ const messagesToNotifications = lift<
   {
     messages: BuiltInLLMMessage[];
     seen: Cell<number>;
-    notifications: Cell<{ id: string; text: string; timestamp: number }[]>;
+    notifications: Cell<{ text: string; timestamp: number }[]>;
   }
 >(({ messages, seen, notifications }) => {
   if (messages.length > 0) {
@@ -133,7 +133,6 @@ const messagesToNotifications = lift<
         }).join("");
 
       notifications.push({
-        id: Math.random().toString(36),
         text: contentText,
         timestamp: Date.now(),
       });

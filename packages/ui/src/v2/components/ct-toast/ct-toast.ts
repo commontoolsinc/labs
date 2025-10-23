@@ -43,7 +43,6 @@ export type ToastVariant =
   | "info";
 
 export interface ToastNotification {
-  id: string;
   variant?: ToastVariant;
   text: string;
   timestamp: number;

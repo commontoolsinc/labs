@@ -149,7 +149,7 @@ export class CTToastStack extends BaseElement {
   @property({ type: Number, attribute: "max-toasts" })
   declare maxToasts: number;
 
-  private _dismissTimers = new Map<string, number>();
+  private _dismissTimers = new Map<number, number>();
   private _unsubscribe: (() => void) | null = null;
 
   constructor() {
@@ -215,29 +215,13 @@ export class CTToastStack extends BaseElement {
 
     const notificationsArray = this.notifications.get();
 
-    // // Ensure all notifications have IDs - if any are missing, update the Cell
-    // const needsIds = notificationsArray.some((n) => !n.id);
-    // if (needsIds && isCell(this.notifications)) {
-    //   mutateCell(this.notifications, (cell) => {
-    //     const current = cell.get();
-    //     const withIds = current.map((n) =>
-    //       n.id ? n : { ...n, id: this._generateId() }
-    //     );
-    //     cell.set(withIds);
-    //   });
-    //   // Will re-render with IDs
-    //   return html`
-
-    //   `;
-    // }
-
     const visibleNotifications = notificationsArray.slice(0, this.maxToasts);
 
     return html`
       <div class="toast-stack" part="stack">
         ${repeat(
           visibleNotifications,
-          (notification) => notification.id || this._generateId(),
+          (notification) => notification.timestamp,
           (notification) =>
             html`
               <ct-toast
@@ -248,12 +232,12 @@ export class CTToastStack extends BaseElement {
                 dismissible
                 @ct-dismiss="${(e: CustomEvent) =>
                   this._handleToastDismiss(
-                    notification.id || "",
+                    notification.timestamp,
                     e,
                   )}"
                 @ct-action="${(e: CustomEvent) =>
                   this._handleToastAction(
-                    notification.id || "",
+                    notification.timestamp,
                     e,
                   )}"
               ></ct-toast>
@@ -264,43 +248,17 @@ export class CTToastStack extends BaseElement {
   }
 
   /**
-   * Add a new toast notification
-   */
-  public addToast(
-    text: string,
-    options?: Partial<Omit<ToastNotification, "id" | "text" | "timestamp">>,
-  ): string {
-    if (!this.notifications) return "";
-
-    const id = this._generateId();
-    const notification: ToastNotification = {
-      id,
-      text,
-      timestamp: Date.now(),
-      variant: options?.variant || "default",
-      actionLabel: options?.actionLabel,
-    };
-
-    mutateCell(this.notifications, (cell) => {
-      const current = cell.get();
-      cell.set([...current, notification]);
-    });
-
-    return id;
-  }
-
-  /**
    * Remove a toast notification by ID
    */
-  public removeToast(id: string): void {
+  public removeToast(timestamp: number): void {
     if (!this.notifications) return;
 
     mutateCell(this.notifications, (cell) => {
       const current = cell.get();
-      cell.set(current.filter((n) => n.id !== id));
+      cell.set(current.filter((n) => n.timestamp !== timestamp));
     });
 
-    this._clearTimer(id);
+    this._clearTimer(timestamp);
   }
 
   /**
@@ -324,28 +282,31 @@ export class CTToastStack extends BaseElement {
       : this.notifications;
 
     // Clear timers for removed notifications
-    for (const [id] of this._dismissTimers) {
-      if (!notificationsArray.some((n) => n.id === id)) {
-        this._clearTimer(id);
+    for (const [timestamp] of this._dismissTimers) {
+      if (!notificationsArray.some((n) => n.timestamp === timestamp)) {
+        this._clearTimer(timestamp);
       }
     }
 
     // Set timers for new notifications (only if they have IDs)
     for (const notification of notificationsArray) {
-      if (notification.id && !this._dismissTimers.has(notification.id)) {
+      if (
+        notification.timestamp &&
+        !this._dismissTimers.has(notification.timestamp)
+      ) {
         const timer = setTimeout(() => {
-          this.removeToast(notification.id);
+          this.removeToast(notification.timestamp);
         }, this.autoDismiss);
-        this._dismissTimers.set(notification.id, timer);
+        this._dismissTimers.set(notification.timestamp, timer);
       }
     }
   }
 
-  private _clearTimer(id: string): void {
-    const timer = this._dismissTimers.get(id);
+  private _clearTimer(timestamp: number): void {
+    const timer = this._dismissTimers.get(timestamp);
     if (timer) {
       clearTimeout(timer);
-      this._dismissTimers.delete(id);
+      this._dismissTimers.delete(timestamp);
     }
   }
 
@@ -356,19 +317,15 @@ export class CTToastStack extends BaseElement {
     this._dismissTimers.clear();
   }
 
-  private _handleToastDismiss(id: string, event: CustomEvent): void {
+  private _handleToastDismiss(timestamp: number, event: CustomEvent): void {
     event.stopPropagation();
-    this.removeToast(id);
-    this.emit("ct-toast-dismiss", { id, ...event.detail });
+    this.removeToast(timestamp);
+    this.emit("ct-toast-dismiss", { id: timestamp, ...event.detail });
   }
 
-  private _handleToastAction(id: string, event: CustomEvent): void {
+  private _handleToastAction(timestamp: number, event: CustomEvent): void {
     event.stopPropagation();
-    this.emit("ct-toast-action", { id, ...event.detail });
-  }
-
-  private _generateId(): string {
-    return `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.emit("ct-toast-action", { id: timestamp, ...event.detail });
   }
 }
 
