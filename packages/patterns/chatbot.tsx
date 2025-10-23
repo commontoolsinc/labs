@@ -106,7 +106,7 @@ const sendMessage = handler<
   });
 });
 
-const _clearChat = handler(
+const clearChat = handler(
   (
     _: never,
     { messages, pending }: {
@@ -137,6 +137,7 @@ type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
+  clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
   title?: string;
   attachments: Array<PromptAttachment>;
@@ -393,6 +394,16 @@ export default recipe<ChatInput, ChatOutput>(
           onct-remove={removeAttachment({ allAttachments })}
         />
         <ct-tools-chip tools={flattenedTools} />
+        <button
+          type="button"
+          title="Clear chat"
+          onClick={clearChat({
+            messages,
+            pending,
+          })}
+        >
+          Clear
+        </button>
       </ct-hstack>
     );
 
@@ -413,6 +424,10 @@ export default recipe<ChatInput, ChatOutput>(
       messages,
       pending,
       addMessage,
+      clearChat: clearChat({
+        messages,
+        pending,
+      }),
       cancelGeneration,
       title,
       attachments: allAttachments,
