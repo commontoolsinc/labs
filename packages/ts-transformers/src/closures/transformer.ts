@@ -450,12 +450,13 @@ function buildParamsProperties(
 
 /**
  * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
- * Returns a TypeLiteral representing { element: T, index?: number, params: {...} }
+ * Returns a TypeLiteral representing { element: T, index?: number, array?: T[], params: {...} }
  */
 function buildCallbackParamTypeNode(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
+  arrayParam: ts.ParameterDeclaration | undefined,
   capturedVarNames: Set<string>,
   captures: Map<string, ts.Expression>,
   context: TransformationContext,
@@ -491,14 +492,28 @@ function buildCallbackParamTypeNode(
     );
   }
 
-  // 4. Build params object type with captured variables
+  // 4. Add optional array property if present
+  if (arrayParam) {
+    // The array type is T[] where T is the element type
+    const arrayTypeNode = factory.createArrayTypeNode(elemTypeNode);
+    callbackParamProperties.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier("array"),
+        factory.createToken(ts.SyntaxKind.QuestionToken),
+        arrayTypeNode,
+      ),
+    );
+  }
+
+  // 5. Build params object type with captured variables
   const paramsProperties = buildParamsProperties(
     capturedVarNames,
     captures,
     context,
   );
 
-  // 5. Add params property
+  // 6. Add params property
   callbackParamProperties.push(
     factory.createPropertySignature(
       undefined,
@@ -738,6 +753,30 @@ function transformIndexReferences(
 }
 
 /**
+ * Transform references to original array parameter to use "array" instead.
+ */
+function transformArrayReferences(
+  body: ts.ConciseBody,
+  arrayParam: ts.ParameterDeclaration | undefined,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  const arrayName = arrayParam?.name;
+
+  // Replace references to the original array param with "array"
+  if (arrayName && ts.isIdentifier(arrayName) && arrayName.text !== "array") {
+    const visitor: ts.Visitor = (node) => {
+      if (ts.isIdentifier(node) && node.text === arrayName.text) {
+        return factory.createIdentifier("array");
+      }
+      return visitEachChildWithJsx(node, visitor, undefined);
+    };
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
+  }
+
+  return body;
+}
+
+/**
  * Transform destructured property references to use element.prop or element[index].
  */
 function transformDestructuredProperties(
@@ -854,6 +893,7 @@ function createRecipeCallWithParams(
   transformedBody: ts.ConciseBody,
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
+  arrayParam: ts.ParameterDeclaration | undefined,
   capturedVarNames: Set<string>,
   captures: Map<string, ts.Expression>,
   context: TransformationContext,
@@ -876,6 +916,17 @@ function createRecipeCallWithParams(
         undefined,
         undefined,
         factory.createIdentifier("index"),
+        undefined,
+      ),
+    );
+  }
+
+  if (arrayParam) {
+    properties.push(
+      factory.createBindingElement(
+        undefined,
+        undefined,
+        factory.createIdentifier("array"),
         undefined,
       ),
     );
@@ -928,6 +979,7 @@ function createRecipeCallWithParams(
     mapCall,
     elemParam,
     indexParam,
+    arrayParam,
     capturedVarNames,
     captures,
     context,
@@ -1004,6 +1056,7 @@ function transformMapCallback(
   const originalParams = callback.parameters;
   const elemParam = originalParams[0];
   const indexParam = originalParams[1]; // May be undefined
+  const arrayParam = originalParams[2]; // May be undefined
 
   // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
   // parameter names. This ensures nested callbacks can properly detect captures from
@@ -1025,14 +1078,21 @@ function transformMapCallback(
     factory,
   );
 
-  // 3. Transform destructured properties
+  // 3. Replace array parameter name
+  transformedBody = transformArrayReferences(
+    transformedBody,
+    arrayParam,
+    factory,
+  );
+
+  // 4. Transform destructured properties
   transformedBody = transformDestructuredProperties(
     transformedBody,
     elemParam,
     factory,
   );
 
-  // 4. Replace captured expressions with their parameter names
+  // 5. Replace captured expressions with their parameter names
   transformedBody = replaceCaptures(transformedBody, captures, factory);
 
   // Create the final recipe call with params
@@ -1042,6 +1102,7 @@ function transformMapCallback(
     transformedBody,
     elemParam,
     indexParam,
+    arrayParam,
     capturedVarNames,
     captures,
     context,
