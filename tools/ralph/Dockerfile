@@ -76,6 +76,7 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # --no-sandbox is required because Docker containers restrict namespace creation
 RUN claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
 
-# Start Common Tool servers in background and keep container alive
-# the sleep ensures that restarting the server doesnt cause the container to exit
-CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
+# Start servers in background, run smoketest, then exit
+# If you want to run ralph normally without the smoketest, then replace with:
+# CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
+CMD ["/bin/sh", "-c", "/app/start-servers.sh & /app/labs/tools/ralph/bin/ralph-smoketest.sh; sleep infinity"]

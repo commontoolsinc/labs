@@ -1,33 +1,56 @@
 # Ralph Task List
 
-A running checklist of tasks. New items include brief implementation notes for a
-future Ralph pass.
-
-Tasks marked with [UI] mean they should add/remove/modify the UI of the pattern.
-UI tasks should wire up the functionality and call the appropriate handlers.
-
-- [] Create a counter
-  - [] Add [UI] buttons for incrementing counter
-    - **Test with Playwright**: click increment 3 times, verify counter shows 3,
-      click decrement once, verify counter shows 2
-    - **State**: The displayed count matches the pattern's `count` output field
-  - [] Create multiple counters
-    - [] Add [UI] buttons to create multiple counters
-      - **Test with Playwright**: create 3 counters, test each one
-      - **State**: Each counter maintains its own value in the pattern's
-        `counters` array
-- [] Create a shopping list
-  - [] Create [UI] for shopping list
-    - **Test with Playwright**: add "milk" and "bread", make sure you see both,
-      remove "bread", verify only "milk" remains
-    - **State**: The list shows all items from pattern's `items` array with
-      correct `completed` status
-- [] Lunch voter - list of destinations (just a string) (dedup)
-  - [] [UI] for adding list of destination (just a string) and displaying it
-    - **UI must**: Show an editable list with add/remove buttons for
-      destinations
-    - **Test with Playwright**: Deploy pattern, add at least 2 destinations via
-      UI, verify they appear in the list, remove one destination, verify it's
-      removed from both UI and charm output
-    - **State**: The displayed list matches the pattern's `destinations` output
-      field
+-
+  1. [ ] Counter
+  - Components: Count display + Increment/decrement buttons + Reset button
+  - Data: Current count value
+  - Features: Increment, decrement, reset to zero
+-
+  2. [ ] Shopping List with sort-by-category and budget tracking. These should
+         be 3 different patterns (shopping list, category list, and budget
+         tracker) and a final pattern that combines them together and acts as a
+         launcher.
+  - Components: Shopping list (item input + checkboxes + clear button) +
+    Category list (category input + item assignment) + Budget tracker (price
+    input + total display) + Launcher (tabs/buttons to switch between views)
+  - Data: Shopping items with name, category, price, checked status; Categories
+    with names
+  - Features: Add/remove items, assign categories, track prices, sort by
+    category, view budget totals, check off purchased items
+-
+  3. [ ] Calendar
+  - Components: Month view with day cells + Event list displayed in calendar +
+    Day editor (opens when clicking a day)
+  - Data: Events with date, time, description
+  - Features: View one month at a time, click day to edit its event list, events
+    shown in calendar UI
+-
+  4. [ ] Fitness Workout Planner
+  - Components: Exercise routine builder + Set/rep counter + Progress chart
+  - Data: Exercises with sets, reps, weight
+  - Features: Track personal records, show strength gains over time
+-
+  5. [ ] Lunch Voter
+  - Components: Restaurant list + Voting buttons + Vote tally display +
+    Add/remove restaurant form
+  - Data: Restaurants with vote counts
+  - Features: Add/remove restaurants, vote for favorites, see most popular
+    choice
+-
+  6. [ ] Study Schedule with Focus Timer
+  - Components: Study task list + Time block scheduler + Pomodoro timer + Break
+    reminders
+  - Data: Study topics, estimated duration, completion status
+  - Features: Schedule study sessions, track time spent, enforce breaks
+-
+  7. [ ] Travel Itinerary with Budget Tracker
+  - Components: Activity scheduler + Day-by-day timeline + Expense tracker +
+    Budget dashboard
+  - Data: Activities with time, location, cost
+  - Features: Plan entire trip, track expenses by category, budget warnings
+-
+  8. [ ] Contact Manager with Birthday Reminders
+  - Components: Contact list + Upcoming birthdays view + Gift idea notes +
+    Calendar integration
+  - Data: Contacts with birthdays, gift history
+  - Features: Birthday notifications, gift suggestions, relationship notes
