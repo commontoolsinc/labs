@@ -72,6 +72,16 @@
   cases
 - [ ] Update JSON Schema to support new way to describe cells
 
+## Random nits
+
+- [ ] Rename `.update` to `.updateWith`
+  - [ ] Consider .update with a function callback, but not sure how useful that
+  is.
+- [ ] Add `.remove` and `.removeAll` which removes the element matching the
+  parameter from the list.
+- [ ] Add overload to `.key` that accepts an array of keys
+
+
 ## Planned Future Work
 
 - [ ] **Serializable node factories** (see `node-factory-shipping.md`)
