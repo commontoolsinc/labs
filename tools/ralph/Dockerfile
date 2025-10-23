@@ -79,4 +79,5 @@ RUN claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --hea
 # Start servers in background, run smoketest, then exit
 # If you want to run ralph normally without the smoketest, then replace with:
 # CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
+# TODO(@ellyxir): remove sleep infinity, smoketest should exit when its done
 CMD ["/bin/sh", "-c", "/app/start-servers.sh & /app/labs/tools/ralph/bin/ralph-smoketest.sh; sleep infinity"]
