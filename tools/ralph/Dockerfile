@@ -52,7 +52,11 @@ RUN mkdir -p /app && chown ralph:ralph /app
 WORKDIR /app
 
 # Clone the Common Tools repository into labs subdirectory
+# TODO(@ellyse): remove branch checkout when landing this branch
 RUN git clone https://github.com/commontoolsinc/labs.git /app/labs && \
+    cd /app/labs && \
+    git fetch origin && \
+    git checkout ellyse/ralph-smoketest-basic && \
     chown -R ralph:ralph /app/labs
 
 # Copy the startup script from local directory
