@@ -200,7 +200,9 @@ export function createDataFlowAnalyzer(
   };
 
   // Helper: Check if an element access expression has a static (literal) index
-  const isStaticElementAccess = (expression: ts.ElementAccessExpression): boolean => {
+  const isStaticElementAccess = (
+    expression: ts.ElementAccessExpression,
+  ): boolean => {
     const argumentExpression = expression.argumentExpression;
     return argumentExpression !== undefined &&
       ts.isExpression(argumentExpression) &&
@@ -494,7 +496,8 @@ export function createDataFlowAnalyzer(
           return merged;
         }
 
-        // JSX elements, arrow functions, and other containers preserve requiresRewrite from children
+        // For JSX elements, arrow functions, and other expression containers, preserve requiresRewrite from children
+        // This matches the non-synthetic code paths for these node types
         if (
           ts.isJsxElement(expression) ||
           ts.isJsxFragment(expression) ||

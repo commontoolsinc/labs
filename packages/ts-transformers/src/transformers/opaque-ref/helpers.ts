@@ -188,18 +188,8 @@ export function filterRelevantDataFlows(
     ) {
       return false;
     }
-    if (isParameterExpression(dataFlow.expression)) {
-      if (resolvesToMapParameter(dataFlow.expression, context.checker)) {
-        return true;
-      }
-      if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-        return false;
-      }
-      return false;
-    }
-    if (resolvesToBuilderParameter(dataFlow.expression, context.checker)) {
-      return false;
-    }
+    // Keep all other dataflows, including builder parameters and map parameters
+    // Both are OpaqueRefs that may need to be included in derive calls
     return true;
   });
 }
