@@ -116,7 +116,7 @@ export default recipe("Charms Launcher", () => {
                 },
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<li>
-                <ct-button onClick={goToCharm({ element })}>
+                <ct-button onClick={goToCharm({ charm: element })}>
                   Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>
                 <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(element, element => element[NAME] || "Unnamed")}</span>

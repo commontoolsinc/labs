@@ -705,20 +705,35 @@ function createMapTransformVisitor(
 }
 
 /**
- * Transform references to original element parameter to use "element" instead.
+ * Generic parameter reference transformer that handles:
+ * - Renaming identifiers from oldName to newName
+ * - Converting shorthand property assignments to preserve property names
+ *   (e.g., { charm } becomes { charm: element })
  */
-function transformElementReferences(
+function transformParameterReferences(
   body: ts.ConciseBody,
-  elemParam: ts.ParameterDeclaration | undefined,
+  param: ts.ParameterDeclaration | undefined,
+  newName: string,
   factory: ts.NodeFactory,
 ): ts.ConciseBody {
-  const elemName = elemParam?.name;
+  const paramName = param?.name;
 
-  // Replace references to the original param with element
-  if (elemName && ts.isIdentifier(elemName) && elemName.text !== "element") {
+  if (paramName && ts.isIdentifier(paramName) && paramName.text !== newName) {
+    const oldName = paramName.text;
     const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && node.text === elemName.text) {
-        return factory.createIdentifier("element");
+      // Handle shorthand property assignments: { oldName } -> { oldName: newName }
+      if (
+        ts.isShorthandPropertyAssignment(node) &&
+        node.name.text === oldName
+      ) {
+        return factory.createPropertyAssignment(
+          node.name, // Keep original property name
+          factory.createIdentifier(newName), // Use new variable name
+        );
+      }
+
+      if (ts.isIdentifier(node) && node.text === oldName) {
+        return factory.createIdentifier(newName);
       }
       return visitEachChildWithJsx(node, visitor, undefined);
     };
@@ -726,6 +741,17 @@ function transformElementReferences(
   }
 
   return body;
+}
+
+/**
+ * Transform references to original element parameter to use "element" instead.
+ */
+function transformElementReferences(
+  body: ts.ConciseBody,
+  elemParam: ts.ParameterDeclaration | undefined,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  return transformParameterReferences(body, elemParam, "element", factory);
 }
 
 /**
@@ -736,20 +762,7 @@ function transformIndexReferences(
   indexParam: ts.ParameterDeclaration | undefined,
   factory: ts.NodeFactory,
 ): ts.ConciseBody {
-  const indexName = indexParam?.name;
-
-  // Replace references to the original index param with "index"
-  if (indexName && ts.isIdentifier(indexName) && indexName.text !== "index") {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && node.text === indexName.text) {
-        return factory.createIdentifier("index");
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    return ts.visitNode(body, visitor) as ts.ConciseBody;
-  }
-
-  return body;
+  return transformParameterReferences(body, indexParam, "index", factory);
 }
 
 /**
@@ -760,20 +773,7 @@ function transformArrayReferences(
   arrayParam: ts.ParameterDeclaration | undefined,
   factory: ts.NodeFactory,
 ): ts.ConciseBody {
-  const arrayName = arrayParam?.name;
-
-  // Replace references to the original array param with "array"
-  if (arrayName && ts.isIdentifier(arrayName) && arrayName.text !== "array") {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && node.text === arrayName.text) {
-        return factory.createIdentifier("array");
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    return ts.visitNode(body, visitor) as ts.ConciseBody;
-  }
-
-  return body;
+  return transformParameterReferences(body, arrayParam, "array", factory);
 }
 
 /**
