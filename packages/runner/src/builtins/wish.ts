@@ -16,7 +16,6 @@ type WishResolution = {
 
 const WISH_TARGETS: Record<string, WishResolution> = {
   "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
-  "/": { entityId: { "/": DEFAULT_PATTERN_ID } },
 };
 
 function resolveWishTarget(
@@ -47,14 +46,25 @@ function parseWishTarget(target: string): ParsedWishTarget | undefined {
   if (trimmed.startsWith("#")) {
     const rest = trimmed.slice(1);
     const segments = rest.split("/").filter((segment) => segment.length > 0);
-    const baseSegment = segments.shift();
-    if (!baseSegment) return undefined;
-    const key = `#${baseSegment}`;
-    return { key, path: segments };
+
+    // Check if it's a well-known target like #allCharms
+    if (segments.length > 0) {
+      const baseSegment = segments[0];
+      const key = `#${baseSegment}`;
+      // If it's a known well-known target, use it with remaining path
+      if (key === "#allCharms") {
+        return { key, path: segments.slice(1) };
+      }
+    }
+
+    // Otherwise, # refers to default pattern (child of space cell)
+    // All segments become the path within the default pattern
+    return { key: "#", path: segments };
   }
 
   if (trimmed.startsWith("/")) {
     const segments = trimmed.split("/").filter((segment) => segment.length > 0);
+    // "/" refers to the space cell, segments are the path within it
     return { key: "/", path: segments };
   }
 
@@ -102,19 +112,48 @@ export function wish(
       return;
     }
 
-    const resolution = WISH_TARGETS[parsed.key];
-    if (!resolution) {
-      console.error(`Wish target "${wishTarget}" is not recognized.`);
-      sendResult(tx, hasDefault ? defaultCell : undefined);
-      return;
-    }
+    let baseCell: Cell<unknown> | undefined;
 
-    const baseCell = resolveWishTarget(
-      resolution,
-      runtime,
-      parentCell.space,
-      tx,
-    );
+    // Check if it's a well-known entity ID target (#allCharms)
+    const resolution = WISH_TARGETS[parsed.key];
+    if (resolution) {
+      baseCell = resolveWishTarget(
+        resolution,
+        runtime,
+        parentCell.space,
+        tx,
+      );
+    } else if (parsed.key === "/") {
+      // "/" refers to the space cell - use the space DID as the cause
+      const spaceCell = runtime.getCell(
+        parentCell.space,
+        parentCell.space, // Use the space DID as the cause
+        undefined,
+      ).withTx(tx);
+
+      // If there's a path, resolve the first segment as a cell reference
+      if (parsed.path.length > 0) {
+        const firstSegment = parsed.path[0];
+        const fieldCell = (spaceCell as any).key(firstSegment);
+        // Resolve the cell reference to get the actual linked cell
+        baseCell = fieldCell.resolveAsCell();
+        // Remove the first segment since we've resolved it
+        parsed.path = parsed.path.slice(1);
+      } else {
+        // No path, just return the space cell itself
+        baseCell = spaceCell;
+      }
+    } else if (parsed.key === "#") {
+      // "#" refers to the default pattern - get it from the space cell
+      const spaceCell = runtime.getCell(
+        parentCell.space,
+        parentCell.space,
+        undefined,
+      ).withTx(tx);
+      // Access defaultPattern field and resolve it as a cell
+      const defaultPatternField = (spaceCell as any).key("defaultPattern");
+      baseCell = defaultPatternField.resolveAsCell();
+    }
 
     if (!baseCell) {
       console.error(`Wish target "${wishTarget}" is not recognized.`);
@@ -129,6 +168,11 @@ export function wish(
       );
     }
 
-    sendResult(tx, resolvedCell.withTx(tx));
+    // If the resolved value is undefined and we have a default, use the default
+    if (hasDefault && resolvedCell.withTx(tx).get() === undefined) {
+      sendResult(tx, defaultCell);
+    } else {
+      sendResult(tx, resolvedCell.withTx(tx));
+    }
   };
 }

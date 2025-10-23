@@ -56,9 +56,17 @@ describe("wish built-in", () => {
     const charmsData = [{ name: "Alpha", title: "Alpha" }];
     allCharmsCell.withTx(tx).set(charmsData);
 
+    // Set up the space cell to link to allCharms
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    (spaceCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
     const wishRecipe = recipe("wish resolves all charms", () => {
-      const allCharms = wish<Array<Record<string, unknown>>>("#/allCharms");
-      const firstCharmTitle = wish("#allCharms/0/title");
+      const allCharms = wish<Array<Record<string, unknown>>>("/allCharms");
+      const firstCharmTitle = wish("/allCharms/0/title");
       return { allCharms, firstCharmTitle };
     });
 
@@ -73,6 +81,7 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
     await runtime.idle();
@@ -91,27 +100,25 @@ describe("wish built-in", () => {
     expect(linkData?.id).toEqual(`of:${ALL_CHARMS_ID}`);
   });
 
-  it("resolves the default charm result cell using slash target", async () => {
-    const defaultPatternCell = runtime.getCellFromEntityId<DefaultPatternData>(
+  it("resolves the space cell using slash target", async () => {
+    // Create the space cell (cause = space DID)
+    const spaceCell = runtime.getCell(
       space,
-      { "/": DEFAULT_PATTERN_ID },
-      [],
-      undefined,
-      tx,
-    );
-    const defaultPatternData = {
-      backlinksIndex: { mentions: ["Alpha"] },
+      space, // Use space DID as cause
+    ).withTx(tx);
+    const spaceData = {
+      testField: "space cell value",
     };
-    defaultPatternCell.withTx(tx).set(defaultPatternData);
+    spaceCell.withTx(tx).set(spaceData);
 
-    const wishRecipe = recipe("wish default result cell", () => {
-      const defaultResult = wish("/");
-      return { defaultResult };
+    const wishRecipe = recipe("wish space cell", () => {
+      const spaceResult = wish("/");
+      return { spaceResult };
     });
 
-    const resultCell = runtime.getCell<{ defaultResult?: unknown }>(
+    const resultCell = runtime.getCell<{ spaceResult?: unknown }>(
       space,
-      "wish built-in default result",
+      "wish built-in space",
       undefined,
       tx,
     );
@@ -122,43 +129,35 @@ describe("wish built-in", () => {
     await runtime.idle();
 
     const readTx = runtime.readTx();
-    const defaultResultCell = result.withTx(readTx).key("defaultResult");
-    const rawValue = defaultResultCell.withTx(readTx).getRaw() as
-      | { ["/"]?: Record<string, unknown> }
-      | undefined;
-    const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as
-      | { id?: string; path?: (string | number)[] }
-      | undefined;
+    const spaceResultCell = result.withTx(readTx).key("spaceResult");
 
-    expect(linkData?.id).toEqual(`of:${DEFAULT_PATTERN_ID}`);
-    expect(defaultResultCell.get()).toEqual(defaultPatternData);
+    expect(spaceResultCell.get()).toEqual(spaceData);
   });
 
-  it("resolves default charm subpaths using slash notation", async () => {
-    const defaultPatternCell = runtime.getCellFromEntityId<DefaultPatternData>(
+  it("resolves space cell subpaths using slash notation", async () => {
+    // Create the space cell with nested data
+    const spaceCell = runtime.getCell(
       space,
-      { "/": DEFAULT_PATTERN_ID },
-      [],
-      undefined,
-      tx,
-    );
-    defaultPatternCell.withTx(tx).set({
-      backlinksIndex: { mentions: ["Alpha"] },
+      space, // Use space DID as cause
+    ).withTx(tx);
+    spaceCell.withTx(tx).set({
+      config: { setting: "value" },
+      nested: { deep: { data: ["Alpha"] } },
     });
 
-    const wishRecipe = recipe("wish default subpaths", () => {
+    const wishRecipe = recipe("wish space subpaths", () => {
       return {
-        backlinksLink: wish("/backlinksIndex"),
-        mentionsLink: wish("/backlinksIndex/mentions"),
+        configLink: wish("/config"),
+        dataLink: wish("/nested/deep/data"),
       };
     });
 
     const resultCell = runtime.getCell<{
-      backlinksLink?: unknown;
-      mentionsLink?: unknown;
+      configLink?: unknown;
+      dataLink?: unknown;
     }>(
       space,
-      "wish built-in default subpaths",
+      "wish built-in space subpaths",
       undefined,
       tx,
     );
@@ -170,26 +169,11 @@ describe("wish built-in", () => {
 
     const readTx = runtime.readTx();
 
-    const backlinksCell = result.withTx(readTx).key("backlinksLink");
-    const backlinksRaw = backlinksCell.withTx(readTx).getRaw() as
-      | { ["/"]?: Record<string, unknown> }
-      | undefined;
-    const backlinksLink = backlinksRaw?.["/"]?.[LINK_V1_TAG] as
-      | { id?: string; path?: (string | number)[] }
-      | undefined;
-    expect(backlinksLink?.id).toEqual(`of:${DEFAULT_PATTERN_ID}`);
-    expect(backlinksLink?.path).toEqual(["backlinksIndex"]);
+    const configCell = result.withTx(readTx).key("configLink");
+    expect(configCell.get()).toEqual({ setting: "value" });
 
-    const mentionsCell = result.withTx(readTx).key("mentionsLink");
-    const mentionsRaw = mentionsCell.withTx(readTx).getRaw() as
-      | { ["/"]?: Record<string, unknown> }
-      | undefined;
-    const mentionsLink = mentionsRaw?.["/"]?.[LINK_V1_TAG] as
-      | { id?: string; path?: (string | number)[] }
-      | undefined;
-    expect(mentionsLink?.id).toEqual(`of:${DEFAULT_PATTERN_ID}`);
-    expect(mentionsLink?.path).toEqual(["backlinksIndex", "mentions"]);
-    expect(mentionsCell.get()).toEqual(["Alpha"]);
+    const dataCell = result.withTx(readTx).key("dataLink");
+    expect(dataCell.get()).toEqual(["Alpha"]);
   });
 
   it("returns undefined for unknown wishes", async () => {
@@ -227,6 +211,16 @@ describe("wish built-in", () => {
   it("uses provided default when target is missing", async () => {
     const fallback = [{ name: "Fallback" }];
 
+    // Set up space cell with an empty default pattern
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(tx);
+    defaultPatternCell.set({});  // Empty default pattern
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
     const wishRecipe = recipe("wish default", () => {
       const missing = wish("#/missing", fallback);
       return { missing };
@@ -240,6 +234,7 @@ describe("wish built-in", () => {
     );
     const result = runtime.run(tx, wishRecipe, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
     tx = runtime.edit();
 
     await runtime.idle();

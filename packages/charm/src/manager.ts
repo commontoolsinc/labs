@@ -18,6 +18,7 @@ import {
   UI,
   URI,
 } from "@commontools/runner";
+import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { vdomSchema } from "@commontools/html";
 import { type Session } from "@commontools/identity";
 import { isObject, isRecord } from "@commontools/utils/types";
@@ -58,9 +59,10 @@ export const charmListSchema = {
 export const spaceCellSchema = {
   type: "object",
   properties: {
-    allCharms: charmListSchema,
+    // Each field is a Cell<> reference to another cell
+    allCharms: { ...charmListSchema, asCell: true },
     defaultPattern: { type: "object", asCell: true },
-    recentCharms: charmListSchema,
+    recentCharms: { ...charmListSchema, asCell: true },
   },
 } as const satisfies JSONSchema;
 
@@ -131,6 +133,7 @@ export class CharmManager {
 
   private charms: Cell<Cell<unknown>[]>;
   private pinnedCharms: Cell<Cell<unknown>[]>;
+  private recentCharms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCell>;
 
   /**
@@ -144,9 +147,11 @@ export class CharmManager {
   ) {
     this.space = this.session.space;
 
-    this.charms = this.runtime.getCell(
+    // Use the well-known ALL_CHARMS_ID entity for the charms cell
+    this.charms = this.runtime.getCellFromEntityId(
       this.space,
-      "charms",
+      { "/": ALL_CHARMS_ID },
+      [],
       charmListSchema,
     );
     this.pinnedCharms = this.runtime.getCell(
@@ -154,20 +159,36 @@ export class CharmManager {
       "pinned-charms",
       charmListSchema,
     );
+    this.recentCharms = this.runtime.getCell(
+      this.space,
+      "recent-charms",
+      charmListSchema,
+    );
+    // Use the space DID as the cause - it's derived from the space name
+    // and consistently available everywhere
     this.spaceCell = this.runtime.getCell(
       this.space,
-      this.session.name,
+      this.space, // Use the DID itself as the cause
       spaceCellSchema,
     );
 
-    // The space cell's allCharms field should reference the same charms data
-    // This is done by accessing the charms cell through the space cell's schema
-    // The runtime will handle the linkage automatically since we're using the same cause
+    // Initialize the space cell structure by linking to existing cells
+    const linkSpaceCell = this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+
+      // Link the three main fields to their respective cells
+      spaceCellWithTx.key("allCharms").set(this.charms.withTx(tx));
+      spaceCellWithTx.key("recentCharms").set(this.recentCharms.withTx(tx));
+
+      // defaultPattern will be linked later when the default pattern is found
+    });
 
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
+      this.syncCharms(this.recentCharms),
       this.spaceCell.sync(),
+      linkSpaceCell,
     ]).then(() => {});
   }
 
@@ -230,6 +251,21 @@ export class CharmManager {
   }
 
   /**
+   * Link the default pattern cell to the space cell.
+   * This should be called after the default pattern is created.
+   * @param defaultPatternCell - The cell representing the default pattern
+   */
+  async linkDefaultPattern(
+    defaultPatternCell: Cell<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
+    });
+    await this.runtime.idle();
+  }
+
+  /**
    * Track a charm as recently viewed/interacted with.
    * Maintains a list of up to 10 most recent charms.
    * @param charm - The charm to track
@@ -239,9 +275,8 @@ export class CharmManager {
     if (!id) return;
 
     await this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
-      const recentCharmsCell = spaceCellWithTx.key("recentCharms");
-      const recentCharms = recentCharmsCell.get() || [];
+      const recentCharmsWithTx = this.recentCharms.withTx(tx);
+      const recentCharms = recentCharmsWithTx.get() || [];
 
       // Remove any existing instance of this charm to avoid duplicates
       const filtered = recentCharms.filter((c) => !isSameEntity(c, id));
@@ -252,7 +287,7 @@ export class CharmManager {
       // Trim to max 10 items
       const trimmed = updated.slice(0, 10);
 
-      recentCharmsCell.set(trimmed);
+      recentCharmsWithTx.set(trimmed);
     });
 
     await this.runtime.idle();
