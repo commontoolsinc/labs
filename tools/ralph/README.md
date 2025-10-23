@@ -6,7 +6,45 @@ Ability to run [Ralph](https://ghuntley.com/ralph/)
 
 Claude CLI and Codex are installed
 
-## How to run Ralph
+## How to use Smoketest Ralph
+
+Smoketest Ralph runs a single task from `TASKS.md` and exits when complete. Each
+Ralph instance is assigned a specific task via the `RALPH_ID` environment
+variable.
+
+### Running a smoketest
+
+1. Build the Docker image (if not using pre-built):
+
+```bash
+docker build -t ellyxir/ralph tools/ralph/
+```
+
+2. Run the container with your RALPH_ID and mounted credentials:
+
+```bash
+cd ~/labs
+docker run -e RALPH_ID=3 -d -v ~/.claude.json:/home/ralph/.claude.json \
+  -v ~/.claude/.credentials.json:/home/ralph/.claude/.credentials.json \
+  -v ./tools/ralph/smoketest:/app/smoketest --name ralph ellyxir/ralph
+```
+
+Note: The container will exit automatically when the smoketest completes.
+
+### Retrieving results
+
+Results are available in the hosts `./tools/ralph/smoketest/${RALPH_ID}/`
+directory:
+
+- `SCORE.txt` - Contains SUCCESS, PARTIAL, or FAILURE
+- `RESULTS.md` - Summary of work including test results
+- Pattern files created during the task
+
+### Running multiple smoketests in parallel
+
+Coming soon
+
+## How to run Ralph (not smoketest)
 
 ### Using pre-built image from Docker Hub (recommended)
 
