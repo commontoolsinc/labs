@@ -209,7 +209,7 @@ cd /path/to/recipes && ./dist/ct init
 
 ### Prerequisites
 
-Before ever calling `ct` you MUST read `docs/common/CT.md`.
+Use `ct --help` and `ct charm --help` to discover available commands.
 
 This tool is used to:
 - Deploy a recipe as a new charm

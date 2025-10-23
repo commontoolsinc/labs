@@ -53,7 +53,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 **Explore in order:**
 1. **Toolshed backend** - Quote from `packages/toolshed/README.md` about hosted platform
 2. **Shell frontend** - Quote from `packages/shell/README.md` about user interface
-3. **CT CLI** - Overview from `docs/common/CT.md`
+3. **CT CLI** - Run `ct --help` to see available commands
 4. **How they work together** - Integration points and data flow
 5. **Development workflow** - Running local development environment
 
