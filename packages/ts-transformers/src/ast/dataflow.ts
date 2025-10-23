@@ -199,6 +199,15 @@ export function createDataFlowAnalyzer(
     };
   };
 
+  // Helper: Check if an element access expression has a static (literal) index
+  const isStaticElementAccess = (expression: ts.ElementAccessExpression): boolean => {
+    const argumentExpression = expression.argumentExpression;
+    return argumentExpression !== undefined &&
+      ts.isExpression(argumentExpression) &&
+      (ts.isLiteralExpression(argumentExpression) ||
+        ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+  };
+
   const analyzeExpression = (
     expression: ts.Expression,
     scope: DataFlowScopeInternal,
@@ -467,8 +476,25 @@ export function createDataFlowAnalyzer(
           };
         }
 
-        // For JSX elements, arrow functions, and other expression containers, preserve requiresRewrite from children
-        // This matches the non-synthetic code paths for these node types
+        // Element access expressions: static indices don't need derive wrapping,
+        // but dynamic indices with opaque refs do (e.g., tagCounts[element])
+        if (ts.isElementAccessExpression(expression)) {
+          const isStaticIndex = isStaticElementAccess(expression);
+
+          if (isStaticIndex) {
+            // Static index like element[0] - preserve merged analysis
+            return merged;
+          } else if (merged.containsOpaqueRef) {
+            // Dynamic index with opaque refs - requires derive wrapper
+            return {
+              ...merged,
+              requiresRewrite: true,
+            };
+          }
+          return merged;
+        }
+
+        // JSX elements, arrow functions, and other containers preserve requiresRewrite from children
         if (
           ts.isJsxElement(expression) ||
           ts.isJsxFragment(expression) ||
@@ -747,10 +773,7 @@ export function createDataFlowAnalyzer(
         ? analyzeExpression(argumentExpression, scope, context)
         : emptyAnalysis();
 
-      const isStaticIndex = argumentExpression &&
-        ts.isExpression(argumentExpression) &&
-        (ts.isLiteralExpression(argumentExpression) ||
-          ts.isNoSubstitutionTemplateLiteral(argumentExpression));
+      const isStaticIndex = isStaticElementAccess(expression);
 
       if (isStaticIndex) {
         const result = mergeAnalyses(target, argument);

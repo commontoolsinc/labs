@@ -1,4 +1,4 @@
-/// &lt;cts-enable />
+/// <cts-enable />
 import { cell, recipe, UI } from "commontools";
 
 export default recipe("ElementAccessBothOpaque", (_state) => {

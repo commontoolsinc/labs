@@ -49,7 +49,7 @@ export default recipe({
                 },
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { tagCounts } }) => (<span>
-            {element}: {__ctHelpers.derive({ tagCounts, element }, ({ tagCounts: _v1, element: _v2 }) => _v1[_v2])}
+            {element}: {__ctHelpers.derive({ tagCounts, element }, ({ tagCounts: tagCounts, element: element }) => tagCounts[element])}
           </span>)), { tagCounts: state.tagCounts })}
       </div>),
     };
