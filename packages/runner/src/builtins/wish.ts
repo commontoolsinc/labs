@@ -6,7 +6,7 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
-import { ALL_CHARMS_ID, DEFAULT_PATTERN_ID } from "./well-known.ts";
+import { ALL_CHARMS_ID } from "./well-known.ts";
 import type { JSONSchema } from "../builder/types.ts";
 
 type WishResolution = {
@@ -113,6 +113,14 @@ export function wish(
     }
 
     let baseCell: Cell<unknown> | undefined;
+    let pathSegments = parsed.path.length > 0 ? [...parsed.path] : [];
+
+    const getSpaceCellWithTx = () =>
+      runtime.getCell(
+        parentCell.space,
+        parentCell.space, // Use the space DID as the cause
+        undefined,
+      ).withTx(tx);
 
     // Check if it's a well-known entity ID target (#allCharms)
     const resolution = WISH_TARGETS[parsed.key];
@@ -124,32 +132,22 @@ export function wish(
         tx,
       );
     } else if (parsed.key === "/") {
-      // "/" refers to the space cell - use the space DID as the cause
-      const spaceCell = runtime.getCell(
-        parentCell.space,
-        parentCell.space, // Use the space DID as the cause
-        undefined,
-      ).withTx(tx);
+      // "/" refers to the space cell
+      const spaceCell = getSpaceCellWithTx();
 
-      // If there's a path, resolve the first segment as a cell reference
-      if (parsed.path.length > 0) {
-        const firstSegment = parsed.path[0];
+      if (pathSegments.length > 0) {
+        const [firstSegment, ...restPath] = pathSegments;
         const fieldCell = (spaceCell as any).key(firstSegment);
         // Resolve the cell reference to get the actual linked cell
         baseCell = fieldCell.resolveAsCell();
-        // Remove the first segment since we've resolved it
-        parsed.path = parsed.path.slice(1);
+        pathSegments = restPath;
       } else {
         // No path, just return the space cell itself
         baseCell = spaceCell;
       }
     } else if (parsed.key === "#") {
       // "#" refers to the default pattern - get it from the space cell
-      const spaceCell = runtime.getCell(
-        parentCell.space,
-        parentCell.space,
-        undefined,
-      ).withTx(tx);
+      const spaceCell = getSpaceCellWithTx();
       // Access defaultPattern field and resolve it as a cell
       const defaultPatternField = (spaceCell as any).key("defaultPattern");
       baseCell = defaultPatternField.resolveAsCell();
@@ -162,7 +160,7 @@ export function wish(
     }
 
     let resolvedCell = baseCell;
-    for (const segment of parsed.path) {
+    for (const segment of pathSegments) {
       resolvedCell = resolvedCell.withTx(tx).key(
         segmentToPropertyKey(segment) as never,
       );
