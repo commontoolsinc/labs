@@ -19,59 +19,65 @@ Use this skill for:
 - Managing identity and space configurations
 - Visualizing charm relationships
 
-## Prerequisites and Setup
+## Self-Documenting CLI Philosophy
 
-### Running CT: Binary vs Source
+**IMPORTANT:** The `ct` binary has comprehensive built-in help. Always use `--help` flags to discover current commands and syntax rather than relying on hardcoded documentation.
+
+### Discovering Commands
+
+```bash
+# Top-level commands
+./dist/ct --help
+
+# Charm subcommands
+./dist/ct charm --help
+
+# Specific command details
+./dist/ct charm get --help
+./dist/ct charm link --help
+./dist/ct dev --help
+```
+
+**Why this matters:** The tool's `--help` output is the authoritative source of truth. As new features are added or flags change, `--help` stays current automatically.
+
+## Running CT: Binary vs Source
 
 The `ct` command can be run in two ways:
 
 **1. As a compiled binary (recommended for production):**
-
 ```bash
 ./dist/ct [command]
 ```
 
-Verify the binary exists:
-
-```bash
-ls -la ./dist/ct
-```
-
-If missing, build it with:
-
+Verify the binary exists with `ls -la ./dist/ct`. If missing, build it:
 ```bash
 deno task build-binaries --cli-only
 ```
 
 **2. From source (for active development):**
-
 ```bash
 deno task ct [command]
 ```
 
-Use this approach when actively developing the ct tool itself, as it runs the latest source code without requiring a rebuild.
+Use this when actively developing the ct tool itself.
 
-**Which to use:**
-- Use `./dist/ct` by default and in production environments
-- Use `deno task ct` when actively developing/debugging the ct tool
-- If uncertain, try `./dist/ct` first; if the binary doesn't exist, use `deno task ct`
+**Default approach:** Try `./dist/ct` first; if the binary doesn't exist, use `deno task ct`.
+
+## Prerequisites and Setup
 
 ### Identity Management
 
 Check for existing identity:
-
 ```bash
 ls -la claude.key
 ```
 
 If missing, create one:
-
 ```bash
 ./dist/ct id new > claude.key
 ```
 
-To get the DID (Decentralized Identifier) of an identity:
-
+To get the DID (Decentralized Identifier):
 ```bash
 ./dist/ct id did claude.key
 ```
@@ -79,12 +85,11 @@ To get the DID (Decentralized Identifier) of an identity:
 ### Recipe Development Setup
 
 When working in a recipes repository, initialize TypeScript support:
-
 ```bash
 ./dist/ct init
 ```
 
-This creates/updates `tsconfig.json` with proper type definitions for recipe development.
+This creates/updates `tsconfig.json` with proper type definitions.
 
 ### Standard Parameters
 
@@ -101,185 +106,89 @@ Most commands require these parameters:
 
 ### 1. Testing Recipes Locally
 
-Before deploying, test recipes locally using `ct dev`:
+Use `ct dev` for rapid iteration during recipe development:
 
-**Type check and execute:**
 ```bash
+# Type check and execute
 ./dist/ct dev ./recipe.tsx
-```
 
-**Type check only (no execution):**
-```bash
+# Type check only (no execution)
 ./dist/ct dev ./recipe.tsx --no-run
 ```
 
-**Show transformed TypeScript:**
+**Discover more options:**
 ```bash
-./dist/ct dev ./recipe.tsx --show-transformed
+./dist/ct dev --help
 ```
-
-**Save compiled output:**
-```bash
-./dist/ct dev ./recipe.tsx --output compiled.js
-```
-
-Use `ct dev` for rapid iteration during recipe development. Fix syntax errors before deploying.
 
 ### 2. Deploying and Managing Charms
 
-**List charms in a space:**
-```bash
-./dist/ct charm ls --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name]
-```
+**Workflow pattern:**
+1. List charms → `ct charm ls`
+2. Deploy new → `ct charm new`
+3. Update existing → `ct charm setsrc` (faster than redeploying)
+4. Inspect state → `ct charm inspect`
 
-**Deploy a recipe as a new charm:**
+**Discover commands:**
 ```bash
-./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] [path/to/recipe.tsx]
-```
-
-**Inspect charm details:**
-```bash
-./dist/ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id]
-```
-
-**Get charm recipe source:**
-```bash
-./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] ./output.tsx
-```
-
-**Update charm recipe source:**
-```bash
-./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [path/to/updated-recipe.tsx]
+./dist/ct charm --help
 ```
 
 ### 3. Reading and Writing Charm Data
 
-Charms have two cells:
-- **Result Cell** (default): Computed output/result of the charm
-- **Input Cell**: Input parameters/arguments passed to the charm
+**Key concepts:**
+- **Result Cell** (default): Computed output of the charm
+- **Input Cell**: Input parameters passed to the charm
+- **Path syntax**: Use forward slashes (e.g., `items/0/name`, `config/database/host`)
 
-**Get value from result cell:**
-```bash
-./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [path]
-```
+**Commands:**
+- `ct charm get` - Read data from charm
+- `ct charm set` - Direct field modification
+- `ct charm call` - Execute handler (for validation/side effects)
 
-**Get value from input cell:**
-```bash
-./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [path] --input
-```
-
-**Set value in result cell (via stdin):**
-```bash
-echo '"New Value"' | ./dist/ct charm set --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [path]
-```
-
-**Set value in input cell:**
-```bash
-echo '{"key": "value"}' | ./dist/ct charm set --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [path] --input
-```
-
-**Path syntax examples:**
-- `title` - top-level field
-- `items/0/name` - array element field
-- `config/database/host` - nested object field
-
-**Important:** Values must be valid JSON. Strings need quotes: `'"text"'` not `'text'`
-
-### 4. Calling Charm Handlers
-
-Handlers are functions defined in recipes that perform operations with validation and side effects. Use `call` instead of `set` for complex operations.
-
-**Call handler with no arguments:**
-```bash
-./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] [handler-name]
-```
-
-**Call handler with JSON arguments (via stdin):**
-```bash
-echo '{"title": "New Item", "priority": 1}' | ./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] addItem
-```
-
-**Call handler with JSON arguments (inline):**
-```bash
-./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --charm [charm-id] updateStatus '{"status": "completed"}'
-```
-
-### 5. Linking Charms Together
-
-Linking is the primary way to build complex applications from simple recipes. Links create reactive data flow between charms.
-
-**How linking works:**
-- **Source side**: Reads from a charm's result/output field
-- **Target side**: Writes to another charm's input field
-- **Syntax**: `[source-charm]/[field] → [target-charm]/[input-field]`
-- **Reactivity**: When source updates, target automatically receives new data
-
-**Basic link:**
-```bash
-./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] bafySourceCharm/emails bafyTargetCharm/emailData
-```
-
-**Nested field link:**
-```bash
-./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] bafyCharmA/data/users/0/email bafyCharmB/config/primaryEmail
-```
-
-**Link well-known ID (e.g., all charms list):**
-```bash
-./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafyTargetCharm/allCharms
-```
-
-**Common patterns:**
-- Email list → Document generator
-- Search results → Summarizer
-- Database query → Dashboard display
-- Form input → Validation processor
-
-### 6. Visualizing Space Architecture
-
-**ASCII map of charms and connections:**
-```bash
-./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name]
-```
-
-**Generate Graphviz diagram:**
-```bash
-./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --format dot
-```
-
-**Render to PNG (requires Graphviz installed):**
-```bash
-./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --format dot | dot -Tpng -o map.png
-```
-
-**Online visualization:**
-1. Generate DOT output
-2. Paste into https://dreampuf.github.io/GraphvizOnline/
-
-## Decision Guide: Which Command to Use
-
-**GET vs SET vs CALL:**
-- **GET**: Read data from charm (result or input cell)
-- **SET**: Direct field modification (simple, fast, no validation)
-- **CALL**: Execute handler (complex operations, validation, side effects)
-
-**When to use each:**
+**Decision guide:**
 - Use **GET** to inspect charm state
 - Use **SET** for simple value updates without business logic
 - Use **CALL** for operations that need validation, computation, or side effects
-- Use **LINK** to establish reactive data flow between charms
 
-**GETSRC vs SETSRC:**
-- **GETSRC**: Retrieve recipe source code from deployed charm
-- **SETSRC**: Update recipe source code in deployed charm
+**Important:** Values must be valid JSON. Strings need quotes: `'"text"'` not `'text'`
 
-Use these when iterating on deployed charms or extracting recipes for local development.
+### 4. Linking Charms Together
 
-## Common Patterns and Best Practices
+Linking creates reactive data flow between charms:
+- **Source side**: Reads from a charm's result/output field
+- **Target side**: Writes to another charm's input field
+- **Syntax**: `[source-charm]/[field] [target-charm]/[input-field]`
+- **Reactivity**: When source updates, target automatically receives new data
+
+**Example pattern:**
+```bash
+./dist/ct charm link -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space \
+  sourceCharmID/emails targetCharmID/emailData
+```
+
+**Discover linking options:**
+```bash
+./dist/ct charm link --help
+```
+
+### 5. Visualizing Space Architecture
+
+Use `ct charm map` to understand charm relationships:
+
+```bash
+# ASCII map
+./dist/ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space
+
+# Graphviz DOT format (for visualization tools)
+./dist/ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space --format dot
+```
+
+## Common Patterns and Gotchas
 
 ### Path Format
 
-Always use forward slashes for paths:
+Always use forward slashes:
 - ✅ `config/database/host`
 - ❌ `config.database.host`
 
@@ -298,20 +207,14 @@ echo '"hello world"' | ./dist/ct charm set ... title
 # Numbers
 echo '42' | ./dist/ct charm set ... count
 
-# Booleans
-echo 'true' | ./dist/ct charm set ... enabled
-
 # Objects
-echo '{"name": "John", "age": 30}' | ./dist/ct charm set ... user
-
-# Arrays
-echo '["item1", "item2"]' | ./dist/ct charm set ... tags
+echo '{"name": "John"}' | ./dist/ct charm set ... user
 ```
 
 ### Error Handling
 
 **Common issues:**
-- Commands hang/timeout → Not connected to CT Tailnet
+- Commands hang/timeout → Not connected to CT Tailnet (for `*.ts.net` URLs)
 - Permission denied → Check identity file permissions (`chmod 600 claude.key`)
 - Invalid path → Verify forward slash syntax
 - JSON parse error → Check JSON formatting (proper quotes, no trailing commas)
@@ -322,7 +225,7 @@ echo '["item1", "item2"]' | ./dist/ct charm set ... tags
 3. For data issues: Use `ct charm inspect` to examine charm state
 4. For linking issues: Use `ct charm map` to visualize connections
 
-### Building Complex Applications
+## Building Complex Applications
 
 **Composability Pattern:**
 1. Create small, focused recipes (each does one thing well)
@@ -342,34 +245,14 @@ Implement by creating 4 recipes, deploying as charms, then linking them together
 
 ## Resources
 
-### references/commands.md
-
-Comprehensive command reference with all flags, options, and detailed examples. Consult when needing specific command syntax or advanced features.
-
 ### references/well-known-ids.md
 
 Documentation of well-known charm IDs (like `allCharms`) that provide access to system-level data. Reference when building tools that need space-wide information.
 
-## Quick Reference
+## Remember
 
-**Most common commands:**
-
-```bash
-# Test recipe locally
-./dist/ct dev ./recipe.tsx
-
-# List charms
-./dist/ct charm ls -i claude.key -a https://toolshed.saga-castor.ts.net/ -s myspace
-
-# Deploy recipe
-./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net/ -s myspace ./recipe.tsx
-
-# Get data
-./dist/ct charm get -i claude.key -a https://toolshed.saga-castor.ts.net/ -s myspace -c bafyID title
-
-# Call handler
-echo '{"name": "value"}' | ./dist/ct charm call -i claude.key -a https://toolshed.saga-castor.ts.net/ -s myspace -c bafyID handler
-
-# Link charms
-./dist/ct charm link -i claude.key -a https://toolshed.saga-castor.ts.net/ -s myspace bafyA/field bafyB/input
-```
+- **Use `--help` flags** - The tool itself is the documentation
+- **Check `ct charm --help`** before asking about available commands
+- **Path syntax** - Always forward slashes, numeric array indices
+- **JSON format** - All values must be valid JSON (strings need quotes)
+- **Environment variables** - Set `CT_API_URL` and `CT_IDENTITY` for convenience
