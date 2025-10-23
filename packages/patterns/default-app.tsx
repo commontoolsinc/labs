@@ -1,10 +1,12 @@
 /// <cts-enable />
 import {
+  BuiltInLLMMessage,
   Cell,
   cell,
   derive,
   handler,
   ifElse,
+  lift,
   NAME,
   navigateTo,
   recipe,
@@ -101,6 +103,52 @@ const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
   value.set(!value.get());
 });
 
+const messagesToNotifications = lift<
+  {
+    messages: BuiltInLLMMessage[];
+    seen: Cell<number>;
+    notifications: Cell<{ text: string; timestamp: number }[]>;
+  }
+>(({ messages, seen, notifications }) => {
+  if (messages.length > 0) {
+    if (seen.get() >= messages.length) {
+      // If messages length went backwards, reset seen counter
+      if (seen.get() > messages.length) {
+        seen.set(0);
+      } else {
+        return;
+      }
+    }
+
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage.role === "assistant") {
+      const contentText = typeof latestMessage.content === "string"
+        ? latestMessage.content
+        : latestMessage.content.map((part) => {
+          if (part.type === "text") {
+            return part.text;
+          } else if (part.type === "tool-call") {
+            return `Tool call: ${part.toolName}`;
+          } else if (part.type === "tool-result") {
+            return part.output.type === "text"
+              ? part.output.value
+              : JSON.stringify(part.output.value);
+          } else if (part.type === "image") {
+            return "[Image]";
+          }
+          return "";
+        }).join("");
+
+      notifications.push({
+        text: contentText,
+        timestamp: Date.now(),
+      });
+
+      seen.set(messages.length);
+    }
+  }
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -110,6 +158,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
     );
     const index = BacklinksIndex({ allCharms });
     const fabExpanded = cell(false);
+    const notifications = cell<{ text: string; timestamp: number }[]>([]);
+    const seen = cell<number>(0);
 
     const omnibot = Chatbot({
       messages: [],
@@ -124,6 +174,14 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           pattern: calculator,
         },
       },
+    });
+
+    messagesToNotifications({
+      messages: omnibot.messages,
+      seen: seen as unknown as Cell<number>,
+      notifications: notifications as unknown as Cell<
+        { id: string; text: string; timestamp: number }[]
+      >,
     });
 
     return {
@@ -215,10 +273,20 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           {omnibot.ui.chatLog as any}
         </div>
       ),
-      fabUI: ifElse(
-        fabExpanded,
-        omnibot.ui.promptInput,
-        <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
+      fabUI: (
+        <>
+          <ct-toast-stack
+            $notifications={notifications}
+            position="top-right"
+            auto-dismiss={5000}
+            max-toasts={5}
+          />
+          {ifElse(
+            fabExpanded,
+            omnibot.ui.promptInput,
+            <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
+          )}
+        </>
       ),
     };
   },
