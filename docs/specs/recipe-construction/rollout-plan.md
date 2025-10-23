@@ -62,7 +62,7 @@
 - [ ] Change lifecycle of recipes so that they are run like a lift, with an
   OpaqueRef already tied to the arguments cell as input.
   - [ ] This should allow us to remove the JSON recipe representation
-- [ ] Add `Cell.for(casue)` cell factory, replacing `cell` and `createCell`.
+- [ ] Add `Cell.for(cause)` cell factory, replacing `cell` and `createCell`.
 - [ ] Have `Cell.set` return itself, so `Cell.for(..).set(..)` works
 - [ ] `cell.assign(otherCell)` applies `cell`'s link to `otherCell` if it
   doesn't have one yet. Useful to make self-referential loops.

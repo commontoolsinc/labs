@@ -34,7 +34,7 @@ This spec describes the implementation for tasks in `rollout-plan.md` lines
 
 ## Snapshot Envelope
 
-Store an additional `graph` payload on the result cell alongside the existing
+Store an additional `process` payload on the result cell alongside the existing
 `value`, `source`, and renamed `pattern` metadata. The payload is versioned to
 allow future format changes.
 
