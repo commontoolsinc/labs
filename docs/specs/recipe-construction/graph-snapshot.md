@@ -1,5 +1,9 @@
 # Graph Snapshot Schema
 
+> **Status:** This work is **deferred to Phase 2** (see `rollout-plan.md` and
+> `overview.md`). The snapshot format described here will be implemented as part
+> of the `process` metadata work mentioned in the rollout plan (lines 54-61).
+
 ## Motivation
 
 - `Runner.setupInternal` currently stores recipe metadata inside the process
@@ -14,6 +18,19 @@
 - Persisting a snapshot on the result cell lets the runtime answer "what does
   this graph look like" without re-running the factory, simplifying rehydration
   and teardown.
+
+## Relationship to Rollout Plan
+
+This spec describes the implementation for tasks in `rollout-plan.md` lines
+54-61:
+
+- Write metadata into result cell including `source` (from context) and
+  `process` metadata
+- The `process` field contains the graph snapshot described in this document,
+  including:
+  - The `Module` (which includes the `Program` as link using `cid:hash`)
+  - Created cells with links to module and/or schema
+  - History of previously used schemas (P2 for safe updating)
 
 ## Snapshot Envelope
 
@@ -82,40 +99,48 @@ type EventHandlerDescriptor = ReactiveModuleDescriptor & { handler: true };
     schemas so reactive nodes can express tuple-style inputs used by lifts and
     handlers.
 
-## Generation Flow
+## Generation Flow (Phase 2)
 
-1. When `Runner.startWithTx` iterates `recipe.nodes`, instrument each
-   `instantiateNode` call to record:
-   - The resolved module descriptor, including implementation reference.
-   - Normalized input links (aliases already resolved by the capability
-     wrappers so `unwrapOneLevelAndBindtoDoc` is no longer needed).
+> **Note:** This describes future implementation work after Phase 1 type
+> unification is complete.
+
+1. When `Runner.startWithTx` iterates nodes during lift/handler execution,
+   instrument each instantiation to record:
+   - The resolved module descriptor, including implementation reference
+   - Normalized input links (already resolved since cells have concrete causes
+     from Phase 1 work)
    - Either an output link (for reactive nodes) or a stream link (for event
-     handlers), whichever applies.
-   - Optional argument/result schemas attached by the builder.
+     handlers), whichever applies
+   - Optional argument/result schemas attached by the builder
 2. Compute the final snapshot object, attach it to
-   `resultCell.withTx(tx).setMetadata("graph", snapshot)`, and persist it in the
-   same transaction that finishes setup.
+   `resultCell.withTx(tx).setMetadata("process", snapshot)` (note: using
+   `process` not `graph` to match rollout plan), and persist it in the same
+   transaction that finishes setup
 
-## Rehydration Strategy
+## Rehydration Strategy (Phase 2)
+
+> **Note:** Deferred to Phase 2 implementation.
 
 - On `Runner.setupInternal`, if a prior snapshot exists, load it before
   unpacking defaults. The runtime can:
   - Reattach scheduler subscriptions by walking the nodes, reusing modules whose
-    implementation reference matches.
-  - Rehydrate handler streams directly from their stored links.
+    implementation reference matches
+  - Rehydrate handler streams directly from their stored links
 - When a handler or lift causes a graph to rebuild, diff the previous and new
   node lists. Nodes that disappear are torn down by following their stored
   output/stream links. Nodes with matching descriptors can reuse their existing
-  cells.
+  cells
 
-## Teardown and Diffing
+## Teardown and Diffing (Phase 2)
+
+> **Note:** Deferred to Phase 2 implementation.
 
 - Nodes uniquely define the dependencies; links are inferred from the cell links
   embedded inside each snapshot entry. Diffing node descriptors is sufficient to
-  drive teardown.
+  drive teardown
 - Maintain a monotonic `generation` counter on the snapshot. When a handler
   triggers rehydration, increment the counter so logs can correlate actions with
-  rebuilds.
+  rebuilds
 
 ## Outstanding Questions
 

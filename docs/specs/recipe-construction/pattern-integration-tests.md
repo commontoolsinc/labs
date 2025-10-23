@@ -1,16 +1,19 @@
 # Pattern Integration Test Harness
 
-> **Terminology update:** What we previously called “recipes” are now referred
-> to as “patterns.” The builder API still exports a `recipe(...)` helper, but
+> **Status:** Test harness implementation is **COMPLETE**. This spec documents
+> the design for reference.
+>
+> **Terminology update:** What we previously called "recipes" are now referred
+> to as "patterns." The builder API still exports a `recipe(...)` helper, but
 > throughout this document we describe the authored artifacts as patterns.
 
 ## Objectives
 
 - Provide end-to-end coverage that exercises recipes (especially in
-  `packages/patterns/`) under both the legacy (V1) and new (V2) builder/runtime
-  pipelines.
-- Capture expected behavior as structured fixtures so we can compare outputs
-  before and after the V2 migration without rewriting tests.
+  `packages/patterns/`) to ensure behavior remains consistent during the
+  in-place migration.
+- Capture expected behavior as structured fixtures so we can verify outputs
+  remain correct throughout the migration process.
 
 ## Test Artifact Structure
 
@@ -48,17 +51,17 @@ Example fixture snippet:
 
 ## Harness Execution Flow
 
-1. Compile the pattern module (shared pipeline for V1 and V2).
-2. Run the pattern twice per fixture:
-   - **V1 mode**: Use current `recipe`/`lift`/`handler` exports.
-   - **V2 mode**: Swap in `recipeV2`/`liftV2`/`handlerV2` and new runtime paths.
-3. For each mode:
+1. Compile the pattern module.
+2. Run the pattern using the current (evolving) implementation:
    - Instantiate the runtime, seed initial state, run the pattern, and evaluate
-     assertions.
+     assertions
    - For checkpoints with events, emit them sequentially via handler streams and
-     re-run assertions after the scheduler settles.
-4. Report differences clearly (e.g., mismatched values, missing paths).
-5. Optionally dump V1 vs V2 graph snapshots when failures occur to aid debugging.
+     re-run assertions after the scheduler settles
+3. Report differences clearly (e.g., mismatched values, missing paths).
+4. Optionally dump graph snapshots when failures occur to aid debugging.
+
+Note: The harness originally supported V1/V2 dual-mode testing but has been
+updated to support the in-place migration approach instead.
 
 ## Tooling Considerations
 
@@ -72,10 +75,10 @@ Example fixture snippet:
 
 ## Rollout
 
-- Add the harness and fixtures under `packages/runner/integration/` so
+- Harness and fixtures are located under `packages/runner/integration/` so
   UI-facing patterns remain focused on front-end rendering scenarios.
-- Seed the suite with high-impact patterns (mirroring those in
-  `packages/patterns/`) to validate end-to-end behavior.
-- Expand coverage to other workspaces once the harness stabilizes.
-- Keep fixtures mode-agnostic so future migrations (beyond V2) can reuse the
-  same tests.
+- Suite includes high-impact patterns (mirroring those in `packages/patterns/`)
+  to validate end-to-end behavior.
+- Coverage continues to expand to other workspaces as needed.
+- Fixtures remain implementation-agnostic so they can be reused for future
+  migrations.
