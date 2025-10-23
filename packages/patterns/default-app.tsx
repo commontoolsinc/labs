@@ -111,7 +111,14 @@ const messagesToNotifications = lift<
   }
 >(({ messages, seen, notifications }) => {
   if (messages.length > 0) {
-    if (seen.get() >= messages.length) return;
+    if (seen.get() >= messages.length) {
+      // If messages length went backwards, reset seen counter
+      if (seen.get() > messages.length) {
+        seen.set(0);
+      } else {
+        return;
+      }
+    }
 
     const latestMessage = messages[messages.length - 1];
     if (latestMessage.role === "assistant") {
