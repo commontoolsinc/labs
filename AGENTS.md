@@ -17,12 +17,8 @@ Skills (recipe-dev) to do the work.
   ct-select, etc.) with bidirectional binding and event handling patterns
 - `docs/common/PATTERNS.md` - High-level patterns and examples for building
   applications, including common mistakes and debugging tips
-- `docs/common/DEVELOPMENT.md` - Coding style, design principles, and best
-  practices
 - `packages/patterns/INDEX.md` - Catalog of all pattern examples with summaries,
   data types, and keywords
-- `docs/common/UI_TESTING.md` - How to work with shadow dom in our integration
-  tests
 
 **Important:** Ignore the top level `recipes` folder - it is defunct.
 
@@ -34,3 +30,5 @@ If you are developing runtime code, read the following documentation:
   overview
 - `docs/common/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/common/UI_TESTING.md` - How to work with shadow dom in our integration
+  tests
