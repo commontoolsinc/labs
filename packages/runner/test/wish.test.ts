@@ -5,10 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
-import {
-  ALL_CHARMS_ID,
-  DEFAULT_PATTERN_ID,
-} from "../src/builtins/well-known.ts";
+import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 
 type DefaultPatternData = {
   backlinksIndex?: {
@@ -213,8 +210,10 @@ describe("wish built-in", () => {
 
     // Set up space cell with an empty default pattern
     const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(tx);
-    defaultPatternCell.set({});  // Empty default pattern
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    defaultPatternCell.set({}); // Empty default pattern
     (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
