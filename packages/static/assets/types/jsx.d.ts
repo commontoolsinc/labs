@@ -2,7 +2,8 @@ import type { OpaqueRef, Cell, Props, RenderNode, VNode, Stream } from "commonto
 
 // Helper type that allows any combination of OpaqueRef, Cell, and Stream wrappers
 // Supports arbitrary nesting like OpaqueRef<OpaqueRef<Cell<T>>>
-type CellLike<T> = OpaqueRef<T> | Cell<T> | Stream<T>;
+type InnerCellLike<T> = OpaqueRef<T> | Cell<T> | Stream<T>;
+type CellLike<T> = InnerCellLike<T> | InnerCellLike<InnerCellLike<T>>;
 
 // Minimal theme typing for ct-theme
 type CTColorToken = string | {
