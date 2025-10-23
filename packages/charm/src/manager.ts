@@ -256,7 +256,7 @@ export class CharmManager {
    * @param defaultPatternCell - The cell representing the default pattern
    */
   async linkDefaultPattern(
-    defaultPatternCell: Cell<Record<string, unknown>>,
+    defaultPatternCell: Cell<any>,
   ): Promise<void> {
     await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
