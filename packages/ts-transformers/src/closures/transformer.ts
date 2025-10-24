@@ -191,6 +191,14 @@ function shouldCaptureIdentifier(
           element.name.text === node.text
         );
       }
+      // Also check array binding patterns (e.g., ([item]) => ...)
+      if (ts.isArrayBindingPattern(param.name)) {
+        return param.name.elements.some((element) =>
+          ts.isBindingElement(element) &&
+          ts.isIdentifier(element.name) &&
+          element.name.text === node.text
+        );
+      }
       return false;
     });
 
