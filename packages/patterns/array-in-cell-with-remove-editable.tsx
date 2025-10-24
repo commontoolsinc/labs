@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -37,9 +37,20 @@ const removeItem = handler<
   }
 });
 
-export default recipe(
+const updateItem = handler<
+  { detail: { value: string } },
+  { items: Cell<Item[]>; index: number }
+>(({ detail: { value } }, { items, index }) => {
+  const itemsCopy = items.get().slice();
+  if (index >= 0 && index < itemsCopy.length) {
+    itemsCopy[index] = { text: value };
+    items.set(itemsCopy);
+  }
+});
+
+export default recipe<InputSchema>(
   "Simple List with Remove and Edit",
-  ({ title, items }: InputSchema) => {
+  ({ title, items }) => {
     return {
       [NAME]: title,
       [UI]: (
@@ -49,7 +60,7 @@ export default recipe(
           <div
             style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
           >
-            {items.map((item: OpaqueRef<Item>) => (
+            {items.map((item, index) => (
               <div
                 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
               >
@@ -62,7 +73,8 @@ export default recipe(
                 </ct-button>
                 <div style={{ flex: 1 }}>
                   <ct-input
-                    $value={item.text}
+                    value={item.text}
+                    onct-change={updateItem({ items, index })}
                     placeholder="Enter text..."
                   />
                 </div>
@@ -82,6 +94,7 @@ export default recipe(
       title,
       items,
       addItem: addItem({ items }),
+      updateItem,
     };
   },
 );

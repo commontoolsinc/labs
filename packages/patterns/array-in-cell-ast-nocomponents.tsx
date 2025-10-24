@@ -26,7 +26,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe("Simple List", ({ title, items }: InputSchema) => {
+export default recipe<InputSchema>("Simple List", ({ title, items }) => {
   return {
     [NAME]: title,
     [UI]: (
@@ -34,7 +34,7 @@ export default recipe("Simple List", ({ title, items }: InputSchema) => {
         <h3>{title}</h3>
         <p>Super Simple Array</p>
         <ul>
-          {items.map((item: Item) => (
+          {items.map((item) => (
             <li>{item.text}</li>
           ))}
         </ul>
