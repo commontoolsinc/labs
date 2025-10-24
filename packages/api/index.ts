@@ -389,7 +389,7 @@ export type RecipeFunction = {
 };
 
 export type PatternToolFunction = <T, E extends Partial<T>>(
-  fn: (input: OpaqueRef<Required<T>>) => any,
+  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
 ) => OpaqueRef<Omit<T, keyof E>>;
 

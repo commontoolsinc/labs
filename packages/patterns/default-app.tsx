@@ -9,6 +9,7 @@ import {
   lift,
   NAME,
   navigateTo,
+  patternTool,
   recipe,
   str,
   UI,
@@ -170,12 +171,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
         readWebpage: {
           pattern: readWebpage,
         },
-        calculator: {
-          extraParams: {
-            base: 10, // Just an example of how to pass extra params to a tool
-          },
-          pattern: calculator,
-        },
+        // Example of using patternTool with an existing recipe and extra params
+        calculator: patternTool(calculator, { base: 10 }),
       },
     });
 
