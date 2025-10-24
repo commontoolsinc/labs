@@ -1,5 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { h, UI } from "@commontools/api";
+import { UI } from "@commontools/api";
 import * as assert from "./assert.ts";
 import { isVNode } from "../src/jsx.ts";
 
