@@ -142,7 +142,9 @@ export function filterRelevantDataFlows(
       // 1. Inside a map callback (keep them)
       // 2. In outer scope where they leaked (filter them out)
 
-      const nonSyntheticDataFlows = dataFlows.filter((df) => !hasSyntheticRoot(df.expression));
+      const nonSyntheticDataFlows = dataFlows.filter((df) =>
+        !hasSyntheticRoot(df.expression)
+      );
 
       // If we have ONLY synthetic dataflows, we're definitely inside a map callback
       if (nonSyntheticDataFlows.length === 0) {
