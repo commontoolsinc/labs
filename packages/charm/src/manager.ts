@@ -163,7 +163,7 @@ export class CharmManager {
     // and consistently available everywhere
     this.spaceCell = this.runtime.getCell(
       this.space,
-      this.space, // Use the DID itself as the cause
+      this.space, // Space DID is stable per space and available to all clients
       spaceCellSchema,
     );
 
