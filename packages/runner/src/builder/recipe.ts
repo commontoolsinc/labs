@@ -174,17 +174,11 @@ function factoryFromRecipe<T, R>(
         !shadows.has(value as ShadowRef)
       ) {
         if (isOpaqueCell(value) && value.export().frame !== getTopFrame()) {
-          value = createShadowRef(value.export().value);
+          throw new Error("Shadow refs no longer supported");
         }
         if (isShadowRef(value)) {
-          shadows.add(value);
-          if (
-            isOpaqueCell(value.shadowOf) &&
-            value.shadowOf.export().frame === getTopFrame()
-          ) {
-            cells.add(value.shadowOf);
-          }
-        } else if (isOpaqueCell(value)) {
+          throw new Error("Shadow refs no longer supported");
+        } else if (isOpaqueRef(value)) {
           cells.add(value);
           value.export().nodes.forEach((node: NodeRef) => {
             if (!nodes.has(node)) {
