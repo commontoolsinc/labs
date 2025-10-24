@@ -41,6 +41,16 @@ function originatesFromIgnoredParameter(
   const inner = (expr: ts.Expression): boolean => {
     if (ts.isIdentifier(expr)) {
       const symbol = checker.getSymbolAtLocation(expr);
+
+      // Don't filter identifiers without symbols here - they might be synthetic
+      // identifiers created by transformers (like map callback parameters), or
+      // they might be legitimate identifiers that lost their symbols. Let
+      // filterRelevantDataFlows handle this with more context about all the
+      // dataflows being analyzed together.
+      if (!symbol) {
+        return false;
+      }
+
       return isIgnoredSymbol(symbol);
     }
     if (
@@ -85,6 +95,69 @@ export function filterRelevantDataFlows(
   analysis: DataFlowAnalysis,
   context: TransformationContext,
 ): NormalizedDataFlow[] {
+  // Check if we have identifiers without symbols (synthetic identifiers created by transformers)
+  const hasSyntheticRoot = (expr: ts.Expression): boolean => {
+    let current = expr;
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = current.expression;
+    }
+    if (ts.isIdentifier(current)) {
+      const symbol = context.checker.getSymbolAtLocation(current);
+      // No symbol means it's likely a synthetic identifier
+      return !symbol;
+    }
+    return false;
+  };
+
+  const syntheticDataFlows = dataFlows.filter((df) =>
+    hasSyntheticRoot(df.expression)
+  );
+  const nonSyntheticDataFlows = dataFlows.filter((df) =>
+    !hasSyntheticRoot(df.expression)
+  );
+
+  // If we have both synthetic and non-synthetic dataflows, we need to determine
+  // if we're inside or outside the map callback
+  if (syntheticDataFlows.length > 0 && nonSyntheticDataFlows.length > 0) {
+    // Heuristic: Check if the non-synthetic dataflows have symbols in the outer
+    // scope If they reference outer-scope variables (like cells), we're at the
+    // outer scope and should filter synthetic params. If they don't have
+    // symbols (they're synthetic parameters themselves, like captured params),
+    // we're inside a callback with captures.
+
+    const nonSyntheticHaveOuterScopeSymbols = nonSyntheticDataFlows.every(
+      (df) => {
+        let rootExpr: ts.Expression = df.expression;
+        while (
+          ts.isPropertyAccessExpression(rootExpr) ||
+          ts.isElementAccessExpression(rootExpr)
+        ) {
+          rootExpr = rootExpr.expression;
+        }
+        if (ts.isIdentifier(rootExpr)) {
+          const symbol = context.checker.getSymbolAtLocation(rootExpr);
+          // If it has a symbol, it's likely from outer scope
+          return !!symbol;
+        }
+        return false;
+      },
+    );
+
+    // If all non-synthetic dataflows have outer-scope symbols AND we have 2 or
+    // more of them, we're likely analyzing an outer-scope expression that
+    // contains nested map callbacks
+    if (
+      nonSyntheticHaveOuterScopeSymbols && nonSyntheticDataFlows.length >= 2
+    ) {
+      return dataFlows.filter((df) => !hasSyntheticRoot(df.expression));
+    }
+
+    // Otherwise, we're inside a map callback with captures - keep all dataflows
+  }
+
   return dataFlows.filter((dataFlow) => {
     if (
       originatesFromIgnoredParameter(
