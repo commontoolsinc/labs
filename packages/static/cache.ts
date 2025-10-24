@@ -13,6 +13,14 @@ export const FS_URL = (import.meta.dirname && isDeno())
   ? toFileUrl(join(import.meta.dirname, "assets"))
   : undefined;
 
+// @see ./assets/scripts/README.md
+function mapStaticAssetHack(assetName: string): string {
+  if (assetName.startsWith("scripts/") && assetName.endsWith(".js")) {
+    return assetName.substring(0, assetName.length - 3) + "._js";
+  }
+  return assetName;
+}
+
 /**
  * Represents a cached static asset with its content and ETag.
  */
@@ -68,7 +76,7 @@ export class InnerCache {
     }
 
     const url = this.getBaseUrl();
-    url.pathname = join(url.pathname, assetName);
+    url.pathname = join(url.pathname, mapStaticAssetHack(assetName));
     return url;
   }
 
