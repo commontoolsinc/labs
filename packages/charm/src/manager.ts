@@ -167,40 +167,56 @@ export class CharmManager {
       spaceCellSchema,
     );
 
+    const syncSpaceCell = Promise.resolve(this.spaceCell.sync());
+
     // Initialize the space cell structure by linking to existing cells
-    const linkSpaceCell = this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
+    const linkSpaceCell = syncSpaceCell.then(() =>
+      this.runtime.editWithRetry((tx) => {
+        const spaceCellWithTx = this.spaceCell.withTx(tx);
 
-      spaceCellWithTx.key("allCharms").set(this.charms.withTx(tx));
+        let existingSpace: Partial<SpaceCell> | undefined;
+        try {
+          existingSpace = spaceCellWithTx.get() ?? undefined;
+        } catch {
+          existingSpace = undefined;
+        }
 
-      // Ensure the recentCharms list exists so we can link to it directly
-      const recentCharmsField = spaceCellWithTx
-        .key("recentCharms")
-        .asSchema(charmListSchema);
+        let recentCharmsCell: Cell<Cell<unknown>[]>;
+        try {
+          recentCharmsCell = spaceCellWithTx
+            .key("recentCharms")
+            .resolveAsCell()
+            .asSchema(charmListSchema);
+        } catch {
+          const recentCharmsField = spaceCellWithTx
+            .key("recentCharms")
+            .asSchema(charmListSchema);
+          recentCharmsField.set([]);
+          recentCharmsCell = recentCharmsField;
+        }
 
-      let currentRecent: Cell<unknown>[] | undefined;
-      try {
-        currentRecent = recentCharmsField.get();
-      } catch {
-        currentRecent = undefined;
-      }
+        const nextSpaceValue: Partial<SpaceCell> = {
+          ...(existingSpace ?? {}),
+          allCharms: this.charms.withTx(tx),
+          recentCharms: recentCharmsCell.withTx(tx),
+        };
 
-      if (!Array.isArray(currentRecent)) {
-        recentCharmsField.set([]);
-      }
+        spaceCellWithTx.set(nextSpaceValue);
 
-      // defaultPattern will be linked later when the default pattern is found
-    });
+        // defaultPattern will be linked later when the default pattern is found
+      })
+    );
 
     this.recentCharms = this.spaceCell
       .key("recentCharms")
+      .resolveAsCell()
       .asSchema(charmListSchema);
 
     this.ready = Promise.all([
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
-      this.spaceCell.sync(),
+      syncSpaceCell,
       linkSpaceCell,
     ]).then(() => {});
   }
