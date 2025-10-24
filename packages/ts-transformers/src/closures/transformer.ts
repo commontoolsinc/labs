@@ -1015,6 +1015,9 @@ function createRecipeCallWithParams(
     transformedBody,
   );
 
+  // Mark this as a map callback for later transformers (e.g., OpaqueRefJSXTransformer)
+  context.markAsMapCallback(newCallback);
+
   // Build a TypeNode for the callback parameter to pass as a type argument to recipe<T>()
   const callbackParamTypeNode = buildCallbackParamTypeNode(
     mapCall,
