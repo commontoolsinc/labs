@@ -2,27 +2,36 @@
 
 - [ ] Disable ShadowRef/unsafe_ and see what breaks, ideally remove it
 - [ ] Update Cell API types to already unify them
-  - [ ] Create a CellLike<> type with a symbol based brand, with the value be
+  - [ ] Create an `AnyCell<>` type with a symbol based brand, with the value be
     `Record<string, boolean>`
   - [ ] Factor out parts of the cell interfaces along reading, writing, .send
     (for stream-like) and derives (which is currently just .map)
-  - [ ] Define `OpaqueRef<>`, `Cell<>` and `Stream<>` by using these factored
+  - [ ] Define `OpaqueCell<>`, `Cell<>` and `Stream<>` by using these factored
     out parts, combined with the brand set to `{ opaque: true, read: false,
     write: false, stream: false }` for `OpaqueRef`, `{ opaque: false, read:
     true, write: true, stream: true }` for `Cell`, and `{ opaque: false, read:
-    false, write: false, stream: true }` for `Stream`. We can go ahead and add
-    ReadonlyCell and WriteonlyCell accordingly as well.
-  - [ ] Add `ComparableCell<>` that is all `false` above
-  - [ ] Alias `OpaqueCell<>` to `OpaqueRef<>` (maintain backward compatibility)
-  - [ ] For `OpaqueRef` we keep the proxy behavior, i.e. each key is an
-    `OpaqueRef` again.
-  - [ ] Simplify most wrap/unwrap types to use `CellLike`.
+    false, write: false, stream: true }` for `Stream`.
+  - [ ] Add `ComparableCell<>` that is all `false` above.
+  - [ ] Add `ReadonlyCell` and `WriteonlyCell`.
+  - [ ] Make `OpaqueRef` a variant of `OpaqueCell` with the current proxy
+    behavior, i.e. each key is an `OpaqueRef` again. That's just for now, until
+    the AST does a .key transformation under the hood.
+  - [ ] Update `CellLike` to be based on `AnyCell` but allow nesting.
+  - [ ] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
+  - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
+    - [ ] "Accept any T where any sub part of T can be wrapped in one ore more
+      `AnyCell`" (for inputs to node factories)
+    - [ ] "Strip any `AnyCell` from T and then wrap it in OpaqueRef<>" (for
+      outputs of node factories, where T is the output of the inner function)
+    - [ ] Make passing the output of the second into the first work. Tricky
+      because we're doing almost opposite expansions on the type.
 - [ ] Add ability to create a cell without a link yet.
   - [ ] Change constructor for RegularCell to make link optional
   - [ ] Add .for method to set a cause (within current context)
     - [ ] second parameter to make it optional/flexible:
       - [ ] ignores the .for if link already exists
       - [ ] adds extension if cause already exists (see tracker below)
+  - [ ] Make .key work even if there is no cause yet.
   - [ ] Add some method to force creation of cause, which errors if in
     non-handler context and no other information was given (as e.g. deriving
     nodes, which do have ids, after asking for them -- this walks the graph up
@@ -31,8 +40,22 @@
     isn't there, e.g. because we need to create a link to the cell (when passed
     into `anotherCell.set()` for example). We want to encourage .for use in
     ambiguous cases.
-- First merge of OpaqueRef and RegularCell
+- [ ] First merge of OpaqueRef and RegularCell
   - [ ] Add methods that allow linking to node invocations
+    - [ ] `setPreExisting` can be deprecated (used in toOpaqueRef which itself
+      can go away, see below)
+    - [ ] `setDefault` can be deprecated
+    - [ ] `setSchema` is tricky (asSchema is cleaner). Let's support it for now,
+      but only if the cause isn't set yet.
+    - [ ] `connect` copy over and add a direction field, so can distinguish
+      where this node is used as input vs where the passed node is an input to
+      this node.
+    - [ ] `export` make the analogous version, if link is present use that as
+      `external`.
+    - [ ] `map` and `mapWithPattern`: Copy over
+    - [ ] `toJSON` return `null` when no link otherwise what Cell does.
+  - [ ] No need for `toOpaqueRef` anymore, since all cells are now also
+    OpaqueRef. So remove all that.
   - [ ] Call that for returned value in lift/handler, with a .for("assigned
     variable of property", true)
   - [ ] For now treat result as recipe, but it should be one where all nodes
@@ -80,7 +103,7 @@
 - [ ] Add `.remove` and `.removeAll` which removes the element matching the
   parameter from the list.
 - [ ] Add overload to `.key` that accepts an array of keys
-
+- [ ] Make name parameter in recipe optional
 
 ## Planned Future Work
 
