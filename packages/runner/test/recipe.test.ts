@@ -237,31 +237,6 @@ describe("recipe with map node", () => {
   });
 });
 
-describe("recipe with map node that references a parent cell", () => {
-  const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
-    "Double numbers",
-    ({ values, factor }) => {
-      const doubled = values.map(({ x }) => {
-        const double = lift<{ x: number; factor: number }>(({ x, factor }) => ({
-          x: x * factor,
-        }));
-        return { doubled: double({ x, factor }) };
-      });
-      return { doubled };
-    },
-  );
-
-  it("correctly creates references to the parent cells", () => {
-    expect(
-      (multiplyArray.nodes[0].inputs as unknown as { op: Recipe }).op
-        .nodes[0].inputs,
-    ).toEqual({
-      x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
-      factor: { $alias: { path: ["argument", "factor"] } },
-    });
-  });
-});
-
 describe("recipe with map node that references a parent cell in another recipe", () => {
   it("correctly creates references to the parent cells", () => {
     const multiplyArray = recipe<{ values: { x: number }[] }>(

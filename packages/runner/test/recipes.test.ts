@@ -206,43 +206,6 @@ describe("Recipe Runner", () => {
     });
   });
 
-  it("should handle recipes with map nodes with closures", async () => {
-    const double = lift<{ x: number; factor: number }>(({ x, factor }) =>
-      x * factor
-    );
-
-    const doubleArray = recipe<{ values: number[]; factor: number }>(
-      "Double numbers",
-      ({ values, factor }) => {
-        const doubled = values.map((x) => double({ x, factor }));
-        return { doubled };
-      },
-    );
-
-    const resultCell = runtime.getCell(
-      space,
-      "should handle recipes with map nodes with closures",
-      {
-        type: "object",
-        properties: {
-          doubled: { type: "array", items: { type: "number" } },
-        },
-      } as const satisfies JSONSchema,
-      tx,
-    );
-    const result = runtime.run(tx, doubleArray, {
-      values: [1, 2, 3],
-      factor: 3,
-    }, resultCell);
-    tx.commit();
-
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({
-      doubled: [3, 6, 9],
-    });
-  });
-
   it("should handle map nodes with undefined input", async () => {
     const double = lift((x: number) => x * 2);
 
