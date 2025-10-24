@@ -173,11 +173,11 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages }) => {
     const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
+    const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
       mentionable: [],
     });
     const mentionable = schemaifyWish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
+      "#mentionable",
       [],
     );
 

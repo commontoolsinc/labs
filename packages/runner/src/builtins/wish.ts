@@ -1,3 +1,4 @@
+import { type WishKey } from "@commontools/api";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -6,7 +7,7 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
-import { ALL_CHARMS_ID, DEFAULT_PATTERN_ID } from "./well-known.ts";
+import { ALL_CHARMS_ID } from "./well-known.ts";
 import type { JSONSchema } from "../builder/types.ts";
 
 type WishResolution = {
@@ -14,9 +15,8 @@ type WishResolution = {
   path?: readonly string[];
 };
 
-const WISH_TARGETS: Record<string, WishResolution> = {
+const WISH_TARGETS: Partial<Record<WishKey, WishResolution>> = {
   "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
-  "/": { entityId: { "/": DEFAULT_PATTERN_ID } },
 };
 
 function resolveWishTarget(
@@ -36,7 +36,7 @@ function resolveWishTarget(
 }
 
 type ParsedWishTarget = {
-  key: string;
+  key: "/" | WishKey;
   path: string[];
 };
 
@@ -45,12 +45,12 @@ function parseWishTarget(target: string): ParsedWishTarget | undefined {
   if (trimmed === "") return undefined;
 
   if (trimmed.startsWith("#")) {
-    const rest = trimmed.slice(1);
-    const segments = rest.split("/").filter((segment) => segment.length > 0);
-    const baseSegment = segments.shift();
-    if (!baseSegment) return undefined;
-    const key = `#${baseSegment}`;
-    return { key, path: segments };
+    const segments = trimmed.slice(1).split("/").filter((segment) =>
+      segment.length > 0
+    );
+    if (segments.length === 0) return undefined;
+    const key = `#${segments[0]}` as WishKey;
+    return { key, path: segments.slice(1) };
   }
 
   if (trimmed.startsWith("/")) {
@@ -63,6 +63,104 @@ function parseWishTarget(target: string): ParsedWishTarget | undefined {
 
 function segmentToPropertyKey(segment: string): PropertyKey {
   return /^\d+$/.test(segment) ? Number(segment) : segment;
+}
+
+type WishContext = {
+  runtime: IRuntime;
+  tx: IExtendedStorageTransaction;
+  parentCell: Cell<any>;
+  spaceCell?: Cell<unknown>;
+};
+
+type BaseResolution = {
+  cell: Cell<unknown>;
+  pathPrefix?: readonly string[];
+};
+
+function getSpaceCell(ctx: WishContext): Cell<unknown> {
+  if (!ctx.spaceCell) {
+    ctx.spaceCell = ctx.runtime.getCell(
+      ctx.parentCell.space,
+      ctx.parentCell.space,
+      undefined,
+      ctx.tx,
+    );
+  }
+  return ctx.spaceCell;
+}
+
+function resolvePath(
+  base: Cell<unknown>,
+  path: readonly string[],
+  ctx: WishContext,
+): Cell<unknown> {
+  let current = base.withTx(ctx.tx);
+  for (const segment of path) {
+    const keyed = current.key(segmentToPropertyKey(segment) as never);
+    try {
+      current = keyed.resolveAsCell().withTx(ctx.tx);
+    } catch {
+      current = keyed.withTx(ctx.tx);
+    }
+  }
+  return current;
+}
+
+function resolveBase(
+  parsed: ParsedWishTarget,
+  ctx: WishContext,
+  wishTarget: string,
+): BaseResolution | undefined {
+  switch (parsed.key) {
+    case "/":
+      return { cell: getSpaceCell(ctx) };
+    case "#default": {
+      return { cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] };
+    }
+    case "#mentionable": {
+      return {
+        cell: getSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
+      };
+    }
+    case "#recent": {
+      return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
+    }
+    case "#now": {
+      if (parsed.path.length > 0) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+      const nowCell = ctx.runtime.getImmutableCell(
+        ctx.parentCell.space,
+        Date.now(),
+        undefined,
+        ctx.tx,
+      );
+      return { cell: nowCell };
+    }
+    default: {
+      const resolution = WISH_TARGETS[parsed.key];
+      if (!resolution) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+
+      const baseCell = resolveWishTarget(
+        resolution,
+        ctx.runtime,
+        ctx.parentCell.space,
+        ctx.tx,
+      );
+
+      if (!baseCell) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+
+      return { cell: baseCell };
+    }
+  }
 }
 
 const TARGET_SCHEMA = {
@@ -102,33 +200,23 @@ export function wish(
       return;
     }
 
-    const resolution = WISH_TARGETS[parsed.key];
-    if (!resolution) {
-      console.error(`Wish target "${wishTarget}" is not recognized.`);
+    const ctx: WishContext = { runtime, tx, parentCell };
+    const baseResolution = resolveBase(parsed, ctx, wishTarget);
+    if (!baseResolution) {
       sendResult(tx, hasDefault ? defaultCell : undefined);
       return;
     }
 
-    const baseCell = resolveWishTarget(
-      resolution,
-      runtime,
-      parentCell.space,
-      tx,
-    );
+    const combinedPath = baseResolution.pathPrefix
+      ? [...baseResolution.pathPrefix, ...parsed.path]
+      : parsed.path;
+    const resolvedCell = resolvePath(baseResolution.cell, combinedPath, ctx);
+    const resolvedWithTx = resolvedCell.withTx(tx);
 
-    if (!baseCell) {
-      console.error(`Wish target "${wishTarget}" is not recognized.`);
-      sendResult(tx, hasDefault ? defaultCell : undefined);
-      return;
+    if (hasDefault && resolvedWithTx.get() === undefined) {
+      sendResult(tx, defaultCell);
+    } else {
+      sendResult(tx, resolvedWithTx);
     }
-
-    let resolvedCell = baseCell;
-    for (const segment of parsed.path) {
-      resolvedCell = resolvedCell.withTx(tx).key(
-        segmentToPropertyKey(segment) as never,
-      );
-    }
-
-    sendResult(tx, resolvedCell.withTx(tx));
   };
 }

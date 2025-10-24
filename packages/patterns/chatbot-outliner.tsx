@@ -55,7 +55,7 @@ const handleCharmLinkClick = handler<
 function getMentionable() {
   return derive<MentionableCharm[], MentionableCharm[]>(
     wish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
+      "#mentionable",
       [],
     ),
     (i) => i,

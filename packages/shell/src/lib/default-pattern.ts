@@ -19,6 +19,9 @@ export async function create(cc: CharmsController): Promise<CharmController> {
   await runtime.idle();
   await manager.synced();
 
+  // Link the default pattern to the space cell
+  await manager.linkDefaultPattern(charm.getCell());
+
   return charm;
 }
 
