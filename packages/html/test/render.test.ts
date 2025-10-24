@@ -125,6 +125,24 @@ describe("renderImpl", () => {
     cancel();
     assert.equal(parent.children.length, 0);
   });
+
+  it("does not render false as text content", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [false, "visible", null, undefined, true],
+    } as VNode;
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    // false, null, and undefined should render as empty text nodes
+    // true should render as "true"
+    // So innerHTML should be "visibletrue" (no "false")
+    assert.equal(div.innerHTML, "visibletrue");
+    cancel();
+  });
 });
 
 describe("serializableEvent", () => {

@@ -161,7 +161,10 @@ const bindChildren = (
           cancel: childCancel ?? (() => {}),
         };
       } else {
-        if (childValue === null || childValue === undefined) {
+        if (
+          childValue === null || childValue === undefined ||
+          childValue === false
+        ) {
           childValue = "";
         } else if (typeof childValue === "object") {
           console.warn("unexpected object when value was expected", childValue);
