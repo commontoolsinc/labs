@@ -169,8 +169,41 @@ function shouldCaptureIdentifier(
     return undefined;
   }
 
-  // Check if ALL declarations are within the callback
-  const allDeclaredInside = declarations.every((decl) =>
+  // Filter out shorthand property assignments - they're not real declarations,
+  // they're just syntactic sugar that references the actual declaration elsewhere
+  const realDeclarations = declarations.filter((decl) =>
+    !ts.isShorthandPropertyAssignment(decl)
+  );
+
+  // If all we have are shorthand property assignments, check if this identifier
+  // is actually a parameter of the callback itself
+  if (realDeclarations.length === 0) {
+    // Check if there's a parameter with this name in the callback
+    const isCallbackParam = func.parameters.some((param) => {
+      if (ts.isIdentifier(param.name) && param.name.text === node.text) {
+        return true;
+      }
+      // Also check destructured parameters
+      if (ts.isObjectBindingPattern(param.name)) {
+        return param.name.elements.some((element) =>
+          ts.isBindingElement(element) &&
+          ts.isIdentifier(element.name) &&
+          element.name.text === node.text
+        );
+      }
+      return false;
+    });
+
+    if (isCallbackParam) {
+      return undefined; // Don't capture - it's just referencing a callback parameter
+    }
+
+    // Not a callback parameter, must be from outer scope
+    return node;
+  }
+
+  // Check if ALL real declarations are within the callback
+  const allDeclaredInside = realDeclarations.every((decl) =>
     isDeclaredWithinCallback(decl, func)
   );
 
