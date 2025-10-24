@@ -10,6 +10,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
   constructor(options: TransformationOptions = {}) {
     const ops = {
       typeRegistry: new WeakMap(),
+      mapCallbackRegistry: new WeakSet(),
       ...options,
     };
     super([

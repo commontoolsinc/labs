@@ -115,81 +115,100 @@ export function filterRelevantDataFlows(
   const syntheticDataFlows = dataFlows.filter((df) =>
     hasSyntheticRoot(df.expression)
   );
-  const nonSyntheticDataFlows = dataFlows.filter((df) =>
-    !hasSyntheticRoot(df.expression)
-  );
 
-  // If we have both synthetic and non-synthetic dataflows, we need to determine
-  // if we're inside or outside the map callback
-  if (syntheticDataFlows.length > 0 && nonSyntheticDataFlows.length > 0) {
-    // Check if any dataflow is in a scope with parameters from a map callback
-    // If so, we're inside a callback being transformed and should keep all dataflows
-    const isInMapCallbackScope = dataFlows.some((df) => {
-      const scope = analysis.graph.scopes.find((s) => s.id === df.scopeId);
-      if (!scope) return false;
-
-      // Check if any parameter in this scope comes from a builder or array-map
-      return scope.parameters.some((param) => {
-        if (!param.declaration) return false;
-        const callKind = getOpaqueCallKindForParameter(
-          param.declaration,
-          context.checker,
-        );
-        return callKind === "builder" || callKind === "array-map";
-      });
+  // If we have synthetic dataflows (e.g., element, index, array from map callbacks),
+  // these are identifiers without symbols that were created by ClosureTransformer.
+  // We need to determine if they're being used in the correct scope or if they leaked.
+  if (syntheticDataFlows.length > 0) {
+    // Check if the synthetic identifiers are standard map callback parameter names
+    const hasSyntheticMapParams = syntheticDataFlows.some((df) => {
+      let rootExpr: ts.Expression = df.expression;
+      while (
+        ts.isPropertyAccessExpression(rootExpr) ||
+        ts.isElementAccessExpression(rootExpr)
+      ) {
+        rootExpr = rootExpr.expression;
+      }
+      if (ts.isIdentifier(rootExpr)) {
+        const name = rootExpr.text;
+        // Standard map callback parameter names created by ClosureTransformer
+        return name === "element" || name === "index" || name === "array";
+      }
+      return false;
     });
 
-    // If we're inside a map callback scope, keep all dataflows
-    if (isInMapCallbackScope) {
-      // Keep all dataflows - we're inside a callback with both synthetic params and captures
-      return dataFlows.filter((dataFlow) => {
-        if (
-          originatesFromIgnoredParameter(
-            dataFlow.expression,
-            dataFlow.scopeId,
-            analysis,
-            context.checker,
-          )
-        ) {
-          return false;
-        }
-        return true;
-      });
-    }
+    if (hasSyntheticMapParams) {
+      // We have synthetic map callback params. These could be:
+      // 1. Inside a map callback (keep them)
+      // 2. In outer scope where they leaked (filter them out)
 
-    // Heuristic: Check if the non-synthetic dataflows have symbols in the outer
-    // scope If they reference outer-scope variables (like cells), we're at the
-    // outer scope and should filter synthetic params.
-    const nonSyntheticHaveOuterScopeSymbols = nonSyntheticDataFlows.every(
-      (df) => {
-        let rootExpr: ts.Expression = df.expression;
-        while (
-          ts.isPropertyAccessExpression(rootExpr) ||
-          ts.isElementAccessExpression(rootExpr)
-        ) {
-          rootExpr = rootExpr.expression;
-        }
-        if (ts.isIdentifier(rootExpr)) {
-          const symbol = context.checker.getSymbolAtLocation(rootExpr);
-          // If it has a symbol, it's likely from outer scope
-          return !!symbol;
+      const nonSyntheticDataFlows = dataFlows.filter((df) =>
+        !hasSyntheticRoot(df.expression)
+      );
+
+      // If we have ONLY synthetic dataflows, we're definitely inside a map callback
+      if (nonSyntheticDataFlows.length === 0) {
+        // Pure synthetic - we're inside a map callback, keep all
+        return dataFlows.filter((dataFlow) => {
+          if (
+            originatesFromIgnoredParameter(
+              dataFlow.expression,
+              dataFlow.scopeId,
+              analysis,
+              context.checker,
+            )
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      // We have both synthetic and non-synthetic. This could be:
+      // 1. Inside a map callback with captures (keep all)
+      // 2. Outer scope with leaked synthetic params (filter synthetics)
+
+      // Try to find if any dataflow is from a scope with parameters that's a marked callback
+      const isInMarkedCallback = dataFlows.some((df) => {
+        const scope = analysis.graph.scopes.find((s) => s.id === df.scopeId);
+        if (!scope || scope.parameters.length === 0) return false;
+
+        const firstParam = scope.parameters[0];
+        if (!firstParam || !firstParam.declaration) return false;
+
+        let node: ts.Node | undefined = firstParam.declaration.parent;
+        while (node) {
+          if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+            return context.isMapCallback(node);
+          }
+          node = node.parent;
         }
         return false;
-      },
-    );
+      });
 
-    // If all non-synthetic dataflows have outer-scope symbols AND we have 2 or
-    // more of them, we're likely analyzing an outer-scope expression that
-    // contains nested map callbacks
-    if (
-      nonSyntheticHaveOuterScopeSymbols && nonSyntheticDataFlows.length >= 2
-    ) {
+      if (isInMarkedCallback) {
+        // Inside a map callback - keep all except ignored params
+        return dataFlows.filter((dataFlow) => {
+          if (
+            originatesFromIgnoredParameter(
+              dataFlow.expression,
+              dataFlow.scopeId,
+              analysis,
+              context.checker,
+            )
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      // Synthetic map params in outer scope - filter them out
       return dataFlows.filter((df) => !hasSyntheticRoot(df.expression));
     }
-
-    // Otherwise, we're inside a map callback with captures - keep all dataflows
   }
 
+  // No synthetic dataflows, use standard filtering
   return dataFlows.filter((dataFlow) => {
     if (
       originatesFromIgnoredParameter(
