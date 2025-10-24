@@ -6,33 +6,9 @@ export default recipe("MapNestedConditional", (_state) => {
     return {
         [UI]: (<div>
         {__ctHelpers.derive({ showList, items }, ({ showList: showList, items: items }) => showList && (<div>
-            {items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/__object"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    __object: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div>
-                {__ctHelpers.derive(element.name, _v1 => _v1 && <span>{_v1}</span>)}
-              </div>)), {})}
+            {items.map((item) => (<div>
+                {__ctHelpers.derive(item.name, _v1 => _v1 && <span>{_v1}</span>)}
+              </div>))}
           </div>))}
       </div>),
     };

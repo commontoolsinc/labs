@@ -101,26 +101,12 @@ export default recipe("Charms Launcher", () => {
         [UI]: (<div>
         <h3>Stored Charms:</h3>
         {ifElse(__ctHelpers.derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
-            {typedCellRef.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
-                type: "object",
-                properties: {
-                    element: true,
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<li>
-                <ct-button onClick={goToCharm({ charm: element })}>
+            {typedCellRef.map((charm: any, index: number) => (<li>
+                <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(element, element => element[NAME] || "Unnamed")}</span>
-              </li>)), {})}
+                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
+              </li>))}
           </ul>)}
 
         <ct-button onClick={createSimpleRecipe({ cellRef })}>
@@ -134,4 +120,3 @@ export default recipe("Charms Launcher", () => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-
