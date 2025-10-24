@@ -35,7 +35,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 2. **Recipe examples** - Show a simple example from `packages/patterns/`
 3. **UI components** - Brief look at `packages/ui/` and `ct-` prefixed components
 4. **How recipes become charms** - Deployment and linking concepts
-5. **Development commands** - `/recipe-dev`, `/imagine-recipe`, `/explore-recipe`
+5. **Development commands** - `/pattern-dev`, `/imagine-recipe`, `/explore-recipe`
 
 ### Path B: Runtime That Enables Information Flow
 *"I chose: The runtime that enables information flow analysis and storage"*
@@ -53,7 +53,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 **Explore in order:**
 1. **Toolshed backend** - Quote from `packages/toolshed/README.md` about hosted platform
 2. **Shell frontend** - Quote from `packages/shell/README.md` about user interface
-3. **CT CLI** - Overview from `docs/common/CT.md`
+3. **CT CLI** - Run `deno task ct --help` to see available commands
 4. **How they work together** - Integration points and data flow
 5. **Development workflow** - Running local development environment
 

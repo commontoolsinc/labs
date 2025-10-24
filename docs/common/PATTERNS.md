@@ -710,7 +710,7 @@ const removeItem = handler(/* ... */);
 ```
 
 **4. Deploy and Test (3-5 minutes)**
-Read `./docs/common/RECIPE_DEV_DEPLOY.md` for more information on how to deploy
+Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
 ```bash
 # Deploy
 ./dist/ct charm new --identity key.json --api-url ... --space test pattern.tsx
@@ -731,7 +731,7 @@ echo '{"title": "Test", "done": false}' | \
 
 ### Testing Commands Reference
 
-Read `./docs/common/RECIPE_DEV_DEPLOY.md` for more information on how to deploy
+Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
 ```bash
 # Check syntax only (fast)
 ./dist/ct dev pattern.tsx --no-run
