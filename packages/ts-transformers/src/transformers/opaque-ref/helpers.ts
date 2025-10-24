@@ -178,13 +178,41 @@ export function filterRelevantDataFlows(
       },
     );
 
-    // If all non-synthetic dataflows have outer-scope symbols AND we have 2 or
-    // more of them, we're likely analyzing an outer-scope expression that
-    // contains nested map callbacks
+    // If all non-synthetic dataflows have outer-scope symbols AND we have at least
+    // one of them, we're likely analyzing an outer-scope expression that
+    // contains nested map callbacks. Use >= 2 to avoid filtering out captures
+    // inside map callbacks that also use params.
     if (
       nonSyntheticHaveOuterScopeSymbols && nonSyntheticDataFlows.length >= 2
     ) {
       return dataFlows.filter((df) => !hasSyntheticRoot(df.expression));
+    }
+
+    // Special case: if we have exactly 1 non-synthetic dataflow with outer scope symbols,
+    // check if we're in a truly outer scope or inside a map callback with params
+    if (nonSyntheticHaveOuterScopeSymbols && syntheticDataFlows.length > 0) {
+      // Check if the synthetic identifiers are standard map callback params
+      const hasSyntheticMapParams = syntheticDataFlows.some((df) => {
+        let rootExpr: ts.Expression = df.expression;
+        while (
+          ts.isPropertyAccessExpression(rootExpr) ||
+          ts.isElementAccessExpression(rootExpr)
+        ) {
+          rootExpr = rootExpr.expression;
+        }
+        if (ts.isIdentifier(rootExpr)) {
+          const name = rootExpr.text;
+          // Standard map callback parameter names
+          return name === "element" || name === "index" || name === "array";
+        }
+        return false;
+      });
+
+      // If we have synthetic map params AND we're NOT in a map callback scope,
+      // we're analyzing an outer expression that leaked synthetic identifiers
+      if (hasSyntheticMapParams && !isInMapCallbackScope) {
+        return dataFlows.filter((df) => !hasSyntheticRoot(df.expression));
+      }
     }
 
     // Otherwise, we're inside a map callback with captures - keep all dataflows
