@@ -45,9 +45,9 @@ const updateItem = handler<
   }
 });
 
-export default recipe(
+export default recipe<InputSchema>(
   "Simple List with Remove and Edit",
-  ({ title, items }: InputSchema) => {
+  ({ title, items }) => {
     return {
       [NAME]: title,
       [UI]: (
@@ -57,7 +57,7 @@ export default recipe(
           <div
             style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
           >
-            {items.map((item: Item, index: number) => (
+            {items.map((item, index) => (
               <div
                 key={index}
                 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}

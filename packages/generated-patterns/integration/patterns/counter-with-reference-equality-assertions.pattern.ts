@@ -1,5 +1,14 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
+import {
+  Cell,
+  cell,
+  Default,
+  derive,
+  handler,
+  lift,
+  recipe,
+  str,
+} from "commontools";
 
 type Parity = "even" | "odd";
 
@@ -33,7 +42,11 @@ function ensureNumber(value: number | undefined): number {
 const applyIncrement = handler(
   (
     event: IncrementEvent | undefined,
-    context: { value: Cell<number>; stability: Cell<StabilityStatus> },
+    context: {
+      value: Cell<number>;
+      stability: Cell<StabilityStatus>;
+      version: Cell<number>;
+    },
   ) => {
     const amount = event?.amount;
     if (typeof amount !== "number" || !Number.isFinite(amount)) {
@@ -52,13 +65,19 @@ const applyIncrement = handler(
 
     context.value.set(next);
     context.stability.set({ stable: false, confirmations: 0 });
+    const currentVersion = ensureNumber(context.version.get());
+    context.version.set(currentVersion + 1);
   },
 );
 
 const applyOverride = handler(
   (
     event: OverrideEvent | undefined,
-    context: { value: Cell<number>; stability: Cell<StabilityStatus> },
+    context: {
+      value: Cell<number>;
+      stability: Cell<StabilityStatus>;
+      version: Cell<number>;
+    },
   ) => {
     const raw = event?.value;
     if (typeof raw !== "number" || !Number.isFinite(raw)) {
@@ -76,6 +95,8 @@ const applyOverride = handler(
 
     context.value.set(raw);
     context.stability.set({ stable: false, confirmations: 0 });
+    const currentVersion = ensureNumber(context.version.get());
+    context.version.set(currentVersion + 1);
   },
 );
 
@@ -92,39 +113,29 @@ export const counterWithReferenceEqualityAssertions = recipe<
       value,
     );
 
-    const summaryCache = cell<Summary>({
-      value: 0,
-      parity: "even",
-      version: 0,
-    });
     const stability = cell<StabilityStatus>({
       stable: true,
       confirmations: 1,
     });
     const versionCounter = cell<number>(0);
 
-    const summary = lift((count: number) => {
-      const parity: Parity = count % 2 === 0 ? "even" : "odd";
-      const cached = summaryCache.get();
-      if (cached.value === count && cached.parity === parity) {
-        return cached;
-      }
-
-      const currentVersion = versionCounter.get();
-      const nextVersion =
-        typeof currentVersion === "number" && Number.isFinite(currentVersion)
-          ? currentVersion + 1
-          : 1;
-      versionCounter.set(nextVersion);
-
-      const next: Summary = {
-        value: count,
-        parity,
-        version: nextVersion,
-      };
-      summaryCache.set(next);
-      return next;
-    })(currentValue);
+    const summary = derive(
+      { count: currentValue, version: versionCounter },
+      ({
+        count,
+        version,
+      }: {
+        count: number;
+        version: number | undefined;
+      }): Summary => {
+        const parity: Parity = count % 2 === 0 ? "even" : "odd";
+        return {
+          value: count,
+          parity,
+          version: ensureNumber(version),
+        };
+      },
+    );
 
     const parity = lift((snapshot: Summary) => snapshot.parity)(summary);
     const version = lift((snapshot: Summary) => snapshot.version)(summary);
@@ -138,8 +149,8 @@ export const counterWithReferenceEqualityAssertions = recipe<
       version,
       label,
       referenceStatus: stability,
-      increment: applyIncrement({ value, stability }),
-      override: applyOverride({ value, stability }),
+      increment: applyIncrement({ value, stability, version: versionCounter }),
+      override: applyOverride({ value, stability, version: versionCounter }),
     };
   },
 );

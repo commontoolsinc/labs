@@ -171,12 +171,15 @@ export const counterWithScenarioDrivenSteps = recipe<MultiStepArgs>(
     })(phaseHistory);
 
     const stepCount = derive(steps, (entries) => entries.length);
-    const lastRecordedTotal = derive(steps, (entries) => {
-      if (entries.length === 0) {
-        return currentValue.get();
-      }
-      return entries[entries.length - 1].total;
-    });
+    const lastRecordedTotal = derive(
+      { steps, current: currentValue },
+      ({ steps, current }) => {
+        if (steps.length === 0) {
+          return current;
+        }
+        return steps[steps.length - 1].total;
+      },
+    );
 
     const summary =
       str`Phase ${currentPhase} total ${currentValue} over ${stepCount} steps`;
