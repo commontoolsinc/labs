@@ -103,7 +103,7 @@ const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
     const mentionable = schemaifyWish<MentionableCharm[]>(
-      "#/backlinksIndex/mentionable",
+      "#mentionable",
       [],
     );
     const mentioned = cell<MentionableCharm[]>([]);
