@@ -183,7 +183,7 @@ declare module "@commontools/api" {
     push(
       ...value: Array<
         | (T extends Array<infer U> ? (Cellify<U> | U) : any)
-        | Cell
+        | AnyCell<any>
       >
     ): void;
     equals(other: any): boolean;
@@ -286,6 +286,7 @@ declare module "@commontools/api" {
 }
 
 export type { Cell, Stream } from "@commontools/api";
+import { type AnyCell, CELL_BRAND } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -350,6 +351,14 @@ export function createCell<T>(
 }
 
 class StreamCell<T> implements Stream<T> {
+  readonly [CELL_BRAND] = {
+    opaque: false,
+    read: false,
+    write: false,
+    stream: true,
+    comparable: false,
+  } as const;
+
   private listeners = new Set<(event: T) => Cancel | undefined>();
   private cleanup: Cancel | undefined;
 
@@ -419,6 +428,14 @@ class StreamCell<T> implements Stream<T> {
 }
 
 export class RegularCell<T> implements Cell<T> {
+  readonly [CELL_BRAND] = {
+    opaque: false,
+    read: true,
+    write: true,
+    stream: true,
+    comparable: false,
+  } as const;
+
   private readOnlyReason: string | undefined;
 
   constructor(
