@@ -25,6 +25,7 @@ type Output = {
 
   /** The content of the note */
   content: Default<string, "">;
+  grep: OpaqueRef<{ query: string }>;
   editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
@@ -154,6 +155,19 @@ const Note = recipe<Input, Output>(
       content,
       mentioned,
       backlinks,
+      grep: {
+        pattern: recipe<{ query: string; content: string }>(
+          "Grep",
+          ({ query, content }) => {
+            return derive({ query, content }, ({ query, content }) => {
+              return content.split("\n").filter((c) => c.includes(query));
+            });
+          },
+        ),
+        extraParams: {
+          content,
+        },
+      } as unknown as OpaqueRef<{ query: string }>,
       editContent: handleEditContent({ content }),
     };
   },

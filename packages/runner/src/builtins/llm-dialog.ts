@@ -426,12 +426,21 @@ async function invokeToolCall(
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
-  charmMeta?: { handler?: any; cell?: Cell<any>; charm: Cell<any> },
+  charmMeta?: {
+    handler?: any;
+    cell?: Cell<any>;
+    charm: Cell<any>;
+    extraParams?: Record<string, unknown>;
+    pattern?: Readonly<Recipe>;
+  },
 ) {
-  const pattern = toolDef?.key("pattern").getRaw() as unknown as
-    | Readonly<Recipe>
-    | undefined;
-  const extraParams = toolDef?.key("extraParams").get() ?? {};
+  const pattern = charmMeta?.pattern ??
+    toolDef?.key("pattern").getRaw() as unknown as
+      | Readonly<Recipe>
+      | undefined;
+  const extraParams = charmMeta?.extraParams ??
+    toolDef?.key("extraParams").get() ??
+    {};
   const handler = charmMeta?.handler ?? toolDef?.key("handler");
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
@@ -895,15 +904,30 @@ async function startRequest(
                     ],
                   };
                   const ref: Cell<any> = runtime.getCellFromLink(link);
-                  if (!isStream(ref)) {
+                  if (isStream(ref)) {
+                    charmMeta = {
+                      handler: ref as any,
+                      charm: agg.charm,
+                    } as any;
+                  } else {
+                    const pattern = (ref as Cell<any>).key("pattern")
+                      .getRaw() as unknown as
+                        | Readonly<Recipe>
+                        | undefined;
+                    if (pattern) {
+                      charmMeta = {
+                        pattern: pattern,
+                        extraParams:
+                          (ref as Cell<any>).key("extraParams").get() ?? {},
+                        charm: agg.charm,
+                      } as any;
+                    }
+                  }
+                  if (!charmMeta) {
                     throw new Error(
                       "path does not resolve to a handler stream",
                     );
                   }
-                  charmMeta = {
-                    handler: ref as any,
-                    charm: agg.charm,
-                  } as any;
                   // For run tools, pass only handler args. Accept both shapes:
                   // either nested under `args`, or top-level fields alongside path.
                   toolDef = undefined;
