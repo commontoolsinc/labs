@@ -65,6 +65,149 @@ function segmentToPropertyKey(segment: string): PropertyKey {
   return /^\d+$/.test(segment) ? Number(segment) : segment;
 }
 
+type WishContext = {
+  runtime: IRuntime;
+  tx: IExtendedStorageTransaction;
+  parentCell: Cell<any>;
+  spaceCell?: Cell<unknown>;
+};
+
+type BaseResolution = {
+  cell: Cell<unknown>;
+  pathPrefix?: readonly string[];
+};
+
+function getSpaceCell(ctx: WishContext): Cell<unknown> {
+  if (!ctx.spaceCell) {
+    ctx.spaceCell = ctx.runtime.getCell(
+      ctx.parentCell.space,
+      ctx.parentCell.space,
+      undefined,
+      ctx.tx,
+    );
+  }
+  return ctx.spaceCell;
+}
+
+function getSpaceField(
+  ctx: WishContext,
+  key: string,
+): Cell<unknown> {
+  return (getSpaceCell(ctx) as Cell<Record<string, unknown>>).key(
+    key as never,
+  ) as Cell<unknown>;
+}
+
+function resolveMaybeLinkedCell(
+  cell: Cell<unknown>,
+  ctx: WishContext,
+): Cell<unknown> {
+  try {
+    return cell.resolveAsCell().withTx(ctx.tx);
+  } catch {
+    return cell.withTx(ctx.tx);
+  }
+}
+
+function resolvePath(
+  base: Cell<unknown>,
+  path: readonly string[],
+  ctx: WishContext,
+): Cell<unknown> {
+  let current = base.withTx(ctx.tx);
+  for (const segment of path) {
+    const keyed = current.key(segmentToPropertyKey(segment) as never);
+    current = resolveMaybeLinkedCell(keyed, ctx);
+  }
+  return current;
+}
+
+function getDefaultPatternCell(
+  ctx: WishContext,
+): Cell<unknown> | undefined {
+  const field = getSpaceField(ctx, "defaultPattern");
+  try {
+    return field.resolveAsCell().withTx(ctx.tx);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveBase(
+  parsed: ParsedWishTarget,
+  ctx: WishContext,
+  wishTarget: string,
+): BaseResolution | undefined {
+  switch (parsed.key) {
+    case "/":
+      return { cell: getSpaceCell(ctx) };
+    case "#default": {
+      const defaultPattern = getDefaultPatternCell(ctx);
+      if (!defaultPattern) {
+        console.error(
+          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
+        );
+        return undefined;
+      }
+      return { cell: defaultPattern };
+    }
+    case "#mentionable": {
+      const defaultPattern = getDefaultPatternCell(ctx);
+      if (!defaultPattern) {
+        console.error(
+          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
+        );
+        return undefined;
+      }
+      return {
+        cell: defaultPattern,
+        pathPrefix: ["backlinksIndex", "mentionable"],
+      };
+    }
+    case "#recent": {
+      const recent = resolveMaybeLinkedCell(
+        getSpaceField(ctx, "recentCharms"),
+        ctx,
+      );
+      return { cell: recent };
+    }
+    case "#now": {
+      if (parsed.path.length > 0) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+      const nowCell = ctx.runtime.getImmutableCell(
+        ctx.parentCell.space,
+        Date.now(),
+        undefined,
+        ctx.tx,
+      );
+      return { cell: nowCell };
+    }
+    default: {
+      const resolution = WISH_TARGETS[parsed.key];
+      if (!resolution) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+
+      const baseCell = resolveWishTarget(
+        resolution,
+        ctx.runtime,
+        ctx.parentCell.space,
+        ctx.tx,
+      );
+
+      if (!baseCell) {
+        console.error(`Wish target "${wishTarget}" is not recognized.`);
+        return undefined;
+      }
+
+      return { cell: baseCell };
+    }
+  }
+}
+
 const TARGET_SCHEMA = {
   type: "string",
   default: "",
@@ -102,147 +245,23 @@ export function wish(
       return;
     }
 
-    const getSpaceCellWithTx = () =>
-      runtime
-        .getCell(
-          parentCell.space,
-          parentCell.space, // Use the space DID as the cause
-          undefined,
-        )
-        .withTx(tx);
-
-    const followPath = (
-      start: Cell<unknown>,
-      segments: string[],
-    ): Cell<unknown> => {
-      let current = start.withTx(tx);
-
-      for (const segment of segments) {
-        const keyed = current.key(
-          segmentToPropertyKey(segment) as never,
-        );
-        let nextCell: Cell<unknown>;
-        try {
-          nextCell = keyed.resolveAsCell().withTx(tx);
-        } catch {
-          nextCell = keyed.withTx(tx);
-        }
-        current = nextCell;
-      }
-
-      return current;
-    };
-
-    const safeResolve = (cell: Cell<unknown>) => {
-      try {
-        return cell.resolveAsCell();
-      } catch {
-        return cell;
-      }
-    };
-
-    let resolvedCell: Cell<unknown> | undefined;
-
-    const needsSpaceCell = parsed.key === "/" ||
-      parsed.key === "#default" ||
-      parsed.key === "#mentionable" ||
-      parsed.key === "#recent";
-    const spaceCell = needsSpaceCell ? getSpaceCellWithTx() : undefined;
-
-    const resolveDefaultPattern = () => {
-      if (!spaceCell) return undefined;
-      const defaultPatternField = (spaceCell as any).key("defaultPattern");
-      try {
-        return defaultPatternField.resolveAsCell();
-      } catch {
-        return undefined;
-      }
-    };
-
-    if (parsed.key === "/") {
-      resolvedCell = followPath(spaceCell!, parsed.path);
-    } else if (parsed.key === "#default") {
-      const defaultPatternCell = resolveDefaultPattern();
-      if (!defaultPatternCell) {
-        console.error(
-          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
-        );
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-      resolvedCell = followPath(defaultPatternCell, parsed.path);
-    } else if (parsed.key === "#mentionable") {
-      const defaultPatternCell = resolveDefaultPattern();
-      if (!defaultPatternCell) {
-        console.error(
-          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
-        );
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-      resolvedCell = followPath(defaultPatternCell, [
-        "backlinksIndex",
-        "mentionable",
-        ...parsed.path,
-      ]);
-    } else if (parsed.key === "#recent") {
-      if (!spaceCell) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-      const recentField = (spaceCell as any).key("recentCharms");
-      const recentCell = safeResolve(recentField);
-      resolvedCell = followPath(recentCell, parsed.path);
-    } else if (parsed.key === "#now") {
-      if (parsed.path.length > 0) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-      const nowCell = runtime.getImmutableCell(
-        parentCell.space,
-        Date.now(),
-        undefined,
-        tx,
-      );
-      sendResult(tx, nowCell.withTx(tx));
-      return;
-    } else {
-      const resolution = WISH_TARGETS[parsed.key];
-      if (!resolution) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-
-      const baseCell = resolveWishTarget(
-        resolution,
-        runtime,
-        parentCell.space,
-        tx,
-      );
-
-      if (!baseCell) {
-        console.error(`Wish target "${wishTarget}" is not recognized.`);
-        sendResult(tx, hasDefault ? defaultCell : undefined);
-        return;
-      }
-
-      resolvedCell = followPath(baseCell, parsed.path);
-    }
-
-    if (!resolvedCell) {
-      console.error(`Wish target "${wishTarget}" is not recognized.`);
+    const ctx: WishContext = { runtime, tx, parentCell };
+    const baseResolution = resolveBase(parsed, ctx, wishTarget);
+    if (!baseResolution) {
       sendResult(tx, hasDefault ? defaultCell : undefined);
       return;
     }
 
-    // If the resolved value is undefined and we have a default, use the default
-    if (hasDefault && resolvedCell.withTx(tx).get() === undefined) {
+    const combinedPath = baseResolution.pathPrefix
+      ? [...baseResolution.pathPrefix, ...parsed.path]
+      : parsed.path;
+    const resolvedCell = resolvePath(baseResolution.cell, combinedPath, ctx);
+    const resolvedWithTx = resolvedCell.withTx(tx);
+
+    if (hasDefault && resolvedWithTx.get() === undefined) {
       sendResult(tx, defaultCell);
     } else {
-      sendResult(tx, resolvedCell.withTx(tx));
+      sendResult(tx, resolvedWithTx);
     }
   };
 }
