@@ -1,14 +1,13 @@
 # Repository Guidelines for AI Agents
 
-## Recipe/Pattern Development
+## Pattern Development
 
-If you are developing recipes/patterns (they mean the same thing), use Claude
-Skills (recipe-dev) to do the work.
+If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
 ### Useful Recipe/Pattern documentation
 
-- `docs/common/RECIPE_DEV_DEPLOY.md` - Building, debugging, and deploying
-  recipes step-by-step
+- `docs/common/PATTERN_DEV_DEPLOY.md` - Building, debugging, and deploying
+  patterns step-by-step
 - `docs/common/RECIPES.md` - Writing recipes with cells, handlers, lifts, best
   practices, and [ID] usage patterns
 - `docs/common/HANDLERS.md` - Writing handler functions, event types, state

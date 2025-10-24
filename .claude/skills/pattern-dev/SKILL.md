@@ -27,7 +27,7 @@ Before starting pattern development:
 1. **Know the ct binary** - Use the **ct** skill for ct command reference
 2. **Read the documentation** - Key docs to reference:
    - `docs/common/RECIPES.md` - Core concepts and best practices
-   - `docs/common/PATTERNS.md` - Common pattern patterns with examples
+   - `docs/common/PATTERNS.md` - Common patterns with examples
    - `docs/common/HANDLERS.md` - Handler patterns and type guidance
    - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
 3. **Check example patterns** - Look in `packages/patterns/` for working examples
@@ -244,7 +244,7 @@ patterns/feature/
 - Use relative imports: `import { Schema } from "./schemas.tsx"`
 - Export shared schemas for reuse
 - ct bundles all dependencies automatically on deployment
-- Export all sub-recipes and functions
+- Export all sub-patterns and functions
 
 **Common Pitfall:**
 - Schema mismatches between linked charms

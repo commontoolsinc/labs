@@ -1,14 +1,14 @@
-# Recipe Development & Deployment Guide
+# Pattern Development & Deployment Guide
 
-This guide covers building, debugging, and deploying recipes/patterns using the CommonTools framework.
+This guide covers building, debugging, and deploying patterns using the CommonTools framework.
 
-## Recipe Development
+## Pattern Development
 
-### Building a New Recipe
+### Building a New Pattern
 
 #### Step 1: Start Simple
 
-Begin with minimal viable recipe:
+Begin with a minimal viable pattern:
 
 ```typescript
 /// <cts-enable />
@@ -23,9 +23,9 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>("My Recipe", ({ items }) => {
+export default recipe<Input, Input>("My Pattern", ({ items }) => {
   return {
-    [NAME]: "My Recipe",
+    [NAME]: "My Pattern",
     [UI]: (
       <div>
         {items.map((item: OpaqueRef<Item>) => (
@@ -74,7 +74,7 @@ const addItem = handler<
 />
 ```
 
-### Debugging Recipes
+### Debugging Patterns
 
 #### Common Error Categories
 
@@ -87,7 +87,7 @@ const addItem = handler<
 **Runtime Errors** (see `RECIPES.md` for details):
 - DOM access (use cells instead)
 - Conditionals in JSX (use `ifElse()`)
-- Calling `llm()` from handlers (only works in recipe body)
+- Calling `llm()` from handlers (only works in the pattern body)
 
 **Data Not Updating** (see `COMPONENTS.md` for details):
 - Forgot `$` prefix for bidirectional binding
@@ -96,14 +96,14 @@ const addItem = handler<
 
 #### Debugging Process
 
-1. **Check TypeScript errors first** - Run `./dist/ct dev recipe.tsx --no-run`
+1. **Check TypeScript errors first** - Run `./dist/ct dev pattern.tsx --no-run`
 2. **Consult the docs** - Match error pattern to relevant doc:
    - Type errors → `HANDLERS.md`
    - Component issues → `COMPONENTS.md`
    - Pattern questions → `PATTERNS.md`
    - Core concepts → `RECIPES.md`
 3. **Inspect deployed charm** - Use ct commands to inspect state
-4. **Check examples** - Look in `packages/patterns/` for similar recipes
+4. **Check examples** - Look in `packages/patterns/` for similar patterns
 
 #### Quick Error Reference
 
@@ -114,13 +114,13 @@ const addItem = handler<
 | Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `HANDLERS.md` |
 | Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
 
-### Multi-File Recipes
+### Multi-File Patterns
 
-When building complex recipes across multiple files:
+When building complex patterns across multiple files:
 
 **Structure:**
 ```
-recipes/feature/
+patterns/feature/
   main.tsx       # Entry point
   schemas.tsx    # Shared types
   utils.tsx      # Helper functions
@@ -133,7 +133,7 @@ recipes/feature/
 
 **Common Pitfall:**
 - Schema mismatches between linked charms
-- Solution: Export shared schemas from common file
+- Solution: Export shared schemas from a common file
 
 See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 
@@ -202,17 +202,17 @@ deno task ct --help
 ls -la claude.key || ./dist/ct id new > claude.key
 # Or with deno task: deno task ct id new > claude.key
 
-# Initialize TypeScript in recipes directory
-cd /path/to/recipes && ./dist/ct init
+# Initialize TypeScript in your patterns directory
+cd /path/to/patterns && ./dist/ct init
 # Or with deno task: deno task ct init
 ```
 
 ### Prerequisites
 
-Use `ct --help` and `ct charm --help` to discover available commands.
+Run `./dist/ct --help` and `./dist/ct charm --help` to discover available commands.
 
 This tool is used to:
-- Deploy a recipe as a new charm
+- Deploy a pattern as a new charm
 - Read/write charm data directly
 - Invoke charm handlers for complex operations
 - Link charms together
@@ -224,10 +224,10 @@ This tool is used to:
 
 ```bash
 # 1. Test syntax (optional)
-./dist/ct dev recipe.tsx --no-run
+./dist/ct dev pattern.tsx --no-run
 
 # 2. Deploy to test space
-./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space recipe.tsx
+./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space pattern.tsx
 # Record the charm ID returned
 
 # 3. Inspect deployed charm
@@ -238,29 +238,29 @@ This tool is used to:
 
 ```bash
 # Update existing charm (much faster than deploying new)
-./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id] recipe.tsx
+./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id] pattern.tsx
 ```
 
 **Note:** Don't pre-test syntax unless deployment fails. The deployment process validates automatically.
 
-#### Getting Recipe Source
+#### Getting Pattern Source
 
 ```bash
 # Get source from deployed charm
-./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space [space] --charm [id] ./recipe.tsx
+./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space [space] --charm [id] ./pattern.tsx
 ```
 
 ### Quick Command Reference
 
 ```bash
 # Test syntax
-./dist/ct dev recipe.tsx --no-run
+./dist/ct dev pattern.tsx --no-run
 
 # Deploy new charm
-./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net -s space recipe.tsx
+./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net -s space pattern.tsx
 
 # Update existing charm
-./dist/ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id recipe.tsx
+./dist/ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id pattern.tsx
 
 # Inspect charm
 ./dist/ct charm inspect -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id
@@ -278,15 +278,15 @@ Practical ct command workflows for:
 - Development cycle (deploy, iterate, debug)
 - Common tasks (modify, link, visualize)
 - Debugging commands
-- Multi-file recipe development
+- Multi-file pattern development
 - Configuration management
 
-Consult `.claude/skills/recipe-dev/references/workflow-guide.md` when you need practical command examples beyond theory.
+Consult `.claude/skills/pattern-dev/references/workflow-guide.md` when you need practical command examples beyond theory.
 
 ### Best Practices
 
 - **Use the ct skill** for ct binary commands and deployment details
-- **Read `docs/common/` files** for recipe framework concepts - don't ask for duplicated information
+- **Read `docs/common/` files** for pattern framework concepts - don't ask for duplicated information
 - **Check `packages/patterns/`** for working examples before building from scratch
-- **Start simple** - minimal viable recipe first, then add features
+- **Start simple** - minimal viable pattern first, then add features
 - **Bidirectional binding first** - only use handlers when truly needed
