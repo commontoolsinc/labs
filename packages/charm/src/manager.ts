@@ -181,24 +181,25 @@ export class CharmManager {
           existingSpace = undefined;
         }
 
-        let recentCharmsCell: Cell<Cell<unknown>[]>;
+        const recentCharmsField = spaceCellWithTx
+          .key("recentCharms")
+          .asSchema(charmListSchema);
+
+        let recentCharmsValue: unknown;
         try {
-          recentCharmsCell = spaceCellWithTx
-            .key("recentCharms")
-            .resolveAsCell()
-            .asSchema(charmListSchema);
+          recentCharmsValue = recentCharmsField.get();
         } catch {
-          const recentCharmsField = spaceCellWithTx
-            .key("recentCharms")
-            .asSchema(charmListSchema);
+          recentCharmsValue = undefined;
+        }
+
+        if (!Array.isArray(recentCharmsValue)) {
           recentCharmsField.set([]);
-          recentCharmsCell = recentCharmsField;
         }
 
         const nextSpaceValue: Partial<SpaceCell> = {
           ...(existingSpace ?? {}),
           allCharms: this.charms.withTx(tx),
-          recentCharms: recentCharmsCell.withTx(tx),
+          recentCharms: recentCharmsField.withTx(tx),
         };
 
         spaceCellWithTx.set(nextSpaceValue);
@@ -209,7 +210,6 @@ export class CharmManager {
 
     this.recentCharms = this.spaceCell
       .key("recentCharms")
-      .resolveAsCell()
       .asSchema(charmListSchema);
 
     this.ready = Promise.all([
