@@ -34,8 +34,8 @@ export default recipe("Simple List", ({ title, items }: InputSchema) => {
         <h3>{title}</h3>
         <p>Super Simple Array</p>
         <ul>
-          {items.map((item: Item, index: number) => (
-            <li key={index}>{item.text}</li>
+          {items.map((item: Item) => (
+            <li>{item.text}</li>
           ))}
         </ul>
         <common-send-message

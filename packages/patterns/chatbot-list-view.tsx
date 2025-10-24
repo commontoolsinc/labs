@@ -222,6 +222,18 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
   return charm?.[NAME] || "Unknown";
 });
 
+const extractLocalMentionable = lift<
+  { list: CharmEntry[] },
+  MentionableCharm[]
+>(({ list }) => {
+  const out: MentionableCharm[] = [];
+  for (const entry of list) {
+    const c = entry.charm;
+    out.push(c.chat);
+  }
+  return out;
+});
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
@@ -244,17 +256,7 @@ export default recipe<Input, Output>(
 
     // Aggregate mentionables from the local charms list so that this
     // container exposes its child chat charms as mention targets.
-    const localMentionable = lift<
-      { list: CharmEntry[] },
-      MentionableCharm[]
-    >(({ list }) => {
-      const out: MentionableCharm[] = [];
-      for (const entry of list) {
-        const c = entry.charm;
-        out.push(c.chat);
-      }
-      return out;
-    })({ list: charmsList });
+    const localMentionable = extractLocalMentionable({ list: charmsList });
 
     const localTheme = theme ?? {
       accentColor: cell("#3b82f6"),

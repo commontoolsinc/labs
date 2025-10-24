@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -26,22 +26,14 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
-  (_, { items, index }) => {
-    const itemsCopy = items.get().slice();
-    if (index >= 0 && index < itemsCopy.length) itemsCopy.splice(index, 1);
-    items.set(itemsCopy);
-  },
-);
-
-const updateItem = handler<
-  { detail: { value: string } },
-  { items: Cell<Item[]>; index: number }
->(({ detail: { value } }, { items, index }) => {
-  const itemsCopy = items.get().slice();
-  if (index >= 0 && index < itemsCopy.length) {
-    itemsCopy[index] = { text: value };
-    items.set(itemsCopy);
+const removeItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+>((_event, { items, item }) => {
+  const currentItems = items.get();
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
   }
 });
 
@@ -57,22 +49,20 @@ export default recipe(
           <div
             style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
           >
-            {items.map((item: Item, index: number) => (
+            {items.map((item: OpaqueRef<Item>) => (
               <div
-                key={index}
                 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
               >
                 <ct-button
                   variant="destructive"
                   size="sm"
-                  onClick={removeItem({ items, index })}
+                  onClick={removeItem({ items, item })}
                 >
                   Remove
                 </ct-button>
                 <div style={{ flex: 1 }}>
                   <ct-input
-                    value={item.text}
-                    onct-change={updateItem({ items, index })}
+                    $value={item.text}
                     placeholder="Enter text..."
                   />
                 </div>
@@ -92,7 +82,6 @@ export default recipe(
       title,
       items,
       addItem: addItem({ items }),
-      updateItem,
     };
   },
 );
