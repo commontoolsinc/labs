@@ -157,26 +157,49 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 ## Implementation Plan
 
-1. **Capability wrappers**
-   - Implement proxy-based wrappers and surface them from the builder API.
-   - Update TypeScript definitions for capability-aware helpers.
-2. **Unify builder outputs**
-   - Adapt `recipe`/`lift` to emit capability-wrapped cells.
-   - Replace `OpaqueRef` internals with compatibility shims or adapters.
-3. **Graph snapshot generation**
+This work is being done as an **in-place migration** of the existing APIs rather
+than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
+
+### Phase 1: Type System Unification (In Progress)
+
+1. **Unified Cell types**
+   - Create `CellLike<>` branded type system replacing separate `OpaqueRef` and
+     `Cell` abstractions
+   - Factor out capability traits: reading, writing, streaming, derives
+   - Define `OpaqueRef<>`, `Cell<>`, `Stream<>`, `ReadonlyCell<>`,
+     `WriteonlyCell<>` via branded type combinations
+   - Remove `ShadowRef`/`unsafe_` mechanisms
+2. **Cell creation without immediate links**
+   - Allow cells to be created before their cause/link is established
+   - Add `.for(cause)` method for explicit cause assignment
+   - Support automatic cause derivation with `.for()` as optional override layer
+3. **Deferred execution model**
+   - Change recipe lifecycle to run like a lift with deferred execution
+   - Track created cells and causes in context during execution
+   - Wire lift/handler returns to auto-assign causes to returned cells
+
+### Phase 2: Graph Snapshot & Metadata (Deferred)
+
+1. **Graph snapshot generation**
    - Build runtime graph snapshots during instantiation and store them in result
-     cell metadata.
-   - Update rehydration/teardown logic to consume the snapshot.
-4. **Cause derivation**
-   - Implement default hashing and expose explicit overrides.
-   - Ensure handler-spawned recipes reuse ids whenever inputs and code are
-     unchanged.
-5. **Cleanup**
-   - Deprecate shadow refs and frame gymnastics once proxies land.
-   - Remove `.setDefault`; rely on schema-level defaults.
-6. **Testing & documentation**
-   - Update builder/runner tests for new helper behavior and metadata.
-   - Document capability wrappers and graph metadata for recipe authors.
+     cell metadata (implements the `process` metadata described in rollout plan)
+   - Update rehydration/teardown logic to consume the snapshot
+   - See `graph-snapshot.md` for schema details
+2. **Serializable node factories** (Deferred - see `node-factory-shipping.md`)
+   - Implement `nodeFactory@1` sigil format
+   - Add `.curry()` support for partial application
+   - Enable shipping factories across spaces
+
+### Phase 3: Cleanup
+
+1. **Migration cleanup**
+   - Remove legacy `OpaqueRef` implementation
+   - Remove `.setDefault`; rely on schema-level defaults
+   - Deprecate JSON recipe representation in favor of graph snapshots
+2. **Testing & documentation**
+   - Integration test harness (see `pattern-integration-tests.md`) - **DONE**
+   - Update builder/runner tests for new helper behavior and metadata
+   - Document unified cell types and `.for()` usage for recipe authors
 
 ## Testing Strategy
 
