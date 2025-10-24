@@ -89,26 +89,6 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
   return ctx.spaceCell;
 }
 
-function getSpaceField(
-  ctx: WishContext,
-  key: string,
-): Cell<unknown> {
-  return (getSpaceCell(ctx) as Cell<Record<string, unknown>>).key(
-    key as never,
-  ) as Cell<unknown>;
-}
-
-function resolveMaybeLinkedCell(
-  cell: Cell<unknown>,
-  ctx: WishContext,
-): Cell<unknown> {
-  try {
-    return cell.resolveAsCell().withTx(ctx.tx);
-  } catch {
-    return cell.withTx(ctx.tx);
-  }
-}
-
 function resolvePath(
   base: Cell<unknown>,
   path: readonly string[],
@@ -117,20 +97,13 @@ function resolvePath(
   let current = base.withTx(ctx.tx);
   for (const segment of path) {
     const keyed = current.key(segmentToPropertyKey(segment) as never);
-    current = resolveMaybeLinkedCell(keyed, ctx);
+    try {
+      current = keyed.resolveAsCell().withTx(ctx.tx);
+    } catch {
+      current = keyed.withTx(ctx.tx);
+    }
   }
   return current;
-}
-
-function getDefaultPatternCell(
-  ctx: WishContext,
-): Cell<unknown> | undefined {
-  const field = getSpaceField(ctx, "defaultPattern");
-  try {
-    return field.resolveAsCell().withTx(ctx.tx);
-  } catch {
-    return undefined;
-  }
 }
 
 function resolveBase(
@@ -142,34 +115,16 @@ function resolveBase(
     case "/":
       return { cell: getSpaceCell(ctx) };
     case "#default": {
-      const defaultPattern = getDefaultPatternCell(ctx);
-      if (!defaultPattern) {
-        console.error(
-          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
-        );
-        return undefined;
-      }
-      return { cell: defaultPattern };
+      return { cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] };
     }
     case "#mentionable": {
-      const defaultPattern = getDefaultPatternCell(ctx);
-      if (!defaultPattern) {
-        console.error(
-          `Wish target "${wishTarget}" is not recognized (missing default pattern).`,
-        );
-        return undefined;
-      }
       return {
-        cell: defaultPattern,
-        pathPrefix: ["backlinksIndex", "mentionable"],
+        cell: getSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
       };
     }
     case "#recent": {
-      const recent = resolveMaybeLinkedCell(
-        getSpaceField(ctx, "recentCharms"),
-        ctx,
-      );
-      return { cell: recent };
+      return { cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] };
     }
     case "#now": {
       if (parsed.path.length > 0) {
