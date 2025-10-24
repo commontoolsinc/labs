@@ -93,19 +93,22 @@ import { type RuntimeProgram } from "../harness/types.ts";
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 // Augment the public interface with the internal OpaqueRefMethods interface.
-// Deliberately repeating the original interface to catch any inconsistencies:
-// This here then reflects the entire interface the internal implementation
-// implements.
+// This adds runtime-specific methods beyond what the public API defines.
+// Note: get(), set() are already defined in the base OpaqueRefMethods.
+// We redefine key() here with the runtime implementation signature.
 declare module "@commontools/api" {
   interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
-    set(value: Opaque<T> | T): void;
+    // Override key() with runtime-specific signature
     key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
+
+    // Runtime-specific configuration methods
     setDefault(value: Opaque<T> | T): void;
     setPreExisting(ref: unknown): void;
     setName(name: string): void;
     setSchema(schema: JSONSchema): void;
     connect(node: NodeRef): void;
+
+    // Export method for introspection
     export(): {
       cell: OpaqueRef<any>;
       path: readonly PropertyKey[];
@@ -118,22 +121,15 @@ declare module "@commontools/api" {
       rootSchema?: JSONSchema;
       frame: Frame;
     };
+
+    // Unsafe methods for internal use
     unsafe_bindToRecipeAndPath(
       recipe: Recipe,
       path: readonly PropertyKey[],
     ): void;
     unsafe_getExternal(): OpaqueRef<T>;
-    map<S>(
-      fn: (
-        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-        index: OpaqueRef<number>,
-        array: OpaqueRef<T>,
-      ) => Opaque<S>,
-    ): Opaque<S[]>;
-    mapWithPattern<S>(
-      op: Recipe,
-      params: Record<string, any>,
-    ): Opaque<S[]>;
+
+    // Additional utility methods
     toJSON(): unknown;
     [Symbol.iterator](): Iterator<T>;
     [Symbol.toPrimitive](hint: string): T;

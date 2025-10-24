@@ -16,48 +16,273 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
-// Cell type with only public methods
-export interface Cell<T = any> {
-  // Public methods available in spell code and system
+// ============================================================================
+// Cell Brand System
+// ============================================================================
+
+/**
+ * Brand symbol for identifying different cell types at compile-time.
+ * Each cell variant has a unique combination of capability flags.
+ */
+export declare const CELL_BRAND: unique symbol;
+
+/**
+ * Brand value indicating cell capabilities.
+ * - opaque: Cell reference is opaque (not directly readable/writable)
+ * - read: Has .get() method
+ * - write: Has .set() method
+ * - stream: Has .send() method
+ * - comparable: Has .equals() method (available on comparable and readable cells)
+ */
+export type CellBrand = {
+  opaque: boolean;
+  read: boolean;
+  write: boolean;
+  stream: boolean;
+  comparable: boolean;
+};
+
+/**
+ * Base type for all cell variants. Uses a symbol brand to distinguish
+ * different cell types at compile-time while sharing common structure.
+ */
+export type AnyCell<T = any, Brand extends CellBrand = CellBrand> = {
+  [CELL_BRAND]: Brand;
+} & CellMethods<T, Brand>;
+
+// ============================================================================
+// Cell Capability Interfaces
+// ============================================================================
+
+/**
+ * Readable cells can retrieve their current value.
+ */
+export interface Readable<T> {
   get(): Readonly<T>;
-  set(value: T): void;
-  send(value: T): void; // alias for set
-  update(values: Partial<T>): void;
-  push(...value: T extends (infer U)[] ? U[] : never): void;
-  equals(other: Cell<any>): boolean;
-  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  resolveAsCell(): Cell<T>;
 }
 
-// Cell type with only public methods
-export interface Stream<T> {
+/**
+ * Writable cells can update their value.
+ */
+export interface Writable<T> {
+  set(value: T): void;
+  update(values: Partial<T>): void;
+  push(...value: T extends (infer U)[] ? U[] : never): void;
+}
+
+/**
+ * Streamable cells can send events.
+ */
+export interface Streamable<T> {
   send(event: T): void;
 }
 
+/**
+ * Cells that support key() for property access.
+ * Available on all cells except streams.
+ */
+export interface Keyable<T, Brand extends CellBrand = CellBrand> {
+  key<K extends keyof T>(valueKey: K): AnyCell<T[K], Brand>;
+}
+
+/**
+ * Cells that can be resolved back to a Cell.
+ * Only available on full Cell<T>, not on OpaqueCell or Stream.
+ */
+export interface Resolvable<T, Brand extends CellBrand = CellBrand> {
+  resolveAsCell(): AnyCell<T, Brand>;
+}
+
+/**
+ * Comparable cells have equals() method.
+ * Available on comparable and readable cells.
+ */
+export interface Equatable {
+  equals(other: AnyCell<any>): boolean;
+}
+
+/**
+ * Derivable cells support functional transformations.
+ * This is a placeholder - the actual methods are defined below after OpaqueRef.
+ */
+export interface Derivable<T> {
+  // Methods defined below after OpaqueRef is available
+}
+
+/**
+ * Combines cell capabilities based on brand flags.
+ * - All cells get Keyable (.key) except streams
+ * - Full cells (read + write) get Resolvable (.resolveAsCell)
+ * - Comparable and readable cells get Equatable (.equals)
+ * - Each flag enables its corresponding capability
+ */
+type CellMethods<T, Brand extends CellBrand> =
+  & (Brand["stream"] extends true ? Record<never, never> : Keyable<T, Brand>)
+  & (Brand["read"] extends true
+    ? Brand["write"] extends true
+      ? Readable<T> & Equatable & Resolvable<T, Brand>
+    : Readable<T> & Equatable
+    : Record<never, never>)
+  & (Brand["comparable"] extends true ? Equatable : Record<never, never>)
+  & (Brand["write"] extends true ? Writable<T> : Record<never, never>)
+  & (Brand["stream"] extends true ? Streamable<T> : Record<never, never>)
+  & (Brand["opaque"] extends true ? Derivable<T> : Record<never, never>);
+
+// ============================================================================
+// Cell Type Definitions
+// ============================================================================
+
+/**
+ * Opaque cell reference - only supports keying and derivation, not direct I/O.
+ * Has .key(), .map(), .mapWithPattern()
+ * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
+ * Brand: { opaque: true, read: false, write: false, stream: false, comparable: false }
+ */
+export type OpaqueCell<T = any> = AnyCell<
+  T,
+  { opaque: true; read: false; write: false; stream: false; comparable: false }
+>;
+
+/**
+ * Full cell with read, write, and stream capabilities.
+ * Has .get(), .set(), .send(), .update(), .push(), .equals(), .key(), .resolveAsCell()
+ * Brand: { opaque: false, read: true, write: true, stream: true, comparable: false }
+ *
+ * Note: This is an interface (not a type) to allow module augmentation by the runtime.
+ * Note: comparable is false because .equals() comes from read: true, not comparable: true
+ */
+export interface Cell<T = any> extends
+  AnyCell<
+    T,
+    { opaque: false; read: true; write: true; stream: true; comparable: false }
+  > {}
+
+/**
+ * Stream-only cell - can only send events, not read or write.
+ * Has .send() only
+ * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()
+ * Brand: { opaque: false, read: false, write: false, stream: true, comparable: false }
+ *
+ * Note: This is an interface (not a type) to allow module augmentation by the runtime.
+ */
+export interface Stream<T> extends
+  AnyCell<
+    T,
+    {
+      opaque: false;
+      read: false;
+      write: false;
+      stream: true;
+      comparable: false;
+    }
+  > {}
+
+/**
+ * Comparable-only cell - just for equality checks and keying.
+ * Has .equals(), .key()
+ * Does NOT have .resolveAsCell()/.get()/.set()/.send()
+ * Brand: { opaque: false, read: false, write: false, stream: false, comparable: true }
+ */
+export type ComparableCell<T = any> = AnyCell<
+  T,
+  { opaque: false; read: false; write: false; stream: false; comparable: true }
+>;
+
+/**
+ * Read-only cell variant.
+ * Has .get(), .equals(), .key()
+ * Does NOT have .resolveAsCell()/.set()/.send()
+ * Brand: { opaque: false, read: true, write: false, stream: false, comparable: false }
+ */
+export type ReadonlyCell<T = any> = AnyCell<
+  T,
+  { opaque: false; read: true; write: false; stream: false; comparable: true }
+>;
+
+/**
+ * Write-only cell variant.
+ * Has .set(), .update(), .push(), .key()
+ * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
+ * Brand: { opaque: false, read: false, write: true, stream: false, comparable: false }
+ */
+export type WriteonlyCell<T = any> = AnyCell<
+  T,
+  { opaque: false; read: false; write: true; stream: false; comparable: false }
+>;
+
+// ============================================================================
+// OpaqueRef - Proxy-based variant of OpaqueCell
+// ============================================================================
+
+/**
+ * Methods available on OpaqueRef beyond what OpaqueCell provides.
+ * This interface can be augmented by the runtime to add internal methods
+ * like .export(), .setDefault(), .setName(), .setSchema(), .connect(), etc.
+ *
+ * Note: .key() is inherited from OpaqueCell (via Keyable), not defined here.
+ */
+export interface OpaqueRefMethods<T> {
+  get(): T;
+  set(value: OpaqueLike<T> | T): void;
+}
+
+/**
+ * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
+ * Each key access returns another OpaqueRef, allowing chained property access.
+ * This is temporary until AST transformation handles .key() automatically.
+ *
+ * OpaqueRef extends OpaqueCell with OpaqueRefMethods (which can be augmented by runtime).
+ */
 export type OpaqueRef<T> =
+  & OpaqueCell<T>
   & OpaqueRefMethods<T>
   & (T extends Array<infer U> ? Array<OpaqueRef<U>>
     : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
     : T);
 
-// Any OpaqueRef is also an Opaque, but can also have static values.
-// Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
-// when data gets passed into what developers see (either recipe inputs or
-// module outputs).
+// ============================================================================
+// CellLike and Opaque - Utility types for accepting cells
+// ============================================================================
+
+/**
+ * CellLike accepts any AnyCell variant at any nesting level.
+ * This is used for type constraints that accept any kind of cell.
+ */
+export type CellLike<T> = AnyCell<T>;
+
+/**
+ * OpaqueLike accepts T or any CellLike<T> at any nesting level.
+ * Used in APIs that accept inputs from developers - can be static values
+ * or wrapped in cells.
+ *
+ * This is the new version based on the unified cell system.
+ * The old Opaque type (below) will be kept for backward compatibility.
+ */
+export type OpaqueLike<T> =
+  | CellLike<T>
+  | (T extends Array<infer U> ? Array<OpaqueLike<U>>
+    : T extends object ? { [K in keyof T]: OpaqueLike<T[K]> }
+    : T);
+
+/**
+ * Legacy Opaque type for backward compatibility.
+ * Any OpaqueRef is also an Opaque, but can also have static values.
+ * Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
+ * when data gets passed into what developers see (either recipe inputs or
+ * module outputs).
+ */
 export type Opaque<T> =
   | OpaqueRef<T>
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
 
-// OpaqueRefMethods type with only public methods
-export interface OpaqueRefMethods<T> {
-  get(): T;
-  set(value: Opaque<T> | T): void;
-  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-  setDefault(value: Opaque<T> | T): void;
-  setName(name: string): void;
-  setSchema(schema: JSONSchema): void;
+// ============================================================================
+// Extend Derivable interface now that OpaqueRef and Opaque are defined
+// ============================================================================
+
+// Interface merging to add methods to Derivable
+export interface Derivable<T> {
   map<S>(
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
