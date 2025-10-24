@@ -19,7 +19,7 @@
   - [ ] Update `CellLike` to be based on `AnyCell` but allow nesting.
   - [ ] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
   - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
-    - [ ] "Accept any T where any sub part of T can be wrapped in one ore more
+    - [ ] "Accept any T where any sub part of T can be wrapped in one or more
       `AnyCell`" (for inputs to node factories)
     - [ ] "Strip any `AnyCell` from T and then wrap it in OpaqueRef<>" (for
       outputs of node factories, where T is the output of the inner function)
