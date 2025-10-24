@@ -239,25 +239,8 @@ export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
 }
 
 function unsafe_materialize(
-  binding: { recipe: Recipe; path: PropertyKey[] } | undefined,
-  path: PropertyKey[],
-) {
-  if (!binding) throw new Error("Can't read value during recipe creation.");
-
-  // Find first frame with unsafe binding
-  let frame = getTopFrame();
-  let unsafe_binding: UnsafeBinding | undefined;
-  while (frame && !unsafe_binding) {
-    unsafe_binding = frame.unsafe_binding;
-    frame = frame.parent;
-  }
-
-  // Walk up the chain until we find the original recipe
-  while (unsafe_binding && unsafe_binding.parent?.recipe === binding.recipe) {
-    unsafe_binding = unsafe_binding.parent;
-  }
-
-  if (!unsafe_binding) throw new Error("Can't find recipe in parent frames.");
-
-  return unsafe_binding.materialize([...binding.path, ...path]);
+  _binding: { recipe: Recipe; path: PropertyKey[] } | undefined,
+  _path: PropertyKey[],
+): any {
+  throw new Error("Unsafe materialization refs no longer supported");
 }
