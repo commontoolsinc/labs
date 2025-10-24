@@ -131,7 +131,10 @@ export function filterRelevantDataFlows(
       // Check if any parameter in this scope comes from a builder or array-map
       return scope.parameters.some((param) => {
         if (!param.declaration) return false;
-        const callKind = getOpaqueCallKindForParameter(param.declaration, context.checker);
+        const callKind = getOpaqueCallKindForParameter(
+          param.declaration,
+          context.checker,
+        );
         return callKind === "builder" || callKind === "array-map";
       });
     });
