@@ -26,12 +26,18 @@ export const calculator = recipe<
   CalculatorRequest,
   string | { error: string }
 >("Calculator", ({ expression, base }) => {
-  return derive(expression, (expr) => {
-    const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
+  return derive({ expression, base }, ({ expression, base }) => {
+    const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, "");
+    let sanitizedBase = Number(base);
+    if (
+      Number.isNaN(sanitizedBase) || sanitizedBase < 2 || sanitizedBase > 36
+    ) {
+      sanitizedBase = 10;
+    }
     let result;
     try {
       result = Function(
-        `"use strict"; return Number(${sanitized}).toString(${base} ?? 10)`,
+        `"use strict"; return Number(${sanitized}).toString(${sanitizedBase})`,
       )();
     } catch (error) {
       result = { error: (error as any)?.message || "<error>" };
