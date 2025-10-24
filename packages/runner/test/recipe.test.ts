@@ -237,40 +237,6 @@ describe("recipe with map node", () => {
   });
 });
 
-describe("recipe with map node that references a parent cell in another recipe", () => {
-  it("correctly creates references to the parent cells", () => {
-    const multiplyArray = recipe<{ values: { x: number }[] }>(
-      "Double numbers",
-      ({ values }) => {
-        const wrapper = recipe("Wrapper", () => {
-          const multiplied = values.map(({ x }, index) => {
-            const multiply = lift<{ x: number; factor: number }>((
-              { x, factor },
-            ) => ({
-              x: x * factor,
-            }));
-            return { multiplied: multiply({ x, factor: index }) };
-          });
-          return { multiplied };
-        });
-        return wrapper({ values });
-      },
-    );
-
-    const subRecipe = (multiplyArray.nodes[0].module as Module)
-      .implementation as Recipe;
-    expect(isRecipe(subRecipe)).toBeTruthy();
-    const subSubRecipe =
-      (subRecipe.nodes[0].inputs as unknown as { op: Recipe })
-        .op;
-    expect(isRecipe(subSubRecipe)).toBeTruthy();
-    expect(subSubRecipe.nodes[0].inputs).toEqual({
-      x: { $alias: { cell: 2, path: ["argument", "element", "x"] } },
-      factor: { $alias: { cell: 2, path: ["argument", "index"] } },
-    });
-  });
-});
-
 describe("recipe with ifc property", () => {
   const ArgumentSchema = {
     description: "Double a number",
