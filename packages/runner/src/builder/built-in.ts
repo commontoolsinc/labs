@@ -1,11 +1,13 @@
 import { BuiltInLLMDialogState } from "@commontools/api";
 import { createNodeFactory, lift } from "./module.ts";
+import { recipe } from "./recipe.ts";
 import type {
   Cell,
   JSONSchema,
   NodeFactory,
   Opaque,
   OpaqueRef,
+  RecipeFactory,
   Schema,
 } from "./types.ts";
 import type {
@@ -152,3 +154,42 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 ): Cell<Schema<S>>;
 
 export type { createCell };
+
+/**
+ * Helper function for creating LLM tool definitions from recipes with optional pre-filled parameters.
+ * Creates a recipe with the given function and returns an object suitable for use as an LLM tool,
+ * with proper TypeScript typing that reflects only the non-pre-filled parameters.
+ *
+ * @param fn - The recipe function that defines the tool's behavior
+ * @param extraParams - Optional object containing parameter values to pre-fill
+ * @returns An object with `pattern` and `extraParams` properties, typed to show only remaining params
+ *
+ * @example
+ * ```ts
+ * import { patternTool } from "commontools";
+ *
+ * const content = cell("Hello world");
+ *
+ * // Creates a grep tool where 'content' is pre-filled, only 'query' is exposed
+ * const grepTool = patternTool(
+ *   ({ query, content }: { query: string; content: string }) => {
+ *     return derive({ query, content }, ({ query, content }) => {
+ *       return content.split("\n").filter((c) => c.includes(query));
+ *     });
+ *   },
+ *   { content }
+ * );
+ * // Type of grepTool is OpaqueRef<{ query: string }>
+ * ```
+ */
+export function patternTool<T, E extends Partial<T>>(
+  fn: (input: OpaqueRef<Required<T>>) => any,
+  extraParams?: Opaque<E>,
+): OpaqueRef<Omit<T, keyof E>> {
+  const pattern = recipe<T>("tool", fn);
+
+  return {
+    pattern,
+    extraParams: extraParams ?? {},
+  } as any as OpaqueRef<Omit<T, keyof E>>;
+}

@@ -29,6 +29,7 @@ import {
   llm,
   llmDialog,
   navigateTo,
+  patternTool,
   str,
   streamData,
   wish,
@@ -100,6 +101,7 @@ export const createBuilder = (
     commontools: {
       // Recipe creation
       recipe,
+      patternTool,
 
       // Module creation
       lift,

@@ -9,6 +9,7 @@ import {
   navigateTo,
   Opaque,
   OpaqueRef,
+  patternTool,
   recipe,
   UI,
   wish,
@@ -155,19 +156,14 @@ const Note = recipe<Input, Output>(
       content,
       mentioned,
       backlinks,
-      grep: {
-        pattern: recipe<{ query: string; content: string }>(
-          "Grep",
-          ({ query, content }) => {
-            return derive({ query, content }, ({ query, content }) => {
-              return content.split("\n").filter((c) => c.includes(query));
-            });
-          },
-        ),
-        extraParams: {
-          content,
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return derive({ query, content }, ({ query, content }) => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
         },
-      } as unknown as OpaqueRef<{ query: string }>,
+        { content },
+      ),
       editContent: handleEditContent({ content }),
     };
   },
