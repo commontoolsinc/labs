@@ -209,6 +209,7 @@ const LLMToolSchema = {
       required: ["argumentSchema", "resultSchema", "nodes"],
       asCell: true,
     },
+    extraParams: { type: "object" },
     charm: {
       // Accept whole charm - its own schema defines its handlers
       asCell: true,
@@ -430,6 +431,7 @@ async function invokeToolCall(
   const pattern = toolDef?.key("pattern").getRaw() as unknown as
     | Readonly<Recipe>
     | undefined;
+  const extraParams = toolDef?.key("extraParams").get() ?? {};
   const handler = charmMeta?.handler ?? toolDef?.key("handler");
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
@@ -455,7 +457,7 @@ async function invokeToolCall(
 
   runtime.editWithRetry((tx) => {
     if (pattern) {
-      runtime.run(tx, pattern, toolCall.input, result);
+      runtime.run(tx, pattern, { ...toolCall.input, ...extraParams }, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...toolCall.input,

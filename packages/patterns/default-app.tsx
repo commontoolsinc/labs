@@ -171,6 +171,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           pattern: readWebpage,
         },
         calculator: {
+          extraParams: {
+            base: 10, // Just an example of how to pass extra params to a tool
+          },
           pattern: calculator,
         },
       },

@@ -18,17 +18,21 @@ import {
 type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
+  /** The base to use for the calculation. */
+  base?: number;
 };
 
 export const calculator = recipe<
   CalculatorRequest,
   string | { error: string }
->("Calculator", ({ expression }) => {
+>("Calculator", ({ expression, base }) => {
   return derive(expression, (expr) => {
     const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
     let result;
     try {
-      result = Function(`"use strict"; return (${sanitized})`)();
+      result = Function(
+        `"use strict"; return Number(${sanitized}).toString(${base} ?? 10)`,
+      )();
     } catch (error) {
       result = { error: (error as any)?.message || "<error>" };
     }
