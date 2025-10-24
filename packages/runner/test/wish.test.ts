@@ -97,6 +97,210 @@ describe("wish built-in", () => {
     expect(linkData?.id).toEqual(`of:${ALL_CHARMS_ID}`);
   });
 
+  it("resolves semantic wishes with # prefixes", async () => {
+    const allCharmsCell = runtime.getCellFromEntityId(
+      space,
+      { "/": ALL_CHARMS_ID },
+      [],
+      undefined,
+      tx,
+    );
+    const charmsData = [
+      { name: "Alpha", title: "Alpha" },
+      { name: "Beta", title: "Beta" },
+    ];
+    allCharmsCell.withTx(tx).set(charmsData);
+
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    (spaceCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const wishRecipe = recipe("wish semantic target", () => {
+      return {
+        semanticAllCharms: wish("#allCharms"),
+        semanticFirstTitle: wish("#allCharms/0/title"),
+      };
+    });
+
+    const resultCell = runtime.getCell<{
+      semanticAllCharms?: unknown[];
+      semanticFirstTitle?: string;
+    }>(
+      space,
+      "wish semantic",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    expect(result.key("semanticAllCharms").get()).toEqual(charmsData);
+    expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
+  });
+
+  it("resolves the default pattern with #default", async () => {
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    const defaultData = {
+      title: "Default App",
+      argument: { greeting: "hello" },
+    };
+    defaultPatternCell.set(defaultData);
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const wishRecipe = recipe("wish default pattern", () => {
+      return {
+        defaultTitle: wish("#default/title"),
+        defaultGreeting: wish("#default/argument/greeting"),
+      };
+    });
+
+    const resultCell = runtime.getCell<{
+      defaultTitle?: string;
+      defaultGreeting?: string;
+    }>(
+      space,
+      "wish default pattern result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    expect(result.key("defaultTitle").get()).toEqual("Default App");
+    expect(result.key("defaultGreeting").get()).toEqual("hello");
+  });
+
+  it("resolves mentionable backlinks via #mentionable", async () => {
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    defaultPatternCell.set({
+      backlinksIndex: {
+        mentionable: [{ name: "Alpha" }, { name: "Beta" }],
+      },
+    });
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const wishRecipe = recipe("wish mentionable", () => {
+      return {
+        mentionable: wish("#mentionable"),
+        firstMentionable: wish("#mentionable/0/name"),
+      };
+    });
+
+    const resultCell = runtime.getCell<{
+      mentionable?: unknown[];
+      firstMentionable?: string;
+    }>(
+      space,
+      "wish mentionable result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    expect(result.key("mentionable").get()).toEqual([
+      { name: "Alpha" },
+      { name: "Beta" },
+    ]);
+    expect(result.key("firstMentionable").get()).toEqual("Alpha");
+  });
+
+  it("resolves recent charms via #recent", async () => {
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const recentCharmsCell = runtime.getCell(space, "recent-charms", {
+      type: "array",
+      items: { type: "object" },
+    }).withTx(tx);
+    const recentData = [{ name: "Charm A" }, { name: "Charm B" }];
+    recentCharmsCell.set(recentData);
+    (spaceCell as any).key("recentCharms").set(recentCharmsCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const wishRecipe = recipe("wish recent charms", () => {
+      return {
+        recent: wish("#recent"),
+        recentFirst: wish("#recent/0/name"),
+      };
+    });
+
+    const resultCell = runtime.getCell<{
+      recent?: unknown[];
+      recentFirst?: string;
+    }>(
+      space,
+      "wish recent charms result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    expect(result.key("recent").get()).toEqual(recentData);
+    expect(result.key("recentFirst").get()).toEqual("Charm A");
+  });
+
+  it("returns current timestamp via #now", async () => {
+    const wishRecipe = recipe("wish now", () => {
+      return { nowValue: wish("#now") };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: number }>(
+      space,
+      "wish now result",
+      undefined,
+      tx,
+    );
+    const before = Date.now();
+    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    await runtime.idle();
+
+    const after = Date.now();
+    const nowValue = result.key("nowValue").get();
+    expect(typeof nowValue).toBe("number");
+    expect(nowValue).toBeGreaterThanOrEqual(before);
+    expect(nowValue).toBeLessThanOrEqual(after);
+  });
+
   it("resolves the space cell using slash target", async () => {
     // Create the space cell (cause = space DID)
     const spaceCell = runtime.getCell(
@@ -221,7 +425,7 @@ describe("wish built-in", () => {
     tx = runtime.edit();
 
     const wishRecipe = recipe("wish default", () => {
-      const missing = wish("#/missing", fallback);
+      const missing = wish("/missing", fallback);
       return { missing };
     });
 

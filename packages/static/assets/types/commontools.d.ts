@@ -353,6 +353,7 @@ export declare const toSchema: <T>(_options?: Partial<JSONSchema>) => JSONSchema
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
     [K in keyof T]: StripCell<T[K]>;
 } : T;
+export type WishKey = `/${string}` | `#${string}`;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
 } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>> : T extends {
