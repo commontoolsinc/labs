@@ -159,11 +159,6 @@ export class CharmManager {
       "pinned-charms",
       charmListSchema,
     );
-    this.recentCharms = this.runtime.getCell(
-      this.space,
-      "recent-charms",
-      charmListSchema,
-    );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
     this.spaceCell = this.runtime.getCell(
@@ -176,12 +171,30 @@ export class CharmManager {
     const linkSpaceCell = this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
 
-      // Link the three main fields to their respective cells
       spaceCellWithTx.key("allCharms").set(this.charms.withTx(tx));
-      spaceCellWithTx.key("recentCharms").set(this.recentCharms.withTx(tx));
+
+      // Ensure the recentCharms list exists so we can link to it directly
+      const recentCharmsField = spaceCellWithTx
+        .key("recentCharms")
+        .asSchema(charmListSchema);
+
+      let currentRecent: Cell<unknown>[] | undefined;
+      try {
+        currentRecent = recentCharmsField.get();
+      } catch {
+        currentRecent = undefined;
+      }
+
+      if (!Array.isArray(currentRecent)) {
+        recentCharmsField.set([]);
+      }
 
       // defaultPattern will be linked later when the default pattern is found
     });
+
+    this.recentCharms = this.spaceCell
+      .key("recentCharms")
+      .asSchema(charmListSchema);
 
     this.ready = Promise.all([
       this.syncCharms(this.charms),
