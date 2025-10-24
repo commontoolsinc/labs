@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, compute, Default, handler, recipe } from "commontools";
+import { Cell, Default, derive, handler, recipe } from "commontools";
 
 interface DelayedCounterArgs {
   value: Default<number, 0>;
@@ -20,17 +20,17 @@ const scheduleIncrement = handler(
 export const counterWithDelayedIncrement = recipe<DelayedCounterArgs>(
   "Counter With Delayed Increment",
   ({ value, pending }) => {
-    const drainPending = compute(() => {
-      const queued = [...(pending.get() ?? [])];
-      if (queued.length === 0) return value.get() ?? 0;
+    const drainPending = derive(
+      { pending, value },
+      ({ pending, value }) => {
+        const queued = [...(pending ?? [])];
+        if (queued.length === 0) return value ?? 0;
 
-      pending.set([]);
-      const total = queued.reduce((sum, amount) => sum + amount, 0);
-      const current = value.get() ?? 0;
-      const next = current + total;
-      value.set(next);
-      return next;
-    });
+        const total = queued.reduce((sum, amount) => sum + amount, 0);
+        const current = value ?? 0;
+        return current + total;
+      },
+    );
 
     return {
       value: drainPending,
