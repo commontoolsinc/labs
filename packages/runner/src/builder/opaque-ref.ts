@@ -231,5 +231,7 @@ function unsafe_materialize(
   _binding: { recipe: Recipe; path: PropertyKey[] } | undefined,
   _path: PropertyKey[],
 ): any {
-  throw new Error("Unsafe materialization refs no longer supported");
+  throw new Error(
+    "Tried to access closed over variable within derive or lift. Instead pass the variable as an argument to the recipe.",
+  );
 }
