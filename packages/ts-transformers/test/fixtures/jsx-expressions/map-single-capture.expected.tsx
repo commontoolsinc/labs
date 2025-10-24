@@ -7,8 +7,8 @@ export default recipe("MapSingleCapture", (_state) => {
     ]);
     return {
         [UI]: (<div>
-        {__ctHelpers.derive({ people, person_name: person.name }, ({ people: people, person_name: _v2 }) => people.length > 0 && (<ul>
-            {people.map((person) => (<li key={person.id}>{_v2}</li>))}
+        {__ctHelpers.derive(people, people => people.length > 0 && (<ul>
+            {people.map((person) => (<li key={person.id}>{person.name}</li>))}
           </ul>))}
       </div>),
     };

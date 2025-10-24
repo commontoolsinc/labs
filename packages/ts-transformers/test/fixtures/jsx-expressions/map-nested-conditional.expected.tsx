@@ -5,9 +5,9 @@ export default recipe("MapNestedConditional", (_state) => {
     const showList = cell(true);
     return {
         [UI]: (<div>
-        {__ctHelpers.derive({ showList, items, item_name: item.name }, ({ showList: showList, items: items, item_name: _v3 }) => showList && (<div>
+        {__ctHelpers.derive({ showList, items }, ({ showList: showList, items: items }) => showList && (<div>
             {items.map((item) => (<div>
-                {__ctHelpers.derive(_v3, _v3 => _v3 && <span>{_v3}</span>)}
+                {__ctHelpers.derive(item.name, _v1 => _v1 && <span>{_v1}</span>)}
               </div>))}
           </div>))}
       </div>),

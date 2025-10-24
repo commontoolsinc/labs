@@ -15,6 +15,7 @@ function originatesFromIgnoredParameter(
   scopeId: number,
   analysis: DataFlowAnalysis,
   checker: ts.TypeChecker,
+  context?: TransformationContext,
 ): boolean {
   const scope = analysis.graph.scopes.find((candidate) =>
     candidate.id === scopeId
@@ -28,7 +29,7 @@ function originatesFromIgnoredParameter(
       if (parameter.symbol === symbol || parameter.name === symbolName) {
         if (
           parameter.declaration &&
-          getOpaqueCallKindForParameter(parameter.declaration, checker)
+          getOpaqueCallKindForParameter(parameter.declaration, checker, context)
         ) {
           return false;
         }
@@ -70,6 +71,7 @@ function originatesFromIgnoredParameter(
 function getOpaqueCallKindForParameter(
   declaration: ts.ParameterDeclaration,
   checker: ts.TypeChecker,
+  context?: TransformationContext,
 ): "builder" | "array-map" | undefined {
   let functionNode: ts.Node | undefined = declaration.parent;
   while (functionNode && !ts.isFunctionLike(functionNode)) {
@@ -84,8 +86,18 @@ function getOpaqueCallKindForParameter(
   if (!candidate) return undefined;
 
   const callKind = detectCallKind(candidate, checker);
-  if (callKind?.kind === "builder" || callKind?.kind === "array-map") {
-    return callKind.kind;
+  if (callKind?.kind === "builder") {
+    return "builder";
+  }
+  if (callKind?.kind === "array-map") {
+    // For array-map calls, only treat parameters as opaque if the callback
+    // was actually transformed (marked in mapCallbackRegistry)
+    // Untransformed maps (plain .map inside derives) should have regular parameters
+    if (context && !context.isMapCallback(functionNode)) {
+      // Callback was not transformed, parameters are not opaque
+      return undefined;
+    }
+    return "array-map";
   }
   return undefined;
 }
@@ -156,6 +168,7 @@ export function filterRelevantDataFlows(
               dataFlow.scopeId,
               analysis,
               context.checker,
+              context,
             )
           ) {
             return false;
@@ -195,6 +208,7 @@ export function filterRelevantDataFlows(
               dataFlow.scopeId,
               analysis,
               context.checker,
+              context,
             )
           ) {
             return false;
@@ -216,6 +230,7 @@ export function filterRelevantDataFlows(
         dataFlow.scopeId,
         analysis,
         context.checker,
+        context,
       )
     ) {
       return false;
