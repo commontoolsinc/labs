@@ -122,12 +122,41 @@ export function filterRelevantDataFlows(
   // If we have both synthetic and non-synthetic dataflows, we need to determine
   // if we're inside or outside the map callback
   if (syntheticDataFlows.length > 0 && nonSyntheticDataFlows.length > 0) {
+    // Check if any dataflow is in a scope with parameters from a map callback
+    // If so, we're inside a callback being transformed and should keep all dataflows
+    const isInMapCallbackScope = dataFlows.some((df) => {
+      const scope = analysis.graph.scopes.find((s) => s.id === df.scopeId);
+      if (!scope) return false;
+
+      // Check if any parameter in this scope comes from a builder or array-map
+      return scope.parameters.some((param) => {
+        if (!param.declaration) return false;
+        const callKind = getOpaqueCallKindForParameter(param.declaration, context.checker);
+        return callKind === "builder" || callKind === "array-map";
+      });
+    });
+
+    // If we're inside a map callback scope, keep all dataflows
+    if (isInMapCallbackScope) {
+      // Keep all dataflows - we're inside a callback with both synthetic params and captures
+      return dataFlows.filter((dataFlow) => {
+        if (
+          originatesFromIgnoredParameter(
+            dataFlow.expression,
+            dataFlow.scopeId,
+            analysis,
+            context.checker,
+          )
+        ) {
+          return false;
+        }
+        return true;
+      });
+    }
+
     // Heuristic: Check if the non-synthetic dataflows have symbols in the outer
     // scope If they reference outer-scope variables (like cells), we're at the
-    // outer scope and should filter synthetic params. If they don't have
-    // symbols (they're synthetic parameters themselves, like captured params),
-    // we're inside a callback with captures.
-
+    // outer scope and should filter synthetic params.
     const nonSyntheticHaveOuterScopeSymbols = nonSyntheticDataFlows.every(
       (df) => {
         let rootExpr: ts.Expression = df.expression;
