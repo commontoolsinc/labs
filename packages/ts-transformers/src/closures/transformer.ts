@@ -1,10 +1,7 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import {
-  createDataFlowAnalyzer,
-  visitEachChildWithJsx,
-} from "../ast/mod.ts";
+import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
