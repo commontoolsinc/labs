@@ -218,7 +218,7 @@ describe("recipes with HTML", () => {
               "ul",
               null,
               entries(row).map((input: Opaque<[string, unknown]>) =>
-                h("li", null, [input[0] as string, ": ", input[1] as VNode])
+                h("li", null, [input[0] as string, ": ", str`${input[1]}`])
               ) as VNode[],
             )
           ) as VNode[],
