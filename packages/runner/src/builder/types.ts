@@ -25,6 +25,7 @@ import type {
   Opaque,
   OpaqueRef,
   OpaqueRefMethods,
+  PatternToolFunction,
   Recipe,
   RecipeFunction,
   RenderFunction,
@@ -275,6 +276,7 @@ export type Frame = {
 export interface BuilderFunctionsAndConstants {
   // Recipe creation
   recipe: RecipeFunction;
+  patternTool: PatternToolFunction;
 
   // Module creation
   lift: LiftFunction;

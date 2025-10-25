@@ -244,6 +244,7 @@ export type RecipeFunction = {
     <T, R>(argumentSchema: string | JSONSchema, fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): RecipeFactory<T, R>;
     <T, R>(argumentSchema: string | JSONSchema, resultSchema: JSONSchema, fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): RecipeFactory<T, R>;
 };
+export type PatternToolFunction = <T, E extends Partial<T> = Record<PropertyKey, never>>(fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>, extraParams?: Opaque<E>) => OpaqueRef<Omit<T, keyof E>>;
 export type LiftFunction = {
     <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(argumentSchema: T, resultSchema: R, implementation: (input: Schema<T>) => Schema<R>): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
     <T, R>(implementation: (input: T) => R): ModuleFactory<T, R>;
@@ -319,6 +320,7 @@ export interface RecipeEnvironment {
 }
 export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 export declare const recipe: RecipeFunction;
+export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;

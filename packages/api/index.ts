@@ -388,6 +388,14 @@ export type RecipeFunction = {
   ): RecipeFactory<T, R>;
 };
 
+export type PatternToolFunction = <
+  T,
+  E extends Partial<T> = Record<PropertyKey, never>,
+>(
+  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  extraParams?: Opaque<E>,
+) => OpaqueRef<Omit<T, keyof E>>;
+
 export type LiftFunction = {
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
     argumentSchema: T,
@@ -573,6 +581,7 @@ export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const recipe: RecipeFunction;
+export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;
