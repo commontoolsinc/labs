@@ -24,12 +24,11 @@ function resolveWishTarget(
   runtime: IRuntime,
   space: MemorySpace,
   tx: IExtendedStorageTransaction,
-): Cell<unknown> | undefined {
-  const path = resolution.path ? [...resolution.path] : [];
+): Cell<any> | undefined {
   return runtime.getCellFromEntityId(
     space,
     resolution.entityId,
-    path,
+    resolution.path,
     undefined,
     tx,
   );
@@ -61,10 +60,6 @@ function parseWishTarget(target: string): ParsedWishTarget | undefined {
   return undefined;
 }
 
-function segmentToPropertyKey(segment: string): PropertyKey {
-  return /^\d+$/.test(segment) ? Number(segment) : segment;
-}
-
 type WishContext = {
   runtime: IRuntime;
   tx: IExtendedStorageTransaction;
@@ -90,20 +85,14 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 function resolvePath(
-  base: Cell<unknown>,
+  base: Cell<any>,
   path: readonly string[],
-  ctx: WishContext,
 ): Cell<unknown> {
-  let current = base.withTx(ctx.tx);
+  let current = base;
   for (const segment of path) {
-    const keyed = current.key(segmentToPropertyKey(segment) as never);
-    try {
-      current = keyed.resolveAsCell().withTx(ctx.tx);
-    } catch {
-      current = keyed.withTx(ctx.tx);
-    }
+    current = current.key(segment);
   }
-  return current;
+  return current.resolveAsCell();
 }
 
 function resolveBase(
@@ -210,13 +199,12 @@ export function wish(
     const combinedPath = baseResolution.pathPrefix
       ? [...baseResolution.pathPrefix, ...parsed.path]
       : parsed.path;
-    const resolvedCell = resolvePath(baseResolution.cell, combinedPath, ctx);
-    const resolvedWithTx = resolvedCell.withTx(tx);
+    const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
 
-    if (hasDefault && resolvedWithTx.get() === undefined) {
-      sendResult(tx, defaultCell);
+    if (resolvedCell.get() !== undefined) {
+      sendResult(tx, resolvedCell);
     } else {
-      sendResult(tx, resolvedWithTx);
+      sendResult(tx, hasDefault ? defaultCell : undefined);
     }
   };
 }

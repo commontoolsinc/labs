@@ -132,14 +132,14 @@ export interface IRuntime {
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     entityId: EntityId,
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId,
-    path?: PropertyKey[],
+    path?: readonly PropertyKey[],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
@@ -490,21 +490,21 @@ export class Runtime implements IRuntime {
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId | string,
-    path?: PropertyKey[],
+    path?: readonly PropertyKey[],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     entityId: EntityId | string,
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
     space: MemorySpace,
     entityId: EntityId | string,
-    path: PropertyKey[] = [],
+    path: readonly PropertyKey[] = [],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
