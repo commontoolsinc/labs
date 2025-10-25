@@ -133,7 +133,7 @@ export interface IRuntime {
     space: MemorySpace,
     entityId: EntityId,
     path: readonly PropertyKey[],
-    schema: JSONSchema,
+    schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
