@@ -53,145 +53,81 @@ import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
 /**
- * This is the regular Cell interface.
- *
- * This abstracts away the paths behind an interface that e.g. the UX code or
- * modules that prefer cell interfaces can use.
- *
- * These methods are available in the system and in spell code:
- *
- * @method get Returns the current value of the cell.
- * @returns {T}
- *
- * @method set Alias for `send`. Sets a new value for the cell.
- * @method send Sets a new value for the cell.
- * @param {T} value - The new value to set.
- * @returns {void}
- *
- * @method update Updates multiple properties of an object cell at once.
- * @param {Partial<T>} values - The properties to update.
- * @returns {void}
- *
- * @method push Adds an item to the end of an array cell.
- * @param {U | Cell<U>} value - The value to add, where U is the array element
- * type.
- * @returns {void}
- *
- * @method equals Compares two cells for equality.
- * @param {Cell<any>} other - The cell to compare with.
- * @returns {boolean}
- *
- * @method key Returns a new cell for the specified key path.
- * @param {K} valueKey - The key to access in the cell's value.
- * @returns {Cell<T[K]>}
- *
- * Everything below is only available in the system, not in spell code:
- *
- * @method asSchema Creates a new cell with a specific schema.
- * @param {JSONSchema} schema - The schema to apply.
- * @returns {Cell<T>} - A cell with the specified schema.
- *
- * @method withTx Creates a new cell with a specific transaction.
- * @param {IExtendedStorageTransaction} tx - The transaction to use.
- * @returns {Cell<T>}
- *
- * @method sink Adds a callback that is called immediately and on cell changes.
- * @param {function} callback - The callback to be called when the cell changes.
- * @returns {function} - A function to Cleanup the callback.
- *
- * @method sync Syncs the cell to the storage.
- * @returns {Promise<void>}
- *
- * @method resolveAsCell Resolves the cell to a new cell with the resolved link.
- * Equivalent to `cell.getAsSchema(<current schema wrapped in Cell<>).get()`
- * @returns {Cell<T>}
- *
- * @method getAsQueryResult Returns a query result for the cell.
- * @param {Path} path - The optional path to follow.
- * @param {ReactivityLog} log - Optional reactivity log.
- * @returns {QueryResult<DeepKeyLookup<T, Path>>}
- *
- * @method getAsNormalizedFullLink Returns a normalized full link for the cell.
- * @returns {NormalizedFullLink}
- *
- * @method getAsLink Returns a cell link for the cell (new sigil format).
- * @returns {SigilLink}
- *
- * @method getRaw Raw access method, without following aliases (which would
- * write to the destination instead of the cell itself).
- * @param {IReadOptions} options - Optional read options.
- * @returns {Immutable<JSONValue> | undefined} - Raw readonly document data
- *
- * @method setRaw Raw write method that bypasses Cell validation,
- * transformation, and alias resolution. Writes directly to the cell without
- * following aliases.
- * @param {any} value - Raw value to write directly to document
- *
- * @method getSourceCell Returns the source cell with optional schema.
- * @param {JSONSchema} schema - Optional schema to apply.
- * @returns {Cell<T & {[TYPE]: string | undefined} & {argument: any}>}
- *
- * @method toJSON Returns a serializable cell link (not the contents) to the
- * cell. This is used e.g. when creating merkle references that refer to cells.
- * It currentlly doesn't contain the space. We'll eventually want to get a
- * relative link here, but that will require context toJSON doesn't get.
- * @returns {{cell: {"/": string} | undefined, path: PropertyKey[]}}
- *
- * @property entityId Returns the current entity ID of the cell.
- * @returns {EntityId}
- *
- * @property sourceURI Returns the source URI of the cell.
- * @returns {URI}
- *
- * @property schema Optional schema for the cell.
- * @returns {JSONSchema | undefined}
- *
- * @property runtime The runtime that was used to create the cell.
- * @returns {IRuntime}
- *
- * @property tx The transaction that was used to create the cell.
- * @returns {IExtendedStorageTransaction}
- *
- * @property rootSchema Optional root schema for cell's schema. This differs
- * from `schema` when the cell represents a child of the original cell (e.g. via
- * `key()`). We need to keep the root schema to resolve `$ref` in the schema.
- * @returns {JSONSchema | undefined}
- *
- * The following are just for debugging and might disappear: (This allows
- * clicking on a property in the debugger and getting the value)
- *
- * @method value Returns the current value of the cell.
- * @returns {T}
- *
- * @property cellLink The cell link representing this cell.
- * @returns {SigilLink}
+ * Module augmentation for runtime-specific cell methods.
+ * These augmentations add implementation details specific to the runner runtime.
  */
+
 declare module "@commontools/api" {
-  interface Cell<T> {
+  /**
+   * Augment Readable to add onCommit callback support
+   */
+  interface Readable<T> {
     get(): Readonly<T>;
+  }
+
+  /**
+   * Augment Writable to add runtime-specific write methods with onCommit callbacks
+   */
+  interface Writable<T> {
     set(
-      value: Cellify<T> | T,
+      value: CellifyForWrite<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
     ): void;
-    send(
-      value: Cellify<T> | T,
-      onCommit?: (tx: IExtendedStorageTransaction) => void,
-    ): void;
-    update<V extends Cellify<Partial<T> | Partial<T>>>(
+    update<V extends CellifyForWrite<Partial<T> | Partial<T>>>(
       values: V extends object ? V : never,
     ): void;
     push(
       ...value: Array<
-        | (T extends Array<infer U> ? (Cellify<U> | U) : any)
+        | (T extends Array<infer U> ? (CellifyForWrite<U> | U) : any)
         | AnyCell<any>
       >
     ): void;
+  }
+
+  /**
+   * Augment Streamable to add onCommit callback support
+   */
+  interface Streamable<T> {
+    send(
+      value: CellifyForWrite<T> | T,
+      onCommit?: (tx: IExtendedStorageTransaction) => void,
+    ): void;
+  }
+
+  /**
+   * Augment Equatable for runtime implementation
+   */
+  interface Equatable {
     equals(other: any): boolean;
+  }
+
+  /**
+   * Augment Keyable to unwrap nested AnyCell types
+   */
+  interface Keyable<T, Brand extends CellBrand = CellBrand> {
+    key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
+      valueKey: K,
+    ): AnyCell<
+      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K],
+      Brand
+    >;
+  }
+
+  /**
+   * Augment Cell to add all internal/system methods that are available
+   * on Cell in the runner runtime.
+   */
+  interface Cell<T> {
+    // Note: Cell also has get(), set(), send(), update(), push(), equals() from
+    // the Readable, Writable, Streamable, Equatable augmentations above, but we
+    // need to explicitly add key() here because TypeScript doesn't pick up the
+    // Keyable augmentation through the conditional type composition.
     key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): Cell<
       T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
+    resolveAsCell(): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -201,7 +137,6 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
-    resolveAsCell(): Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -228,8 +163,6 @@ declare module "@commontools/api" {
     ):
       | Cell<
         & T
-        // Add default types for TYPE and `argument`. A more specific type in T will
-        // take precedence.
         & { [TYPE]: string | undefined }
         & ("argument" extends keyof T ? unknown : { argument: any })
       >
@@ -239,15 +172,11 @@ declare module "@commontools/api" {
     ):
       | Cell<
         & Schema<S>
-        // Add default types for TYPE and `argument`. A more specific type in
-        // `schema` will take precedence.
         & { [TYPE]: string | undefined }
-        & ("argument" extends keyof Schema<S> ? unknown
-          : { argument: any })
+        & ("argument" extends keyof Schema<S> ? unknown : { argument: any })
       >
       | undefined;
     setSourceCell(sourceCell: Cell<any>): void;
-    // This just flags as frozen. It does not prevent modification
     freeze(reason: string): void;
     isFrozen(): boolean;
     toJSON(): LegacyJSONCellLink;
@@ -265,8 +194,10 @@ declare module "@commontools/api" {
     [toOpaqueRef]: () => OpaqueRef<any>;
   }
 
+  /**
+   * Augment Stream to add runtime-specific Stream methods
+   */
   interface Stream<T> {
-    send(event: T, onCommit?: (tx: IExtendedStorageTransaction) => void): void;
     sink(callback: (event: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
@@ -285,12 +216,13 @@ declare module "@commontools/api" {
   }
 }
 
+
 export type { Cell, Cellify, Stream } from "@commontools/api";
 import {
   type AnyCell,
   CELL_BRAND,
   type CellBrand,
-  type Cellify,
+  type CellifyForWrite,
 } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
@@ -450,7 +382,7 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   set(
-    newValue: Cellify<T> | T,
+    newValue: CellifyForWrite<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
     if (!this.tx) throw new Error("Transaction required for set");
@@ -478,13 +410,13 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   send(
-    newValue: Cellify<T> | T,
+    newValue: CellifyForWrite<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
     this.set(newValue, onCommit);
   }
 
-  update<V extends Cellify<Partial<T> | Partial<T>>>(
+  update<V extends CellifyForWrite<Partial<T> | Partial<T>>>(
     values: V extends object ? V : never,
   ): void {
     if (!this.tx) throw new Error("Transaction required for update");
@@ -535,7 +467,7 @@ export class RegularCell<T> implements Cell<T> {
 
   push(
     ...value: Array<
-      | (T extends Array<infer U> ? (Cellify<U> | U) : any)
+      | (T extends Array<infer U> ? (CellifyForWrite<U> | U) : any)
       | AnyCell<any>
     >
   ): void {

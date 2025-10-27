@@ -276,20 +276,28 @@ export type Opaque<T> =
  * AnyCell<>, and allow any part of T that is currently wrapped in AnyCell<> to be
  * used unwrapped. This is designed for use with cell method parameters,
  * allowing flexibility in how values are passed.
+ *
+ * Note: Does NOT include ID/ID_FIELD symbols - use CellifyForWrite for write
+ * operations that need those metadata fields.
  */
 export type Cellify<T> =
   // Handle existing AnyCell<> types, allowing unwrapping
   T extends AnyCell<infer U> ? Cellify<U> | AnyCell<Cellify<U>>
     // Handle arrays
     : T extends Array<infer U> ? Array<Cellify<U>> | AnyCell<Array<Cellify<U>>>
-    // Handle objects (excluding null), adding optional ID fields
+    // Handle objects (excluding null)
     : T extends object ?
-        | ({ [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any })
-        | AnyCell<
-          { [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any }
-        >
+        | { [K in keyof T]: Cellify<T[K]> }
+        | AnyCell<{ [K in keyof T]: Cellify<T[K]> }>
     // Handle primitives
     : T | AnyCell<T>;
+
+/**
+ * CellifyForWrite is used for write operations (.set(), .push(), .update()).
+ * Currently identical to Cellify. The ID and ID_FIELD metadata symbols are
+ * added at runtime via recursivelyAddIDIfNeeded, not enforced by the type system.
+ */
+export type CellifyForWrite<T> = Cellify<T>;
 
 // ============================================================================
 // Extend Derivable interface now that OpaqueRef and Opaque are defined
