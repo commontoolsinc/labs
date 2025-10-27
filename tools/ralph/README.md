@@ -14,9 +14,30 @@ variable.
 
 ### Running smoketests
 
+**Prerequisites:**
+
+- Docker must be installed. Follow the
+  [official Docker installation guide](https://docs.docker.com/get-started/get-docker/)
+  for your platform.
+
+- Your user must be in the `docker` group to run docker commands without sudo:
+  ```bash
+  sudo usermod -aG docker $USER
+  # Log out and back in for changes to take effect
+  ```
+  **Important:** Running the script with `sudo` will cause it to look for Claude
+  credentials in `/root/.claude.json` instead of your user's home directory,
+  causing the smoketests to fail.
+
+- You must be logged into Claude CLI:
+  ```bash
+  claude
+  # Follow prompts to authenticate
+  ```
+
 **Option 1: Use the automated script (recommended)**
 
-Run multiple smoketests in parallel (tasks 1-3):
+Run multiple smoketests in parallel (currently configured for tasks 1-8):
 
 ```bash
 ./tools/ralph/bin/run_smoketest.sh
@@ -24,15 +45,25 @@ Run multiple smoketests in parallel (tasks 1-3):
 
 This script will:
 
+- Pull the latest ellyxir/ralph image from Docker Hub
 - Clean up old results
 - Stop/remove any existing ralph containers
-- Start 3 smoketest containers in parallel (RALPH_ID 1, 2, and 3)
+- Start smoketest containers in parallel (one per task)
 - Results are written to `./tools/ralph/smoketest/<ID>/`
 
-Monitor progress with:
+**Adding new tasks:** Edit `RALPH_IDS` variable at the top of
+`tools/ralph/bin/run_smoketest.sh` to include new task numbers (e.g., change
+`"1 2 3 4 5 6 7 8"` to `"1 2 3 4 5 6 7 8 9"`).
+
+The containers use bind mounts, so any changes you make to PROMPTS will be
+immediately available inside the running containers.
+
+Monitor progress by checking the logs in the smoketest directory:
 
 ```bash
-docker logs ralph_1  # or ralph_2, ralph_3
+cat tools/ralph/smoketest/1/ralph.log  # or /2/, /3/
+# Or follow live:
+tail -f tools/ralph/smoketest/1/ralph.log
 ```
 
 To stop all running smoketests:
@@ -43,19 +74,33 @@ To stop all running smoketests:
 
 **Option 2: Run a single smoketest manually**
 
-1. Build the Docker image (if not using pre-built):
+1. Pull or build the Docker image:
 
 ```bash
-docker build -t ellyxir/ralph tools/ralph/
+docker pull ellyxir/ralph
+# OR build locally: docker build -t ellyxir/ralph tools/ralph/
 ```
 
-2. Run the container with your RALPH_ID and mounted credentials:
+2. Run the container as host user and copy credentials:
 
 ```bash
 cd ~/labs
-docker run -e RALPH_ID=3 -d -v ~/.claude.json:/home/ralph/.claude.json \
-  -v ~/.claude/.credentials.json:/home/ralph/.claude/.credentials.json \
-  -v ./tools/ralph/smoketest:/app/smoketest --name ralph ellyxir/ralph
+# Create smoketest directory
+mkdir -p tools/ralph/smoketest/3
+
+# Run container as host user
+docker run --rm -e RALPH_ID=3 -d \
+  -u $(id -u):$(id -g) \
+  -e HOME=/tmp/home \
+  -v "$(pwd):/app/labs" \
+  -v "$(pwd)/tools/ralph/smoketest:/app/smoketest" \
+  --name ralph_3 \
+  ellyxir/ralph
+
+# Copy credentials into container
+docker exec ralph_3 mkdir -p /tmp/home/.claude
+docker cp ~/.claude.json ralph_3:/tmp/home/.claude.json
+docker cp ~/.claude/.credentials.json ralph_3:/tmp/home/.claude/.credentials.json
 ```
 
 Note: The container will exit automatically when the smoketest completes.
@@ -65,12 +110,15 @@ Note: The container will exit automatically when the smoketest completes.
 Results are available on the host machine in
 `./tools/ralph/smoketest/${RALPH_ID}/`:
 
+- `ralph.log` - Complete log of Ralph's execution (stdout and stderr)
 - `SCORE.txt` - Contains SUCCESS, PARTIAL, or FAILURE
 - `RESULTS.md` - Summary of work including test results
-- Pattern files created during the task
+- Pattern files (created directly in this directory for automatic cleanup)
 
 No need to copy files from the container - the bind mount makes results
-immediately available on your host.
+immediately available on your host machine as Ralph works. Pattern files are
+created directly in the smoketest directory (not in packages/patterns), so they
+are automatically cleaned up when smoketests rerun.
 
 ## How to run Ralph (not smoketest)
 

@@ -3,38 +3,59 @@
 Goal: implement the unchecked item from `./tools/ralph/TASKS.md` that matches
 your assigned RALPH_ID
 
-1. Open `./tools/ralph/TASKS.md` and find the task numbered with your RALPH_ID.
+1. Open `/app/labs/tools/ralph/TASKS.md` and find the task numbered with your
+   RALPH_ID.
 
 2. If your assigned task is already checked `[x]`, exit with a message saying
    the task is already complete.
 
-3. Use Claude Skills "recipe-dev" to work on the task that corresponds to your
+3. Use Claude Skills "pattern-dev" to work on the task that corresponds to your
    RALPH_ID number.
+
+   IMPORTANT:
+   - Create your pattern files directly in /app/smoketest/${RALPH_ID}/
+   - Use space name "ralph${RALPH_ID}" (e.g., ralph1, ralph2, ralph3) to avoid
+     conflicts with other parallel smoketests
 
 4. Format with `deno fmt` for the changed files.
 
-5. Once tests pass, deploy it locally using `./docs/common/RECIPE_DEV_DEPLOY.md`
-   for info on how to deploy. It should deploy to http://localhost:8080 and not
-   to toolshed. Servers are already running.
+5. Once tests pass, deploy it locally using
+   `/app/labs/docs/common/PATTERN_DEV_DEPLOY.md` for info on how to deploy. It
+   should deploy to http://localhost:8000. Servers are already running.
 
-6. Once it is deployed locally, use a subagent to test your work with MCP
-   playwright
+   Remember to use space name "ralph${RALPH_ID}" when deploying.
 
-7. Check off the completed items in `TASKS.md`:
+6. Once it is deployed locally, test your work using Playwright MCP tools
+   directly.
 
-8. git stage and commit with a message
+   IMPORTANT: Use the MCP tools (like `mcp__playwright__browser_navigate`,
+   `mcp__playwright__browser_click`, `mcp__playwright__browser_take_screenshot`)
+   directly as regular tool calls. DO NOT use the Skill tool for Playwright.
 
-9. Copy the files you created for the task to /app/smoketest/${RALPH_ID}/
+   Testing steps: a. Navigate to
+   http://localhost:8000/ralph${RALPH_ID}/<CHARM_ID> using
+   `mcp__playwright__browser_navigate` b. If you see a login page (first time
+   only), complete registration c. Test the charm's functionality using
+   Playwright MCP tools:
+   - Take screenshots to verify it loaded (name them
+     ralph_${RALPH_ID}-<description>.png, e.g., ralph_1-initial.png)
+   - Interact with buttons/inputs using `mcp__playwright__browser_click`
+   - Verify behavior matches task requirements
+   - Take final screenshot showing successful interactions
 
-10. Create a summary of your work in the same directory, be sure to include
-    playwright results and what you tested. file location:
-    /app/smoketest/${RALPH_ID}/RESULTS.md
+7. Create a summary of your work in /app/smoketest/${RALPH_ID}/RESULTS.md
+   Include:
+   - What pattern you implemented
+   - Test results (deno test output)
+   - Playwright test results and what you tested
+   - Any issues or limitations
 
-11. Create a /app/smoketest/${RALPH_ID}/SCORE.txt which has one of the following
-    values based on your results: SUCCESS, PARTIAL, FAILURE
+8. Create /app/smoketest/${RALPH_ID}/SCORE.txt with one of the following values
+   based on your results:
+   - SUCCESS: All tests pass, pattern works as expected
+   - PARTIAL: Some tests pass, pattern partially works
+   - FAILURE: Tests fail or pattern doesn't work
 
-12. Add feedback to documentation to `./tools/ralph/LEARNINGS.md`.
-
-13. Exit
+9. Exit
 
 Please begin.
