@@ -249,24 +249,21 @@ export type OpaqueRef<T> =
 // ============================================================================
 
 /**
- * CellLike accepts T or any AnyCell<T> at any nesting level.
- * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in any kind of cell.
+ * CellLike is a cell (AnyCell) whose nested values are Opaque.
+ * The top level must be AnyCell, but nested values can be plain or wrapped.
  *
- * This is the unified type that replaces OpaqueLike.
+ * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> =
-  | AnyCell<T>
-  | (T extends Array<infer U> ? Array<CellLike<U>>
-    : T extends object ? { [K in keyof T]: CellLike<T[K]> }
-    : T);
+export type CellLike<T> = AnyCell<T>;
 
 /**
- * Legacy Opaque type for backward compatibility.
- * Any OpaqueRef is also an Opaque, but can also have static values.
- * Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
- * when data gets passed into what developers see (either recipe inputs or
- * module outputs).
+ * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
+ * Used in APIs that accept inputs from developers - can be static values
+ * or wrapped in cells (OpaqueRef, Cell, etc).
+ *
+ * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
+ * for backward compatibility since it has the recursive proxy behavior that
+ * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
  */
 export type Opaque<T> =
   | OpaqueRef<T>
