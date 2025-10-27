@@ -61,8 +61,9 @@ while true; do
     break
   fi
 
-  # Print status
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Still running: ${RUNNING_CONTAINERS[*]}"
+  # Print status (strip "ralph_" prefix from container names)
+  IDS=("${RUNNING_CONTAINERS[@]#ralph_}")
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Still running: ${IDS[*]}"
 
   # Wait 10 seconds before checking again
   sleep 10
