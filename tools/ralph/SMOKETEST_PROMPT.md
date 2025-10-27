@@ -37,7 +37,8 @@ your assigned RALPH_ID
    `mcp__playwright__browser_navigate` b. If you see a login page (first time
    only), complete registration c. Test the charm's functionality using
    Playwright MCP tools:
-   - Take screenshots to verify it loaded (name them ralph_${RALPH_ID}-<description>.png, e.g., ralph_1-initial.png)
+   - Take screenshots to verify it loaded (name them
+     ralph_${RALPH_ID}-<description>.png, e.g., ralph_1-initial.png)
    - Interact with buttons/inputs using `mcp__playwright__browser_click`
    - Verify behavior matches task requirements
    - Take final screenshot showing successful interactions
