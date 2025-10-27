@@ -1978,7 +1978,7 @@ describe("asCell with schema", () => {
     const arrayCell = c.key("items");
     expect(arrayCell.get()).toBeNull();
 
-    expect(() => arrayCell.push(1)).toThrow();
+    expect(() => arrayCell.push(1 as never)).toThrow();
   });
 
   it("should push values to undefined array with schema default", () => {
@@ -2160,7 +2160,7 @@ describe("asCell with schema", () => {
     c.set({ value: "not an array" });
     const cell = c.key("value");
 
-    expect(() => cell.push(42)).toThrow();
+    expect(() => cell.push(42 as never)).toThrow();
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
