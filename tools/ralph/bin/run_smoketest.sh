@@ -41,4 +41,29 @@ for ID in 1; do
   fi
 done
 
-echo "All smoketests started. Use 'docker logs ralph_<ID>' to monitor progress."
+echo "All smoketests started. Monitoring container status..."
+echo ""
+
+# Poll containers until all have exited
+while true; do
+  RUNNING_CONTAINERS=()
+
+  # Check which containers are still running
+  for ID in 1 2 3; do
+    if docker ps --filter "name=ralph_$ID" --format "{{.Names}}" | grep -q "ralph_$ID"; then
+      RUNNING_CONTAINERS+=("ralph_$ID")
+    fi
+  done
+
+  # If no containers are running, exit the loop
+  if [ ${#RUNNING_CONTAINERS[@]} -eq 0 ]; then
+    echo "All smoketests completed!"
+    break
+  fi
+
+  # Print status
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Still running: ${RUNNING_CONTAINERS[*]}"
+
+  # Wait 10 seconds before checking again
+  sleep 10
+done
