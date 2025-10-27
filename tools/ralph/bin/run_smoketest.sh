@@ -58,6 +58,22 @@ while true; do
   # If no containers are running, exit the loop
   if [ ${#RUNNING_CONTAINERS[@]} -eq 0 ]; then
     echo "All smoketests completed!"
+
+    # Move screenshots to appropriate smoketest directories
+    if [ -d "$LABS/.playwright-mcp" ]; then
+      for screenshot in "$LABS/.playwright-mcp"/ralph_*-*.png; do
+        if [ -f "$screenshot" ]; then
+          # Extract RALPH_ID from filename (ralph_1-foo.png -> 1)
+          filename=$(basename "$screenshot")
+          ralph_id=$(echo "$filename" | sed 's/ralph_\([0-9]*\)-.*/\1/')
+          if [ -d "$LABS/tools/ralph/smoketest/$ralph_id" ]; then
+            mv "$screenshot" "$LABS/tools/ralph/smoketest/$ralph_id/"
+            echo "Moved $filename to smoketest/$ralph_id/"
+          fi
+        fi
+      done
+    fi
+
     break
   fi
 
