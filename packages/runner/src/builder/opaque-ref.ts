@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import {
+  type Derivable,
   isOpaqueRefMarker,
   type JSONSchema,
   type NodeFactory,
@@ -64,7 +65,7 @@ export function opaqueRef<T>(
     nestedSchema: JSONSchema | undefined,
     rootSchema: JSONSchema | undefined,
   ): OpaqueRef<any> {
-    const methods: OpaqueRefMethods<any> = {
+    const methods: OpaqueRefMethods<any> & Derivable<any> = {
       get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
         if (unsafe_binding) {

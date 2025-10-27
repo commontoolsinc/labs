@@ -49,6 +49,7 @@ import {
 import { AuthSchema } from "./schema-lib.ts";
 export { AuthSchema } from "./schema-lib.ts";
 export {
+  type Derivable,
   ID,
   ID_FIELD,
   type IDFields,
