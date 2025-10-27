@@ -75,4 +75,5 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # Start servers in background, wait for mount to settle, run smoketest, then exit
 # If you want to run ralph normally without the smoketest, then replace with:
 # CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
-CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && mkdir -p /app/smoketest/${RALPH_ID} && /app/labs/tools/ralph/bin/ralph-smoketest.sh > /app/smoketest/${RALPH_ID}/ralph.log 2>&1"]
+# Note: Directories are pre-created by run_smoketest.sh to ensure correct ownership
+CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && /app/labs/tools/ralph/bin/ralph-smoketest.sh > /app/smoketest/${RALPH_ID}/ralph.log 2>&1"]

@@ -22,10 +22,17 @@ done
 # Remove existing results after containers are stopped
 rm -rf "$LABS/tools/ralph/smoketest"/[0-9]*
 
+# Pre-create directories with correct ownership to avoid permission issues
+# This ensures the host user creates them (with correct UID) before containers try to
+for ID in $RALPH_IDS; do
+  mkdir -p "$LABS/tools/ralph/smoketest/$ID"
+done
+
 # Run smoketests
 for ID in $RALPH_IDS; do
   echo "Starting smoketest for RALPH_ID=$ID"
   docker run --rm -e RALPH_ID=$ID -d \
+    -u $(id -u):$(id -g) \
     -v "$LABS:/app/labs" \
     -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
     --name ralph_$ID \

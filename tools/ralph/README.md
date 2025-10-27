@@ -14,6 +14,27 @@ variable.
 
 ### Running smoketests
 
+**Prerequisites:**
+
+- Docker must be installed. Follow the
+  [official Docker installation guide](https://docs.docker.com/get-started/get-docker/)
+  for your platform.
+
+- Your user must be in the `docker` group to run docker commands without sudo:
+  ```bash
+  sudo usermod -aG docker $USER
+  # Log out and back in for changes to take effect
+  ```
+  **Important:** Running the script with `sudo` will cause it to look for Claude
+  credentials in `/root/.claude.json` instead of your user's home directory,
+  causing the smoketests to fail.
+
+- You must be logged into Claude CLI:
+  ```bash
+  claude
+  # Follow prompts to authenticate
+  ```
+
 **Option 1: Use the automated script (recommended)**
 
 Run multiple smoketests in parallel (currently configured for tasks 1-8):
