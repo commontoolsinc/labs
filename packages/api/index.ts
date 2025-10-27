@@ -219,11 +219,13 @@ export type WriteonlyCell<T = any> = AnyCell<
  * This interface can be augmented by the runtime to add internal methods
  * like .export(), .setDefault(), .setName(), .setSchema(), .connect(), etc.
  *
- * Note: .key() is inherited from OpaqueCell (via Keyable), not defined here.
+ * Note: .key() is overridden here to return OpaqueRef instead of OpaqueCell,
+ * maintaining the OpaqueRef type through property access.
  */
 export interface OpaqueRefMethods<T> {
   get(): T;
   set(value: OpaqueLike<T> | T): void;
+  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
 }
 
 /**
@@ -232,9 +234,11 @@ export interface OpaqueRefMethods<T> {
  * This is temporary until AST transformation handles .key() automatically.
  *
  * OpaqueRef extends OpaqueCell with OpaqueRefMethods (which can be augmented by runtime).
+ * We omit methods from OpaqueCell that are redefined in OpaqueRefMethods to ensure
+ * the OpaqueRefMethods versions take precedence (e.g., .key() returning OpaqueRef).
  */
 export type OpaqueRef<T> =
-  & OpaqueCell<T>
+  & Omit<OpaqueCell<T>, keyof OpaqueRefMethods<any>>
   & OpaqueRefMethods<T>
   & (T extends Array<infer U> ? Array<OpaqueRef<U>>
     : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
