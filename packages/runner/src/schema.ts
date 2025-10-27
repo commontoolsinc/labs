@@ -1,6 +1,6 @@
 import { JSONSchemaObj } from "@commontools/api";
 import { getLogger } from "@commontools/utils/logger";
-import { isObject, isRecord } from "@commontools/utils/types";
+import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
@@ -15,6 +15,11 @@ import {
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
 import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import {
+  IObjectCreator,
+  OptJSONValue,
+  SchemaObjectTraverser,
+} from "@commontools/runner/traverse";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -317,7 +322,143 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+export function validateAndTransformNew(
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  _seen: Array<[string, any]> = [],
+): any {
+  // If the transaction is no longer open, just treat it as no transaction, i.e.
+  // create temporary transactions to read. The main reason we use transactions
+  // here is so that this operation can see open reads, that are only accessible
+  // from the tx. Once tx.commit() is called, all that data is either available
+  // via other transactions or has been rolled back. Either way, we want to
+  // reflect that reality.
+  if (tx?.status().status !== "ready") tx = undefined;
+
+  // Reconstruct doc, path, schema, rootSchema from link and runtime
+  const schema = link.schema;
+  let rootSchema = link.rootSchema ?? schema;
+  let resolvedSchema = resolveSchema(schema, rootSchema, true);
+
+  // Follow aliases, etc. to last element on path + just aliases on that last one
+  // When we generate cells below, we want them to be based off this value, as that
+  // is what a setter would change when they update a value or reference.
+  tx = tx ?? runtime.edit();
+  const resolvedLink = resolveLink(tx, link, "writeRedirect");
+
+  // Use schema from alias if provided and no explicit schema was set
+  if (resolvedSchema === undefined && resolvedLink.schema) {
+    // Call resolveSchema to strip asCell/asStream here as well. It's still the
+    // initial `schema` that says whether this should be a cell, not the
+    // resolved schema.
+    resolvedSchema = resolveSchema(
+      resolvedLink.schema,
+      resolvedLink.rootSchema,
+      true,
+    );
+    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
+  }
+
+  link = {
+    ...resolvedLink,
+    schema: resolvedSchema,
+    rootSchema,
+  };
+
+  if (resolvedSchema === undefined) {
+    const rv = createQueryResultProxy(runtime, tx, link);
+    console.log("Returning rv", clearRuntime(rv));
+    return rv;
+    //return createQueryResultProxy(runtime, tx, link);
+  }
+
+  const objectCreator = new TransformObjectCreator(runtime, tx!);
+  // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
+  const traverser = new SchemaObjectTraverser<any>(tx!, {
+    path: [],
+    schemaContext: { schema: schema!, rootSchema: rootSchema! },
+  }, link.space);
+  traverser.objectCreator = objectCreator;
+  traverser.recurseCells = false;
+  const doc = { address: link, value: tx!.readValueOrThrow(link) };
+  const result = traverser.traverse(doc);
+  console.log("Returning result", result, doc.value);
+  return result;
+}
+
+class TransformObjectCreator implements IObjectCreator<unknown> {
+  constructor(
+    private runtime: IRuntime,
+    private tx: IExtendedStorageTransaction,
+  ) {
+  }
+  addOptionalProperty(
+    obj: Record<string, Immutable<OptJSONValue>>,
+    key: string,
+    value: JSONValue,
+  ) {
+    obj[key] = value;
+  }
+  applyDefault<T>(
+    link: NormalizedFullLink,
+    value: T,
+  ): T {
+    return processDefaultValue(this.runtime, this.tx, link, value);
+  }
+  // This is an early pass to see if we should just create a proxy or cell
+  // If not, we will actually resolve our links to get to our values.
+  createObject<T>(
+    link: NormalizedFullLink,
+    value: T[] | Record<string, T>,
+  ): T | undefined {
+    // If we have a schema with an asCell or asStream (or if our anyOf values
+    // do), we should create a cell here.
+    // If we don't have a schema, we should create a query result proxy.
+    // If we have a schema without asCell or asStream, we should annotate the
+    // object so we can get back to the cell if needed.
+    // console.log("called createObject with", clearRuntime(value), link);
+    if (link.schema === undefined) {
+      return createQueryResultProxy(this.runtime, this.tx, link);
+    } else if (isObject(link.schema)) {
+      const { asCell, asStream, ...restSchema } = link.schema;
+      if (asCell || asStream) {
+        // FIXME: wrong type cast -- Cell<T>
+        // TODO: deal with anyOf/oneOf with asCell/asStream
+        // TODO:: Figure out if we should purge asCell/asStream from restSchema children
+        return createCell(
+          this.runtime,
+          { ...link, schema: restSchema },
+          this.tx,
+        ) as T;
+      }
+    }
+    return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
+  }
+}
+
+// This is just used for removing the runtime before logging, so we have less noise
+function clearRuntime(obj: any): any {
+  if (isObject(obj) && "runtime" in obj) {
+    const { runtime: _runtime, ...rest } = obj;
+    return { runtime: "<removed>", ...rest };
+  }
+  return obj;
+}
+
 export function validateAndTransform(
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  seen: Array<[string, any]> = [],
+): any {
+  console.log("Calling VAT with", link.schema);
+  const rv = validateAndTransformNew(runtime, tx, link, seen);
+  console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
+  return rv;
+}
+
+export function validateAndTransformOrig(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,

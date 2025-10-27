@@ -1026,7 +1026,9 @@ export class Replica {
         result.error.name === "ConflictError" &&
         result.error.conflict.existsInHistory
       ) {
-        logger.info(() => ["Transaction failed (aready exists)", result.error]);
+        logger.info(
+          () => ["Transaction failed (already exists)", result.error]
+        );
       } else {
         logger.warn(() => ["Transaction failed", result.error]);
       }

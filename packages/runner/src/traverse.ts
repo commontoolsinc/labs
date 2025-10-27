@@ -182,18 +182,21 @@ export class CycleTracker<K> {
  * Cycle tracker for more complex objects with multiple parts.
  *
  * This will not work correctly if the key is modified after being added.
- *
- * This will do an identity check on the partial key and a deepEqual check on
- * the ExtraKey.
  */
-export class CompoundCycleTracker<PartialKey, ExtraKey> {
-  private partial: Map<PartialKey, ExtraKey[]>;
+export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
+  private partial: Map<EqualKey, [DeepEqualKey, Value?][]>;
   constructor() {
-    this.partial = new Map<PartialKey, ExtraKey[]>();
+    this.partial = new Map<EqualKey, [DeepEqualKey, Value?][]>();
   }
+
+  /**
+   * This will do an identity check on the `partialKey` and a deepEqual check on
+   * the `extraKey`.
+   */
   include(
-    partialKey: PartialKey,
-    extraKey: ExtraKey,
+    partialKey: EqualKey,
+    extraKey: DeepEqualKey,
+    value?: Value,
     context?: unknown,
   ): Disposable | null {
     let existing = this.partial.get(partialKey);
@@ -201,14 +204,16 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
       existing = [];
       this.partial.set(partialKey, existing);
     }
-    if (existing.some((item) => deepEqual(item, extraKey))) {
+    if (existing.some(([item, _value]) => deepEqual(item, extraKey))) {
       return null;
     }
-    existing.push(extraKey);
+    existing.push([extraKey, value]);
     return {
       [Symbol.dispose]: () => {
         const entries = this.partial.get(partialKey)!;
-        const index = entries.indexOf(extraKey);
+        const index = entries.findIndex(([item, _value]) =>
+          deepEqual(item, extraKey)
+        );
         if (index === -1) {
           logger.error(() => [
             "Failed to dispose of missing key",
@@ -224,11 +229,26 @@ export class CompoundCycleTracker<PartialKey, ExtraKey> {
       },
     };
   }
+
+  // After a failed include (that returns null), we can use getExisting to find the registered value
+  getExisting(partialKey: EqualKey, extraKey: DeepEqualKey): Value | undefined {
+    const existing = this.partial.get(partialKey);
+    if (existing === undefined) {
+      return undefined; // no match for partialKey
+    }
+    const match = existing.find(([item, _value]) => deepEqual(item, extraKey));
+    if (match === undefined) {
+      return undefined; // no match for extraKey
+    }
+    const [_key, value] = match;
+    return value;
+  }
 }
 
 export type PointerCycleTracker = CompoundCycleTracker<
   Immutable<JSONValue>,
-  SchemaContext | undefined
+  SchemaContext | undefined,
+  any
 >;
 
 class ManagedStorageJournal implements ITransactionJournal {
@@ -314,118 +334,83 @@ interface OptJSONObject {
 // Create objects based on the data and schema (in the link)
 // I think this callback system is a bit of a kludge, but it lets me
 // use the core traversal together with different object types for the runner.
-export interface IObjectCreator {
-  createObject(
-    link: NormalizedFullLink,
-  ): unknown;
-  // In the SchemaObjectTraverser system, we don't need to annotate the object
-  // In the validateAndTransform system, we may add the toCell and toOpaqueRef
-  // functions
-  annotateObject<T>(
-    link: NormalizedFullLink,
-    value: T,
-  ): T;
+export interface IObjectCreator<T> {
   // In the SchemaObjectTraverser system, we'll copy the object's value into
   // the new version
   // In the validateAndTransform system, we'll skip these properties
   addOptionalProperty(
-    obj: Record<string, Immutable<OptJSONValue>>,
+    obj: Record<string, unknown>,
     key: string,
-    value: JSONValue,
+    value: T,
   ): void;
 
   // In the SchemaObjectTraverser system, we don't need to apply defaults
   // In the validateAndTransform system, we apply defaults from the schema
   // This should also handle annotation of the default value if needed.
-  applyDefault<T>(link: NormalizedFullLink, value: T): T | undefined;
-}
+  applyDefault(
+    link: NormalizedFullLink,
+    defaultValue: T,
+  ): T;
 
-class TransformObjectCreator implements IObjectCreator {
-  addOptionalProperty(
-    _obj: Record<string, Immutable<OptJSONValue>>,
-    _key: string,
-    _value: JSONValue,
-  ) {
-    // noop
-  }
-  annotateObject<T>(
-    _link: NormalizedFullLink,
-    value: T,
-  ): T {
-    // return annotateWithBackToCellSymbols(result, runtime, link, tx);
-    return value;
-  }
-  applyDefault<T>(
-    _link: NormalizedFullLink,
-    value: T,
-  ): T {
-    // return processDefaultValue(runtime, tx, link, value);
-    return value;
-  }
-  // This is an early pass to see if we should just craete a proxy or cell
-  // If not, we will actually resolve our links to get to our values.
+  // In the SchemaObjectTraverser system, we don't need to annotate the object
+  // In the validateAndTransform system, we may add the toCell and toOpaqueRef
+  // functions
   createObject(
     link: NormalizedFullLink,
-  ): object | undefined {
-    // If we have a schema with an asCell or asStream (or if our anyOf values
-    // do), we should create a cell here.
-    // If we don't have a schema, we should create a query result proxy.
-    // if (link.schema === undefined) {
-    //   return createQueryResultProxy(this.runtime, this.tx, link);
-    // } else if (
-    //   isObject(link.schema) &&
-    //   (link.schema["asCell"] || link.schema["asStream"])
-    // ) {
-    //   return createCell(this.runtime, link, this.tx);
-    // }
-    return undefined;
-  }
+    value: T[] | Record<string, T>,
+  ): T;
 }
 
-class StandardObjectCreator implements IObjectCreator {
+class StandardObjectCreator<T> implements IObjectCreator<T> {
   addOptionalProperty(
-    obj: Record<string, Immutable<OptJSONValue>>,
+    obj: Record<string, unknown>,
     key: string,
-    value: JSONValue,
+    value: T,
   ) {
     obj[key] = value;
   }
-  annotateObject<T>(
+  applyDefault(
     _link: NormalizedFullLink,
-    value: T,
+    defaultValue: T,
   ): T {
-    return value;
-  }
-  applyDefault<T>(
-    _link: NormalizedFullLink,
-    _value: T,
-  ): T | undefined {
-    return undefined;
+    return defaultValue;
   }
   createObject(
-    link: NormalizedFullLink,
-  ): unknown {
-    return undefined;
+    _link: NormalizedFullLink,
+    value: T[] | Record<string, T>,
+  ): T {
+    return value as T;
   }
+}
+
+function getNormalizedLink(
+  address: IMemoryAddress,
+  space: MemorySpace,
+  schema: JSONSchema | undefined,
+  rootSchema: JSONSchema | undefined,
+): NormalizedFullLink {
+  return { ...address, path: address.path.slice(1), space, schema, rootSchema };
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
-export abstract class BaseObjectTraverser {
+export abstract class BaseObjectTraverser<
+  V extends JSONValue = JSONValue,
+> {
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
-    protected objectCreator: IObjectCreator = new StandardObjectCreator(),
-    protected recurseCells = true,
+    public objectCreator: IObjectCreator<V> = new StandardObjectCreator<V>(),
+    public recurseCells = true,
   ) {}
-  abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
-
+  abstract traverse(doc: IAttestation): V | undefined;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
    * If the doc's value is undefined, this will return undefined (or
    * defaultValue if provided).
    * Otherwise, it will return the fully traversed object.
+   * If a cycle is detected, it will not traverse the cyclic element
    *
    * @param doc
    * @param space
@@ -440,24 +425,25 @@ export abstract class BaseObjectTraverser {
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
     defaultValue?: JSONValue,
-  ): Immutable<JSONValue> | undefined {
+  ): V {
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return null
       return defaultValue != undefined
         ? this.objectCreator.applyDefault(
           { ...doc.address, space },
-          defaultValue,
-        )
-        : null;
+          defaultValue as V,
+        )!
+        : null as V;
     } else if (isPrimitive(doc.value)) {
-      return doc.value;
+      return doc.value as V;
     } else if (Array.isArray(doc.value)) {
-      using t = tracker.include(doc.value, SchemaAll, doc);
+      const newValue: V[] = [];
+      using t = tracker.include(doc.value, SchemaAll, newValue, doc);
       if (t === null) {
-        return null;
+        return tracker.getExisting(doc.value, SchemaAll);
       }
-      const newValue = doc.value.map((item, index) =>
+      const entries = doc.value.map((item, index) =>
         this.traverseDAG(
           {
             ...doc,
@@ -476,8 +462,13 @@ export abstract class BaseObjectTraverser {
             : undefined,
         )!
       );
-      return this.objectCreator.annotateObject(
-        { ...doc.address, space },
+      // We copy the contents of our result into newValue so that if we have
+      // a cycle, we can return newValue before we actually populate it.
+      for (const v of entries) {
+        newValue.push(v);
+      }
+      return this.objectCreator.createObject(
+        getNormalizedLink(doc.address, space, true, true),
         newValue,
       );
     } else if (isRecord(doc.value)) {
@@ -494,7 +485,7 @@ export abstract class BaseObjectTraverser {
           DefaultSchemaSelector,
         );
         if (newDoc.value === undefined) {
-          return null;
+          return null as V;
         }
         return this.traverseDAG(
           newDoc,
@@ -504,36 +495,44 @@ export abstract class BaseObjectTraverser {
           defaultValue,
         );
       } else {
-        using t = tracker.include(doc.value, SchemaAll, doc);
+        const newValue: Record<string, any> = {};
+        using t = tracker.include(doc.value, SchemaAll, newValue, doc);
         if (t === null) {
-          return null;
+          return tracker.getExisting(doc.value, SchemaAll);
         }
-        const newValue = Object.fromEntries(
-          Object.entries(doc.value as JSONObject).map(([k, value]) => [
-            k,
-            this.traverseDAG(
-              {
-                ...doc,
-                address: { ...doc.address, path: [...doc.address.path, k] },
-                value: value,
-              },
-              space,
-              tracker,
-              schemaTracker,
-              isObject(defaultValue) && !Array.isArray(defaultValue)
-                ? (defaultValue as JSONObject)[k] as JSONValue
-                : undefined,
-            )!,
-          ]),
-        );
-        return this.objectCreator.annotateObject(
-          { ...doc.address, space },
+        const entries = Object.entries(doc.value as JSONObject).map((
+          [k, value],
+        ) => [
+          k,
+          this.traverseDAG(
+            {
+              ...doc,
+              address: { ...doc.address, path: [...doc.address.path, k] },
+              value: value,
+            },
+            space,
+            tracker,
+            schemaTracker,
+            isObject(defaultValue) && !Array.isArray(defaultValue)
+              ? (defaultValue as JSONObject)[k] as JSONValue
+              : undefined,
+          )!,
+        ]);
+        // We copy the contents of our result into newValue so that if we have
+        // a cycle, we can return newValue before we actually populate it.
+        for (const [k, v] of entries) {
+          if (typeof k === "string") {
+            newValue[k] = v;
+          }
+        }
+        return this.objectCreator.createObject(
+          getNormalizedLink(doc.address, space, true, true),
           newValue,
         );
       }
     } else {
       logger.error(() => ["Encountered unexpected object: ", doc.value]);
-      return null;
+      return null as V;
     }
   }
 }
@@ -678,7 +677,7 @@ function followPointer(
       cfc,
     );
   }
-  using t = tracker.include(doc.value!, selector?.schemaContext, doc);
+  using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
   if (t === null) {
     // Cycle detected - treat this as notFound to avoid traversal
     return [notFound(doc.address), selector];
@@ -911,7 +910,8 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
-export class SchemaObjectTraverser extends BaseObjectTraverser {
+export class SchemaObjectTraverser<T extends JSONValue>
+  extends BaseObjectTraverser<T> {
   constructor(
     tx: IExtendedStorageTransaction,
     private selector: SchemaPathSelector,
@@ -930,7 +930,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
 
   override traverse(
     doc: IAttestation,
-  ): Immutable<OptJSONValue> {
+  ): T | undefined {
     const key = `${doc.address.id}/${doc.address.type}`;
     this.schemaTracker.add(key, this.selector);
     return this.traverseWithSelector(doc, this.selector);
@@ -942,7 +942,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
   traverseWithSelector(
     doc: IAttestation,
     selector: SchemaPathSelector,
-  ): Immutable<OptJSONValue> {
+  ): T | undefined {
     // Remove the leading "value" from the doc's address for comparison with
     // the schema path (which does not include the "value" portion).
     const valuePath = doc.address.path.slice(1);
@@ -1014,7 +1014,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
-  ): Immutable<OptJSONValue> {
+  ): T | undefined {
     // Handle any top-level $ref in the schema
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
@@ -1047,23 +1047,36 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
       return undefined;
     }
     const schemaObj = schemaContext.schema;
+    // FIXME: Need to clean up these casts
     if (doc.value === null) {
-      return this.isValidType(schemaObj, "null") ? doc.value : undefined;
+      return this.isValidType(schemaObj, "null") ? doc.value as T : undefined;
     } else if (isString(doc.value)) {
-      return this.isValidType(schemaObj, "string") ? doc.value : undefined;
+      return this.isValidType(schemaObj, "string") ? doc.value as T : undefined;
     } else if (isNumber(doc.value)) {
-      return this.isValidType(schemaObj, "number") ? doc.value : undefined;
+      return this.isValidType(schemaObj, "number") ? doc.value as T : undefined;
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
-        using t = this.tracker.include(doc.value, schemaContext, doc);
+        const newValue: any = [];
+        using t = this.tracker.include(doc.value, schemaContext, newValue, doc);
         if (t === null) {
-          return null;
+          return this.tracker.getExisting(doc.value, schemaContext);
         }
-        // FIXME: annotate
-        return this.traverseArrayWithSchema(doc, {
+        const entries = this.traverseArrayWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
         });
+        for (const item of entries as Immutable<OptJSONValue>[]) {
+          newValue.push(item);
+        }
+        return this.objectCreator.createObject(
+          getNormalizedLink(
+            doc.address,
+            this.space,
+            schemaObj,
+            schemaContext.rootSchema,
+          ),
+          newValue,
+        );
       }
       return undefined;
     } else if (isObject(doc.value)) {
@@ -1073,15 +1086,29 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
           rootSchema: schemaContext.rootSchema,
         });
       } else if (this.isValidType(schemaObj, "object")) {
-        using t = this.tracker.include(doc.value, schemaContext, doc);
+        const newValue: any = {};
+        using t = this.tracker.include(doc.value, schemaContext, newValue, doc);
         if (t === null) {
-          return null;
+          return this.tracker.getExisting(doc.value, schemaContext);
         }
-        // FIXME: annotate
-        return this.traverseObjectWithSchema(doc, {
+        const entries = this.traverseObjectWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
         });
+        for (
+          const [k, v] of Object.entries(entries as Immutable<OptJSONObject>)
+        ) {
+          newValue[k] = v;
+        }
+        return this.objectCreator.createObject(
+          getNormalizedLink(
+            doc.address,
+            this.space,
+            schemaObj,
+            schemaContext.rootSchema,
+          ),
+          newValue,
+        );
       }
     }
   }
@@ -1107,9 +1134,9 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
   private traverseArrayWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): Immutable<OptJSONValue> {
-    const arrayObj = [];
-    const schema = schemaContext.schema as JSONSchemaObj;
+  ): T | undefined {
+    const arrayObj: T[] = [];
+    const schema = schemaContext.schema;
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
     ) {
@@ -1137,18 +1164,23 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
       }
       arrayObj.push(val);
     }
-    return this.objectCreator.annotateObject({
-      ...doc.address,
-      space: this.space,
-    }, arrayObj);
+    return this.objectCreator.createObject(
+      getNormalizedLink(
+        doc.address,
+        this.space,
+        schema,
+        schemaContext.rootSchema,
+      ),
+      arrayObj,
+    );
   }
 
   // Returned object should be annotated and have defaults applied
   private traverseObjectWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): Immutable<OptJSONValue> {
-    const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
+  ): T | undefined {
+    const filteredObj: Record<string, T> = {};
     const schema = schemaContext.schema;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       const schemaProperties = isObject(schema)
@@ -1194,10 +1226,15 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
         }
       }
     }
-    return this.objectCreator.annotateObject({
-      ...doc.address,
-      space: this.space,
-    }, filteredObj);
+    return this.objectCreator.createObject(
+      getNormalizedLink(
+        doc.address,
+        this.space,
+        schema,
+        schemaContext.rootSchema,
+      ),
+      filteredObj,
+    );
   }
 
   // This just has a schemaContext, since the portion of the doc.address.path
@@ -1205,7 +1242,7 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
   private traversePointerWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
-  ): Immutable<OptJSONValue> {
+  ): T | undefined {
     const selector = {
       path: [...doc.address.path.slice(1)],
       schemaContext: schemaContext,
@@ -1221,15 +1258,17 @@ export class SchemaObjectTraverser extends BaseObjectTraverser {
       selector,
     );
     if (newDoc.value === undefined) {
-      return null;
+      // FIXME: need to fix cast
+      return null as T;
     }
     // The call to getAtPath above will track entry into the pointer,
     // but we may have a pointer cycle of docs, and we've finished resolving
     // the pointer now. To avoid descending into a cycle, track entry to the
     // doc we were called with (not the one we resolved, which may be a pointer).
-    using t = this.tracker.include(doc.value!, schemaContext, doc);
+    using t = this.tracker.include(doc.value!, schemaContext, null, doc);
     if (t === null) {
-      return null;
+      // FIXME: need to fix cast
+      return null as T;
     }
     return this.traverseWithSelector(newDoc, newSelector!);
   }
