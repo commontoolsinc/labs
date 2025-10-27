@@ -73,15 +73,6 @@ declare module "@commontools/api" {
       value: CellifyForWrite<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
     ): void;
-    update<V extends CellifyForWrite<Partial<T> | Partial<T>>>(
-      values: V extends object ? V : never,
-    ): void;
-    push(
-      ...value: Array<
-        | (T extends Array<infer U> ? (CellifyForWrite<U> | U) : any)
-        | AnyCell<any>
-      >
-    ): void;
   }
 
   /**
@@ -95,25 +86,6 @@ declare module "@commontools/api" {
   }
 
   /**
-   * Augment Equatable for runtime implementation
-   */
-  interface Equatable {
-    equals(other: any): boolean;
-  }
-
-  /**
-   * Augment Keyable to unwrap nested AnyCell types
-   */
-  interface Keyable<T, Brand extends CellBrand = CellBrand> {
-    key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
-      valueKey: K,
-    ): AnyCell<
-      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K],
-      Brand
-    >;
-  }
-
-  /**
    * Augment Cell to add all internal/system methods that are available
    * on Cell in the runner runtime.
    */
@@ -122,10 +94,10 @@ declare module "@commontools/api" {
     // the Readable, Writable, Streamable, Equatable augmentations above, but we
     // need to explicitly add key() here because TypeScript doesn't pick up the
     // Keyable augmentation through the conditional type composition.
-    key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
+    key<K extends keyof UnwrapCell<T>>(
       valueKey: K,
     ): Cell<
-      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+      UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
     >;
     resolveAsCell(): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
@@ -216,13 +188,13 @@ declare module "@commontools/api" {
   }
 }
 
-
 export type { Cell, Cellify, Stream } from "@commontools/api";
 import {
   type AnyCell,
   CELL_BRAND,
   type CellBrand,
   type CellifyForWrite,
+  type UnwrapCell,
 } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
@@ -261,7 +233,7 @@ export function createCell<T>(
       { ...link, schema, rootSchema },
       tx,
       synced,
-    );
+    ) as Cell<T>;
   }
 }
 
@@ -465,12 +437,7 @@ export class RegularCell<T> implements Cell<T> {
     }
   }
 
-  push(
-    ...value: Array<
-      | (T extends Array<infer U> ? (CellifyForWrite<U> | U) : any)
-      | AnyCell<any>
-    >
-  ): void {
+  push(...value: T extends (infer U)[] ? CellifyForWrite<U>[] : any[]): void {
     if (!this.tx) throw new Error("Transaction required for push");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -524,10 +491,10 @@ export class RegularCell<T> implements Cell<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
+  key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): Cell<
-    T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+    UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
   > {
     const childSchema = this.runtime.cfc.getSchemaAtPath(
       this.schema,
@@ -545,7 +512,7 @@ export class RegularCell<T> implements Cell<T> {
       false,
       this.synced,
     ) as Cell<
-      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+      UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
     >;
   }
 
@@ -565,7 +532,9 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return new RegularCell(this.runtime, this.link, newTx, this.synced);
+    return new RegularCell(this.runtime, this.link, newTx, this.synced) as Cell<
+      T
+    >;
   }
 
   sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
@@ -575,8 +544,8 @@ export class RegularCell<T> implements Cell<T> {
 
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
-    if (this.link.id.startsWith("data:")) return this;
-    return this.runtime.storageManager.syncCell<T>(this);
+    if (this.link.id.startsWith("data:")) return this as Cell<T>;
+    return this.runtime.storageManager.syncCell<T>(this as Cell<T>);
   }
 
   resolveAsCell(): Cell<T> {
