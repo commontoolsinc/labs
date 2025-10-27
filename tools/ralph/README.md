@@ -29,10 +29,15 @@ This script will:
 - Start 3 smoketest containers in parallel (RALPH_ID 1, 2, and 3)
 - Results are written to `./tools/ralph/smoketest/<ID>/`
 
-Monitor progress with:
+The containers use bind mounts, so any changes you make to PROMPTS will be
+immediately available inside the running containers.
+
+Monitor progress by checking the logs in the smoketest directory:
 
 ```bash
-docker logs ralph_1  # or ralph_2, ralph_3
+cat tools/ralph/smoketest/1/ralph.log  # or /2/, /3/
+# Or follow live:
+tail -f tools/ralph/smoketest/1/ralph.log
 ```
 
 To stop all running smoketests:
@@ -65,12 +70,13 @@ Note: The container will exit automatically when the smoketest completes.
 Results are available on the host machine in
 `./tools/ralph/smoketest/${RALPH_ID}/`:
 
+- `ralph.log` - Complete log of Ralph's execution (stdout and stderr)
 - `SCORE.txt` - Contains SUCCESS, PARTIAL, or FAILURE
 - `RESULTS.md` - Summary of work including test results
 - Pattern files created during the task
 
 No need to copy files from the container - the bind mount makes results
-immediately available on your host.
+immediately available on your host machine as Ralph works.
 
 ## How to run Ralph (not smoketest)
 

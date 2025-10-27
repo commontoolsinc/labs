@@ -76,4 +76,4 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # If you want to run ralph normally without the smoketest, then replace with:
 # CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
 # TODO(@ellyxir): remove sleep infinity, smoketest should exit when its done
-CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && /app/labs/tools/ralph/bin/ralph-smoketest.sh; sleep infinity"]
+CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && mkdir -p /app/smoketest/${RALPH_ID} && /app/labs/tools/ralph/bin/ralph-smoketest.sh > /app/smoketest/${RALPH_ID}/ralph.log 2>&1; sleep infinity"]
