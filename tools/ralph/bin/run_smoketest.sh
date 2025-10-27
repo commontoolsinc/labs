@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Ralph IDs to run smoketests for
+RALPH_IDS="1 2 3 4 5 6 7 8"
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Get the ralph directory (parent of bin)
@@ -11,7 +14,7 @@ LABS="$(dirname "$(dirname "$RALPH_DIR")")"
 cd "$LABS"
 
 # Stop and remove any existing ralph containers first
-for ID in 1 2 3; do
+for ID in $RALPH_IDS; do
   docker stop ralph_$ID 2>/dev/null || true
   docker rm ralph_$ID 2>/dev/null || true
 done
@@ -19,9 +22,8 @@ done
 # Remove existing results after containers are stopped
 rm -rf "$LABS/tools/ralph/smoketest"/[0-9]*
 
-# Run smoketests for IDs 1 through 3
-# TODO: Change back to "1 2 3" to run all containers
-for ID in 1; do
+# Run smoketests
+for ID in $RALPH_IDS; do
   echo "Starting smoketest for RALPH_ID=$ID"
   docker run --rm -e RALPH_ID=$ID -d \
     -v "$LABS:/app/labs" \
@@ -49,7 +51,7 @@ while true; do
   RUNNING_CONTAINERS=()
 
   # Check which containers are still running
-  for ID in 1 2 3; do
+  for ID in $RALPH_IDS; do
     if docker ps --filter "name=ralph_$ID" --format "{{.Names}}" | grep -q "ralph_$ID"; then
       RUNNING_CONTAINERS+=("ralph_$ID")
     fi
@@ -81,7 +83,7 @@ while true; do
     PARTIAL_COUNT=0
     FAILURE_COUNT=0
 
-    for ID in 1 2 3; do
+    for ID in $RALPH_IDS; do
       if [ -f "$LABS/tools/ralph/smoketest/$ID/SCORE.txt" ]; then
         SCORE=$(cat "$LABS/tools/ralph/smoketest/$ID/SCORE.txt" | tr -d '[:space:]')
         case "$SCORE" in

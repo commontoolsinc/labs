@@ -16,7 +16,7 @@ variable.
 
 **Option 1: Use the automated script (recommended)**
 
-Run multiple smoketests in parallel (tasks 1-3):
+Run multiple smoketests in parallel (currently configured for tasks 1-8):
 
 ```bash
 ./tools/ralph/bin/run_smoketest.sh
@@ -26,8 +26,12 @@ This script will:
 
 - Clean up old results
 - Stop/remove any existing ralph containers
-- Start 3 smoketest containers in parallel (RALPH_ID 1, 2, and 3)
+- Start smoketest containers in parallel (one per task)
 - Results are written to `./tools/ralph/smoketest/<ID>/`
+
+**Adding new tasks:** Edit `RALPH_IDS` variable at the top of
+`tools/ralph/bin/run_smoketest.sh` to include new task numbers (e.g., change
+`"1 2 3 4 5 6 7 8"` to `"1 2 3 4 5 6 7 8 9"`).
 
 The containers use bind mounts, so any changes you make to PROMPTS will be
 immediately available inside the running containers.
