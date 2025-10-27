@@ -1193,10 +1193,10 @@ export class SchemaObjectTraverser<T extends JSONValue>
           ? schema["additionalProperties"]
           : undefined;
       // Normally, if additionalProperties is not specified, it would
-      // default to true. However, we treat this specially, where we
-      // don't invalidate the object, but also don't descend down
-      // into that property.
-      if (propSchema === undefined) {
+      // default to true. However, if we provided the `properties` field, we
+      // treat this specially, and don't invalidate the object, but also don't
+      // descend down into that property.
+      if (isObject(schemaProperties) && propSchema === undefined) {
         this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
         continue;
       }
@@ -1208,7 +1208,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
         },
         value: propValue,
       }, {
-        schema: propSchema,
+        schema: propSchema ?? true,
         rootSchema: schemaContext.rootSchema,
       });
       if (val !== undefined) {

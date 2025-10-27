@@ -393,12 +393,14 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
     private tx: IExtendedStorageTransaction,
   ) {
   }
+  // This controls the behavior when properties is specified, but
+  // additonalProperties is not.
   addOptionalProperty(
-    obj: Record<string, Immutable<OptJSONValue>>,
-    key: string,
-    value: JSONValue,
+    _obj: Record<string, Immutable<OptJSONValue>>,
+    _key: string,
+    _value: JSONValue,
   ) {
-    obj[key] = value;
+    //obj[key] = value;
   }
   applyDefault<T>(
     link: NormalizedFullLink,
