@@ -181,7 +181,7 @@ async function runCharm(data: RunData): Promise<void> {
     }
 
     // Find the updater stream
-    const updater = runningCharm.key("bgUpdater") as Stream<unknown>;
+    const updater = runningCharm.key("bgUpdater") as unknown as Stream<unknown>;
     if (!updater || !isStream(updater)) {
       throw new Error(`No updater stream found for charm: ${charmId}`);
     }
