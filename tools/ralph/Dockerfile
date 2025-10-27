@@ -51,8 +51,8 @@ RUN useradd -m -s /bin/bash ralph && \
 RUN mkdir -p /app && chown ralph:ralph /app
 WORKDIR /app
 
-# Clone the Common Tools repository into labs subdirectory
-RUN git clone https://github.com/commontoolsinc/labs.git /app/labs && \
+# Create labs directory structure (will be mounted from host)
+RUN mkdir -p /app/labs && \
     chown -R ralph:ralph /app/labs
 
 # Copy the startup script from local directory
@@ -72,12 +72,8 @@ ENV PATH="/home/ralph/.npm-global/bin:/app/labs/tools/ralph/bin:$PATH"
 RUN npm install -g @anthropic-ai/claude-code && \
     npm install -g @openai/codex
 
-# Configure Claude MCP server for ralph user
-# --no-sandbox is required because Docker containers restrict namespace creation
-RUN claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
-
-# Start servers in background, run smoketest, then exit
+# Start servers in background, wait for mount to settle, run smoketest, then exit
 # If you want to run ralph normally without the smoketest, then replace with:
 # CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
 # TODO(@ellyxir): remove sleep infinity, smoketest should exit when its done
-CMD ["/bin/sh", "-c", "/app/start-servers.sh & /app/labs/tools/ralph/bin/ralph-smoketest.sh; sleep infinity"]
+CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && /app/labs/tools/ralph/bin/ralph-smoketest.sh; sleep infinity"]

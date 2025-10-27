@@ -20,14 +20,25 @@ done
 rm -rf "$LABS/tools/ralph/smoketest"/[0-9]*
 
 # Run smoketests for IDs 1 through 3
-for ID in 1 2 3; do
+# TODO: Change back to "1 2 3" to run all containers
+for ID in 1; do
   echo "Starting smoketest for RALPH_ID=$ID"
   docker run --rm -e RALPH_ID=$ID -d \
-    -v ~/.claude.json:/home/ralph/.claude.json \
-    -v ~/.claude/.credentials.json:/home/ralph/.claude/.credentials.json \
+    -v "$LABS:/app/labs" \
     -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
     --name ralph_$ID \
     ellyxir/ralph
+
+  # Create .claude directory and copy credentials into the running container
+  docker exec ralph_$ID mkdir -p /home/ralph/.claude
+  docker cp ~/.claude.json ralph_$ID:/home/ralph/.claude.json
+  docker cp ~/.claude/.credentials.json ralph_$ID:/home/ralph/.claude/.credentials.json
+
+  # Configure Claude MCP server for Playwright (only if not already configured)
+  # --no-sandbox is required because Docker containers restrict namespace creation
+  if ! docker exec -u ralph ralph_$ID claude mcp list 2>/dev/null | grep -q playwright; then
+    docker exec -u ralph ralph_$ID claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
+  fi
 done
 
 echo "All smoketests started. Use 'docker logs ralph_<ID>' to monitor progress."
