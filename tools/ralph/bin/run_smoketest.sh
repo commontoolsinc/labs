@@ -74,6 +74,32 @@ while true; do
       done
     fi
 
+    echo ""
+
+    # Summarize scores
+    SUCCESS_COUNT=0
+    PARTIAL_COUNT=0
+    FAILURE_COUNT=0
+
+    for ID in 1 2 3; do
+      if [ -f "$LABS/tools/ralph/smoketest/$ID/SCORE.txt" ]; then
+        SCORE=$(cat "$LABS/tools/ralph/smoketest/$ID/SCORE.txt" | tr -d '[:space:]')
+        case "$SCORE" in
+          SUCCESS) SUCCESS_COUNT=$((SUCCESS_COUNT + 1)) ;;
+          PARTIAL) PARTIAL_COUNT=$((PARTIAL_COUNT + 1)) ;;
+          FAILURE) FAILURE_COUNT=$((FAILURE_COUNT + 1)) ;;
+        esac
+      fi
+    done
+
+    echo "Summary: $SUCCESS_COUNT success, $PARTIAL_COUNT partial, $FAILURE_COUNT failure"
+    echo ""
+    echo "Results available in tools/ralph/smoketest/<ID>/"
+    echo "  - SCORE.txt: SUCCESS/PARTIAL/FAILURE"
+    echo "  - RESULTS.md: Test summary"
+    echo "  - ralph.log: Full execution log"
+    echo "  - Pattern files and screenshots"
+
     break
   fi
 
