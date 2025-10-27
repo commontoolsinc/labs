@@ -43,6 +43,10 @@ RUN npm install -g mystmd
 RUN npx playwright install chrome && \
     npx playwright install-deps chrome
 
+# Install Claude CLI and Codex globally (accessible to all users)
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm install -g @openai/codex
+
 # Create ralph user (with sudo privileges for development)
 RUN useradd -m -s /bin/bash ralph && \
     echo "ralph ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -62,15 +66,8 @@ RUN chmod +x /app/start-servers.sh
 # Switch to ralph user
 USER ralph
 
-# Configure npm to install global packages in user directory
-RUN npm config set prefix ~/.npm-global
-
-# Add npm-global bin and ralph scripts to PATH
-ENV PATH="/home/ralph/.npm-global/bin:/app/labs/tools/ralph/bin:$PATH"
-
-# Install Claude CLI and Codex as ralph user (can auto-update)
-RUN npm install -g @anthropic-ai/claude-code && \
-    npm install -g @openai/codex
+# Add ralph scripts to PATH
+ENV PATH="/app/labs/tools/ralph/bin:$PATH"
 
 # Start servers in background, wait for mount to settle, run smoketest, then exit
 # If you want to run ralph normally without the smoketest, then replace with:
