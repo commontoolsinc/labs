@@ -39,10 +39,14 @@ for ID in $RALPH_IDS; do
     -e HOME=/tmp/home \
     -v "$LABS:/app/labs" \
     -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
-    -v "$HOME/.claude.json:/tmp/home/.claude.json:ro" \
-    -v "$HOME/.claude:/tmp/home/.claude:ro" \
     --name ralph_$ID \
     ellyxir/ralph
+
+  # Copy Claude credentials into container's writable /tmp/home
+  # Each container gets its own copy to avoid conflicts
+  docker exec ralph_$ID mkdir -p /tmp/home/.claude
+  docker cp ~/.claude.json ralph_$ID:/tmp/home/.claude.json
+  docker cp ~/.claude/.credentials.json ralph_$ID:/tmp/home/.claude/.credentials.json
 
   # Configure Claude MCP server for Playwright
   # Container runs as host user with HOME=/tmp/home
