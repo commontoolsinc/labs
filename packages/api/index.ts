@@ -224,7 +224,7 @@ export type WriteonlyCell<T = any> = AnyCell<
  */
 export interface OpaqueRefMethods<T> {
   get(): T;
-  set(value: OpaqueLike<T> | T): void;
+  set(value: CellLike<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
 }
 
@@ -249,23 +249,16 @@ export type OpaqueRef<T> =
 // ============================================================================
 
 /**
- * CellLike accepts any AnyCell variant at any nesting level.
- * This is used for type constraints that accept any kind of cell.
- */
-export type CellLike<T> = AnyCell<T>;
-
-/**
- * OpaqueLike accepts T or any CellLike<T> at any nesting level.
+ * CellLike accepts T or any AnyCell<T> at any nesting level.
  * Used in APIs that accept inputs from developers - can be static values
- * or wrapped in cells.
+ * or wrapped in any kind of cell.
  *
- * This is the new version based on the unified cell system.
- * The old Opaque type (below) will be kept for backward compatibility.
+ * This is the unified type that replaces OpaqueLike.
  */
-export type OpaqueLike<T> =
-  | CellLike<T>
-  | (T extends Array<infer U> ? Array<OpaqueLike<U>>
-    : T extends object ? { [K in keyof T]: OpaqueLike<T[K]> }
+export type CellLike<T> =
+  | AnyCell<T>
+  | (T extends Array<infer U> ? Array<CellLike<U>>
+    : T extends object ? { [K in keyof T]: CellLike<T[K]> }
     : T);
 
 /**
