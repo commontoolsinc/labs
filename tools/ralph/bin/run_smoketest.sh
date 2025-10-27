@@ -13,6 +13,10 @@ LABS="$(dirname "$(dirname "$RALPH_DIR")")"
 # Change to labs directory
 cd "$LABS"
 
+# Pull latest image from Docker Hub
+echo "Pulling latest ellyxir/ralph image from Docker Hub..."
+docker pull ellyxir/ralph
+
 # Stop and remove any existing ralph containers first
 for ID in $RALPH_IDS; do
   docker stop ralph_$ID 2>/dev/null || true
