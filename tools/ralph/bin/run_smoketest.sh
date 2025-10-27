@@ -41,7 +41,7 @@ for ID in 1; do
   fi
 done
 
-echo "All smoketests started. Monitoring container status..."
+echo "All smoketests started. Monitor logs in tools/ralph/smoketest/<ID>/ralph.log"
 echo ""
 
 # Poll containers until all have exited
