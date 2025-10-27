@@ -285,32 +285,10 @@ declare module "@commontools/api" {
   }
 }
 
-export type { Cell, Stream } from "@commontools/api";
-import { type AnyCell, CELL_BRAND } from "@commontools/api";
+export type { Cell, Cellify, Stream } from "@commontools/api";
+import { type AnyCell, CELL_BRAND, type Cellify } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
-
-/**
- * Cellify is a type utility that allows any part of type T to be wrapped in
- * Cell<>, and allow any part of T that is currently wrapped in Cell<> to be
- * used unwrapped. This is designed for use with Cell<T> method parameters,
- * allowing flexibility in how values are passed.
- */
-export type Cellify<T> =
-  // Handle existing Cell<> types, allowing unwrapping
-  T extends Cell<infer U> ? Cellify<U> | Cell<Cellify<U>>
-    // Handle Stream<> types, allowing unwrapping
-    : T extends Stream<infer U> ? Cellify<U> | Stream<Cellify<U>>
-    // Handle arrays
-    : T extends Array<infer U> ? Array<Cellify<U>> | Cell<Array<Cellify<U>>>
-    // Handle objects (excluding null), adding optional ID fields
-    : T extends object ?
-        | ({ [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any })
-        | Cell<
-          { [K in keyof T]: Cellify<T[K]> } & { [ID]?: any; [ID_FIELD]?: any }
-        >
-    // Handle primitives
-    : T | Cell<T>;
 
 export function createCell<T>(
   runtime: IRuntime,
