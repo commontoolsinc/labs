@@ -1,8 +1,5 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import type {
-  BuiltInLLMMessage,
-  BuiltInLLMToolCallPart,
-} from "commontools";
+import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const {
@@ -15,7 +12,7 @@ const {
 } = llmDialogTestHelpers;
 
 Deno.test("createCharmToolDefinitions slugifies charm names and returns tool metadata", () => {
-  const defs = createCharmToolDefinitions("My Charm!", "{ \"type\": \"object\" }");
+  const defs = createCharmToolDefinitions("My Charm!", '{ "type": "object" }');
   assertEquals(defs.read.name, "My_Charm_read");
   assertEquals(defs.run.name, "My_Charm_run");
   const readSchema = defs.read.inputSchema as any;
