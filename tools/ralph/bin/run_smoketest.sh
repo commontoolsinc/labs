@@ -22,6 +22,9 @@ done
 # Remove existing results after containers are stopped
 rm -rf "$LABS/tools/ralph/smoketest"/[0-9]*
 
+# Ensure smoketest directory exists and is writable
+mkdir -p "$LABS/tools/ralph/smoketest"
+
 # Pre-create directories with correct ownership to avoid permission issues
 # This ensures the host user creates them (with correct UID) before containers try to
 for ID in $RALPH_IDS; do
@@ -33,20 +36,18 @@ for ID in $RALPH_IDS; do
   echo "Starting smoketest for RALPH_ID=$ID"
   docker run --rm -e RALPH_ID=$ID -d \
     -u $(id -u):$(id -g) \
+    -e HOME=/tmp/home \
     -v "$LABS:/app/labs" \
     -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
+    -v "$HOME/.claude.json:/tmp/home/.claude.json:ro" \
+    -v "$HOME/.claude:/tmp/home/.claude:ro" \
     --name ralph_$ID \
     ellyxir/ralph
 
-  # Create .claude directory and copy credentials into the running container
-  docker exec ralph_$ID mkdir -p /home/ralph/.claude
-  docker cp ~/.claude.json ralph_$ID:/home/ralph/.claude.json
-  docker cp ~/.claude/.credentials.json ralph_$ID:/home/ralph/.claude/.credentials.json
-
-  # Configure Claude MCP server for Playwright (only if not already configured)
-  # --no-sandbox is required because Docker containers restrict namespace creation
-  if ! docker exec -u ralph ralph_$ID claude mcp list 2>/dev/null | grep -q playwright; then
-    docker exec -u ralph ralph_$ID claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
+  # Configure Claude MCP server for Playwright
+  # Container runs as host user with HOME=/tmp/home
+  if ! docker exec ralph_$ID claude mcp list 2>/dev/null | grep -q playwright; then
+    docker exec ralph_$ID claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
   fi
 done
 
