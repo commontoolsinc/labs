@@ -13,7 +13,7 @@ your assigned RALPH_ID
    RALPH_ID number.
 
    IMPORTANT:
-   - Create your pattern files in /app/labs/packages/patterns/
+   - Create your pattern files directly in /app/smoketest/${RALPH_ID}/
    - Use space name "ralph${RALPH_ID}" (e.g., ralph1, ralph2, ralph3) to avoid
      conflicts with other parallel smoketests
 
@@ -42,22 +42,19 @@ your assigned RALPH_ID
    - Verify behavior matches task requirements
    - Take final screenshot showing successful interactions
 
-7. Copy the pattern files you created from /app/labs/packages/patterns/ to
-   /app/smoketest/${RALPH_ID}/
-
-8. Create a summary of your work in /app/smoketest/${RALPH_ID}/RESULTS.md
+7. Create a summary of your work in /app/smoketest/${RALPH_ID}/RESULTS.md
    Include:
    - What pattern you implemented
    - Test results (deno test output)
    - Playwright test results and what you tested
    - Any issues or limitations
 
-9. Create /app/smoketest/${RALPH_ID}/SCORE.txt with one of the following values
+8. Create /app/smoketest/${RALPH_ID}/SCORE.txt with one of the following values
    based on your results:
    - SUCCESS: All tests pass, pattern works as expected
    - PARTIAL: Some tests pass, pattern partially works
    - FAILURE: Tests fail or pattern doesn't work
 
-10. Exit
+9. Exit
 
 Please begin.

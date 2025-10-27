@@ -73,10 +73,12 @@ Results are available on the host machine in
 - `ralph.log` - Complete log of Ralph's execution (stdout and stderr)
 - `SCORE.txt` - Contains SUCCESS, PARTIAL, or FAILURE
 - `RESULTS.md` - Summary of work including test results
-- Pattern files created during the task
+- Pattern files (created directly in this directory for automatic cleanup)
 
 No need to copy files from the container - the bind mount makes results
-immediately available on your host machine as Ralph works.
+immediately available on your host machine as Ralph works. Pattern files are
+created directly in the smoketest directory (not in packages/patterns), so they
+are automatically cleaned up when smoketests rerun.
 
 ## How to run Ralph (not smoketest)
 
