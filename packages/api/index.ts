@@ -43,6 +43,32 @@ export type CellBrand = {
 };
 
 /**
+ * Minimal cell type with just the brand, no methods.
+ * Used for type-level operations like unwrapping nested cells without
+ * creating circular dependencies.
+ */
+export type BrandedCell<T = any, Brand extends CellBrand = CellBrand> = {
+  [CELL_BRAND]: Brand;
+};
+
+/**
+ * Recursively unwraps BrandedCell types at any nesting level.
+ * UnwrapCell<BrandedCell<BrandedCell<string>>> = string
+ * UnwrapCell<BrandedCell<{ a: BrandedCell<number> }>> = { a: BrandedCell<number> }
+ *
+ * Special cases:
+ * - UnwrapCell<any> = any (preserves any for backward compatibility)
+ * - UnwrapCell<unknown> = unknown (preserves unknown)
+ */
+export type UnwrapCell<T> =
+  // Preserve any
+  0 extends (1 & T) ? T
+    // Unwrap BrandedCell
+    : T extends BrandedCell<infer S> ? UnwrapCell<S>
+    // Otherwise return as-is
+    : T;
+
+/**
  * Base type for all cell variants. Uses a symbol brand to distinguish
  * different cell types at compile-time while sharing common structure.
  */
@@ -65,9 +91,11 @@ export interface Readable<T> {
  * Writable cells can update their value.
  */
 export interface Writable<T> {
-  set(value: T): void;
-  update(values: Partial<T>): void;
-  push(...value: T extends (infer U)[] ? U[] : never): void;
+  set(value: CellifyForWrite<T> | T): void;
+  update<V extends CellifyForWrite<Partial<T> | Partial<T>>>(
+    values: V extends object ? V : never,
+  ): void;
+  push(...value: T extends (infer U)[] ? CellifyForWrite<U>[] : any[]): void;
 }
 
 /**
@@ -80,9 +108,19 @@ export interface Streamable<T> {
 /**
  * Cells that support key() for property access.
  * Available on all cells except streams.
+ *
+ * Unwraps nested BrandedCell types recursively, so if T = BrandedCell<BrandedCell<S>>,
+ * accepts keys of S instead. This allows Cell<Cell<{a: number}>>.key("a") to work.
+ *
+ * If UnwrapCell<T> is unknown, treats it as any (accepts any key).
  */
 export interface Keyable<T, Brand extends CellBrand = CellBrand> {
-  key<K extends keyof T>(valueKey: K): AnyCell<T[K], Brand>;
+  key<K extends keyof UnwrapCell<T>>(
+    valueKey: K,
+  ): AnyCell<
+    UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K],
+    Brand
+  >;
 }
 
 /**
@@ -98,7 +136,7 @@ export interface Resolvable<T, Brand extends CellBrand = CellBrand> {
  * Available on comparable and readable cells.
  */
 export interface Equatable {
-  equals(other: AnyCell<any>): boolean;
+  equals(other: AnyCell<any> | object): boolean;
 }
 
 /**
@@ -154,7 +192,7 @@ export type OpaqueCell<T = any> = AnyCell<
 export interface Cell<T = any> extends
   AnyCell<
     T,
-    { opaque: false; read: true; write: true; stream: true; comparable: false }
+    { opaque: false; read: true; write: true; stream: false; comparable: true }
   > {}
 
 /**
