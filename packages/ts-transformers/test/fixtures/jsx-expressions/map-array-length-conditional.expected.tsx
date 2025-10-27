@@ -4,9 +4,9 @@ export default recipe("MapArrayLengthConditional", (_state) => {
     const list = cell(["apple", "banana", "cherry"]);
     return {
         [UI]: (<div>
-        {__ctHelpers.derive(list, list => list.length > 0 && (<div>
+        {__ctHelpers.ifElse(__ctHelpers.derive(list, list => list.length > 0), <div>
             {list.map((name) => (<span>{name}</span>))}
-          </div>))}
+          </div>, null)}
       </div>),
     };
 });
