@@ -45,6 +45,7 @@ Run multiple smoketests in parallel (currently configured for tasks 1-8):
 
 This script will:
 
+- Pull the latest ellyxir/ralph image from Docker Hub
 - Clean up old results
 - Stop/remove any existing ralph containers
 - Start smoketest containers in parallel (one per task)
@@ -73,19 +74,33 @@ To stop all running smoketests:
 
 **Option 2: Run a single smoketest manually**
 
-1. Build the Docker image (if not using pre-built):
+1. Pull or build the Docker image:
 
 ```bash
-docker build -t ellyxir/ralph tools/ralph/
+docker pull ellyxir/ralph
+# OR build locally: docker build -t ellyxir/ralph tools/ralph/
 ```
 
-2. Run the container with your RALPH_ID and mounted credentials:
+2. Run the container as host user and copy credentials:
 
 ```bash
 cd ~/labs
-docker run -e RALPH_ID=3 -d -v ~/.claude.json:/home/ralph/.claude.json \
-  -v ~/.claude/.credentials.json:/home/ralph/.claude/.credentials.json \
-  -v ./tools/ralph/smoketest:/app/smoketest --name ralph ellyxir/ralph
+# Create smoketest directory
+mkdir -p tools/ralph/smoketest/3
+
+# Run container as host user
+docker run --rm -e RALPH_ID=3 -d \
+  -u $(id -u):$(id -g) \
+  -e HOME=/tmp/home \
+  -v "$(pwd):/app/labs" \
+  -v "$(pwd)/tools/ralph/smoketest:/app/smoketest" \
+  --name ralph_3 \
+  ellyxir/ralph
+
+# Copy credentials into container
+docker exec ralph_3 mkdir -p /tmp/home/.claude
+docker cp ~/.claude.json ralph_3:/tmp/home/.claude.json
+docker cp ~/.claude/.credentials.json ralph_3:/tmp/home/.claude/.credentials.json
 ```
 
 Note: The container will exit automatically when the smoketest completes.
