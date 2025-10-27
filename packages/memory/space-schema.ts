@@ -175,13 +175,19 @@ export const selectSchema = <Space extends MemorySpace>(
     for (const entry of matchingFacts) {
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry, entry.cause, entry.since);
-
+      // These selectorEntry objects in SchemaQuery have their path relative
+      // to the value, but our traversal wants them to be relative to the
+      // fact.is, so adjust the paths.
+      const selector = {
+        ...selectorEntry.value,
+        path: ["value", ...selectorEntry.value.path],
+      };
       // Then filter the facts by the associated schemas, which will dereference
       // pointers as we walk through the structure.
       loadFactsForDoc(
         manager,
         entry,
-        selectorEntry.value,
+        selector,
         tracker,
         cfc,
         session.subject,
@@ -259,8 +265,8 @@ function loadFactsForDoc(
     const tx = new ExtendedStorageTransaction(managedTx);
     if (selector.schemaContext !== undefined) {
       const factValue: IAttestation = {
-        address: { ...fact.address, path: [...fact.address.path, "value"] },
-        value: (fact.value as Immutable<JSONObject>).value,
+        address: fact.address,
+        value: (fact.value as Immutable<JSONObject>),
       };
       const [newDoc, newSelector] = getAtPath(
         tx,

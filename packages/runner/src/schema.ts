@@ -375,15 +375,18 @@ export function validateAndTransformNew(
 
   const objectCreator = new TransformObjectCreator(runtime, tx!);
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
-  const traverser = new SchemaObjectTraverser<any>(tx!, {
-    path: [],
+  // Our selector is relative to the "value" in our doc
+  const selector = {
+    path: ["value"],
     schemaContext: { schema: schema!, rootSchema: rootSchema! },
-  }, link.space);
+  };
+  const traverser = new SchemaObjectTraverser<any>(tx!, selector, link.space);
   traverser.objectCreator = objectCreator;
   traverser.recurseCells = false;
-  const doc = { address: link, value: tx!.readValueOrThrow(link) };
+  // Link paths don't include value, but doc address should
+  const address = { ...link, path: ["value", ...link.path] };
+  const doc = { address, value: tx!.readValueOrThrow(link) };
   const result = traverser.traverse(doc);
-  console.log("Returning result", result, doc.value);
   return result;
 }
 
@@ -428,6 +431,7 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
         // FIXME: wrong type cast -- Cell<T>
         // TODO: deal with anyOf/oneOf with asCell/asStream
         // TODO:: Figure out if we should purge asCell/asStream from restSchema children
+        console.log("create cell link", link);
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
@@ -454,8 +458,9 @@ export function validateAndTransform(
   link: NormalizedFullLink,
   seen: Array<[string, any]> = [],
 ): any {
-  console.log("Calling VAT with", link.schema);
+  console.log("Calling VAT with", link);
   const rv = validateAndTransformNew(runtime, tx, link, seen);
+  //const rv = validateAndTransformOrig(runtime, tx, link, seen);
   console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
   return rv;
 }
@@ -579,6 +584,7 @@ export function validateAndTransformOrig(
         );
       }
     }
+    console.log("create cell link", link);
     return createCell(runtime, link, tx);
   }
 

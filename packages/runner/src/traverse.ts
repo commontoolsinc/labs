@@ -1,5 +1,7 @@
 import { refer } from "merkle-reference";
 import { SchemaAll } from "@commontools/memory/schema";
+import { MIME } from "@commontools/memory/interface";
+import { JSONSchemaObj } from "@commontools/api";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
@@ -42,8 +44,6 @@ import type {
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import { IExtendedStorageTransaction } from "./runtime.ts";
-import { MIME } from "@commontools/memory/interface";
-import { JSONSchemaObj } from "@commontools/api";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -355,6 +355,8 @@ export interface IObjectCreator<T> {
   // In the SchemaObjectTraverser system, we don't need to annotate the object
   // In the validateAndTransform system, we may add the toCell and toOpaqueRef
   // functions
+  // TODO: I think this link does not have the leading "value" that we'd see
+  // in an attestation
   createObject(
     link: NormalizedFullLink,
     value: T[] | Record<string, T>,
@@ -668,12 +670,12 @@ function followPointer(
     // Also insert the portions of cellTarget.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    // We also remove the initial "value" from the doc path, since that won't
-    // be included in the selector or link path.
+    // Link paths are relative to value, so prepend value to our target path
+    const targetPath = ["value", ...link.path as string[]];
     selector = narrowSchema(
-      doc.address.path.slice(1),
+      doc.address.path,
       selector,
-      link.path as string[],
+      targetPath,
       cfc,
     );
   }
@@ -712,10 +714,10 @@ function followPointer(
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
   // An assertion fact.is will be an object with a value property, and
-  // that's what our schema is relative to, so we'll grab the value part.
+  // that's what our schema is relative to.
   const targetDoc = {
-    address: { ...target, path: ["value"] },
-    value: (valueEntry.value as Immutable<JSONObject>)["value"],
+    address: { ...target, path: [] },
+    value: (valueEntry.value as Immutable<JSONObject>),
   };
 
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
@@ -937,15 +939,14 @@ export class SchemaObjectTraverser<T extends JSONValue>
   }
 
   // Traverse the specified doc with the selector.
-  // The selector should have been re-rooted if needed to be relative to the specified doc
+  // The selector should have been re-rooted if needed to be relative to the
+  // specified doc. This generally means that its path starts with value.
   // The selector must have a valid (defined) schemaContext
   traverseWithSelector(
     doc: IAttestation,
     selector: SchemaPathSelector,
   ): T | undefined {
-    // Remove the leading "value" from the doc's address for comparison with
-    // the schema path (which does not include the "value" portion).
-    const valuePath = doc.address.path.slice(1);
+    const valuePath = doc.address.path;
     if (deepEqual(valuePath, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!);
     } else if (valuePath.length > selector.path.length) {
@@ -969,8 +970,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
       if (nextDoc.value === undefined) {
         return undefined;
       }
-      const nextValuePath = nextDoc.address.path.slice(1);
-      if (!deepEqual(nextValuePath, nextSelector!.path)) {
+      if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
       }
       return this.traverseWithSchemaContext(
@@ -1149,9 +1149,8 @@ export class SchemaObjectTraverser<T extends JSONValue>
         },
         value: item,
       };
-      // Selector paths don't include the initial "value"
       const selector = {
-        path: curDoc.address.path.slice(1),
+        path: curDoc.address.path,
         schemaContext: {
           schema: itemSchema,
           rootSchema: schemaContext.rootSchema,
@@ -1244,7 +1243,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
     schemaContext: SchemaContext,
   ): T | undefined {
     const selector = {
-      path: [...doc.address.path.slice(1)],
+      path: doc.address.path,
       schemaContext: schemaContext,
     };
     const [newDoc, newSelector] = getAtPath(
@@ -1258,8 +1257,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
       selector,
     );
     if (newDoc.value === undefined) {
-      // FIXME: need to fix cast
-      return null as T;
+      return null as T; // FIXME: need to fix cast
     }
     // The call to getAtPath above will track entry into the pointer,
     // but we may have a pointer cycle of docs, and we've finished resolving
