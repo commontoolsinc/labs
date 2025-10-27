@@ -305,7 +305,6 @@ function createCharmToolDefinitions(
   charmName: string,
   schemaString: string,
 ): {
-  slug: string;
   read: { name: string; description: string; inputSchema: JSONSchema };
   run: { name: string; description: string; inputSchema: JSONSchema };
 } {
@@ -344,7 +343,6 @@ function createCharmToolDefinitions(
   };
 
   return {
-    slug,
     read: {
       name: readName,
       description: readDescription,
@@ -577,6 +575,99 @@ function resolveToolCall(
   }
 
   throw new Error("path does not resolve to a handler stream");
+}
+
+function extractToolCallParts(
+  content: BuiltInLLMMessage["content"],
+): BuiltInLLMToolCallPart[] {
+  if (!Array.isArray(content)) return [];
+  return content.filter((part): part is BuiltInLLMToolCallPart =>
+    (part as BuiltInLLMToolCallPart).type === "tool-call"
+  );
+}
+
+function buildAssistantMessage(
+  content: BuiltInLLMMessage["content"],
+  toolCallParts: BuiltInLLMToolCallPart[],
+): BuiltInLLMMessage {
+  const assistantContentParts: Array<
+    BuiltInLLMTextPart | BuiltInLLMToolCallPart
+  > = [];
+
+  if (typeof content === "string" && content) {
+    assistantContentParts.push({
+      type: "text",
+      text: content,
+    });
+  } else if (Array.isArray(content)) {
+    assistantContentParts.push(
+      ...content.filter((part) => part.type === "text") as BuiltInLLMTextPart[],
+    );
+  }
+
+  assistantContentParts.push(...toolCallParts);
+
+  return {
+    role: "assistant",
+    content: assistantContentParts,
+  };
+}
+
+type ToolCallExecutionResult = {
+  id: string;
+  toolName: string;
+  result?: any;
+  error?: string;
+};
+
+async function executeToolCalls(
+  runtime: IRuntime,
+  space: MemorySpace,
+  toolCatalog: ToolCatalog,
+  toolCallParts: BuiltInLLMToolCallPart[],
+): Promise<ToolCallExecutionResult[]> {
+  const results: ToolCallExecutionResult[] = [];
+  for (const part of toolCallParts) {
+    try {
+      const resolved = resolveToolCall(runtime, part, toolCatalog);
+      const resultValue = await invokeToolCall(
+        runtime,
+        space,
+        resolved.toolDef,
+        resolved.call,
+        resolved.charmMeta,
+      );
+      results.push({
+        id: part.toolCallId,
+        toolName: part.toolName,
+        result: resultValue,
+      });
+    } catch (error) {
+      console.error(`Tool ${part.toolName} failed:`, error);
+      results.push({
+        id: part.toolCallId,
+        toolName: part.toolName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
+
+function createToolResultMessages(
+  results: ToolCallExecutionResult[],
+): BuiltInLLMMessage[] {
+  return results.map((toolResult) => ({
+    role: "tool",
+    content: [{
+      type: "tool-result",
+      toolCallId: toolResult.id,
+      toolName: toolResult.toolName || "unknown",
+      output: toolResult.error
+        ? { type: "error-text", value: toolResult.error }
+        : toolResult.result,
+    }],
+  }));
 }
 
 /**
@@ -971,85 +1062,19 @@ async function startRequest(
 
       if (hasToolCalls) {
         try {
-          const newMessages: BuiltInLLMMessage[] = [];
-
-          // Create assistant message with tool-call content parts
-          const assistantContentParts: Array<
-            BuiltInLLMTextPart | BuiltInLLMToolCallPart
-          > = [];
-
-          // Add text content if present
-          if (typeof llmResult.content === "string" && llmResult.content) {
-            assistantContentParts.push({
-              type: "text",
-              text: llmResult.content,
-            });
-          } else if (Array.isArray(llmResult.content)) {
-            // Content is already an array of parts, use it directly
-            assistantContentParts.push(
-              ...llmResult.content.filter((part) => part.type === "text"),
-            );
-          }
-
-          // Extract tool calls from content parts
-          const toolCallParts = (llmResult.content as any[]).filter((part) =>
-            part.type === "tool-call"
-          ) as BuiltInLLMToolCallPart[];
-
-          for (const toolCallPart of toolCallParts) {
-            assistantContentParts.push(toolCallPart);
-          }
-
-          const assistantMessage: BuiltInLLMMessage = {
-            role: "assistant",
-            content: assistantContentParts,
-          };
-
-          // Execute each tool call and collect results
-          const toolResults: any[] = [];
-          for (const toolCallPart of toolCallParts) {
-            try {
-              const resolved = resolveToolCall(runtime, toolCallPart, toolCatalog);
-              const resultValue = await invokeToolCall(
-                runtime,
-                space,
-                resolved.toolDef,
-                resolved.call,
-                resolved.charmMeta,
-              );
-              toolResults.push({
-                id: toolCallPart.toolCallId,
-                result: resultValue,
-              });
-            } catch (error) {
-              console.error(`Tool ${toolCallPart.toolName} failed:`, error);
-              toolResults.push({
-                id: toolCallPart.toolCallId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
-
-          // Add assistant message with tool calls
-          newMessages.push(assistantMessage);
-
-          // Add tool result messages
-          for (const toolResult of toolResults) {
-            const matchingToolCallPart = toolCallParts.find((tc) =>
-              tc.toolCallId === toolResult.id
-            );
-            newMessages.push({
-              role: "tool",
-              content: [{
-                type: "tool-result",
-                toolCallId: toolResult.id,
-                toolName: matchingToolCallPart?.toolName || "unknown",
-                output: toolResult.error
-                  ? { type: "error-text", value: toolResult.error }
-                  : toolResult.result,
-              }],
-            });
-          }
+          const llmContent = llmResult.content as BuiltInLLMMessage["content"];
+          const toolCallParts = extractToolCallParts(llmContent);
+          const assistantMessage = buildAssistantMessage(llmContent, toolCallParts);
+          const toolResults = await executeToolCalls(
+            runtime,
+            space,
+            toolCatalog,
+            toolCallParts,
+          );
+          const newMessages: BuiltInLLMMessage[] = [
+            assistantMessage,
+            ...createToolResultMessages(toolResults),
+          ];
 
           newMessages.forEach((message) => {
             (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
