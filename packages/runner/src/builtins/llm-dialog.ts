@@ -484,14 +484,16 @@ function normalizeCharmPathSegments(input: unknown): string[] {
   ).map((segment) => segment.toString());
 }
 
-function extractRunArguments(input: unknown): unknown {
+function extractRunArguments(input: unknown): Record<string, any> {
   if (input && typeof input === "object") {
     const obj = input as Record<string, unknown>;
-    if (obj.args !== undefined) return obj.args;
+    if (obj.args && typeof obj.args === "object") {
+      return obj.args as Record<string, any>;
+    }
     const { path: _path, ...rest } = obj;
-    return rest;
+    return rest as Record<string, any>;
   }
-  return input;
+  return {};
 }
 
 function resolveToolCall(
