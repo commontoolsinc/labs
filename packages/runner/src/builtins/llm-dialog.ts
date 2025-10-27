@@ -443,7 +443,10 @@ async function buildToolCatalog(
   for (const entry of charms) {
     const schema = await getCharmResultSchemaAsync(runtime, entry.charm) ?? {};
     const schemaString = stringifySchemaGuarded(schema as JSONSchema);
-    const charmTools = createCharmToolDefinitions(entry.charmName, schemaString);
+    const charmTools = createCharmToolDefinitions(
+      entry.charmName,
+      schemaString,
+    );
 
     llmTools[charmTools.read.name] = {
       description: charmTools.read.description,
@@ -669,6 +672,15 @@ function createToolResultMessages(
     }],
   }));
 }
+
+export const llmDialogTestHelpers = {
+  createCharmToolDefinitions,
+  normalizeCharmPathSegments,
+  extractRunArguments,
+  extractToolCallParts,
+  buildAssistantMessage,
+  createToolResultMessages,
+};
 
 /**
  * Performs a mutation on the storage if the pending flag is active and the
@@ -1064,7 +1076,10 @@ async function startRequest(
         try {
           const llmContent = llmResult.content as BuiltInLLMMessage["content"];
           const toolCallParts = extractToolCallParts(llmContent);
-          const assistantMessage = buildAssistantMessage(llmContent, toolCallParts);
+          const assistantMessage = buildAssistantMessage(
+            llmContent,
+            toolCallParts,
+          );
           const toolResults = await executeToolCalls(
             runtime,
             space,
