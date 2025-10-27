@@ -187,10 +187,10 @@ declare module "@commontools/api" {
       >
     ): void;
     equals(other: any): boolean;
-    key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+    key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): Cell<
-      T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
@@ -286,7 +286,12 @@ declare module "@commontools/api" {
 }
 
 export type { Cell, Cellify, Stream } from "@commontools/api";
-import { type AnyCell, CELL_BRAND, type Cellify } from "@commontools/api";
+import {
+  type AnyCell,
+  CELL_BRAND,
+  type CellBrand,
+  type Cellify,
+} from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -528,15 +533,11 @@ export class RegularCell<T> implements Cell<T> {
     }
   }
 
-  push(...value: T extends Array<infer U> ? U[] : never): void;
   push(
     ...value: Array<
       | (T extends Array<infer U> ? (Cellify<U> | U) : any)
-      | Cell
+      | AnyCell<any>
     >
-  ): void;
-  push(
-    ...value: any[]
   ): void {
     if (!this.tx) throw new Error("Transaction required for push");
 
@@ -591,10 +592,10 @@ export class RegularCell<T> implements Cell<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+  key<K extends T extends AnyCell<infer S> ? keyof S : keyof T>(
     valueKey: K,
   ): Cell<
-    T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+    T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
   > {
     const childSchema = this.runtime.cfc.getSchemaAtPath(
       this.schema,
@@ -612,7 +613,7 @@ export class RegularCell<T> implements Cell<T> {
       false,
       this.synced,
     ) as Cell<
-      T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+      T extends AnyCell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
   }
 
