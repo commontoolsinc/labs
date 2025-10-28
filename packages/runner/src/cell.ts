@@ -60,16 +60,9 @@ import { ContextualFlowControl } from "./cfc.ts";
 
 declare module "@commontools/api" {
   /**
-   * Augment Readable to add onCommit callback support
-   */
-  interface Readable<T> {
-    get(): Readonly<T>;
-  }
-
-  /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
    */
-  interface Writable<T> {
+  interface IWritable<T> {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
@@ -79,7 +72,7 @@ declare module "@commontools/api" {
   /**
    * Augment Streamable to add onCommit callback support
    */
-  interface Streamable<T> {
+  interface IStreamable<T> {
     send(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
@@ -90,18 +83,7 @@ declare module "@commontools/api" {
    * Augment Cell to add all internal/system methods that are available
    * on Cell in the runner runtime.
    */
-  interface Cell<T> {
-    // Note: Cell also has get(), set(), send(), update(), push(), equals() from
-    // the Readable, Writable, Streamable, Equatable augmentations above, but we
-    // need to explicitly add key() here because TypeScript doesn't pick up the
-    // Keyable augmentation through the conditional type composition.
-    key<K extends keyof UnwrapCell<T>>(
-      valueKey: K,
-    ): UnwrapCell<T>[K] extends never ? any
-      : UnwrapCell<T>[K] extends BrandedCell<infer U>
-        ? Cell<U>
-        : Cell<UnwrapCell<T>[K]>;
-    resolveAsCell(): Cell<T>;
+  interface IAnyCell<T> {
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -172,7 +154,7 @@ declare module "@commontools/api" {
    * Augment Stream to add runtime-specific Stream methods
    */
   interface Stream<T> {
-    sink(callback: (event: Readonly<T>) => Cancel | undefined | void): Cancel;
+    sink(callback: (event: AnyCellWrapping<T>) => Cancel | undefined): Cancel;
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
     getAsNormalizedFullLink(): NormalizedFullLink;
@@ -190,13 +172,13 @@ declare module "@commontools/api" {
   }
 }
 
-export type { Cell, Cellify, Stream } from "@commontools/api";
-import {
-  type AnyCell,
-  type AnyCellWrapping,
-  CELL_BRAND,
-  type CellBrand,
-  type UnwrapCell,
+export type { AnyCell, Cell, Stream } from "@commontools/api";
+import type {
+  AnyCellWrapping,
+  ICell,
+  IStreamable,
+  KeyResultType,
+  UnwrapCell,
 } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
@@ -235,20 +217,14 @@ export function createCell<T>(
       { ...link, schema, rootSchema },
       tx,
       synced,
-    ) as Cell<T>;
+    ) as unknown as Cell<T>;
   }
 }
 
-class StreamCell<T> implements Stream<T> {
-  readonly [CELL_BRAND] = {
-    opaque: false,
-    read: false,
-    write: false,
-    stream: true,
-    comparable: false,
-  } as const;
-
-  private listeners = new Set<(event: T) => Cancel | undefined>();
+class StreamCell<T> implements IStreamable<T> {
+  private listeners = new Set<
+    (event: AnyCellWrapping<T>) => Cancel | undefined
+  >();
   private cleanup: Cancel | undefined;
 
   constructor(
@@ -265,8 +241,11 @@ class StreamCell<T> implements Stream<T> {
     return this.link.rootSchema;
   }
 
-  send(event: T, onCommit?: (tx: IExtendedStorageTransaction) => void): void {
-    event = convertCellsToLinks(event) as T;
+  send(
+    event: AnyCellWrapping<T>,
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+  ): void {
+    event = convertCellsToLinks(event) as AnyCellWrapping<T>;
 
     // Use runtime from doc if available
     this.runtime.scheduler.queueEvent(this.link, event, undefined, onCommit);
@@ -278,7 +257,7 @@ class StreamCell<T> implements Stream<T> {
     this.listeners.forEach((callback) => addCancel(callback(event)));
   }
 
-  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
+  sink(callback: (event: AnyCellWrapping<T>) => Cancel | undefined): Cancel {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
   }
@@ -286,7 +265,7 @@ class StreamCell<T> implements Stream<T> {
   // sync: No-op for streams, but maybe eventually it might mean wait for all
   // events to have been processed
   sync(): Stream<T> {
-    return this;
+    return this as unknown as Stream<T>;
   }
 
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
@@ -312,19 +291,11 @@ class StreamCell<T> implements Stream<T> {
   }
 
   withTx(_tx?: IExtendedStorageTransaction): Stream<T> {
-    return this; // No-op for streams
+    return this as unknown as Stream<T>; // No-op for streams
   }
 }
 
-export class RegularCell<T> implements Cell<T> {
-  readonly [CELL_BRAND] = {
-    opaque: false,
-    read: true,
-    write: true,
-    stream: true,
-    comparable: false,
-  } as const;
-
+export class RegularCell<T> implements ICell<T> {
   private readOnlyReason: string | undefined;
 
   constructor(
@@ -435,7 +406,7 @@ export class RegularCell<T> implements Cell<T> {
 
     // Now update each property
     for (const [key, value] of Object.entries(values)) {
-      (this as Cell<any>).key(key).set(value);
+      (this as unknown as Cell<any>).key(key).set(value);
     }
   }
 
@@ -495,10 +466,11 @@ export class RegularCell<T> implements Cell<T> {
 
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? Cell<U>
-      : Cell<UnwrapCell<T>[K]> {
+  ): KeyResultType<
+    T,
+    K,
+    Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
+  > {
     const childSchema = this.runtime.cfc.getSchemaAtPath(
       this.schema,
       [valueKey.toString()],
@@ -514,10 +486,11 @@ export class RegularCell<T> implements Cell<T> {
       this.tx,
       false,
       this.synced,
-    ) as UnwrapCell<T>[K] extends never ? any
-      : UnwrapCell<T>[K] extends BrandedCell<infer U>
-        ? Cell<U>
-        : Cell<UnwrapCell<T>[K]>;
+    ) as KeyResultType<
+      T,
+      K,
+      Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
+    >;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -532,13 +505,16 @@ export class RegularCell<T> implements Cell<T> {
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
       false, // Reset synced flag, since schmema is changing
-    ) as Cell<any>;
+    ) as unknown as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return new RegularCell(this.runtime, this.link, newTx, this.synced) as Cell<
-      T
-    >;
+    return new RegularCell(
+      this.runtime,
+      this.link,
+      newTx,
+      this.synced,
+    ) as unknown as Cell<T>;
   }
 
   sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
@@ -548,8 +524,8 @@ export class RegularCell<T> implements Cell<T> {
 
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
-    if (this.link.id.startsWith("data:")) return this as Cell<T>;
-    return this.runtime.storageManager.syncCell<T>(this as Cell<T>);
+    if (this.link.id.startsWith("data:")) return this as unknown as Cell<T>;
+    return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
   }
 
   resolveAsCell(): Cell<T> {
