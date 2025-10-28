@@ -28,17 +28,12 @@ export const emitBinaryExpression: Emitter = ({
       dataFlows,
       expression.left,
     );
-    const rightDataFlows = selectDataFlowsReferencedIn(
-      dataFlows,
-      expression.right,
-    );
 
     const shouldDeriveLeft = leftDataFlows.length > 0 &&
       !isSimpleOpaqueRefAccess(expression.left, context.checker);
 
-    // Only apply ifElse optimization if:
-    // 1. Left side has opaque refs (needs derive)
-    // 2. Right side either has no opaque refs OR is simple enough (like JSX)
+    // Only apply ifElse optimization if left side has opaque refs (needs derive)
+    // Right side is handled by rewriteChildren which processes any opaque refs appropriately
     if (shouldDeriveLeft) {
       let predicate: ts.Expression = expression.left;
       const plan = createBindingPlan(leftDataFlows);
