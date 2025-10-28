@@ -105,6 +105,27 @@ export class CommonToolsFormatter implements TypeFormatter {
           context,
           wrapperInfo.kind,
         );
+      } else {
+        // If we detected a wrapper via typeNode but the type structure is complex
+        // (e.g., wrapped in Opaque union), recursively unwrap to find the base wrapper type
+        const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+          type,
+          resolvedWrapper.kind,
+          context.typeChecker,
+        );
+        if (unwrappedType) {
+          const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
+            ? n
+            : resolvedWrapper.node;
+
+          return this.formatWrapperType(
+            unwrappedType.typeRef,
+            nodeToPass,
+            context,
+            unwrappedType.kind,
+          );
+        }
+        // If we couldn't unwrap, fall through to regular handling
       }
     }
 
@@ -214,6 +235,61 @@ export class CommonToolsFormatter implements TypeFormatter {
         : { [propertyName]: true }; // true = "any value is valid"
     }
     return { ...innerSchema, [propertyName]: true };
+  }
+
+  /**
+   * Recursively unwrap OpaqueRef layers to find a wrapper type (Cell/Stream/OpaqueRef).
+   * This handles cases like Opaque<OpaqueRef<Stream<T>>> where the type is wrapped in
+   * multiple layers of OpaqueRef due to the Opaque type's recursive definition.
+   */
+  private recursivelyUnwrapOpaqueRef(
+    type: ts.Type,
+    targetWrapperKind: WrapperKind,
+    checker: ts.TypeChecker,
+    depth: number = 0,
+  ):
+    | { type: ts.Type; typeRef: ts.TypeReference; kind: WrapperKind }
+    | undefined {
+    // Prevent infinite recursion
+    if (depth > 10) {
+      return undefined;
+    }
+
+    // Check if this type itself is the target wrapper
+    const wrapperInfo = this.getWrapperTypeInfo(type);
+    if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
+      return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
+    }
+
+    // If this is a union (e.g., from Opaque<T>), check each member
+    if (type.flags & ts.TypeFlags.Union) {
+      const unionType = type as ts.UnionType;
+      for (const member of unionType.types) {
+        // Try to unwrap this member
+        const result = this.recursivelyUnwrapOpaqueRef(
+          member,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+        if (result) return result;
+      }
+    }
+
+    // If this is an OpaqueRef type, extract its type argument and recurse
+    if (this.isOpaqueRefType(type)) {
+      const innerType = this.extractOpaqueRefTypeArgument(type, checker);
+      if (innerType) {
+        return this.recursivelyUnwrapOpaqueRef(
+          innerType,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+      }
+    }
+
+    return undefined;
   }
 
   /**
