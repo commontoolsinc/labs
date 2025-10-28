@@ -29,10 +29,15 @@ rm -rf "$LABS/tools/ralph/smoketest"/[0-9]*
 # Ensure smoketest directory exists and is writable
 mkdir -p "$LABS/tools/ralph/smoketest"
 
-# Pre-create directories with correct ownership to avoid permission issues
+# Pre-create directories and files with correct ownership to avoid permission issues
 # This ensures the host user creates them (with correct UID) before containers try to
 for ID in $RALPH_IDS; do
   mkdir -p "$LABS/tools/ralph/smoketest/$ID"
+  # Pre-create files that will be written by shell redirection or Claude Write tool
+  touch "$LABS/tools/ralph/smoketest/$ID/ralph.log"
+  touch "$LABS/tools/ralph/smoketest/$ID/TIMING_SECONDS.txt"
+  touch "$LABS/tools/ralph/smoketest/$ID/RESULTS.md"
+  touch "$LABS/tools/ralph/smoketest/$ID/SCORE.txt"
 done
 
 # Run smoketests
