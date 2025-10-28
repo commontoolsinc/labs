@@ -199,10 +199,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             onct-keybind={toggle({ value: fabExpanded })}
           />
 
-          <ct-vstack gap="4" padding="6">
-            {/* Quick Launch Toolbar */}
-            <ct-hstack gap="2" align="center">
-              <h3>Quicklaunch:</h3>
+          <ct-toolbar slot="header">
+            <div slot="start">
               <ct-button
                 onClick={spawnChatList()}
               >
@@ -223,43 +221,47 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               >
                 📄 Note
               </ct-button>
-            </ct-hstack>
+            </div>
+          </ct-toolbar>
 
-            <h2>Charms ({allCharms.length})</h2>
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack gap="4" padding="6">
+              <h2>Charms ({allCharms.length})</h2>
 
-            <ct-table full-width hover>
-              <thead>
-                <tr>
-                  <th>Charm Name</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allCharms.map((charm) => (
+              <ct-table full-width hover>
+                <thead>
                   <tr>
-                    <td>{charm?.[NAME] || "Untitled Charm"}</td>
-                    <td>
-                      <ct-hstack gap="2">
-                        <ct-button
-                          size="sm"
-                          onClick={visit({ charm })}
-                        >
-                          Visit
-                        </ct-button>
-                        <ct-button
-                          size="sm"
-                          variant="destructive"
-                          onClick={removeCharm({ charm, allCharms })}
-                        >
-                          Remove
-                        </ct-button>
-                      </ct-hstack>
-                    </td>
+                    <th>Charm Name</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </ct-table>
-          </ct-vstack>
+                </thead>
+                <tbody>
+                  {allCharms.map((charm) => (
+                    <tr>
+                      <td>{charm?.[NAME] || "Untitled Charm"}</td>
+                      <td>
+                        <ct-hstack gap="2">
+                          <ct-button
+                            size="sm"
+                            onClick={visit({ charm })}
+                          >
+                            Visit
+                          </ct-button>
+                          <ct-button
+                            size="sm"
+                            variant="destructive"
+                            onClick={removeCharm({ charm, allCharms })}
+                          >
+                            Remove
+                          </ct-button>
+                        </ct-hstack>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </ct-table>
+            </ct-vstack>
+          </ct-vscroll>
         </ct-screen>
       ),
       sidebarUI: (
