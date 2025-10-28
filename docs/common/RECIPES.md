@@ -176,6 +176,53 @@ Several utility functions are available:
     str`Hello, ${user.name}! You have ${notifications.count} new messages.`;
   ```
 
+- `wish`: Access well-known paths and system data in your space. The wish()
+  function provides a way to reference common system entities and data through
+  semantic paths.
+
+  Available paths:
+
+  - **`"/"`**: Access the root space cell and its properties
+    ```typescript
+    const spaceConfig = wish("/config");
+    const nestedData = wish("/nested/deep/data");
+    ```
+
+  - **`"#default"`**: Shortcut for `/defaultPattern` - access your default pattern
+    ```typescript
+    const defaultTitle = wish("#default/title");
+    const defaultArg = wish("#default/argument/greeting");
+    ```
+
+  - **`"#mentionable"`**: Access mentionable items from the backlinks index
+    (maps to `/defaultPattern/backlinksIndex/mentionable`)
+    ```typescript
+    const mentionable = wish("#mentionable");
+    const firstMention = wish("#mentionable/0/name");
+    ```
+
+  - **`"#recent"`**: Access recently used charms (maps to `/recentCharms`)
+    ```typescript
+    const recentCharms = wish("#recent");
+    const latestCharm = wish("#recent/0/name");
+    ```
+
+  - **`"#allCharms"`**: Access all charms in the system
+    ```typescript
+    const allCharms = wish("#allCharms");
+    const firstCharm = wish("#allCharms/0/title");
+    ```
+
+  - **`"#now"`**: Get the current timestamp (no additional path segments allowed)
+    ```typescript
+    const timestamp = wish("#now");
+    ```
+
+  You can also provide a default value as the second argument:
+  ```typescript
+  const items = wish("/myItems", []); // Returns [] if /myItems doesn't exist
+  ```
+
 **Important**: These built-in functions can only be called from within a recipe
 function, not from handlers, lift, or derive functions. They create nodes in the
 reactive graph and cannot be awaited directly.
