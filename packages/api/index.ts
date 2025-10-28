@@ -78,16 +78,18 @@ export interface IStreamable<T> {
 
 /**
  * Cells that support key() for property access - Cell variant.
- * Unwraps nested cells recursively. If the indexed value is itself a cell,
- * unwraps it and wraps in Cell<>. Otherwise wraps the value in Cell<>.
+ * If T wraps another cell type, delegates to that cell's .key() return type.
+ * Otherwise wraps the indexed value in Cell<>.
  */
 export interface IKeyableCell<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? Cell<U>
-      : Cell<UnwrapCell<T>[K]>;
+    : T extends BrandedCell<any>
+      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
+      : Cell<UnwrapCell<T>[K]>
+    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? Cell<U>
+    : Cell<UnwrapCell<T>[K]>;
 }
 
 /**
@@ -98,51 +100,56 @@ export interface IKeyableOpaque<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? OpaqueCell<U>
-      : OpaqueCell<UnwrapCell<T>[K]>;
+    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U>
+    : OpaqueCell<UnwrapCell<T>[K]>;
 }
 
 /**
  * Cells that support key() for property access - ReadonlyCell variant.
- * Unwraps nested cells recursively. If the indexed value is itself a cell,
- * unwraps it and wraps in ReadonlyCell<>. Otherwise wraps the value in ReadonlyCell<>.
+ * If T wraps another cell type, delegates to that cell's .key() return type.
+ * Otherwise wraps the indexed value in ReadonlyCell<>.
  */
 export interface IKeyableReadonly<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? ReadonlyCell<U>
-      : ReadonlyCell<UnwrapCell<T>[K]>;
+    : T extends BrandedCell<any>
+      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
+      : ReadonlyCell<UnwrapCell<T>[K]>
+    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? ReadonlyCell<U>
+    : ReadonlyCell<UnwrapCell<T>[K]>;
 }
 
 /**
  * Cells that support key() for property access - WriteonlyCell variant.
- * Unwraps nested cells recursively. If the indexed value is itself a cell,
- * unwraps it and wraps in WriteonlyCell<>. Otherwise wraps the value in WriteonlyCell<>.
+ * If T wraps another cell type, delegates to that cell's .key() return type.
+ * Otherwise wraps the indexed value in WriteonlyCell<>.
  */
 export interface IKeyableWriteonly<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? WriteonlyCell<U>
-      : WriteonlyCell<UnwrapCell<T>[K]>;
+    : T extends BrandedCell<any>
+      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
+      : WriteonlyCell<UnwrapCell<T>[K]>
+    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? WriteonlyCell<U>
+    : WriteonlyCell<UnwrapCell<T>[K]>;
 }
 
 /**
  * Cells that support key() for property access - ComparableCell variant.
- * Unwraps nested cells recursively. If the indexed value is itself a cell,
- * unwraps it and wraps in ComparableCell<>. Otherwise wraps the value in ComparableCell<>.
+ * If T wraps another cell type, delegates to that cell's .key() return type.
+ * Otherwise wraps the indexed value in ComparableCell<>.
  */
 export interface IKeyableComparable<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
   ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U>
-      ? ComparableCell<U>
-      : ComparableCell<UnwrapCell<T>[K]>;
+    : T extends BrandedCell<any>
+      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
+      : ComparableCell<UnwrapCell<T>[K]>
+    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? ComparableCell<U>
+    : ComparableCell<UnwrapCell<T>[K]>;
 }
 
 /**
@@ -204,10 +211,7 @@ export interface Stream<T> extends AnyCell<T, Stream<T>>, IStreamable<T> {}
  * Does NOT have .resolveAsCell()/.get()/.set()/.send()
  */
 export interface ComparableCell<T>
-  extends
-    AnyCell<T, ComparableCell<T>>,
-    IEquatable,
-    IKeyableComparable<T> {}
+  extends AnyCell<T, ComparableCell<T>>, IEquatable, IKeyableComparable<T> {}
 
 /**
  * Read-only cell variant.
@@ -227,10 +231,7 @@ export interface ReadonlyCell<T>
  * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
  */
 export interface WriteonlyCell<T>
-  extends
-    AnyCell<T, WriteonlyCell<T>>,
-    IWritable<T>,
-    IKeyableWriteonly<T> {}
+  extends AnyCell<T, WriteonlyCell<T>>, IWritable<T>, IKeyableWriteonly<T> {}
 
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell
