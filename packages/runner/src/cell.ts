@@ -70,7 +70,7 @@ declare module "@commontools/api" {
    */
   interface Writable<T> {
     set(
-      value: CellifyForWrite<T> | T,
+      value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
     ): void;
   }
@@ -80,7 +80,7 @@ declare module "@commontools/api" {
    */
   interface Streamable<T> {
     send(
-      value: CellifyForWrite<T> | T,
+      value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
     ): void;
   }
@@ -191,9 +191,9 @@ declare module "@commontools/api" {
 export type { Cell, Cellify, Stream } from "@commontools/api";
 import {
   type AnyCell,
+  type AnyCellWrapping,
   CELL_BRAND,
   type CellBrand,
-  type CellifyForWrite,
   type UnwrapCell,
 } from "@commontools/api";
 
@@ -354,7 +354,7 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   set(
-    newValue: CellifyForWrite<T> | T,
+    newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
     if (!this.tx) throw new Error("Transaction required for set");
@@ -382,13 +382,13 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   send(
-    newValue: CellifyForWrite<T> | T,
+    newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
     this.set(newValue, onCommit);
   }
 
-  update<V extends CellifyForWrite<Partial<T> | Partial<T>>>(
+  update<V extends AnyCellWrapping<Partial<T> | Partial<T>>>(
     values: V extends object ? V : never,
   ): void {
     if (!this.tx) throw new Error("Transaction required for update");
@@ -437,7 +437,7 @@ export class RegularCell<T> implements Cell<T> {
     }
   }
 
-  push(...value: T extends (infer U)[] ? CellifyForWrite<U>[] : any[]): void {
+  push(...value: T extends (infer U)[] ? AnyCellWrapping<U>[] : any[]): void {
     if (!this.tx) throw new Error("Transaction required for push");
 
     // No await for the sync, just kicking this off, so we have the data to
