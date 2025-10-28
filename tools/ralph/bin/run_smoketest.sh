@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Ralph IDs to run smoketests for
-RALPH_IDS="1 2 3 4 5 6 7 8"
+RALPH_IDS="1 2 3 4 5 6 7 8 9"
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

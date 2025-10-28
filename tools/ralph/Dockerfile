@@ -72,4 +72,4 @@ ENV PATH="/app/labs/tools/ralph/bin:$PATH"
 # If you want to run ralph normally without the smoketest, then replace with:
 # CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep infinity"]
 # Note: Directories are pre-created by run_smoketest.sh to ensure correct ownership
-CMD ["/bin/sh", "-c", "/app/start-servers.sh & sleep 5 && /app/labs/tools/ralph/bin/ralph-smoketest.sh > /app/smoketest/${RALPH_ID}/ralph.log 2>&1"]
+CMD ["/bin/bash", "-c", "/app/start-servers.sh & sleep 5 && TIMEFORMAT='%R'; { time /app/labs/tools/ralph/bin/ralph-smoketest.sh > /app/smoketest/${RALPH_ID}/ralph.log 2>&1 ; } 2> /app/smoketest/${RALPH_ID}/TIMING_SECONDS.txt"]
