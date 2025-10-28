@@ -38,11 +38,14 @@ done
 # Run smoketests
 for ID in $RALPH_IDS; do
   echo "Starting smoketest for RALPH_ID=$ID"
-  docker run --rm -e RALPH_ID=$ID -d \
+  docker run --platform linux/amd64 --rm -e RALPH_ID=$ID -d \
     -u $(id -u):$(id -g) \
     -e HOME=/tmp/home \
-    -v "$LABS:/app/labs" \
-    -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
+    -v "$LABS:/app/labs:z" \
+    -v "$LABS/tools/ralph/smoketest:/app/smoketest:z" \
+    --cap-add=SYS_ADMIN \
+    --security-opt seccomp=unconfined \
+    --shm-size=2g \
     --name ralph_$ID \
     ellyxir/ralph
 
@@ -50,7 +53,22 @@ for ID in $RALPH_IDS; do
   # Each container gets its own copy to avoid conflicts
   docker exec ralph_$ID mkdir -p /tmp/home/.claude
   docker cp ~/.claude.json ralph_$ID:/tmp/home/.claude.json
-  docker cp ~/.claude/.credentials.json ralph_$ID:/tmp/home/.claude/.credentials.json
+
+  # Handle credentials based on platform
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS: Extract credentials from keychain
+    echo "Extracting credentials from macOS keychain..."
+    CREDS=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+    if [ -n "$CREDS" ]; then
+      echo "$CREDS" | docker exec -i ralph_$ID tee /tmp/home/.claude/.credentials.json > /dev/null
+      echo "Credentials copied from keychain for ralph_$ID"
+    else
+      echo "Warning: Could not find credentials in keychain for ralph_$ID"
+    fi
+  else
+    # Linux/other: Copy from file
+    docker cp ~/.claude/.credentials.json ralph_$ID:/tmp/home/.claude/.credentials.json
+  fi
 
   # Configure Claude MCP server for Playwright
   # Container runs as host user with HOME=/tmp/home
