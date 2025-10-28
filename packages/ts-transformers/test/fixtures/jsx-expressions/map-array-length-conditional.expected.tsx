@@ -6,7 +6,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
         [UI]: (<div>
         {__ctHelpers.ifElse(__ctHelpers.derive(list, list => list.length > 0), <div>
             {list.map((name) => (<span>{name}</span>))}
-          </div>, null)}
+          </div>, __ctHelpers.derive(list, list => list.length > 0))}
       </div>),
     };
 });

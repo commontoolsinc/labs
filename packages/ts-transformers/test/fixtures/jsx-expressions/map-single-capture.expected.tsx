@@ -9,7 +9,7 @@ export default recipe("MapSingleCapture", (_state) => {
         [UI]: (<div>
         {__ctHelpers.ifElse(__ctHelpers.derive(people, people => people.length > 0), <ul>
             {people.map((person) => (<li key={person.id}>{person.name}</li>))}
-          </ul>, null)}
+          </ul>, __ctHelpers.derive(people, people => people.length > 0))}
       </div>),
     };
 });

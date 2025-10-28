@@ -49,14 +49,15 @@ export const emitBinaryExpression: Emitter = ({
       // Process right side - rewrite children but don't wrap whole thing in derive
       const whenTrue = rewriteChildren(expression.right) || expression.right;
 
-      // Create ifElse(predicate, whenTrue, null)
+      // Create ifElse(predicate, whenTrue, predicate)
+      // This preserves && semantics where falsy values are returned as-is
       // We need to create a synthetic conditional expression to pass to createIfElseCall
       const syntheticConditional = context.factory.createConditionalExpression(
         predicate,
         context.factory.createToken(ts.SyntaxKind.QuestionToken),
         whenTrue,
         context.factory.createToken(ts.SyntaxKind.ColonToken),
-        context.factory.createNull(),
+        predicate,
       );
 
       return createIfElseCall({
