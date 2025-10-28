@@ -3,6 +3,7 @@ import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import type { BrandedCell } from "@commontools/api";
 import {
+  type AnyCell,
   type Cell,
   ID,
   ID_FIELD,
@@ -361,7 +362,7 @@ export class RegularCell<T> implements ICell<T> {
     this.set(newValue, onCommit);
   }
 
-  update<V extends AnyCellWrapping<Partial<T> | Partial<T>>>(
+  update<V extends AnyCellWrapping<Partial<T>> | Partial<T>>(
     values: V extends object ? V : never,
   ): void {
     if (!this.tx) throw new Error("Transaction required for update");
@@ -899,7 +900,7 @@ export function convertCellsToLinks(
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCell(value: any): value is Cell<any> {
+export function isCell(value: any): value is AnyCell<any> {
   return value instanceof RegularCell;
 }
 

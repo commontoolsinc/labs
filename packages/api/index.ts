@@ -53,11 +53,13 @@ export interface IReadable<T> {
  * Writable cells can update their value.
  */
 export interface IWritable<T> {
-  set(value: AnyCellWrapping<T>): void;
-  update<V extends AnyCellWrapping<Partial<T>>>(
+  set(value: T | AnyCellWrapping<T>): void;
+  update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     values: V extends object ? V : never,
   ): void;
-  push(...value: T extends (infer U)[] ? AnyCellWrapping<U>[] : any[]): void;
+  push(
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : any[]
+  ): void;
 }
 
 /**
@@ -185,6 +187,21 @@ export interface IDerivable<T> {
   ): OpaqueRef<S[]>;
 }
 
+export interface IOpaquable<T> {
+  /** deprecated */
+  get(): T;
+  /** deprecated */
+  set(newValue: Opaque<Partial<T>>): void;
+  /** deprecated */
+  setDefault(value: Opaque<T> | T): void;
+  /** deprecated */
+  setPreExisting(ref: any): void;
+  /** deprecated */
+  setName(name: string): void;
+  /** deprecated */
+  setSchema(schema: JSONSchema): void;
+}
+
 // ============================================================================
 // Cell Type Definitions
 // ============================================================================
@@ -194,7 +211,7 @@ export interface IDerivable<T> {
  * interface with internal only API. Uses a second symbol brand to distinguish
  * from core cell brand without any methods.
  */
-export interface AnyCell<T> extends BrandedCell<T>, IAnyCell<T> {
+export interface AnyCell<T = any> extends BrandedCell<T>, IAnyCell<T> {
 }
 
 /**
@@ -202,8 +219,11 @@ export interface AnyCell<T> extends BrandedCell<T>, IAnyCell<T> {
  * Has .key(), .map(), .mapWithPattern()
  * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
  */
+export interface IOpaqueCell<T>
+  extends IKeyableOpaque<T>, IDerivable<T>, IOpaquable<T> {}
+
 export interface OpaqueCell<T>
-  extends BrandedCell<T, "opaque">, IKeyableOpaque<T>, IDerivable<T> {}
+  extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
 
 /**
  * Full cell with read, write capabilities.
@@ -278,10 +298,6 @@ export interface WriteonlyCell<T>
  * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
  * Each key access returns another OpaqueRef, allowing chained property access.
  * This is temporary until AST transformation handles .key() automatically.
- *
- * OpaqueRef extends OpaqueCell with OpaqueRefMethods (which can be augmented by runtime).
- * We omit methods from OpaqueCell that are redefined in OpaqueRefMethods to ensure
- * the OpaqueRefMethods versions take precedence (e.g., .key() returning OpaqueRef).
  */
 export type OpaqueRef<T> =
   & OpaqueCell<T>

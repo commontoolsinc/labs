@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   canBeOpaqueRef,
-  isOpaqueRef,
+  isOpaqueCell,
   isRecipe,
   isShadowRef,
   type Opaque,
@@ -30,7 +30,7 @@ export function traverseValue(
 
   // Traverse value
   if (
-    !isOpaqueRef(value) &&
+    !isOpaqueCell(value) &&
     !canBeOpaqueRef(value) &&
     !isShadowRef(value) &&
     (isRecord(value) || isRecipe(value))

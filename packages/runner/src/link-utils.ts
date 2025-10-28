@@ -1,5 +1,5 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
   isCell,
@@ -207,28 +207,28 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: Cell<any> | Stream<any>,
+  value: AnyCell,
   base?: Cell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".

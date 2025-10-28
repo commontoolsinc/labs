@@ -23,8 +23,8 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
-  OpaqueRefMethods,
   PatternToolFunction,
   Recipe,
   RecipeFunction,
@@ -48,24 +48,27 @@ import {
 import { AuthSchema } from "./schema-lib.ts";
 export { AuthSchema } from "./schema-lib.ts";
 export {
+  h,
   ID,
   ID_FIELD,
-  type IDerivable,
-  type IDFields,
   NAME,
   type Schema,
   schema,
-  type SchemaWithoutCell,
   toSchema,
   TYPE,
   UI,
 } from "@commontools/api";
-export { h } from "@commontools/api";
 export type {
+  AnyCell,
   Cell,
   CreateCellFunction,
   Handler,
   HandlerFactory,
+  IDerivable,
+  IDFields,
+  IKeyableOpaque,
+  IOpaquable,
+  IOpaqueCell,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,
@@ -79,9 +82,11 @@ export type {
   Recipe,
   RecipeFactory,
   RenderNode,
+  SchemaWithoutCell,
   Stream,
   StripCell,
   toJSON,
+  UnwrapCell,
   VNode,
 } from "@commontools/api";
 import {
@@ -94,25 +99,13 @@ export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 // Augment the public interface with the internal OpaqueRefMethods interface.
 // This adds runtime-specific methods beyond what the public API defines.
-// Note: get(), set() are already defined in the base OpaqueRefMethods.
-// We redefine key() here with the runtime implementation signature.
 declare module "@commontools/api" {
-  interface OpaqueRefMethods<T> {
-    // Override key() with runtime-specific signature
-    key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-
-    // Runtime-specific configuration methods
-    setDefault(value: Opaque<T> | T): void;
-    setPreExisting(ref: unknown): void;
-    setName(name: string): void;
-    setSchema(schema: JSONSchema): void;
-    connect(node: NodeRef): void;
-
+  interface IOpaquable<T> {
     // Export method for introspection
     export(): {
-      cell: OpaqueRef<any>;
+      cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
-      value?: Opaque<T>;
+      value?: Opaque<T> | T;
       defaultValue?: Opaque<T>;
       nodes: Set<NodeRef>;
       external?: unknown;
@@ -122,12 +115,14 @@ declare module "@commontools/api" {
       frame: Frame;
     };
 
+    connect(node: NodeRef): void;
+
     // Unsafe methods for internal use
     unsafe_bindToRecipeAndPath(
       recipe: Recipe,
       path: readonly PropertyKey[],
     ): void;
-    unsafe_getExternal(): OpaqueRef<T>;
+    unsafe_getExternal(): OpaqueCell<T>;
 
     // Additional utility methods
     toJSON(): unknown;
@@ -137,20 +132,18 @@ declare module "@commontools/api" {
   }
 }
 
-export type { OpaqueRefMethods };
-
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueRef<T = any>(
+export function isOpaqueCell<T = any>(
   value: unknown,
-): value is OpaqueRefMethods<T> {
+): value is OpaqueCell<T> {
   return !!value &&
     typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
       "boolean";
 }
 
 export type NodeRef = {
-  module: Module | Recipe | OpaqueRef<Module | Recipe>;
+  module: Module | Recipe | OpaqueCell<Module | Recipe>;
   inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
@@ -249,7 +242,7 @@ export function isShadowRef(value: unknown): value is ShadowRef {
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueRef((value as ShadowRef).shadowOf) ||
+    (isOpaqueCell((value as ShadowRef).shadowOf) ||
       isShadowRef((value as ShadowRef).shadowOf))
   );
 }
