@@ -28,17 +28,42 @@ done
 # llm command to summarize changes
 LLM="./tools/ralph/bin/llm.sh"
 
-{ printf "Your RALPH_ID is %s.\n\n" "$RALPH_ID"; cat ./tools/ralph/SMOKETEST_PROMPT.md; } | \
+# Extract task for this RALPH_ID from TASKS.md
+TASK=$(awk -v id="$RALPH_ID" '
+/^[0-9]+\. \[ \]/ {
+  task_num = substr($1, 1, length($1)-1)
+  if (task_num == id) {
+    found = 1
+    # Strip the "N. [ ] " prefix from first line
+    sub(/^[0-9]+\. \[ \] /, "")
+    print
+    next
+  }
+}
+found && /^[0-9]+\. \[ \]/ {
+  exit
+}
+found {
+  print
+}
+' ./tools/ralph/TASKS.md)
+
+# If no task found, provide default message
+if [ -z "$TASK" ]; then
+  TASK="You have no task, just exit"
+fi
+
+# Replace <SMOKETEST_TASK> in prompt and pipe to claude
+{
+  printf "Your RALPH_ID is %s.\n\n" "$RALPH_ID"
+  awk -v task="$TASK" '{
+    if ($0 ~ /<SMOKETEST_TASK>/) {
+      print task
+    } else {
+      print $0
+    }
+  }' ./tools/ralph/SMOKETEST_PROMPT.md
+} | \
 claude --print --dangerously-skip-permissions \
 --verbose --output-format=stream-json 2>&1 | \
 tee -a ./tools/ralph/logs/ralph-claude.log
-
-# Auto-stash changes if any exist
-if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A
-
-  # Generate commit message from staged changes
-  commit_msg=$(git diff --staged | $LLM "Summarize these changes into a short one-line description, output just that one line")
-
-  git stash push -m "$commit_msg"
-fi
