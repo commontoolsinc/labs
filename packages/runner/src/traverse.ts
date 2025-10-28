@@ -502,14 +502,14 @@ export abstract class BaseObjectTraverser<
           return tracker.getExisting(doc.value, SchemaAll);
         }
         const entries = Object.entries(doc.value as JSONObject).map((
-          [k, value],
+          [k, v],
         ) => [
           k,
           this.traverseDAG(
             {
               ...doc,
               address: { ...doc.address, path: [...doc.address.path, k] },
-              value: value,
+              value: v,
             },
             space,
             tracker,
@@ -544,7 +544,7 @@ export abstract class BaseObjectTraverser<
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
- * @param path - Property/index path to follow
+ * @param path - Property/index path to follow beyond doc.address.path
  * @param tracker - Prevents pointer cycles
  * @param cfc: ContextualFlowControl with classification rules
  * @param space: the memory space used for resolving pointers
@@ -662,6 +662,8 @@ function followPointer(
   const target: IMemorySpaceAddress = (link.id !== undefined)
     ? { space, id: link.id, type: "application/json", path: [] }
     : { space, ...doc.address, path: [] };
+  // The link.path doesn't include the initial "value", so prepend it
+  const targetPath = ["value", ...link.path as string[]];
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -670,7 +672,6 @@ function followPointer(
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
     // Link paths are relative to value, so prepend value to our target path
-    const targetPath = ["value", ...link.path as string[]];
     selector = narrowSchema(
       doc.address.path,
       selector,
@@ -724,7 +725,7 @@ function followPointer(
   return getAtPath(
     tx,
     targetDoc,
-    [...link.path, ...path] as string[],
+    [...targetPath, ...path] as string[],
     tracker,
     cfc,
     space,
@@ -945,13 +946,13 @@ export class SchemaObjectTraverser<T extends JSONValue>
     doc: IAttestation,
     selector: SchemaPathSelector,
   ): T | undefined {
-    const valuePath = doc.address.path;
-    if (deepEqual(valuePath, selector.path)) {
+    const docPath = doc.address.path;
+    if (deepEqual(docPath, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!);
-    } else if (valuePath.length > selector.path.length) {
+    } else if (docPath.length > selector.path.length) {
       throw new Error("Doc path should never exceed selector path");
     } else if (
-      !deepEqual(valuePath, selector.path.slice(0, valuePath.length))
+      !deepEqual(docPath, selector.path.slice(0, docPath.length))
     ) {
       // There's a mismatch in the initial part, so this will not match
       return undefined;
@@ -959,7 +960,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
       const [nextDoc, nextSelector] = getAtPath(
         this.tx,
         doc,
-        selector.path.slice(valuePath.length),
+        selector.path.slice(docPath.length),
         this.tracker,
         this.cfc,
         this.space,
@@ -1239,8 +1240,8 @@ export class SchemaObjectTraverser<T extends JSONValue>
     return filteredObj;
   }
 
-  // This just has a schemaContext, since the portion of the doc.address.path
-  // after "value" would match the selector.path.
+  // This just has a schemaContext, since the doc.address.path should match
+  // the selector.path.
   private traversePointerWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
