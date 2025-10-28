@@ -38,7 +38,7 @@ done
 # Run smoketests
 for ID in $RALPH_IDS; do
   echo "Starting smoketest for RALPH_ID=$ID"
-  docker run --rm -e RALPH_ID=$ID -d \
+  docker run --platform linux/amd64 --rm -e RALPH_ID=$ID -d \
     -u $(id -u):$(id -g) \
     -e HOME=/tmp/home \
     -v "$LABS:/app/labs:z" \
