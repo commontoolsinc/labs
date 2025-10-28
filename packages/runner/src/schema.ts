@@ -374,18 +374,17 @@ export function validateAndTransformNew(
   }
 
   const objectCreator = new TransformObjectCreator(runtime, tx!);
+  // Link paths don't include value, but doc address should
+  const address = { ...link, path: ["value", ...link.path] };
+  const doc = { address, value: tx!.readValueOrThrow(link) };
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
-  // Our selector is relative to the "value" in our doc
   const selector = {
-    path: ["value", ...link.path],
+    path: doc.address.path,
     schemaContext: { schema: schema!, rootSchema: rootSchema! },
   };
   const traverser = new SchemaObjectTraverser<any>(tx!, selector, link.space);
   traverser.objectCreator = objectCreator;
   traverser.recurseCells = false;
-  // Link paths don't include value, but doc address should
-  const address = { ...link, path: ["value", ...link.path] };
-  const doc = { address, value: tx!.readValueOrThrow(link) };
   const result = traverser.traverse(doc);
   return result;
 }
@@ -419,11 +418,14 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
   ): T | undefined {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
-    // If we don't have a schema, we should create a query result proxy.
+    // If we don't have a schema, or a true schema, we should create a query result proxy.
     // If we have a schema without asCell or asStream, we should annotate the
     // object so we can get back to the cell if needed.
     // console.log("called createObject with", clearRuntime(value), link);
-    if (link.schema === undefined) {
+    if (
+      link.schema === undefined ||
+      ContextualFlowControl.isTrueSchema(link.schema)
+    ) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isObject(link.schema)) {
       const { asCell, asStream, ...restSchema } = link.schema;
