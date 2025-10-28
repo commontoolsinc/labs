@@ -1,13 +1,18 @@
-# Capability Wrappers Prototype
+# Capability Types via Branded Types
+
+> **Status:** This design has been **superseded by the branded types approach**
+> described in `rollout-plan.md`. We are using TypeScript branded types with
+> symbol-based brands rather than runtime proxy wrappers.
 
 ## Objectives
 
-- Collapse `OpaqueRef` and runtime `Cell` APIs into a single object whose
+- Collapse `OpaqueRef` and runtime `Cell` APIs into a single type system whose
   surface area is gated by explicit capabilities (`Opaque`, `Readonly`,
   `Mutable`, `Writeonly`).
+- Use TypeScript's type system (branded types) rather than runtime Proxy objects
+  to enforce capability boundaries.
 - Keep recipe ergonomics intact by continuing to expose property proxies and
-  helpers like `.map()` while steering operations through capability-aware
-  wrappers.
+  helpers like `.map()`.
 - Provide a migration path that lets existing recipes run during the migration
   window by adapting the current builder implementation incrementally.
 
@@ -27,84 +32,99 @@
   nested recipes. That indirection means wrappers must cooperate with module
   factories that expect builder-time proxies yet execute against runtime cells.
 
-## Wrapper Shape
+## Type System Shape (Branded Types Approach)
 
-- Introduce a lightweight `CapabilityCell<T, C extends Capability>` interface
-  that wraps a concrete runtime cell and exposes operations allowed by
-  capability `C`. Capabilities map to subsets of the current `Cell` API:
-  - `Opaque`: property proxies, `.map`, `.filter`, `.derive`, structural
-    equality, read-only helpers.
-  - `Readonly`: everything in `Opaque` plus `.get`, `.getAsQueryResult`, and
-    schema navigation helpers that do not mutate state.
-  - `Mutable`: superset of `Readonly` plus `.set`, `.update`, `.push`, and
-    `.redirectTo`.
-  - `Writeonly`: `.send`, `.set`, `.redirectTo`, but intentionally hides `.get`
-    to encourage event-sink authoring disciplines.
-- Use `Proxy` objects to intercept property access and method calls. Each proxy
-  lazily constructs child proxies with the same capability so nested lookups
-  remain ergonomic (e.g. `mutable.todos[0].title.set("…")`).
-- When a helper like `.map` is invoked, delegate to a capability-aware shim that
-  wraps the callee recipe factory so the inner function receives wrappers
-  instead of raw cells or `OpaqueRef`s. Internally reuse the existing
-  `createNodeFactory` path to avoid reimplementing module registration.
+The actual implementation uses **branded types** rather than runtime Proxy wrappers:
 
-## Construction Flow
+- Create a `CellLike<T>` type with a symbol-based brand where the value is
+  `Record<string, boolean>` representing capability flags.
+- Factor out interface parts along: reading, writing, `.send` (for stream-like),
+  and derives (currently just `.map`).
+- Define capability types by combining these factored parts with specific brand
+  configurations:
+  - `OpaqueRef<T>`: `{ opaque: true, read: false, write: false, stream: false }`
+    - Supports: property proxies, `.map`, `.filter`, `.derive`, structural equality
+  - `Cell<T>` (Mutable): `{ opaque: false, read: true, write: true, stream: true }`
+    - Supports: everything (`.get`, `.set`, `.update`, `.push`, `.redirectTo`, `.send`)
+  - `Stream<T>`: `{ opaque: false, read: false, write: false, stream: true }`
+    - Supports: `.send` only
+  - `ReadonlyCell<T>`: `{ opaque: false, read: true, write: false, stream: false }`
+    - Supports: `.get`, `.getAsQueryResult`, schema navigation
+  - `WriteonlyCell<T>`: `{ opaque: false, read: false, write: true, stream: false }`
+    - Supports: `.set`, `.update`, `.redirectTo` but hides `.get`
+- For `OpaqueRef`, keep proxy behavior where each key access returns another
+  `OpaqueRef`.
+- Simplify most wrap/unwrap types to use `CellLike`.
 
-1. Builder entry points (`recipe`, `lift`, `handler`) push a frame, wrap inputs
-   in `CapabilityCell` proxies instead of `opaqueRef`, and still record the
-   graph using existing traversal utilities.
-2. For compatibility, supply adapters that allow legacy `OpaqueRef` helper
-   affordances (`setDefault`, `unsafe_bindToRecipeAndPath`) to continue working
-   until all call sites migrate. These adapters simply forward to the wrapped
-   runtime cell or translate to snapshot metadata updates.
-3. During runtime execution, `pushFrameFromCause` already seeds the frame with
-   the `cause` and `unsafe_binding`. Wrappers created while executing a lifted
-   function can therefore call `runtime.getCell` immediately because the cause
-   data is ready.
+### Comparison to Original Proxy Design
+
+The branded types approach provides compile-time safety without runtime overhead.
+The original proxy-based `CapabilityCell<T, C>` design is **not being implemented**
+because TypeScript's type system can enforce the same boundaries more efficiently.
+
+## Construction Flow (Branded Types)
+
+1. Builder entry points (`recipe`, `lift`, `handler`) push a frame and work with
+   the unified `CellLike` types instead of separate `opaqueRef` and `Cell` types.
+2. Cell creation is deferred - cells can be created without an immediate link,
+   using `.for(cause)` to establish the link later.
+3. For compatibility during migration, legacy `OpaqueRef` helper affordances
+   (`setDefault`, `unsafe_bindToRecipeAndPath`) continue working until all call
+   sites migrate.
+4. During runtime execution, `pushFrameFromCause` seeds the frame with the
+   `cause` and `unsafe_binding`. Created cells can call `runtime.getCell` when
+   their cause is ready (either automatically derived or explicitly set via
+   `.for()`).
 
 ## Type System Notes
 
-- Export capability-specific TypeScript types from `@commontools/api` such as
-  `OpaqueCell<T>`, `ReadonlyCell<T>`, `MutableCell<T>`, and `WriteonlyCell<T>`.
-  These extend a shared base that keeps the proxy type information available to
-  recipe authors.
+- Export capability-specific TypeScript types from `@commontools/api`:
+  `OpaqueRef<T>`, `Cell<T>`, `ReadonlyCell<T>`, `WriteonlyCell<T>`, and
+  `Stream<T>`.
+- All types extend a shared `CellLike<T>` base with branded capability flags.
 - Extend our JSON Schema annotations so authors can declare capabilities at any
   depth. When `asCell: true` is present, allow an `opaque`, `readonly`, or
   `writeonly` flag (or the closest JSON Schema standard equivalent if one
-  exists). Builder proxies read these flags to choose the capability for the
-  proxy returned by `key()` or nested property access.
+  exists).
 - Provide conditional helper types to map schema metadata to helper surfaces
   (e.g., array helpers only appear when `T` extends `readonly any[]`). Reuse the
   IFC-aware schema lookup utilities to keep helper availability aligned with the
   JSON schema.
-- Augment builders so `recipe` factories default to `OpaqueCell` inputs while
+- Augment builders so `recipe` factories default to `OpaqueRef` inputs while
   `lift` can declare stronger capabilities for each argument via a typed options
   bag (e.g., `{ inputs: { item: Capability.Mutable } }`).
 
-## Cause Defaults
+## Cause Defaults and `.for()` Method
 
-- Capability helpers (e.g., `.map`, `.filter`) should emit deterministic
-  default causes that combine the parent cell's cause with a helper-specific
-  label. Authors can still pass explicit `cause` overrides to `lift` or
-  `handler`, but most call sites inherit stable defaults automatically.
-- Expose an optional `.setCause(cause: CauseDescriptor)` chain on newly created
-  capability cells. It overrides the derived id before the cell participates in
-  the graph. If the cell has already been connected to a node or materialized
-  into a runtime cell, `.setCause` must throw to avoid inconsistencies.
+- Cause assignment happens in two layers:
+  1. **Automatic derivation**: Default causes are derived from frame context,
+     input cell ids, and implementation fingerprints (see `cause-derivation.md`)
+  2. **Explicit override via `.for()`**: Authors can call `.for(cause)` to
+     explicitly assign a cause before the cell is linked
+- The `.for()` method provides an explicit layer on top of automation:
+  - Optional second parameter makes it flexible (ignores if link already exists,
+    adds extension if cause already exists)
+  - Throws if cell already connected to a node or materialized into runtime cell
+- Helpers (e.g., `.map`, `.filter`) use automatic derivation by default but can
+  be overridden with explicit `cause` parameters to `lift` or `handler`.
 
-## Migration Strategy
+## Migration Strategy (In-Place)
 
-- Step 1: Introduce wrappers with shims that forward to existing opaque ref
-  behavior. Dual-write metadata (`export()`) so `factoryFromRecipe` can continue
-  serializing the graph until the snapshot pipeline lands.
-- Step 2: Convert builtin helpers and modules to consume wrappers. Audit
-  `packages/runner/src/builder` to replace direct `OpaqueRef` imports with
-  wrapper types while keeping `opaqueRef` available as a thin adapter.
-- Step 3: Update recipes in `recipes/` iteratively. Provide codemods that swap
-  `cell()` usage for capability-specific constructors when explicit mutability is
-  required.
-- Step 4: Remove legacy-only APIs (`setDefault`, `setPreExisting`) once the
-  snapshot work replaces path-based aliasing and defaults come from schemas.
+This is an **in-place migration** rather than a V1/V2 opt-in system:
+
+- **Step 1**: Unify Cell API types using branded types (see `rollout-plan.md`)
+  - Create `CellLike<>` and factor out capability traits
+  - Remove `ShadowRef`/`unsafe_` mechanisms
+- **Step 2**: Enable deferred cell creation with `.for()` method
+  - Change `RegularCell` constructor to make link optional
+  - Add `.for()` method for explicit cause assignment
+  - Implement automatic cause derivation as baseline
+- **Step 3**: Update recipe lifecycle to use deferred execution
+  - Run recipes like lifts with tracked cell/cause creation
+  - Remove JSON recipe representation
+- **Step 4**: Cleanup legacy APIs
+  - Remove `setDefault`, `setPreExisting` once defaults come from schemas
+  - Deprecate path-based aliasing in favor of graph snapshots (Phase 2)
 
 ## Open Questions
 

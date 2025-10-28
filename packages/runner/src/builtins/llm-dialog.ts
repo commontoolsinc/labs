@@ -209,6 +209,7 @@ const LLMToolSchema = {
       required: ["argumentSchema", "resultSchema", "nodes"],
       asCell: true,
     },
+    extraParams: { type: "object" },
     charm: {
       // Accept whole charm - its own schema defines its handlers
       asCell: true,
@@ -249,6 +250,112 @@ const internalSchema = {
   required: ["requestId", "lastActivity"],
 } as const satisfies JSONSchema;
 
+type LegacyToolEntry = {
+  name: string;
+  tool: any;
+  cell: Cell<Schema<typeof LLMToolSchema>>;
+};
+
+type CharmToolEntry = {
+  name: string;
+  charm: Cell<any>;
+  charmName: string;
+};
+
+type AggregatedCharmToolMeta = {
+  kind: "read" | "run";
+  charm: Cell<any>;
+};
+
+type ToolCatalog = {
+  llmTools: Record<string, { description: string; inputSchema: JSONSchema }>;
+  legacyToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
+  aggregatedTools: Map<string, AggregatedCharmToolMeta>;
+};
+
+function collectToolEntries(
+  toolsCell: Cell<any>,
+): { legacy: LegacyToolEntry[]; charms: CharmToolEntry[] } {
+  const tools = toolsCell.get() ?? {};
+  const legacy: LegacyToolEntry[] = [];
+  const charms: CharmToolEntry[] = [];
+
+  for (const [name, tool] of Object.entries(tools)) {
+    if (tool?.charm?.get?.()) {
+      const charm: Cell<any> = tool.charm;
+      const charmValue = charm.get();
+      const charmName = String(charmValue?.[NAME] ?? name);
+      charms.push({ name, charm, charmName });
+      continue;
+    }
+
+    legacy.push({
+      name,
+      tool,
+      cell: toolsCell.key(name) as unknown as Cell<
+        Schema<typeof LLMToolSchema>
+      >,
+    });
+  }
+
+  return { legacy, charms };
+}
+
+function createCharmToolDefinitions(
+  charmName: string,
+  schemaString: string,
+): {
+  read: { name: string; description: string; inputSchema: JSONSchema };
+  run: { name: string; description: string; inputSchema: JSONSchema };
+} {
+  const slug = slugify(charmName);
+  const readName = `${slug}_read`;
+  const runName = `${slug}_run`;
+
+  const readDescription =
+    `Read values from charm "${charmName}" using path: string[]. ` +
+    `Construct paths by walking the charm schema (single key -> ["key"]). ` +
+    `Schema: ${schemaString}`;
+
+  const runDescription =
+    `Run handlers on charm "${charmName}" using path: string[] ` +
+    `to a handler stream and args: object. You may pass args nested ` +
+    `under input.args or as top-level fields (path removed). ` +
+    `Schema: ${schemaString}`;
+
+  const readInputSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      path: { type: "array", items: { type: "string" }, minItems: 1 },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  };
+
+  const runInputSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      path: { type: "array", items: { type: "string" }, minItems: 1 },
+      args: { type: "object" },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  };
+
+  return {
+    read: {
+      name: readName,
+      description: readDescription,
+      inputSchema: readInputSchema,
+    },
+    run: {
+      name: runName,
+      description: runDescription,
+      inputSchema: runInputSchema,
+    },
+  };
+}
+
 /**
  * Flattens tools by extracting handlers from charm-based tools.
  * Converts { charm: ... } entries into individual handler entries.
@@ -270,77 +377,310 @@ function flattenTools(
   }
 > {
   const flattened: Record<string, any> = {};
-  const tools = toolsCell.get() ?? {};
+  const { legacy, charms } = collectToolEntries(toolsCell);
 
-  // Preserve pass-through for non-charm tools
-  for (const [name, tool] of Object.entries(tools)) {
-    if (tool?.charm?.get?.()) continue;
-    const passThrough: Record<string, unknown> = { ...tool };
+  for (const entry of legacy) {
+    const passThrough: Record<string, unknown> = { ...entry.tool };
     if (
       passThrough.inputSchema && typeof passThrough.inputSchema === "object"
     ) {
       passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
     }
-    flattened[name] = passThrough;
+    flattened[entry.name] = passThrough;
   }
 
-  // Add aggregated entries for each charm without enumerating internals.
-  for (const [name, tool] of Object.entries(tools)) {
-    const charmCell: Cell<any> | undefined = tool?.charm?.get?.()
-      ? tool.charm
-      : undefined;
-    if (!charmCell) continue;
-
-    const charmValue = charmCell.get();
-    const charmName = String(charmValue?.[NAME] || name);
-    const slug = slugify(charmName);
-    const readName = `${slug}_read`;
-    const runName = `${slug}_run`;
-
-    // Best-effort schema for UI: use loaded recipe if present; no async loads here
+  for (const entry of charms) {
     let schema: JSONSchema | undefined =
-      getLoadedRecipeResultSchema(runtime, charmCell) ??
-        buildMinimalSchemaFromValue(charmCell);
+      getLoadedRecipeResultSchema(runtime, entry.charm) ??
+        buildMinimalSchemaFromValue(entry.charm);
     schema = schema ?? ({} as JSONSchema);
     const schemaString = stringifySchemaGuarded(schema);
+    const charmTools = createCharmToolDefinitions(
+      entry.charmName,
+      schemaString,
+    );
 
-    flattened[readName] = {
-      description:
-        `Read values from charm "${charmName}" using path: string[]. ` +
-        `Construct paths by walking the charm schema (single key -> ["key"]). ` +
-        `Schema: ${schemaString}`,
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: { type: "array", items: { type: "string" }, minItems: 1 },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      } as JSONSchema,
-      internal: { kind: "cell", path: [], charmName },
+    flattened[charmTools.read.name] = {
+      description: charmTools.read.description,
+      inputSchema: charmTools.read.inputSchema,
+      internal: { kind: "cell", path: [], charmName: entry.charmName },
     };
 
-    flattened[runName] = {
-      description:
-        `Run handlers on charm "${charmName}" using path: string[] ` +
-        `to a handler stream and args: object. You may pass args nested ` +
-        `under input.args or as top-level fields (path removed). ` +
-        `Schema: ${schemaString}`,
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: { type: "array", items: { type: "string" }, minItems: 1 },
-          args: { type: "object" },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      } as JSONSchema,
-      internal: { kind: "handler", path: [], charmName },
+    flattened[charmTools.run.name] = {
+      description: charmTools.run.description,
+      inputSchema: charmTools.run.inputSchema,
+      internal: { kind: "handler", path: [], charmName: entry.charmName },
     };
   }
 
   return flattened;
 }
+
+async function buildToolCatalog(
+  runtime: IRuntime,
+  toolsCell: Cell<any>,
+): Promise<ToolCatalog> {
+  const { legacy, charms } = collectToolEntries(toolsCell);
+
+  const llmTools: ToolCatalog["llmTools"] = {};
+  const legacyToolCells = new Map<string, Cell<Schema<typeof LLMToolSchema>>>();
+  const aggregatedTools = new Map<string, AggregatedCharmToolMeta>();
+
+  for (const entry of legacy) {
+    const toolValue: any = entry.tool ?? {};
+    const pattern = toolValue?.pattern?.get?.() ?? toolValue?.pattern;
+    const handler = toolValue?.handler;
+    let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
+      toolValue?.inputSchema;
+    if (inputSchema === undefined) continue;
+    inputSchema = normalizeInputSchema(inputSchema);
+    const description: string = toolValue.description ??
+      (inputSchema as any)?.description ?? "";
+    llmTools[entry.name] = { description, inputSchema };
+    legacyToolCells.set(entry.name, entry.cell);
+  }
+
+  for (const entry of charms) {
+    const schema = await getCharmResultSchemaAsync(runtime, entry.charm) ?? {};
+    const schemaString = stringifySchemaGuarded(schema as JSONSchema);
+    const charmTools = createCharmToolDefinitions(
+      entry.charmName,
+      schemaString,
+    );
+
+    llmTools[charmTools.read.name] = {
+      description: charmTools.read.description,
+      inputSchema: charmTools.read.inputSchema,
+    };
+    llmTools[charmTools.run.name] = {
+      description: charmTools.run.description,
+      inputSchema: charmTools.run.inputSchema,
+    };
+
+    aggregatedTools.set(charmTools.read.name, {
+      kind: "read",
+      charm: entry.charm,
+    });
+    aggregatedTools.set(charmTools.run.name, {
+      kind: "run",
+      charm: entry.charm,
+    });
+  }
+
+  return { llmTools, legacyToolCells, aggregatedTools };
+}
+
+function normalizeCharmPathSegments(input: unknown): string[] {
+  const rawPath = (input && typeof input === "object")
+    ? (input as any).path
+    : undefined;
+  const parts = Array.isArray(rawPath)
+    ? rawPath.map((segment) => String(segment))
+    : [];
+  if (parts.length === 0) {
+    throw new Error("path must be an array of strings");
+  }
+  return parts.filter((segment) =>
+    segment !== undefined && segment !== null && `${segment}`.length > 0
+  ).map((segment) => segment.toString());
+}
+
+function extractRunArguments(input: unknown): Record<string, any> {
+  if (input && typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    if (obj.args && typeof obj.args === "object") {
+      return obj.args as Record<string, any>;
+    }
+    const { path: _path, ...rest } = obj;
+    return rest as Record<string, any>;
+  }
+  return {};
+}
+
+function resolveToolCall(
+  runtime: IRuntime,
+  toolCallPart: BuiltInLLMToolCallPart,
+  catalog: ToolCatalog,
+): {
+  call: LLMToolCall;
+  toolDef?: Cell<Schema<typeof LLMToolSchema>>;
+  charmMeta?: {
+    handler?: any;
+    cell?: Cell<any>;
+    charm: Cell<any>;
+    extraParams?: Record<string, unknown>;
+    pattern?: Readonly<Recipe>;
+  };
+} {
+  const name = toolCallPart.toolName;
+  const id = toolCallPart.toolCallId;
+  const legacyTool = catalog.legacyToolCells.get(name);
+  if (legacyTool) {
+    return {
+      toolDef: legacyTool,
+      call: { id, name, input: toolCallPart.input },
+    };
+  }
+
+  const aggregated = catalog.aggregatedTools.get(name);
+  if (!aggregated) {
+    throw new Error("Tool has neither pattern nor handler");
+  }
+
+  const segments = normalizeCharmPathSegments(toolCallPart.input);
+  const baseLink = aggregated.charm.getAsNormalizedFullLink();
+  const link = {
+    ...baseLink,
+    path: [
+      ...baseLink.path,
+      ...segments.map((segment) => segment.toString()),
+    ],
+  };
+
+  if (aggregated.kind === "read") {
+    const maybeRef: Cell<any> = runtime.getCellFromLink(link);
+    if (isStream(maybeRef)) {
+      throw new Error("path resolves to a handler stream; use <slug>_run");
+    }
+    return {
+      charmMeta: { cell: aggregated.charm, charm: aggregated.charm },
+      call: { id, name, input: toolCallPart.input },
+    };
+  }
+
+  const ref: Cell<any> = runtime.getCellFromLink(link);
+  if (isStream(ref)) {
+    return {
+      charmMeta: { handler: ref as any, charm: aggregated.charm },
+      call: {
+        id,
+        name,
+        input: extractRunArguments(toolCallPart.input),
+      },
+    };
+  }
+
+  const pattern = (ref as Cell<any>).key("pattern")
+    .getRaw() as unknown as Readonly<Recipe> | undefined;
+  if (pattern) {
+    return {
+      charmMeta: {
+        pattern,
+        extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
+        charm: aggregated.charm,
+      },
+      call: {
+        id,
+        name,
+        input: extractRunArguments(toolCallPart.input),
+      },
+    };
+  }
+
+  throw new Error("path does not resolve to a handler stream");
+}
+
+function extractToolCallParts(
+  content: BuiltInLLMMessage["content"],
+): BuiltInLLMToolCallPart[] {
+  if (!Array.isArray(content)) return [];
+  return content.filter((part): part is BuiltInLLMToolCallPart =>
+    (part as BuiltInLLMToolCallPart).type === "tool-call"
+  );
+}
+
+function buildAssistantMessage(
+  content: BuiltInLLMMessage["content"],
+  toolCallParts: BuiltInLLMToolCallPart[],
+): BuiltInLLMMessage {
+  const assistantContentParts: Array<
+    BuiltInLLMTextPart | BuiltInLLMToolCallPart
+  > = [];
+
+  if (typeof content === "string" && content) {
+    assistantContentParts.push({
+      type: "text",
+      text: content,
+    });
+  } else if (Array.isArray(content)) {
+    assistantContentParts.push(
+      ...content.filter((part) => part.type === "text") as BuiltInLLMTextPart[],
+    );
+  }
+
+  assistantContentParts.push(...toolCallParts);
+
+  return {
+    role: "assistant",
+    content: assistantContentParts,
+  };
+}
+
+type ToolCallExecutionResult = {
+  id: string;
+  toolName: string;
+  result?: any;
+  error?: string;
+};
+
+async function executeToolCalls(
+  runtime: IRuntime,
+  space: MemorySpace,
+  toolCatalog: ToolCatalog,
+  toolCallParts: BuiltInLLMToolCallPart[],
+): Promise<ToolCallExecutionResult[]> {
+  const results: ToolCallExecutionResult[] = [];
+  for (const part of toolCallParts) {
+    try {
+      const resolved = resolveToolCall(runtime, part, toolCatalog);
+      const resultValue = await invokeToolCall(
+        runtime,
+        space,
+        resolved.toolDef,
+        resolved.call,
+        resolved.charmMeta,
+      );
+      results.push({
+        id: part.toolCallId,
+        toolName: part.toolName,
+        result: resultValue,
+      });
+    } catch (error) {
+      console.error(`Tool ${part.toolName} failed:`, error);
+      results.push({
+        id: part.toolCallId,
+        toolName: part.toolName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}
+
+function createToolResultMessages(
+  results: ToolCallExecutionResult[],
+): BuiltInLLMMessage[] {
+  return results.map((toolResult) => ({
+    role: "tool",
+    content: [{
+      type: "tool-result",
+      toolCallId: toolResult.id,
+      toolName: toolResult.toolName || "unknown",
+      output: toolResult.error
+        ? { type: "error-text", value: toolResult.error }
+        : toolResult.result,
+    }],
+  }));
+}
+
+export const llmDialogTestHelpers = {
+  createCharmToolDefinitions,
+  normalizeCharmPathSegments,
+  extractRunArguments,
+  extractToolCallParts,
+  buildAssistantMessage,
+  createToolResultMessages,
+};
 
 /**
  * Performs a mutation on the storage if the pending flag is active and the
@@ -425,11 +765,21 @@ async function invokeToolCall(
   space: MemorySpace,
   toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
   toolCall: LLMToolCall,
-  charmMeta?: { handler?: any; cell?: Cell<any>; charm: Cell<any> },
+  charmMeta?: {
+    handler?: any;
+    cell?: Cell<any>;
+    charm: Cell<any>;
+    extraParams?: Record<string, unknown>;
+    pattern?: Readonly<Recipe>;
+  },
 ) {
-  const pattern = toolDef?.key("pattern").getRaw() as unknown as
-    | Readonly<Recipe>
-    | undefined;
+  const pattern = charmMeta?.pattern ??
+    toolDef?.key("pattern").getRaw() as unknown as
+      | Readonly<Recipe>
+      | undefined;
+  const extraParams = charmMeta?.extraParams ??
+    toolDef?.key("extraParams").get() ??
+    {};
   const handler = charmMeta?.handler ?? toolDef?.key("handler");
   // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
   const result = runtime.getCell<any>(space, toolCall.id);
@@ -455,7 +805,7 @@ async function invokeToolCall(
 
   runtime.editWithRetry((tx) => {
     if (pattern) {
-      runtime.run(tx, pattern, toolCall.input, result);
+      runtime.run(tx, pattern, { ...toolCall.input, ...extraParams }, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...toolCall.input,
@@ -700,78 +1050,7 @@ async function startRequest(
 
   // No need to flatten here; UI handles flattened tools reactively
 
-  // Build LLM tools; may load recipes to fetch schemas
-  const toolsWithSchemas: Record<
-    string,
-    { description: string; inputSchema: JSONSchema }
-  > = {};
-  const aggregatedTools = new Map<string, { charm: Cell<any> }>();
-
-  // Pass-through non-charm tools
-  for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
-    if (tool?.charm?.get?.()) continue;
-    const t: any = tool as any;
-    const pattern = t?.pattern?.get?.() ?? t?.pattern;
-    const handler = t?.handler;
-    let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
-      t?.inputSchema;
-    if (inputSchema === undefined) continue;
-    inputSchema = normalizeInputSchema(inputSchema);
-    const description: string = tool.description ??
-      (inputSchema as any)?.description ?? "";
-    toolsWithSchemas[name] = { description, inputSchema };
-  }
-
-  // Aggregated charm tools: include schema by loading recipe if needed
-  for (const [name, tool] of Object.entries(toolsCell.get() ?? {})) {
-    const charmCell: Cell<any> | undefined = tool?.charm?.get?.()
-      ? tool.charm
-      : undefined;
-    if (!charmCell) continue;
-    const charmValue = charmCell.get();
-    const charmName = String(charmValue?.[NAME] || name);
-    const slug = `${slugify(charmName)}`;
-    const readName = `${slug}_read`;
-    const runName = `${slug}_run`;
-
-    const schema = await getCharmResultSchemaAsync(runtime, charmCell) ?? {};
-    const schemaString = stringifySchemaGuarded(schema as JSONSchema);
-
-    toolsWithSchemas[readName] = {
-      description:
-        `Read values from charm "${charmName}" using path: string[]. ` +
-        `Construct paths by walking the charm schema (single key -> ["key"]). ` +
-        `Schema: ${schemaString}`,
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: { type: "array", items: { type: "string" }, minItems: 1 },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      } as JSONSchema,
-    };
-
-    toolsWithSchemas[runName] = {
-      description:
-        `Run handlers on charm "${charmName}" using path: string[] ` +
-        `to a handler stream and args: object. You may pass args nested ` +
-        `under input.args or as top-level fields (path removed). ` +
-        `Schema: ${schemaString}`,
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: { type: "array", items: { type: "string" }, minItems: 1 },
-          args: { type: "object" },
-        },
-        required: ["path"],
-        additionalProperties: false,
-      } as JSONSchema,
-    };
-
-    aggregatedTools.set(readName, { charm: charmCell });
-    aggregatedTools.set(runName, { charm: charmCell });
-  }
+  const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
   const llmParams: LLMRequest = {
     system: system ?? "",
@@ -781,7 +1060,7 @@ async function startRequest(
     model: model ?? DEFAULT_MODEL_NAME,
     metadata: { context: "charm" },
     cache: true,
-    tools: toolsWithSchemas,
+    tools: toolCatalog.llmTools,
   };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
@@ -795,173 +1074,22 @@ async function startRequest(
 
       if (hasToolCalls) {
         try {
-          const newMessages: BuiltInLLMMessage[] = [];
-
-          // Create assistant message with tool-call content parts
-          const assistantContentParts: Array<
-            BuiltInLLMTextPart | BuiltInLLMToolCallPart
-          > = [];
-
-          // Add text content if present
-          if (typeof llmResult.content === "string" && llmResult.content) {
-            assistantContentParts.push({
-              type: "text",
-              text: llmResult.content,
-            });
-          } else if (Array.isArray(llmResult.content)) {
-            // Content is already an array of parts, use it directly
-            assistantContentParts.push(
-              ...llmResult.content.filter((part) => part.type === "text"),
-            );
-          }
-
-          // Extract tool calls from content parts
-          const toolCallParts = (llmResult.content as any[]).filter((part) =>
-            part.type === "tool-call"
-          ) as BuiltInLLMToolCallPart[];
-
-          for (const toolCallPart of toolCallParts) {
-            assistantContentParts.push(toolCallPart);
-          }
-
-          const assistantMessage: BuiltInLLMMessage = {
-            role: "assistant",
-            content: assistantContentParts,
-          };
-
-          // Execute each tool call and collect results
-          const toolResults: any[] = [];
-          // Snapshot tools object to detect presence of legacy/non-aggregated tool defs
-          const toolsObj = toolsCell.get() ?? {};
-          for (const toolCallPart of toolCallParts) {
-            try {
-              const name = toolCallPart.toolName;
-              let charmMeta:
-                | { handler?: any; cell?: Cell<any>; charm: Cell<any> }
-                | undefined;
-              let toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined =
-                undefined;
-              if (
-                !charmMeta &&
-                Object.prototype.hasOwnProperty.call(toolsObj, name)
-              ) {
-                toolDef = toolsCell.key(name) as unknown as Cell<
-                  Schema<typeof LLMToolSchema>
-                >;
-              }
-
-              // New aggregated API: <Charm>_read | <Charm>_run
-              let adjustedInput = toolCallPart.input;
-              if (!charmMeta && !toolDef && aggregatedTools.has(name)) {
-                const agg = aggregatedTools.get(name)!;
-                const input = toolCallPart.input as any;
-
-                const parts = Array.isArray(input?.path)
-                  ? input.path.map((s: any) => String(s))
-                  : [];
-                if (parts.length === 0) {
-                  throw new Error("path must be an array of strings");
-                }
-                const segs = parts.filter((p: any) =>
-                  p !== undefined && p !== null && `${p}`.length > 0
-                );
-
-                if (name.endsWith("_read")) {
-                  // For reads, keep base charm and use getAsQueryResult(path)
-                  const baseLink = agg.charm.getAsNormalizedFullLink();
-                  const link = {
-                    ...baseLink,
-                    path: [
-                      ...baseLink.path,
-                      ...segs.map((p: any) => p.toString()),
-                    ],
-                  };
-                  const maybeRef: Cell<any> = runtime.getCellFromLink(link);
-                  if (isStream(maybeRef)) {
-                    throw new Error(
-                      "path resolves to a handler stream; use <slug>_run",
-                    );
-                  }
-                  charmMeta = { cell: agg.charm, charm: agg.charm } as any;
-                } else if (name.endsWith("_run")) {
-                  const baseLink = agg.charm.getAsNormalizedFullLink();
-                  const link = {
-                    ...baseLink,
-                    path: [
-                      ...baseLink.path,
-                      ...segs.map((p: any) => p.toString()),
-                    ],
-                  };
-                  const ref: Cell<any> = runtime.getCellFromLink(link);
-                  if (!isStream(ref)) {
-                    throw new Error(
-                      "path does not resolve to a handler stream",
-                    );
-                  }
-                  charmMeta = {
-                    handler: ref as any,
-                    charm: agg.charm,
-                  } as any;
-                  // For run tools, pass only handler args. Accept both shapes:
-                  // either nested under `args`, or top-level fields alongside path.
-                  toolDef = undefined;
-                  const nestedArgs = (input && typeof input === "object")
-                    ? input.args
-                    : undefined;
-                  if (nestedArgs !== undefined) {
-                    adjustedInput = nestedArgs;
-                  } else {
-                    const { path: _, ...rest } =
-                      (input && typeof input === "object") ? input : {} as any;
-                    adjustedInput = rest;
-                  }
-                }
-              }
-
-              const resultValue = await invokeToolCall(
-                runtime,
-                space,
-                toolDef,
-                {
-                  id: toolCallPart.toolCallId,
-                  name: toolCallPart.toolName,
-                  input: adjustedInput,
-                },
-                charmMeta,
-              );
-              toolResults.push({
-                id: toolCallPart.toolCallId,
-                result: resultValue,
-              });
-            } catch (error) {
-              console.error(`Tool ${toolCallPart.toolName} failed:`, error);
-              toolResults.push({
-                id: toolCallPart.toolCallId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
-
-          // Add assistant message with tool calls
-          newMessages.push(assistantMessage);
-
-          // Add tool result messages
-          for (const toolResult of toolResults) {
-            const matchingToolCallPart = toolCallParts.find((tc) =>
-              tc.toolCallId === toolResult.id
-            );
-            newMessages.push({
-              role: "tool",
-              content: [{
-                type: "tool-result",
-                toolCallId: toolResult.id,
-                toolName: matchingToolCallPart?.toolName || "unknown",
-                output: toolResult.error
-                  ? { type: "error-text", value: toolResult.error }
-                  : toolResult.result,
-              }],
-            });
-          }
+          const llmContent = llmResult.content as BuiltInLLMMessage["content"];
+          const toolCallParts = extractToolCallParts(llmContent);
+          const assistantMessage = buildAssistantMessage(
+            llmContent,
+            toolCallParts,
+          );
+          const toolResults = await executeToolCalls(
+            runtime,
+            space,
+            toolCatalog,
+            toolCallParts,
+          );
+          const newMessages: BuiltInLLMMessage[] = [
+            assistantMessage,
+            ...createToolResultMessages(toolResults),
+          ];
 
           newMessages.forEach((message) => {
             (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {

@@ -1,10 +1,15 @@
 /// <cts-enable />
 import {
+  BuiltInLLMMessage,
   Cell,
+  cell,
   derive,
   handler,
+  ifElse,
+  lift,
   NAME,
   navigateTo,
+  patternTool,
   recipe,
   str,
   UI,
@@ -16,11 +21,10 @@ import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
+import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 
-export type Charm = {
+type MinimalCharm = {
   [NAME]?: string;
-  [UI]?: unknown;
-  [key: string]: any;
 };
 
 type CharmsListInput = void;
@@ -31,11 +35,13 @@ interface CharmsListOutput {
   backlinksIndex: {
     mentionable: MentionableCharm[];
   };
+  sidebarUI: unknown;
+  fabUI: unknown;
 }
 
 const visit = handler<
   Record<string, never>,
-  { charm: any }
+  { charm: Cell<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -43,20 +49,19 @@ const visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: any;
-    allCharms: Cell<any[]>;
+    charm: Cell<MinimalCharm>;
+    allCharms: Cell<MinimalCharm[]>;
   }
 >((_, state) => {
-  const charmName = state.charm[NAME];
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => c[NAME] === charmName);
+  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
-    console.log("charmListCopy before", charmListCopy);
+    console.log("charmListCopy before", charmListCopy.length);
     charmListCopy.splice(index, 1);
-    console.log("charmListCopy after", charmListCopy);
-    state.allCharms.set(charmListCopy);
+    console.log("charmListCopy after", charmListCopy.length);
+    state.allCharms.resolveAsCell().set(charmListCopy);
   }
 });
 
@@ -92,6 +97,56 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
+const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
+  value.set(!value.get());
+});
+
+const messagesToNotifications = lift<
+  {
+    messages: BuiltInLLMMessage[];
+    seen: Cell<number>;
+    notifications: Cell<{ text: string; timestamp: number }[]>;
+  }
+>(({ messages, seen, notifications }) => {
+  if (messages.length > 0) {
+    if (seen.get() >= messages.length) {
+      // If messages length went backwards, reset seen counter
+      if (seen.get() > messages.length) {
+        seen.set(0);
+      } else {
+        return;
+      }
+    }
+
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage.role === "assistant") {
+      const contentText = typeof latestMessage.content === "string"
+        ? latestMessage.content
+        : latestMessage.content.map((part) => {
+          if (part.type === "text") {
+            return part.text;
+          } else if (part.type === "tool-call") {
+            return `Tool call: ${part.toolName}`;
+          } else if (part.type === "tool-result") {
+            return part.output.type === "text"
+              ? part.output.value
+              : JSON.stringify(part.output.value);
+          } else if (part.type === "image") {
+            return "[Image]";
+          }
+          return "";
+        }).join("");
+
+      notifications.push({
+        text: contentText,
+        timestamp: Date.now(),
+      });
+
+      seen.set(messages.length);
+    }
+  }
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -100,6 +155,31 @@ export default recipe<CharmsListInput, CharmsListOutput>(
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
+    const fabExpanded = cell(false);
+    const notifications = cell<{ text: string; timestamp: number }[]>([]);
+    const seen = cell<number>(0);
+
+    const omnibot = Chatbot({
+      messages: [],
+      tools: {
+        searchWeb: {
+          pattern: searchWeb,
+        },
+        readWebpage: {
+          pattern: readWebpage,
+        },
+        // Example of using patternTool with an existing recipe and extra params
+        calculator: patternTool(calculator, { base: 10 }),
+      },
+    });
+
+    messagesToNotifications({
+      messages: omnibot.messages,
+      seen: seen as unknown as Cell<number>,
+      notifications: notifications as unknown as Cell<
+        { id: string; text: string; timestamp: number }[]
+      >,
+    });
 
     return {
       backlinksIndex: index,
@@ -113,10 +193,14 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             onct-keybind={spawnChatList()}
           />
 
-          <ct-vstack gap="4" padding="6">
-            {/* Quick Launch Toolbar */}
-            <ct-hstack gap="2" align="center">
-              <h3>Quicklaunch:</h3>
+          <ct-keybind
+            code="Escape"
+            preventDefault
+            onct-keybind={toggle({ value: fabExpanded })}
+          />
+
+          <ct-toolbar slot="header">
+            <div slot="start">
               <ct-button
                 onClick={spawnChatList()}
               >
@@ -137,22 +221,24 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               >
                 📄 Note
               </ct-button>
-            </ct-hstack>
+            </div>
+          </ct-toolbar>
 
-            <h2>Charms ({allCharms.length})</h2>
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack gap="4" padding="6">
+              <h2>Charms ({allCharms.length})</h2>
 
-            <ct-table full-width hover>
-              <thead>
-                <tr>
-                  <th>Charm Name</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {derive(allCharms, (allCharms) =>
-                  allCharms.map((charm: any) => (
+              <ct-table full-width hover>
+                <thead>
+                  <tr>
+                    <th>Charm Name</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allCharms.map((charm) => (
                     <tr>
-                      <td>{charm[NAME] || "Untitled Charm"}</td>
+                      <td>{charm?.[NAME] || "Untitled Charm"}</td>
                       <td>
                         <ct-hstack gap="2">
                           <ct-button
@@ -171,11 +257,34 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                         </ct-hstack>
                       </td>
                     </tr>
-                  )))}
-              </tbody>
-            </ct-table>
-          </ct-vstack>
+                  ))}
+                </tbody>
+              </ct-table>
+            </ct-vstack>
+          </ct-vscroll>
         </ct-screen>
+      ),
+      sidebarUI: (
+        <div>
+          {/* TODO(bf): Remove once we fix types to not require ReactNode */}
+          {omnibot.ui.attachmentsAndTools as any}
+          {omnibot.ui.chatLog as any}
+        </div>
+      ),
+      fabUI: (
+        <>
+          <ct-toast-stack
+            $notifications={notifications}
+            position="top-right"
+            auto-dismiss={5000}
+            max-toasts={5}
+          />
+          {ifElse(
+            fabExpanded,
+            omnibot.ui.promptInput,
+            <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
+          )}
+        </>
       ),
     };
   },

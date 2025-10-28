@@ -20,6 +20,7 @@ claude-research.key
 .page-agent-config.json
 .common.json
 .knowledge
-packages/local-dev-toolshed.log
+local-dev-toolshed.log
 local-dev-shell.log
 tools/ralph/logs/
+tools/ralph/smoketest/

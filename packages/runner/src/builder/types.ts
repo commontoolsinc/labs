@@ -25,6 +25,7 @@ import type {
   Opaque,
   OpaqueRef,
   OpaqueRefMethods,
+  PatternToolFunction,
   Recipe,
   RecipeFunction,
   RenderFunction,
@@ -123,10 +124,14 @@ declare module "@commontools/api" {
     unsafe_getExternal(): OpaqueRef<T>;
     map<S>(
       fn: (
-        element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
-        index: Opaque<number>,
-        array: T,
+        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+        index: OpaqueRef<number>,
+        array: OpaqueRef<T>,
       ) => Opaque<S>,
+    ): Opaque<S[]>;
+    mapWithPattern<S>(
+      op: Recipe,
+      params: Record<string, any>,
     ): Opaque<S[]>;
     toJSON(): unknown;
     [Symbol.iterator](): Iterator<T>;
@@ -271,6 +276,7 @@ export type Frame = {
 export interface BuilderFunctionsAndConstants {
   // Recipe creation
   recipe: RecipeFunction;
+  patternTool: PatternToolFunction;
 
   // Module creation
   lift: LiftFunction;

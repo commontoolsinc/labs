@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
 import { AppState } from "../lib/app/mod.ts";
 import { BaseView } from "./BaseView.ts";
@@ -59,6 +59,9 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   private titleSubscription?: CellEventTarget<string | undefined>;
 
+  @state()
+  private hasSidebarContent = false;
+
   private debuggerController = new DebuggerController(this);
   @provide({ context: keyboardRouterContext })
   private keyboard = new KeyboardRouter();
@@ -69,6 +72,11 @@ export class XAppView extends BaseView {
     super.connectedCallback();
     // Listen for clear telemetry events
     this.addEventListener("clear-telemetry", this.handleClearTelemetry);
+    // Listen for sidebar content changes
+    this.addEventListener(
+      "sidebar-content-change",
+      this.handleSidebarContentChange,
+    );
 
     // Register global shortcuts via keyboard router
     const isMac = navigator.platform.toLowerCase().includes("mac");
@@ -94,6 +102,10 @@ export class XAppView extends BaseView {
 
   override disconnectedCallback() {
     this.removeEventListener("clear-telemetry", this.handleClearTelemetry);
+    this.removeEventListener(
+      "sidebar-content-change",
+      this.handleSidebarContentChange,
+    );
     for (const off of this._unsubShortcuts) off();
     this._unsubShortcuts = [];
     this.keyboard.dispose();
@@ -102,6 +114,11 @@ export class XAppView extends BaseView {
 
   private handleClearTelemetry = () => {
     this.debuggerController.clearTelemetry();
+  };
+
+  private handleSidebarContentChange = (e: Event) => {
+    const event = e as CustomEvent<{ hasSidebarContent: boolean }>;
+    this.hasSidebarContent = event.detail.hasSidebarContent;
   };
 
   // Do not make private, integration tests access this directly.
@@ -117,7 +134,13 @@ export class XAppView extends BaseView {
       ) {
         return current;
       }
-      const activeCharm = await rt.cc().get(app.activeCharmId, nameSchema);
+      const activeCharm = await rt.cc().get(
+        app.activeCharmId,
+        true,
+        nameSchema,
+      );
+      // Record the charm as recently accessed so recents stay fresh.
+      await rt.cc().manager().trackRecentCharm(activeCharm.getCell());
       this.#setTitleSubscription(activeCharm);
 
       return activeCharm;
@@ -190,6 +213,7 @@ export class XAppView extends BaseView {
         .rt="${this.rt}"
         .activeCharm="${this._activeCharm.value}"
         .showShellCharmListView="${app.showShellCharmListView ?? false}"
+        .showSidebar="${app.showSidebar ?? false}"
       ></x-body-view>
     `;
 
@@ -205,6 +229,8 @@ export class XAppView extends BaseView {
           .charmId="${this._activeCharm.value?.id}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showDebuggerView="${app.showDebuggerView ?? false}"
+          .showSidebar="${app.showSidebar ?? false}"
+          .hasSidebarContent="${this.hasSidebarContent}"
         ></x-header-view>
         <div class="content-area">
           ${content}

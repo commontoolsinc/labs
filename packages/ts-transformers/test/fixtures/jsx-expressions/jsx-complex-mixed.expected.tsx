@@ -65,18 +65,61 @@ export default recipe({
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.map((item) => (<li key={item.id}>
-              <span>{item.name}</span>
-              <span>- Original: ${item.price}</span>
+          {state.items.mapWithPattern(__ctHelpers.recipe({
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            taxRate: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["discount", "taxRate"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            price: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "name", "price", "active"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount, taxRate } }) => (<li key={element.id}>
+              <span>{element.name}</span>
+              <span>- Original: ${element.price}</span>
               <span>
-                - Discounted: ${__ctHelpers.derive({ item_price: item.price, state_discount: state.discount }, ({ item_price: _v1, state_discount: _v2 }) => (_v1 * (1 - _v2)).toFixed(2))}
+                - Discounted: ${__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price: _v1, discount: discount }) => (_v1 * (1 - discount)).toFixed(2))}
               </span>
               <span>
                 - With tax:
-                ${__ctHelpers.derive({ item_price: item.price, state_discount: state.discount, state_taxRate: state.taxRate }, ({ item_price: _v1, state_discount: _v2, state_taxRate: _v3 }) => (_v1 * (1 - _v2) * (1 + _v3))
+                ${__ctHelpers.derive({ element_price: element.price, discount, taxRate }, ({ element_price: _v1, discount: discount, taxRate: taxRate }) => (_v1 * (1 - discount) * (1 + taxRate))
                 .toFixed(2))}
               </span>
-            </li>))}
+            </li>)), { discount: state.discount, taxRate: state.taxRate })}
         </ul>
 
         <h3>Array Methods</h3>

@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Record and mapped types", () => {
   const transformer = createSchemaTransformerV2();
@@ -15,7 +15,9 @@ describe("Schema: Record and mapped types", () => {
        }`,
       "Config",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
@@ -50,7 +52,9 @@ describe("Schema: Record and mapped types", () => {
       }`,
       "Config",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
@@ -80,7 +84,9 @@ describe("Schema: Record and mapped types", () => {
       }`,
       "Config",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     const limitsSchema = schema.properties!.limits as any;
     expect(limitsSchema.type).toBe("object");
@@ -98,7 +104,9 @@ describe("Schema: Record and mapped types", () => {
       }`,
       "Config",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     const featuresSchema = schema.properties!.features as any;
     expect(featuresSchema.type).toBe("object");
@@ -116,7 +124,9 @@ describe("Schema: Record and mapped types", () => {
       }`,
       "Registry",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     const handlersSchema = schema.properties!.handlers as any;
     expect(handlersSchema.type).toBe("object");
@@ -152,7 +162,9 @@ describe("Schema: Record and mapped types", () => {
       }`,
       "Config",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     const nestedSchema = schema.properties!.nested as any;
     expect(nestedSchema.type).toBe("object");
@@ -168,7 +180,9 @@ describe("Schema: Record and mapped types", () => {
       `type PartialConfig = Partial<{ name: string; age: number }>;`,
       "PartialConfig",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
@@ -187,7 +201,9 @@ describe("Schema: Record and mapped types", () => {
        type PickedUser = Pick<User, "id" | "name">;`,
       "PickedUser",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
@@ -206,7 +222,9 @@ describe("Schema: Record and mapped types", () => {
       `type RequiredConfig = Required<{ name?: string; age?: number }>;`,
       "RequiredConfig",
     );
-    const schema = transformer(type, checker, typeNode);
+    const schema = asObjectSchema(
+      transformer.generateSchema(type, checker, typeNode),
+    );
 
     expect(schema.type).toBe("object");
 
@@ -227,7 +245,9 @@ describe("Schema: Record and mapped types", () => {
         }`,
         "Config",
       );
-      const schema = transformer(type, checker, typeNode);
+      const schema = asObjectSchema(
+        transformer.generateSchema(type, checker, typeNode),
+      );
 
       // Record<string, T> should use additionalProperties pattern
       const metadataSchema = schema.properties!.metadata as any;
@@ -250,7 +270,9 @@ describe("Schema: Record and mapped types", () => {
          }`,
         "Config",
       );
-      const schema = transformer(type, checker, typeNode);
+      const schema = asObjectSchema(
+        transformer.generateSchema(type, checker, typeNode),
+      );
 
       console.log("box schema:", JSON.stringify(schema.properties?.box));
       console.log(
@@ -281,7 +303,9 @@ describe("Schema: Record and mapped types", () => {
          }`,
         "Config",
       );
-      const schema = transformer(type, checker, typeNode);
+      const schema = asObjectSchema(
+        transformer.generateSchema(type, checker, typeNode),
+      );
 
       // TypeScript distributes the conditional over the union, resulting in:
       // Record<"foo", number> | Record<"bar", number>

@@ -26,13 +26,16 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
-  (_, { items, index }) => {
-    const itemsCopy = items.get().slice();
-    if (index >= 0 && index < itemsCopy.length) itemsCopy.splice(index, 1);
-    items.set(itemsCopy);
-  },
-);
+const removeItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+>((_event, { items, item }) => {
+  const currentItems = items.get();
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
+});
 
 const updateItem = handler<
   { detail: { value: string } },
@@ -45,9 +48,9 @@ const updateItem = handler<
   }
 });
 
-export default recipe(
+export default recipe<InputSchema>(
   "Simple List with Remove and Edit",
-  ({ title, items }: InputSchema) => {
+  ({ title, items }) => {
     return {
       [NAME]: title,
       [UI]: (
@@ -57,15 +60,14 @@ export default recipe(
           <div
             style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
           >
-            {items.map((item: Item, index: number) => (
+            {items.map((item, index) => (
               <div
-                key={index}
                 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
               >
                 <ct-button
                   variant="destructive"
                   size="sm"
-                  onClick={removeItem({ items, index })}
+                  onClick={removeItem({ items, item })}
                 >
                   Remove
                 </ct-button>

@@ -26,6 +26,7 @@ export interface Cell<T = any> {
   push(...value: T extends (infer U)[] ? U[] : never): void;
   equals(other: Cell<any>): boolean;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+  resolveAsCell(): Cell<T>;
 }
 
 // Cell type with only public methods
@@ -59,11 +60,15 @@ export interface OpaqueRefMethods<T> {
   setSchema(schema: JSONSchema): void;
   map<S>(
     fn: (
-      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
-      index: Opaque<number>,
-      array: T,
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
     ) => Opaque<S>,
-  ): Opaque<S[]>;
+  ): OpaqueRef<S[]>;
+  mapWithPattern<S>(
+    op: Recipe,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]>;
 }
 
 // Factory types
@@ -156,7 +161,7 @@ export type JSONSchemaObj = {
   // Subschema logic
   readonly allOf?: readonly (JSONSchema)[]; // not validated
   readonly anyOf?: readonly (JSONSchema)[]; // not always validated
-  readonly oneOf?: readonly (JSONSchema)[]; // not validated
+  readonly oneOf?: readonly (JSONSchema)[]; // not always validated
   readonly not?: JSONSchema;
   // Subschema conditionally - none applied
   readonly if?: JSONSchema;
@@ -164,7 +169,7 @@ export type JSONSchemaObj = {
   readonly else?: JSONSchema;
   readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
   // Subschema for array
-  readonly prefixItems?: (JSONSchema)[]; // not validated
+  readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
   readonly items?: Readonly<JSONSchema>;
   readonly contains?: JSONSchema; // not validated
   // Subschema for object
@@ -383,6 +388,14 @@ export type RecipeFunction = {
   ): RecipeFactory<T, R>;
 };
 
+export type PatternToolFunction = <
+  T,
+  E extends Partial<T> = Record<PropertyKey, never>,
+>(
+  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  extraParams?: Opaque<E>,
+) => OpaqueRef<Omit<T, keyof E>>;
+
 export type LiftFunction = {
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
     argumentSchema: T,
@@ -568,6 +581,7 @@ export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const recipe: RecipeFunction;
+export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;
@@ -613,6 +627,8 @@ export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>
   : T extends Array<infer U> ? StripCell<U>[]
   : T extends object ? { [K in keyof T]: StripCell<T[K]> }
   : T;
+
+export type WishKey = `/${string}` | `#${string}`;
 
 export type Schema<
   T extends JSONSchema,

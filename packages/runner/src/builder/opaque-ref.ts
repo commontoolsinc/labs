@@ -18,7 +18,7 @@ import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 
-let mapFactory: NodeFactory<any, any>;
+let mapFactory: NodeFactory<any, any> | undefined;
 
 // A opaque ref factory that creates future cells with optional default values.
 //
@@ -120,8 +120,8 @@ export function opaqueRef<T>(
       },
       map: <S>(
         fn: (
-          element: Opaque<Required<T extends Array<infer U> ? U : T>>,
-          index: Opaque<number>,
+          element: OpaqueRef<Required<T extends Array<infer U> ? U : T>>,
+          index: OpaqueRef<number>,
           array: T,
         ) => Opaque<S>,
       ) => {
@@ -138,6 +138,22 @@ export function opaqueRef<T>(
             ({ element, index, array }: Opaque<any>) =>
               fn(element, index, array),
           ),
+        });
+      },
+      mapWithPattern: <S>(
+        op: Recipe,
+        params: Record<string, any>,
+      ) => {
+        // Create the factory if it doesn't exist. Doing it here to avoid
+        // circular dependency.
+        mapFactory ||= createNodeFactory({
+          type: "ref",
+          implementation: "map",
+        });
+        return mapFactory({
+          list: proxy,
+          op: op,
+          params: params,
         });
       },
       toJSON: () => null, // TODO(seefeld): Merge with Cell and cover doc-less case

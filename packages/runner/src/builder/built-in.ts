@@ -1,11 +1,14 @@
 import { BuiltInLLMDialogState } from "@commontools/api";
 import { createNodeFactory, lift } from "./module.ts";
+import { recipe } from "./recipe.ts";
+import { isRecipe } from "./types.ts";
 import type {
   Cell,
   JSONSchema,
   NodeFactory,
   Opaque,
   OpaqueRef,
+  RecipeFactory,
   Schema,
 } from "./types.ts";
 import type {
@@ -152,3 +155,52 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 ): Cell<Schema<S>>;
 
 export type { createCell };
+
+/**
+ * Helper function for creating LLM tool definitions from recipes with optional pre-filled parameters.
+ * Creates a recipe with the given function and returns an object suitable for use as an LLM tool,
+ * with proper TypeScript typing that reflects only the non-pre-filled parameters.
+ *
+ * @param fnOrRecipe - Either a recipe function or an already-created RecipeFactory
+ * @param extraParams - Optional object containing parameter values to pre-fill
+ * @returns An object with `pattern` and `extraParams` properties, typed to show only remaining params
+ *
+ * @example
+ * ```ts
+ * import { patternTool } from "commontools";
+ *
+ * const content = cell("Hello world");
+ *
+ * // With a function - recipe will be created automatically
+ * const grepTool = patternTool(
+ *   ({ query, content }: { query: string; content: string }) => {
+ *     return derive({ query, content }, ({ query, content }) => {
+ *       return content.split("\n").filter((c) => c.includes(query));
+ *     });
+ *   },
+ *   { content }
+ * );
+ *
+ * // With an existing recipe
+ * const myRecipe = recipe<{ query: string; content: string }>(
+ *   "Grep",
+ *   ({ query, content }) => { ... }
+ * );
+ * const grepTool2 = patternTool(myRecipe, { content });
+ *
+ * // Both result in type: OpaqueRef<{ query: string }>
+ * ```
+ */
+export function patternTool<T, E extends Partial<T>>(
+  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  extraParams?: Opaque<E>,
+): OpaqueRef<Omit<T, keyof E>> {
+  const pattern = isRecipe(fnOrRecipe)
+    ? fnOrRecipe
+    : recipe<T>("tool", fnOrRecipe);
+
+  return {
+    pattern,
+    extraParams: extraParams ?? {},
+  } as any as OpaqueRef<Omit<T, keyof E>>;
+}

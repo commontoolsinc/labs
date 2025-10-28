@@ -45,7 +45,8 @@ written in Deno2, that provides the distributed runtime and storage.
 Lit Web Components for interacting with CommonTools spaces.
 
 **CLI (CT Binary)**: Command-line interface for managing charms, linking
-recipes, and deploying to spaces. See [CT Usage Guide](./docs/common/CT.md).
+patterns, and deploying to spaces. Run `deno task ct --help` for command
+reference.
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
 prefixed components for recipe UIs.
@@ -53,9 +54,9 @@ prefixed components for recipe UIs.
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
 recipes and common patterns for building with CommonTools.
 
-**Recipe Development**: Recipes can be developed using LLM assistance with
-commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`. See
-[Recipe Documentation](./docs/common/) for patterns, components, and handlers.
+**Pattern Development**: Patterns can be developed using LLM assistance with
+commands like `/imagine-recipe`, `/pattern-dev`, and `/explore-recipe`. See
+[Pattern Documentation](./docs/common/) for patterns, components, and handlers.
 
 ## Development & Integrations
 
@@ -64,7 +65,7 @@ commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`. See
 This repository includes many Claude Code commands in
 [`.claude/commands/`](./.claude/commands/) for common workflows:
 
-- `/recipe-dev` - Work on existing recipes with LLM assistance
+- `/pattern-dev` - Work on existing patterns with LLM assistance
 - `/imagine-recipe` - Create new recipes from ideas
 - `/explore-recipe` - Test recipes interactively with Playwright
 - `/linear` - Task management integration

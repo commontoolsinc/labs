@@ -17,6 +17,7 @@ export interface Cell<T = any> {
     push(...value: T extends (infer U)[] ? U[] : never): void;
     equals(other: Cell<any>): boolean;
     key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+    resolveAsCell(): Cell<T>;
 }
 export interface Stream<T> {
     send(event: T): void;
@@ -34,7 +35,8 @@ export interface OpaqueRefMethods<T> {
     setDefault(value: Opaque<T> | T): void;
     setName(name: string): void;
     setSchema(schema: JSONSchema): void;
-    map<S>(fn: (element: T extends Array<infer U> ? Opaque<U> : Opaque<T>, index: Opaque<number>, array: T) => Opaque<S>): Opaque<S[]>;
+    map<S>(fn: (element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>, index: OpaqueRef<number>, array: OpaqueRef<T>) => Opaque<S>): OpaqueRef<S[]>;
+    mapWithPattern<S>(op: Recipe, params: Record<string, any>): OpaqueRef<S[]>;
 }
 export interface Recipe {
     argumentSchema: JSONSchema;
@@ -77,7 +79,7 @@ export type JSONSchemaObj = {
     readonly then?: JSONSchema;
     readonly else?: JSONSchema;
     readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
-    readonly prefixItems?: (JSONSchema)[];
+    readonly prefixItems?: readonly (JSONSchema)[];
     readonly items?: Readonly<JSONSchema>;
     readonly contains?: JSONSchema;
     readonly properties?: Readonly<Record<string, JSONSchema>>;
@@ -242,6 +244,7 @@ export type RecipeFunction = {
     <T, R>(argumentSchema: string | JSONSchema, fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): RecipeFactory<T, R>;
     <T, R>(argumentSchema: string | JSONSchema, resultSchema: JSONSchema, fn: (input: OpaqueRef<Required<T>>) => Opaque<R>): RecipeFactory<T, R>;
 };
+export type PatternToolFunction = <T, E extends Partial<T> = Record<PropertyKey, never>>(fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>, extraParams?: Opaque<E>) => OpaqueRef<Omit<T, keyof E>>;
 export type LiftFunction = {
     <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(argumentSchema: T, resultSchema: R, implementation: (input: Schema<T>) => Schema<R>): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
     <T, R>(implementation: (input: T) => R): ModuleFactory<T, R>;
@@ -317,6 +320,7 @@ export interface RecipeEnvironment {
 }
 export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 export declare const recipe: RecipeFunction;
+export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;
@@ -352,6 +356,7 @@ export declare const toSchema: <T>(_options?: Partial<JSONSchema>) => JSONSchema
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
     [K in keyof T]: StripCell<T[K]>;
 } : T;
+export type WishKey = `/${string}` | `#${string}`;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
 } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>> : T extends {

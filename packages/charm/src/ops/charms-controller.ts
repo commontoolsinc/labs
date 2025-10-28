@@ -49,15 +49,21 @@ export class CharmsController<T = unknown> {
 
   async get<S extends JSONSchema = JSONSchema>(
     charmId: string,
+    runIt: boolean,
     schema: S,
   ): Promise<CharmController<Schema<S>>>;
   async get<T = unknown>(
     charmId: string,
+    runIt?: boolean,
     schema?: JSONSchema,
   ): Promise<CharmController<T>>;
-  async get(charmId: string, schema?: JSONSchema): Promise<CharmController> {
+  async get(
+    charmId: string,
+    runIt: boolean = false,
+    schema?: JSONSchema,
+  ): Promise<CharmController> {
     this.disposeCheck();
-    const cell = await this.#manager.get(charmId, true, schema);
+    const cell = await this.#manager.get(charmId, runIt, schema);
     if (!cell) {
       throw new Error(`Charm "${charmId}" not found.`);
     }
@@ -73,9 +79,8 @@ export class CharmsController<T = unknown> {
   async remove(charmId: string): Promise<boolean> {
     this.disposeCheck();
     const removed = await this.#manager.remove(charmId);
-    // Empty trash and ensure full synchronization
+    // Ensure full synchronization
     if (removed) {
-      await this.#manager.emptyTrash();
       await this.#manager.runtime.idle();
       await this.#manager.synced();
     }

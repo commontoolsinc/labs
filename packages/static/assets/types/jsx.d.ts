@@ -1,4 +1,9 @@
-import type { OpaqueRef, Cell, Props, RenderNode, VNode } from "commontools";
+import type { OpaqueRef, Cell, Props, RenderNode, VNode, Stream } from "commontools";
+
+// Helper type that allows any combination of OpaqueRef, Cell, and Stream wrappers
+// Supports arbitrary nesting like OpaqueRef<OpaqueRef<Cell<T>>>
+type InnerCellLike<T> = OpaqueRef<T> | Cell<T> | Stream<T>;
+type CellLike<T> = InnerCellLike<T> | InnerCellLike<InnerCellLike<T>>;
 
 // Minimal theme typing for ct-theme
 type CTColorToken = string | {
@@ -85,18 +90,18 @@ declare global {
     interface IntrinsicElements {
       [elemName: string]: any;
       "ct-outliner": {
-        "$value": OpaqueRef<Cell<{ root: OutlinerNode }>>,
-        "$mentionable"?: OpaqueRef<Cell<Charm[]>>,
-        "oncharm-link-click"?: OpaqueRef<HandlerEvent<{ charm: Cell<Charm> }>>,
+        "$value": CellLike<{ root: OutlinerNode }>,
+        "$mentionable"?: CellLike<Charm[]>,
+        "oncharm-link-click"?: CellLike<HandlerEvent<{ charm: Cell<Charm> }>>,
       } & Children & HTMLElementProps;
       "ct-list": {
-        "$value": OpaqueRef<CtListItem[]>,
+        "$value": CellLike<CtListItem[]>,
         /** setting this allows editing items inline */
         "editable"?: boolean,
         /** setting this hides the 'add item' form built into the list */
         "readonly"?: boolean,
         "title"?: string,
-        "onct-remove-item"?: OpaqueRef<HandlerEvent<{ item: CtListItem }>>,
+        "onct-remove-item"?: CellLike<HandlerEvent<{ item: CtListItem }>>,
       } & Children & HTMLElementProps;
       "ct-list-item": {
         "selected"?: boolean,
@@ -106,7 +111,7 @@ declare global {
         "onct-activate"?: any,
       } & Children & HTMLElementProps;
       "ct-input": {
-        "$value"?: OpaqueRef<string>,
+        "$value"?: CellLike<string>,
         "customStyle"?: string, // bf: I think this is going to go away one day soon
         "type"?: string,
         "placeholder"?: string,
@@ -142,7 +147,7 @@ declare global {
         "onct-invalid"?: any,
       } & Children & HTMLElementProps;
       "ct-checkbox": {
-        "$checked"?: OpaqueRef<boolean>,
+        "$checked"?: CellLike<boolean>,
         "checked"?: boolean,
         "disabled"?: boolean,
         "indeterminate"?: boolean,
@@ -151,10 +156,10 @@ declare global {
         "onct-change"?: any,
       } & Children & HTMLElementProps;
       "ct-select": {
-        "$value": OpaqueRef<any | any[]>,
+        "$value": CellLike<any | any[]>,
         "items": { label: string, value: any }[],
         "multiple"?: boolean,
-        "onct-change"?: OpaqueRef<HandlerEvent<{ items: { label: string, value: any }[], value: any | any[] }>>,
+        "onct-change"?: CellLike<HandlerEvent<{ items: { label: string, value: any }[], value: any | any[] }>>,
       } & Children & HTMLElementProps;
       "ct-tools-chip": {
         "label"?: string,
@@ -184,7 +189,7 @@ declare global {
         theme?: CTThemeInput,
       } & Children & HTMLElementProps;
       "ct-code-editor": {
-        "$value"?: OpaqueRef<string>,
+        "$value"?: CellLike<string>,
         "value"?: string,
         "language"?: string,
         "disabled"?: boolean,
@@ -192,9 +197,9 @@ declare global {
         "placeholder"?: string,
         "timingStrategy"?: string,
         "timingDelay"?: number,
-        "$mentionable"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
-        "$mentioned"?: OpaqueRef<Charm[]> | OpaqueRef<Cell<Charm[]>>,
-        "$pattern"?: OpaqueRef<any> | OpaqueRef<Cell<any>>,
+        "$mentionable"?: CellLike<Charm[]>,
+        "$mentioned"?: CellLike<Charm[]>,
+        "$pattern"?: CellLike<any>,
         "pattern"?: any,
         "wordWrap"?: boolean,
         "lineNumbers"?: boolean,

@@ -13,6 +13,7 @@ import {
   parseLinkOrThrow,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -773,10 +774,8 @@ describe("link-utils", () => {
         baseCell,
       );
 
-      // Decode the data URI
-      const base64 = dataURI.split(",")[1];
-      const json = atob(base64);
-      const parsed = JSON.parse(json);
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
 
       expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
         "nested",
@@ -814,10 +813,8 @@ describe("link-utils", () => {
 
       const dataURI = createDataCellURI(data, baseCell);
 
-      // Decode the data URI
-      const base64 = dataURI.split(",")[1];
-      const json = atob(base64);
-      const parsed = JSON.parse(json);
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
 
       expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
       expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
@@ -841,10 +838,8 @@ describe("link-utils", () => {
 
       const dataURI = createDataCellURI({ link: absoluteLink }, baseCell);
 
-      // Decode the data URI
-      const base64 = dataURI.split(",")[1];
-      const json = atob(base64);
-      const parsed = JSON.parse(json);
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
 
       // Should remain unchanged
       expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
@@ -867,14 +862,34 @@ describe("link-utils", () => {
       // Should not throw even though sharedObject is referenced multiple times
       const dataURI = createDataCellURI(data);
 
-      // Decode and verify
-      const base64 = dataURI.split(",")[1];
-      const json = atob(base64);
-      const parsed = JSON.parse(json);
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
 
       expect(parsed.value.first.value).toBe(42);
       expect(parsed.value.second.value).toBe(42);
       expect(parsed.value.nested.third.value).toBe(42);
+    });
+
+    it("should handle UTF-8 characters (emojis, special characters)", () => {
+      const data = {
+        emoji: "🚀 Hello World! 🌍",
+        chinese: "你好世界",
+        arabic: "مرحبا بالعالم",
+        special: "Ñoño™©®",
+        mixed: "Test 🎉 with ñ and 中文",
+      };
+
+      // Should not throw with UTF-8 characters
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.emoji).toBe("🚀 Hello World! 🌍");
+      expect(parsed.value.chinese).toBe("你好世界");
+      expect(parsed.value.arabic).toBe("مرحبا بالعالم");
+      expect(parsed.value.special).toBe("Ñoño™©®");
+      expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
     });
   });
 });

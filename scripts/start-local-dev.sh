@@ -41,7 +41,7 @@ check_port 5173
 
 # Start shell dev server in background
 cd packages/shell
-deno task dev-local > ../../local-dev-shell.log 2>&1 &
+deno task dev-local > local-dev-shell.log 2>&1 &
 SHELL_PID=$!
 
 # Wait a moment for shell to start
@@ -49,7 +49,7 @@ sleep 2
 
 # Start toolshed dev server in background
 cd ../toolshed
-SHELL_URL=http://localhost:5173 deno task dev > ../local-dev-toolshed.log 2>&1 &
+SHELL_URL=http://localhost:5173 deno task dev > local-dev-toolshed.log 2>&1 &
 TOOLSHED_PID=$!
 
 # # Function to cleanup background processes

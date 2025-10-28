@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import {
+  applyCommand,
   AppState,
   AppStateSerialized,
   deserialize,
@@ -68,5 +69,19 @@ describe("AppState", () => {
     assert(state.apiUrl.toString() === API_URL.toString());
     assert(state.spaceName === SPACE_NAME);
     assert(state.identity?.did() === identity.did(), "deserializes identity.");
+  });
+
+  it("clears charm list view when activating a charm", () => {
+    const initial: AppState = {
+      apiUrl: new URL(API_URL),
+      showShellCharmListView: true,
+    };
+
+    const next = applyCommand(initial, {
+      type: "set-active-charm-id",
+      charmId: "example",
+    });
+
+    assert(next.showShellCharmListView === false);
   });
 });

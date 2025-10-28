@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, recipe, UI, } from "commontools";
+import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
     [NAME]: "Some Simple Recipe",
@@ -93,12 +93,15 @@ export default recipe("Charms Launcher", () => {
         isInitialized: cell(false),
         storedCellRef: cell(),
     });
+    // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
+    // Without this, TypeScript infers `any` and the closure transformer won't detect it
+    const typedCellRef = cellRef as OpaqueRef<any[]>;
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(!cellRef?.length, <div>No charms created yet</div>, <ul>
-            {cellRef.map((charm: any, index: number) => (<li>
+        {ifElse(__ctHelpers.derive(typedCellRef, typedCellRef => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+            {typedCellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>

@@ -90,7 +90,19 @@ export function getJSONFromDataURI(uri: URI | string): any {
   // Check if data is base64 encoded
   const isBase64 = headerParts.some((part) => part === "base64");
 
-  const decodedData = isBase64 ? atob(data) : decodeURIComponent(data);
+  let decodedData: string;
+  if (isBase64) {
+    // Use TextDecoder to properly decode UTF-8 bytes from base64
+    const binaryString = atob(data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const decoder = new TextDecoder();
+    decodedData = decoder.decode(bytes);
+  } else {
+    decodedData = decodeURIComponent(data);
+  }
 
   return decodedData.length > 0 ? JSON.parse(decodedData) : undefined;
 }

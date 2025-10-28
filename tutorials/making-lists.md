@@ -22,6 +22,10 @@ some point. We'll go over how to do that within recipes.
 Lists are essential for displaying collections of data—whether it's a todo list,
 a contact list, or a feed of messages.
 
+**Important Concept: Bidirectional Binding**
+
+Before we dive in, know that CommonTools components support **bidirectional binding** with the `$` prefix (`$value`, `$checked`, etc.). This automatically updates cells when users interact with components, often eliminating the need for handlers! We'll introduce this concept as we go, but keep in mind: if you're just syncing UI ↔ data with no additional logic, bidirectional binding is usually simpler than using handlers.
+
 ## Our First List
 
 Let's start simple: we'll create a list of our friends. We'll make an array of 5
@@ -266,8 +270,14 @@ We've demonstrated:
 ## Editing Items
 
 Now we can change the names of our friends. We'll use regular `<input>` elements
-to keep things basic. When the user presses Enter, our `onkeydown` event
-listener kicks in and calls our handler which will modify the friend's name.
+to keep things basic.
+
+**Two Approaches:**
+
+1. **Simple approach (bidirectional binding)**: Use `$value` to automatically sync the input with the cell
+2. **Handler approach**: Handle the Enter key press to update the value
+
+We'll demonstrate the handler approach here for learning purposes, but in practice, bidirectional binding (approach 1) is often simpler.
 
 The handler checks if the key is Enter and, if so, we grab the string
 entered by the user and update it in the names list. We'll be passing the index
@@ -392,6 +402,26 @@ it did on list items:
 
 The `removeItem` handler is the same one we created earlier - we can reuse it
 with the button's `onclick` event.
+
+### Alternative: Bidirectional Binding Approach
+
+As mentioned earlier, for simple value updates, bidirectional binding is often
+simpler. Here's how the editing section would look using `$value`:
+
+```typescript
+// No edit handler needed!
+
+<li>
+  <ct-input $value={state.names[index]} />
+  <button type="button" onclick={removeItem({ names: state.names, index })}>
+    Delete
+  </button>
+</li>
+```
+
+With `$value`, the input automatically updates the cell when the user types -
+no need for an `editItem` handler or Enter key checking! This is the recommended
+approach for simple value updates.
 
 :::{dropdown} View complete code
 :animate: fade-in

@@ -4,7 +4,7 @@ import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
 import { getLogger } from "@commontools/utils/logger";
-import { MockDoc } from "@commontools/html/utils";
+import { MockDoc } from "../../html/src/mock-doc.ts";
 
 const logger = getLogger("charm-render", { level: "info", enabled: false });
 
@@ -29,7 +29,7 @@ export async function renderCharm(
   // 2. Get charm controller to access the Cell
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, true);
   const cell = charm.getCell().asSchema({
     type: "object",
     properties: {

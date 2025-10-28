@@ -8,6 +8,8 @@ import {
   NAME,
   navigateTo,
   Opaque,
+  OpaqueRef,
+  patternTool,
   recipe,
   UI,
   wish,
@@ -20,8 +22,12 @@ type Input = {
 
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
-  content: Default<string, "">;
   backlinks: MentionableCharm[];
+
+  /** The content of the note */
+  content: Default<string, "">;
+  grep: OpaqueRef<{ query: string }>;
+  editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
 const _updateTitle = handler<
@@ -75,6 +81,16 @@ const handleNewBacklink = handler<
   }
 });
 
+/** This edits the content */
+const handleEditContent = handler<
+  { detail: { value: string } },
+  { content: Cell<string> }
+>(
+  ({ detail }, { content }) => {
+    content.set(detail.value);
+  },
+);
+
 const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   (_, { charm }) => {
     return navigateTo(charm);
@@ -89,7 +105,7 @@ const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
     const mentionable = schemaifyWish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
+      "#mentionable",
       [],
     );
     const mentioned = cell<MentionableCharm[]>([]);
@@ -140,6 +156,15 @@ const Note = recipe<Input, Output>(
       content,
       mentioned,
       backlinks,
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return derive({ query, content }, ({ query, content }) => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
+        },
+        { content },
+      ),
+      editContent: handleEditContent({ content }),
     };
   },
 );

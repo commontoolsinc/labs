@@ -7,7 +7,8 @@ export type Command =
   | { type: "clear-authentication" }
   | { type: "set-show-charm-list-view"; show: boolean }
   | { type: "set-show-debugger-view"; show: boolean }
-  | { type: "set-show-quick-jump-view"; show: boolean };
+  | { type: "set-show-quick-jump-view"; show: boolean }
+  | { type: "set-show-sidebar"; show: boolean };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -38,6 +39,9 @@ export function isCommand(value: unknown): value is Command {
       return "show" in value && typeof value.show === "boolean";
     }
     case "set-show-quick-jump-view": {
+      return "show" in value && typeof value.show === "boolean";
+    }
+    case "set-show-sidebar": {
       return "show" in value && typeof value.show === "boolean";
     }
   }

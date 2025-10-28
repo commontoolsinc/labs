@@ -27,6 +27,10 @@ import {
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
+function schemaifyWish<T>(path: string, def: Opaque<T>) {
+  return derive<T, T>(wish<T>(path, def), (i) => i);
+}
+
 type ChatbotNoteInput = {
   title: Default<string, "LLM Test">;
   messages: Default<Array<BuiltInLLMMessage>, []>;
@@ -165,19 +169,15 @@ type BacklinksIndex = {
   mentionable: MentionableCharm[];
 };
 
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
-}
-
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages }) => {
     const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
+    const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
       mentionable: [],
     });
     const mentionable = schemaifyWish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
+      "#mentionable",
       [],
     );
 

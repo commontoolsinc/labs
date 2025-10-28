@@ -73,8 +73,8 @@ import { ContextualFlowControl } from "./cfc.ts";
  * @returns {void}
  *
  * @method push Adds an item to the end of an array cell.
- * @param {U | Cell<U>} value - The value to add, where U is
- * the array element type.
+ * @param {U | Cell<U>} value - The value to add, where U is the array element
+ * type.
  * @returns {void}
  *
  * @method equals Compares two cells for equality.
@@ -101,6 +101,10 @@ import { ContextualFlowControl } from "./cfc.ts";
  *
  * @method sync Syncs the cell to the storage.
  * @returns {Promise<void>}
+ *
+ * @method resolveAsCell Resolves the cell to a new cell with the resolved link.
+ * Equivalent to `cell.getAsSchema(<current schema wrapped in Cell<>).get()`
+ * @returns {Cell<T>}
  *
  * @method getAsQueryResult Returns a query result for the cell.
  * @param {Path} path - The optional path to follow.
@@ -197,6 +201,7 @@ declare module "@commontools/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
+    resolveAsCell(): Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -644,6 +649,11 @@ export class RegularCell<T> implements Cell<T> {
     this.synced = true;
     if (this.link.id.startsWith("data:")) return this;
     return this.runtime.storageManager.syncCell<T>(this);
+  }
+
+  resolveAsCell(): Cell<T> {
+    const link = resolveLink(this.runtime.readTx(this.tx), this.link);
+    return createCell(this.runtime, link, this.tx, true, this.synced);
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
