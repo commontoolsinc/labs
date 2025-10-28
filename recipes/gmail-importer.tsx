@@ -18,7 +18,7 @@ type Secret<T> = CFC<T, "secret">;
 type Confidential<T> = CFC<T, "confidential">;
 
 // This is used by the various Google tokens created with tokenToAuthData
-type Auth = {
+export type Auth = {
   token: Default<Secret<string>, "">;
   tokenType: Default<string, "">;
   scope: Default<string[], []>;
@@ -778,9 +778,6 @@ export async function process(
 
         if (emails.length > 0) {
           console.log(`Adding ${emails.length} new emails`);
-          // emails.forEach((email) => {
-          //   email[ID] = email.id;
-          // });
           allNewEmails.push(...emails);
         }
       } catch (error: any) {
@@ -819,7 +816,7 @@ export default recipe<{
   }>;
   auth: Auth;
 }>(
-  "gmail",
+  "gmail-importer",
   ({ settings, auth }) => {
     const emails = cell<Confidential<Email[]>>([]);
 
@@ -841,13 +838,29 @@ export default recipe<{
           }}
         >
           <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
-            {auth?.user?.email}
-          </h2>
-          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
-            Imported email count: {derive(emails, (emails) => emails.length)}
+            Gmail Importer
           </h2>
 
-          <h2>historyId: {settings.historyId}</h2>
+          <div
+            style={{
+              padding: "15px",
+              backgroundColor: auth?.user?.email ? "#d4edda" : "#f8d7da",
+              borderRadius: "8px",
+              border: `1px solid ${auth?.user?.email ? "#c3e6cb" : "#f5c6cb"}`,
+            }}
+          >
+            <strong>Auth Status:</strong> {auth?.user?.email
+              ? `✅ Authenticated as ${auth.user.email}`
+              : "❌ Not authenticated - Please link to a gmail-auth charm"}
+          </div>
+
+          <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
+            Imported email count: {derive(emails, (emails) => emails.length)}
+          </h3>
+
+          <div style={{ fontSize: "14px", color: "#666" }}>
+            historyId: {settings.historyId || "none"}
+          </div>
 
           <common-hstack gap="sm">
             <common-vstack gap="sm">
@@ -884,14 +897,7 @@ export default recipe<{
               </ct-button>
             </common-vstack>
           </common-hstack>
-          <common-google-oauth
-            $auth={auth}
-            scopes={[
-              "email",
-              "profile",
-              "https://www.googleapis.com/auth/gmail.readonly",
-            ]}
-          />
+
           <div>
             <table>
               <thead>
