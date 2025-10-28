@@ -897,53 +897,13 @@ function transformDestructuredProperties(
 ): ts.ConciseBody {
   const elemName = elemParam?.name;
 
-  let transformedBody: ts.ConciseBody = body;
-
-  const prependStatements = (
-    statements: readonly ts.Statement[],
-    currentBody: ts.ConciseBody,
-  ): ts.ConciseBody => {
-    if (statements.length === 0) return currentBody;
-
-    if (ts.isBlock(currentBody)) {
-      return factory.updateBlock(
-        currentBody,
-        factory.createNodeArray([
-          ...statements,
-          ...currentBody.statements,
-        ]),
-      );
-    }
-
-    return factory.createBlock(
-      [
-        ...statements,
-        factory.createReturnStatement(currentBody as ts.Expression),
-      ],
-      true,
-    );
-  };
-
+  // Collect destructured property names if the param is an object destructuring pattern
   const destructuredProps = new Map<string, () => ts.Expression>();
-  const computedInitializers: ts.VariableStatement[] = [];
-  const usedTempNames = new Set<string>();
-
-  const registerTempName = (base: string): string => {
-    let candidate = `__ct_${base || "prop"}_key`;
-    let counter = 1;
-    while (usedTempNames.has(candidate)) {
-      candidate = `__ct_${base || "prop"}_key_${counter++}`;
-    }
-    usedTempNames.add(candidate);
-    return candidate;
-  };
-
   if (elemName && ts.isObjectBindingPattern(elemName)) {
     for (const element of elemName.elements) {
       if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
         const alias = element.name.text;
         const propertyName = element.propertyName;
-        usedTempNames.add(alias);
 
         destructuredProps.set(alias, () => {
           const target = factory.createIdentifier("element");
@@ -970,29 +930,9 @@ function transformDestructuredProperties(
           }
 
           if (ts.isComputedPropertyName(propertyName)) {
-            const tempName = registerTempName(alias);
-            const tempIdentifier = factory.createIdentifier(tempName);
-
-            computedInitializers.push(
-              factory.createVariableStatement(
-                undefined,
-                factory.createVariableDeclarationList(
-                  [
-                    factory.createVariableDeclaration(
-                      tempIdentifier,
-                      undefined,
-                      undefined,
-                      propertyName.expression,
-                    ),
-                  ],
-                  ts.NodeFlags.Const,
-                ),
-              ),
-            );
-
             return factory.createElementAccessExpression(
               target,
-              tempIdentifier,
+              propertyName.expression,
             );
           }
 
@@ -1005,6 +945,7 @@ function transformDestructuredProperties(
     }
   }
 
+  // Collect array destructured identifiers: [date, pizza] -> {date: 0, pizza: 1}
   const arrayDestructuredVars = new Map<string, number>();
   if (elemName && ts.isArrayBindingPattern(elemName)) {
     let index = 0;
@@ -1016,9 +957,12 @@ function transformDestructuredProperties(
     }
   }
 
+  // If param was object-destructured, replace property references with element.prop
   if (destructuredProps.size > 0) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
+        // Check if this identifier is not part of a property access already
+        // (e.g., don't transform the 'x' in 'something.x')
         if (
           !node.parent ||
           !(ts.isPropertyAccessExpression(node.parent) &&
@@ -1030,14 +974,16 @@ function transformDestructuredProperties(
       }
       return visitEachChildWithJsx(node, visitor, undefined);
     };
-    transformedBody = ts.visitNode(transformedBody, visitor) as ts.ConciseBody;
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
   }
 
+  // If param was array-destructured, replace variable references with element[index]
   if (arrayDestructuredVars.size > 0) {
     const visitor: ts.Visitor = (node) => {
       if (ts.isIdentifier(node)) {
         const index = arrayDestructuredVars.get(node.text);
         if (index !== undefined) {
+          // Check if this identifier is not part of a property access already
           if (
             !node.parent ||
             !(ts.isPropertyAccessExpression(node.parent) &&
@@ -1052,14 +998,10 @@ function transformDestructuredProperties(
       }
       return visitEachChildWithJsx(node, visitor, undefined);
     };
-    transformedBody = ts.visitNode(transformedBody, visitor) as ts.ConciseBody;
+    return ts.visitNode(body, visitor) as ts.ConciseBody;
   }
 
-  if (computedInitializers.length > 0) {
-    transformedBody = prependStatements(computedInitializers, transformedBody);
-  }
-
-  return transformedBody;
+  return body;
 }
 
 /**
@@ -1249,32 +1191,12 @@ function transformMapCallback(
   const captureExpressions = collectCaptures(callback, checker);
 
   // Build map of capture name -> expression
-  const captureEntries: Array<{ name: string; expr: ts.Expression }> = [];
-  const usedNames = new Set<string>(["element", "index", "array", "params"]);
-
-  for (const expr of captureExpressions) {
-    const baseName = getCaptureName(expr);
-    if (!baseName) continue;
-
-    // Skip if an existing entry captures an equivalent expression
-    const existing = captureEntries.find((entry) =>
-      expressionsMatch(expr, entry.expr)
-    );
-    if (existing) continue;
-
-    let candidate = baseName;
-    let counter = 2;
-    while (usedNames.has(candidate)) {
-      candidate = `${baseName}_${counter++}`;
-    }
-
-    usedNames.add(candidate);
-    captureEntries.push({ name: candidate, expr });
-  }
-
   const captures = new Map<string, ts.Expression>();
-  for (const entry of captureEntries) {
-    captures.set(entry.name, entry.expr);
+  for (const expr of captureExpressions) {
+    const name = getCaptureName(expr);
+    if (name && !captures.has(name)) {
+      captures.set(name, expr);
+    }
   }
 
   // Build set of captured variable names
