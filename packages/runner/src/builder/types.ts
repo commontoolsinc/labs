@@ -49,9 +49,9 @@ import {
 import { AuthSchema } from "./schema-lib.ts";
 export { AuthSchema } from "./schema-lib.ts";
 export {
-  type Derivable,
   ID,
   ID_FIELD,
+  type IDerivable,
   type IDFields,
   NAME,
   type Schema,
@@ -146,7 +146,8 @@ export function isOpaqueRef<T = any>(
   value: unknown,
 ): value is OpaqueRefMethods<T> {
   return !!value &&
-    typeof (value as OpaqueRef<T>)[isOpaqueRefMarker] === "boolean";
+    typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
+      "boolean";
 }
 
 export type NodeRef = {

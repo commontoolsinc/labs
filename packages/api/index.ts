@@ -25,8 +25,6 @@ export const UI = "$UI";
  * Each cell variant has a unique combination of capability flags.
  */
 export declare const CELL_BRAND: unique symbol;
-export declare const CELL_TYPE: unique symbol;
-export declare const ANY_CELL_BRAND: unique symbol;
 
 /**
  * Minimal cell type with just the brand, no methods.
@@ -35,21 +33,14 @@ export declare const ANY_CELL_BRAND: unique symbol;
  */
 export type BrandedCell<T, Brand extends string = string> = {
   [CELL_BRAND]: Brand;
-  [CELL_TYPE]: T;
 };
-
-/**
- * Base type for all cell variants that has methods. Internal API augments this
- * interface with internal only API. Uses a second symbol brand to distinguish
- * from core cell brand without any methods.
- */
-interface AnyCell<T, C = unknown> extends BrandedCell<T> {
-  [ANY_CELL_BRAND]: C;
-}
 
 // ============================================================================
 // Cell Capability Interfaces
 // ============================================================================
+
+export interface IAnyCell<T> {
+}
 
 /**
  * Readable cells can retrieve their current value.
@@ -77,24 +68,34 @@ export interface IStreamable<T> {
 }
 
 /**
+ * Helper type for .key() return type logic.
+ * - If T wraps another cell with .key(), delegates to that cell's return type
+ * - If T[K] is a cell, unwraps it and wraps in Wrapper<>
+ * - Otherwise wraps T[K] in Wrapper<>
+ */
+export type KeyResultType<T, K extends keyof UnwrapCell<T>, Wrapper> =
+  UnwrapCell<T>[K] extends never ? any
+    : T extends BrandedCell<any>
+      ? T extends { key(k: K): infer R } ? R : Wrapper
+    : UnwrapCell<T>[K] extends BrandedCell<any> ? Wrapper
+    : Wrapper;
+
+/**
  * Cells that support key() for property access - Cell variant.
- * If T wraps another cell type, delegates to that cell's .key() return type.
- * Otherwise wraps the indexed value in Cell<>.
  */
 export interface IKeyableCell<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : T extends BrandedCell<any>
-      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
-      : Cell<UnwrapCell<T>[K]>
-    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? Cell<U>
-    : Cell<UnwrapCell<T>[K]>;
+  ): KeyResultType<
+    T,
+    K,
+    Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
+  >;
 }
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
- * Unwraps nested cells recursively and always returns OpaqueCell<>.
+ * OpaqueCell is "sticky" and always returns OpaqueCell<>.
  */
 export interface IKeyableOpaque<T> {
   key<K extends keyof UnwrapCell<T>>(
@@ -106,57 +107,54 @@ export interface IKeyableOpaque<T> {
 
 /**
  * Cells that support key() for property access - ReadonlyCell variant.
- * If T wraps another cell type, delegates to that cell's .key() return type.
- * Otherwise wraps the indexed value in ReadonlyCell<>.
  */
 export interface IKeyableReadonly<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : T extends BrandedCell<any>
-      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
-      : ReadonlyCell<UnwrapCell<T>[K]>
-    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? ReadonlyCell<U>
-    : ReadonlyCell<UnwrapCell<T>[K]>;
+  ): KeyResultType<
+    T,
+    K,
+    ReadonlyCell<
+      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
+    >
+  >;
 }
 
 /**
  * Cells that support key() for property access - WriteonlyCell variant.
- * If T wraps another cell type, delegates to that cell's .key() return type.
- * Otherwise wraps the indexed value in WriteonlyCell<>.
  */
 export interface IKeyableWriteonly<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : T extends BrandedCell<any>
-      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
-      : WriteonlyCell<UnwrapCell<T>[K]>
-    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? WriteonlyCell<U>
-    : WriteonlyCell<UnwrapCell<T>[K]>;
+  ): KeyResultType<
+    T,
+    K,
+    WriteonlyCell<
+      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
+    >
+  >;
 }
 
 /**
  * Cells that support key() for property access - ComparableCell variant.
- * If T wraps another cell type, delegates to that cell's .key() return type.
- * Otherwise wraps the indexed value in ComparableCell<>.
  */
 export interface IKeyableComparable<T> {
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : T extends BrandedCell<any>
-      ? T extends { key(k: K): infer R } & BrandedCell<unknown> ? R
-      : ComparableCell<UnwrapCell<T>[K]>
-    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? ComparableCell<U>
-    : ComparableCell<UnwrapCell<T>[K]>;
+  ): KeyResultType<
+    T,
+    K,
+    ComparableCell<
+      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
+    >
+  >;
 }
 
 /**
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
  */
-export interface IResolvable<T, C extends AnyCell<T>> {
+export interface IResolvable<T, C extends BrandedCell<T>> {
   resolveAsCell(): C;
 }
 
@@ -168,9 +166,36 @@ export interface IEquatable {
   equals(other: AnyCell<any> | object): boolean;
 }
 
+/**
+ * Cells that allow deriving new cells from existing cells. Currently just
+ * .map(), but this will eventually include all Array, String and Number
+ * methods.
+ */
+export interface IDerivable<T> {
+  map<S>(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S>,
+  ): OpaqueRef<S[]>;
+  mapWithPattern<S>(
+    op: Recipe,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]>;
+}
+
 // ============================================================================
 // Cell Type Definitions
 // ============================================================================
+
+/**
+ * Base type for all cell variants that has methods. Internal API augments this
+ * interface with internal only API. Uses a second symbol brand to distinguish
+ * from core cell brand without any methods.
+ */
+export interface AnyCell<T> extends BrandedCell<T>, IAnyCell<T> {
+}
 
 /**
  * Opaque cell reference - only supports keying and derivation, not direct I/O.
@@ -178,7 +203,7 @@ export interface IEquatable {
  * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
  */
 export interface OpaqueCell<T>
-  extends AnyCell<T, OpaqueCell<T>>, IKeyableOpaque<T>, Derivable<T> {}
+  extends BrandedCell<T, "opaque">, IKeyableOpaque<T>, IDerivable<T> {}
 
 /**
  * Full cell with read, write capabilities.
@@ -186,15 +211,17 @@ export interface OpaqueCell<T>
  *
  * Note: This is an interface (not a type) to allow module augmentation by the runtime.
  */
-export interface Cell<T = any>
+export interface ICell<T>
   extends
-    AnyCell<T, Cell<T>>,
+    IAnyCell<T>,
     IReadable<T>,
     IWritable<T>,
     IStreamable<T>,
     IEquatable,
     IKeyableCell<T>,
     IResolvable<T, Cell<T>> {}
+
+export interface Cell<T = any> extends BrandedCell<T, "cell">, ICell<T> {}
 
 /**
  * Stream-only cell - can only send events, not read or write.
@@ -203,7 +230,8 @@ export interface Cell<T = any>
  *
  * Note: This is an interface (not a type) to allow module augmentation by the runtime.
  */
-export interface Stream<T> extends AnyCell<T, Stream<T>>, IStreamable<T> {}
+export interface Stream<T>
+  extends BrandedCell<T, "stream">, IAnyCell<T>, IStreamable<T> {}
 
 /**
  * Comparable-only cell - just for equality checks and keying.
@@ -211,7 +239,11 @@ export interface Stream<T> extends AnyCell<T, Stream<T>>, IStreamable<T> {}
  * Does NOT have .resolveAsCell()/.get()/.set()/.send()
  */
 export interface ComparableCell<T>
-  extends AnyCell<T, ComparableCell<T>>, IEquatable, IKeyableComparable<T> {}
+  extends
+    BrandedCell<T, "comparable">,
+    IAnyCell<T>,
+    IEquatable,
+    IKeyableComparable<T> {}
 
 /**
  * Read-only cell variant.
@@ -220,7 +252,8 @@ export interface ComparableCell<T>
  */
 export interface ReadonlyCell<T>
   extends
-    AnyCell<T, ReadonlyCell<T>>,
+    BrandedCell<T, "readonly">,
+    IAnyCell<T>,
     IReadable<T>,
     IEquatable,
     IKeyableReadonly<T> {}
@@ -231,25 +264,15 @@ export interface ReadonlyCell<T>
  * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
  */
 export interface WriteonlyCell<T>
-  extends AnyCell<T, WriteonlyCell<T>>, IWritable<T>, IKeyableWriteonly<T> {}
+  extends
+    BrandedCell<T, "writeonly">,
+    IAnyCell<T>,
+    IWritable<T>,
+    IKeyableWriteonly<T> {}
 
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell
 // ============================================================================
-
-/**
- * Methods available on OpaqueRef beyond what OpaqueCell provides.
- * This interface can be augmented by the runtime to add internal methods
- * like .export(), .setDefault(), .setName(), .setSchema(), .connect(), etc.
- *
- * Note: .key() is overridden here to return OpaqueRef instead of OpaqueCell,
- * maintaining the OpaqueRef type through property access.
- */
-export interface OpaqueRefMethods<T> {
-  get(): T;
-  set(value: CellLike<T> | T): void;
-  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-}
 
 /**
  * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
@@ -261,8 +284,7 @@ export interface OpaqueRefMethods<T> {
  * the OpaqueRefMethods versions take precedence (e.g., .key() returning OpaqueRef).
  */
 export type OpaqueRef<T> =
-  & Omit<OpaqueCell<T>, keyof OpaqueRefMethods<any>>
-  & OpaqueRefMethods<T>
+  & OpaqueCell<T>
   & (T extends Array<infer U> ? Array<OpaqueRef<U>>
     : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
     : T);
@@ -312,32 +334,12 @@ export type UnwrapCell<T> =
     : T;
 
 /**
- * Cellify is a type utility that allows any part of type T to be wrapped in
- * AnyCell<>, and allow any part of T that is currently wrapped in AnyCell<> to
- * be used unwrapped. This is designed for use with cell method parameters,
- * allowing flexibility in how values are passed.
- *
- * Note: Does NOT include ID/ID_FIELD symbols - use CellifyForWrite for write
- * operations that need those metadata fields.
- */
-export type Cellify<T> =
-  // Handle existing BrandedCell<> types, allowing unwrapping
-  T extends BrandedCell<infer U> ? Cellify<U> | BrandedCell<Cellify<U>>
-    // Handle arrays
-    : T extends Array<infer U>
-      ? Array<Cellify<U>> | BrandedCell<Array<Cellify<U>>>
-    // Handle objects (excluding null)
-    : T extends object ?
-        | { [K in keyof T]: Cellify<T[K]> }
-        | BrandedCell<{ [K in keyof T]: Cellify<T[K]> }>
-    // Handle primitives
-    : T | BrandedCell<T>;
-
-/**
- * CellifyForWrite is used for write operations (.set(), .push(), .update()).
- * Currently identical to Cellify. The ID and ID_FIELD metadata symbols are
- * added at runtime via recursivelyAddIDIfNeeded, not enforced by the type
- * system.
+ * AnyCellWrapping is used for write operations (.set(), .push(), .update()). It
+ * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
+ * and allow any part of T that is currently wrapped in AnyCell<> to be used
+ * unwrapped. This is designed for use with cell method parameters, allowing
+ * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
+ * allows controlling id generation and can only be passed to write operations.
  */
 export type AnyCellWrapping<T> =
   // Handle existing BrandedCell<> types, allowing unwrapping
@@ -348,30 +350,11 @@ export type AnyCellWrapping<T> =
       ? Array<AnyCellWrapping<U>> | BrandedCell<Array<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
-        | { [K in keyof T]: Cellify<T[K]> }
+        | { [K in keyof T]: AnyCellWrapping<T[K]> }
           & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
         | BrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | BrandedCell<T>;
-
-// ============================================================================
-// Extend Derivable interface now that OpaqueRef and Opaque are defined
-// ============================================================================
-
-// Interface merging to add methods to Derivable
-export interface Derivable<T> {
-  map<S>(
-    fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
-    ) => Opaque<S>,
-  ): OpaqueRef<S[]>;
-  mapWithPattern<S>(
-    op: Recipe,
-    params: Record<string, any>,
-  ): OpaqueRef<S[]>;
-}
 
 // Factory types
 
