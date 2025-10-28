@@ -102,7 +102,6 @@ export class CTFab extends BaseElement {
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        will-change: width, height, border-radius;
         transition:
           width var(--ct-theme-animation-duration, 400ms) cubic-bezier(0.34, 1.56, 0.64, 1),
           height var(--ct-theme-animation-duration, 400ms) cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -124,6 +123,7 @@ export class CTFab extends BaseElement {
         border-radius: 12px;
         cursor: default;
         background: var(--ct-theme-color-background, #fafafa);
+        overflow: visible;
       }
 
       /* Collapsing state - triggers content fade-out */

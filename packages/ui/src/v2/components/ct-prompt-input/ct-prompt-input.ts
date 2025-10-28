@@ -1,6 +1,5 @@
-import { css, html } from "lit";
+import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
-import { ref } from "lit/directives/ref.js";
 import { consume } from "@lit/context";
 import { type Cell, NAME } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
@@ -15,7 +14,6 @@ import {
   type MentionableArray,
 } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
-import { applyMenuPosition } from "../../core/menu-position.ts";
 import "../ct-button/ct-button.ts";
 import "../ct-chip/ct-chip.ts";
 
@@ -204,45 +202,6 @@ export class CTPromptInput extends BaseElement {
             );
           }
 
-          /* Mentions dropdown styles */
-          .mentions-dropdown {
-            position: fixed;
-            background: var(--ct-prompt-input-background);
-            border: 1px solid var(--ct-prompt-input-border);
-            border-radius: var(--ct-prompt-input-border-radius);
-            box-shadow:
-              0 10px 15px -3px rgba(0, 0, 0, 0.1),
-              0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 1000;
-            min-width: 200px;
-          }
-
-          .mention-item {
-            padding: 0.5rem 0.75rem;
-            cursor: pointer;
-            border-bottom: 1px solid var(--ct-prompt-input-border);
-            transition: background-color 0.1s;
-          }
-
-          .mention-item:last-child {
-            border-bottom: none;
-          }
-
-          .mention-item:hover,
-          .mention-item.selected {
-            background-color: var(
-              --ct-theme-surface,
-              var(--ct-color-gray-100, #f3f4f6)
-            );
-          }
-
-          .mention-name {
-            font-weight: 500;
-            color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
-          }
-
           /* Pills list styles */
           .pills-list {
             display: flex;
@@ -324,6 +283,11 @@ export class CTPromptInput extends BaseElement {
         getContent: () => this.value,
       });
 
+      // Overlay management for mentions dropdown (rendered in body)
+      private _mentionsOverlay: HTMLDivElement | null = null;
+      private _resizeObs?: ResizeObserver;
+      private _raf?: number;
+
       constructor() {
         super();
         this.placeholder = "";
@@ -338,6 +302,30 @@ export class CTPromptInput extends BaseElement {
         this.variant = "";
         this.mentionable = null;
       }
+
+      override connectedCallback(): void {
+        super.connectedCallback();
+        this._resizeObs = new ResizeObserver(() => this._repositionMentionsOverlay());
+        this._resizeObs.observe(this);
+        globalThis.addEventListener("resize", this._onWindowChange, {
+          passive: true,
+        });
+        globalThis.addEventListener("scroll", this._onWindowChange, true);
+      }
+
+      override disconnectedCallback(): void {
+        super.disconnectedCallback();
+        this._resizeObs?.disconnect();
+        this._resizeObs = undefined;
+        globalThis.removeEventListener("resize", this._onWindowChange);
+        globalThis.removeEventListener("scroll", this._onWindowChange, true);
+        this._unmountMentionsOverlay();
+      }
+
+      private _onWindowChange = () => {
+        if (!this.mentionController.isShowing) return;
+        this._repositionMentionsOverlay();
+      };
 
       override firstUpdated(
         changedProperties: Map<string | number | symbol, unknown>,
@@ -355,9 +343,23 @@ export class CTPromptInput extends BaseElement {
         super.updated(changedProperties);
         if (changedProperties.has("theme")) {
           this._updateThemeProperties();
+          // Update theme on overlay if it exists
+          if (this._mentionsOverlay) {
+            applyThemeToElement(this._mentionsOverlay, this.theme || defaultTheme);
+          }
         }
         if (changedProperties.has("mentionable")) {
           this.mentionController.setMentionable(this.mentionable);
+        }
+
+        // Manage mentions overlay based on controller state
+        // The MentionController will trigger requestUpdate when state changes
+        if (this.mentionController.isShowing) {
+          this._mountMentionsOverlay();
+          this._renderMentionsOverlay();
+          this._positionMentionsOverlay();
+        } else {
+          this._unmountMentionsOverlay();
         }
       }
 
@@ -589,9 +591,7 @@ export class CTPromptInput extends BaseElement {
                     @paste="${this._handlePaste}"
                     part="textarea"
                   ></textarea>
-                  ${this.mentionController.isShowing
-                    ? this._renderMentionsDropdown()
-                    : ""}
+                  <!-- Mentions dropdown now rendered in body via overlay -->
                 </div>
 
                 <div class="actions">
@@ -778,38 +778,81 @@ export class CTPromptInput extends BaseElement {
       }
 
       /**
-       * Position the mentions dropdown
+       * Mount the mentions overlay in the document body
        */
-      private _positionMentionsDropdown() {
-        return ref((el?: Element) => {
-          if (!el || !(el instanceof HTMLElement)) return;
-
-          const textarea = this._textareaElement as HTMLTextAreaElement;
-          if (!textarea) return;
-
-          const anchorRect = textarea.getBoundingClientRect();
-          applyMenuPosition(anchorRect, el, {
-            gap: 2,
-            preferredVertical: "below",
-          });
-        });
+      private _mountMentionsOverlay() {
+        if (this._mentionsOverlay) return;
+        const el = document.createElement("div");
+        el.style.position = "fixed";
+        el.style.inset = "0 auto auto 0";
+        el.style.zIndex = "1000";
+        el.style.pointerEvents = "auto";
+        el.dataset.ctPromptInputMentionsOverlay = "";
+        document.body.appendChild(el);
+        this._mentionsOverlay = el;
+        applyThemeToElement(el, this.theme ?? defaultTheme);
       }
 
       /**
-       * Render the mentions dropdown
+       * Unmount the mentions overlay from the document body
        */
-      private _renderMentionsDropdown() {
+      private _unmountMentionsOverlay() {
+        if (this._mentionsOverlay) {
+          render(nothing, this._mentionsOverlay);
+          this._mentionsOverlay.remove();
+          this._mentionsOverlay = null;
+        }
+        if (this._raf) cancelAnimationFrame(this._raf);
+        this._raf = undefined;
+      }
+
+      /**
+       * Render the mentions dropdown into the overlay
+       */
+      private _renderMentionsOverlay() {
+        if (!this._mentionsOverlay) return;
+
         const filteredMentions = this.mentionController.getFilteredMentions();
 
         if (filteredMentions.length === 0) {
-          return "";
+          this._unmountMentionsOverlay();
+          return;
         }
 
-        return html`
-          <div
-            class="mentions-dropdown"
-            ${this._positionMentionsDropdown()}
-          >
+        // Inline styles so overlay has its own styling
+        const tpl = html`
+          <style>
+            .mentions-dropdown {
+              position: absolute;
+              background: var(--ct-theme-color-surface, #fff);
+              border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+              border-radius: var(--ct-theme-border-radius, 0.375rem);
+              box-shadow: var(--ct-shadow-md, 0 10px 15px -3px rgba(0,0,0,0.1),
+                0 4px 6px -2px rgba(0,0,0,0.05));
+              max-height: 200px;
+              overflow-y: auto;
+              min-width: 200px;
+              pointer-events: auto;
+            }
+            .mention-item {
+              padding: 0.5rem 0.75rem;
+              cursor: pointer;
+              border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
+              transition: background-color 0.1s;
+            }
+            .mention-item:last-child {
+              border-bottom: none;
+            }
+            .mention-item:hover,
+            .mention-item.selected {
+              background-color: var(--ct-theme-surface, #f3f4f6);
+            }
+            .mention-name {
+              font-weight: 500;
+              color: var(--ct-theme-color-text, #111827);
+            }
+          </style>
+          <div class="mentions-dropdown" role="listbox">
             ${filteredMentions.map((mention, index) =>
               html`
                 <div
@@ -817,6 +860,7 @@ export class CTPromptInput extends BaseElement {
                       this.mentionController.state.selectedIndex
                     ? "selected"
                     : ""}"
+                  role="option"
                   @click="${() =>
                     this.mentionController.insertMention(mention)}"
                   @mouseenter="${() =>
@@ -828,6 +872,63 @@ export class CTPromptInput extends BaseElement {
             )}
           </div>
         `;
+        render(tpl, this._mentionsOverlay);
+      }
+
+      /**
+       * Position the mentions overlay relative to the textarea
+       */
+      private _positionMentionsOverlay() {
+        if (!this._mentionsOverlay) return;
+        const dropdown = this._mentionsOverlay.querySelector(
+          ".mentions-dropdown",
+        ) as HTMLElement | null;
+        if (!dropdown) return;
+
+        const textarea = this._textareaElement as HTMLTextAreaElement;
+        if (!textarea) return;
+
+        const rect = textarea.getBoundingClientRect();
+        // Start below the textarea
+        let top = rect.bottom + 2;
+        let left = rect.left;
+
+        // Temporarily set position for measurement
+        dropdown.style.top = `${Math.round(top)}px`;
+        dropdown.style.left = `${Math.round(left)}px`;
+        dropdown.style.right = "auto";
+        dropdown.style.bottom = "auto";
+
+        // Next frame, measure and adjust to viewport
+        if (this._raf) cancelAnimationFrame(this._raf);
+        this._raf = requestAnimationFrame(() => {
+          const vw = globalThis.innerWidth;
+          const vh = globalThis.innerHeight;
+          const dr = dropdown.getBoundingClientRect();
+
+          // Horizontal clamping
+          if (dr.right > vw - 8) {
+            left = Math.max(8, vw - dr.width - 8);
+          }
+          if (left < 8) left = 8;
+
+          // Vertical flip if overflow bottom
+          if (dr.bottom > vh - 8) {
+            const above = rect.top - dr.height - 2;
+            if (above >= 8) top = above; // place above if space
+            else top = Math.max(8, vh - dr.height - 8); // clamp
+          }
+
+          dropdown.style.top = `${Math.round(top)}px`;
+          dropdown.style.left = `${Math.round(left)}px`;
+        });
+      }
+
+      /**
+       * Reposition the mentions overlay (for resize/scroll)
+       */
+      private _repositionMentionsOverlay() {
+        this._positionMentionsOverlay();
       }
 
       /**
