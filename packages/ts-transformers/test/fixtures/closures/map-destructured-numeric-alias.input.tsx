@@ -2,14 +2,14 @@
 import { recipe, UI } from "commontools";
 
 interface State {
-  entries: Array<{ zero: number }>;
+  entries: Array<{ 0: number }>;
 }
 
 export default recipe<State>("MapDestructuredNumericAlias", (state) => {
   return {
     [UI]: (
       <div>
-        {state.entries.map(({ zero: first }) => (
+        {state.entries.map(({ 0: first }) => (
           <span>{first}</span>
         ))}
       </div>
