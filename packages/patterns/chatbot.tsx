@@ -20,8 +20,8 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
+function schemaifyWish<T>(path: string) {
+  return derive<T, T>(wish<T>(path), (i) => i);
 }
 
 const addAttachment = handler<
@@ -274,10 +274,7 @@ export default recipe<ChatInput, ChatOutput>(
   ({ messages, tools, theme }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
-    const mentionable = schemaifyWish<MentionableCharm[]>(
-      "#mentionable",
-      [],
-    );
+    const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
 
     // Derive tools from attachments
     const dynamicTools = derive(allAttachments, (attachments) => {

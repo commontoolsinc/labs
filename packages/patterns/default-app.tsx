@@ -7,9 +7,9 @@ import {
   handler,
   ifElse,
   lift,
+  llmDialog,
   NAME,
   navigateTo,
-  patternTool,
   recipe,
   str,
   UI,
@@ -61,7 +61,7 @@ const removeCharm = handler<
     console.log("charmListCopy before", charmListCopy.length);
     charmListCopy.splice(index, 1);
     console.log("charmListCopy after", charmListCopy.length);
-    state.allCharms.resolveAsCell().set(charmListCopy);
+    state.allCharms.set(charmListCopy);
   }
 });
 
@@ -99,6 +99,10 @@ const spawnNote = handler<void, void>((_, __) => {
 
 const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
   value.set(!value.get());
+});
+
+const closeFab = handler<any, { fabExpanded: Cell<boolean> }>((_, { fabExpanded }) => {
+  fabExpanded.set(false);
 });
 
 const messagesToNotifications = lift<
@@ -151,11 +155,12 @@ export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
     const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
+      wish<MentionableCharm[]>("#allCharms"),
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
     const fabExpanded = cell(false);
+    const showHistory = cell(false);
     const notifications = cell<{ text: string; timestamp: number }[]>([]);
     const seen = cell<number>(0);
 
@@ -168,8 +173,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
         readWebpage: {
           pattern: readWebpage,
         },
-        // Example of using patternTool with an existing recipe and extra params
-        calculator: patternTool(calculator, { base: 10 }),
+        calculator: {
+          pattern: calculator,
+        },
       },
     });
 
@@ -193,34 +199,31 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             onct-keybind={spawnChatList()}
           />
 
-          <ct-keybind
-            code="Escape"
-            preventDefault
-            onct-keybind={toggle({ value: fabExpanded })}
-          />
+          {/* Escape key now handled by ct-fab itself */}
 
-          <ct-toolbar slot="header">
+          <ct-toolbar slot="header" sticky>
             <div slot="start">
-              <ct-button
-                onClick={spawnChatList()}
-              >
-                📂 Chat List
-              </ct-button>
-              <ct-button
-                onClick={spawnChatbot()}
-              >
-                💬 Chatbot
-              </ct-button>
-              <ct-button
-                onClick={spawnChatbotOutliner()}
-              >
-                📝 Chatbot Outliner
-              </ct-button>
-              <ct-button
-                onClick={spawnNote()}
-              >
-                📄 Note
-              </ct-button>
+
+                <ct-button
+                  onClick={spawnChatList()}
+                >
+                  📂 Chat List
+                </ct-button>
+                <ct-button
+                  onClick={spawnChatbot()}
+                >
+                  💬 Chatbot
+                </ct-button>
+                <ct-button
+                  onClick={spawnChatbotOutliner()}
+                >
+                  📝 Chatbot Outliner
+                </ct-button>
+                <ct-button
+                  onClick={spawnNote()}
+                >
+                  📄 Note
+                </ct-button>
             </div>
           </ct-toolbar>
 
@@ -275,15 +278,53 @@ export default recipe<CharmsListInput, CharmsListOutput>(
         <>
           <ct-toast-stack
             $notifications={notifications}
-            position="top-right"
+            position="bottom-right"
             auto-dismiss={5000}
             max-toasts={5}
+            style="bottom: 80px; right: 24px;"
           />
-          {ifElse(
-            fabExpanded,
-            omnibot.ui.promptInput,
-            <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
-          )}
+          <ct-fab
+            expanded={fabExpanded}
+            variant="primary"
+            position="bottom-right"
+            onct-fab-backdrop-click={closeFab({ fabExpanded })}
+            onct-fab-escape={closeFab({ fabExpanded })}
+            onClick={toggle({ value: fabExpanded })}
+          >
+            <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
+              {ifElse(
+                showHistory,
+                <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid #e5e5e5;">
+                  <div style="padding: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
+                    <span style="font-size: 11px; text-transform: uppercase; color: #999; font-weight: 600; letter-spacing: 1px;">History</span>
+                    <button
+                      onClick={toggle({ value: showHistory })}
+                      style="background: none; border: 1px solid #ddd; border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; color: #666;"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  <div style="padding: 8px 12px; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
+                    {omnibot.ui.attachmentsAndTools}
+                  </div>
+                  <div style="flex: 1; overflow-y: auto; min-height: 0;">
+                    {omnibot.ui.chatLog}
+                  </div>
+                </div>,
+                <div style="padding: 8px; border-bottom: 1px solid #e5e5e5; text-align: center; flex-shrink: 0;">
+                  <button
+                    onClick={toggle({ value: showHistory })}
+                    style="background: none; border: none; color: #666; font-size: 11px; cursor: pointer; padding: 4px 8px;"
+                  >
+                    ↓ Show History
+                  </button>
+                </div>,
+              )}
+              <div style="padding: 16px; flex-shrink: 0;">
+                {omnibot.ui.promptInput}
+              </div>
+            </div>
+          </ct-fab>
         </>
       ),
     };
