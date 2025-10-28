@@ -1,6 +1,6 @@
 import { refer } from "merkle-reference";
 import { isRecord } from "@commontools/utils/types";
-import { isOpaqueRef } from "./builder/types.ts";
+import { isOpaqueCell } from "./builder/types.ts";
 import {
   getCellOrThrow,
   isQueryResultForDereferencing,
@@ -48,7 +48,7 @@ export function createRef(
       obj = obj.toJSON() ?? obj;
     }
 
-    if (isOpaqueRef(obj)) return obj.export().value ?? crypto.randomUUID();
+    if (isOpaqueCell(obj)) return obj.export().value ?? crypto.randomUUID();
 
     if (isQueryResultForDereferencing(obj)) {
       // It'll traverse this and call .toJSON on the doc in the reference.
