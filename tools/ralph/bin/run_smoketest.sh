@@ -41,8 +41,8 @@ for ID in $RALPH_IDS; do
   docker run --rm -e RALPH_ID=$ID -d \
     -u $(id -u):$(id -g) \
     -e HOME=/tmp/home \
-    -v "$LABS:/app/labs" \
-    -v "$LABS/tools/ralph/smoketest:/app/smoketest" \
+    -v "$LABS:/app/labs:z" \
+    -v "$LABS/tools/ralph/smoketest:/app/smoketest:z" \
     --cap-add=SYS_ADMIN \
     --security-opt seccomp=unconfined \
     --name ralph_$ID \
