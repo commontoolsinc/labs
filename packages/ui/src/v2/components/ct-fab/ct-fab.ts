@@ -43,20 +43,43 @@ export class CTFab extends BaseElement {
       .backdrop {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0);
+        background: radial-gradient(
+          circle at bottom right,
+          rgba(0, 0, 0, 0) 0%,
+          rgba(0, 0, 0, 0) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        backdrop-filter: blur(0px);
+        -webkit-backdrop-filter: blur(0px);
         pointer-events: none;
         transition:
-          background var(--ct-theme-animation-duration, 300ms) ease;
+          background var(--ct-theme-animation-duration, 300ms) ease,
+          backdrop-filter var(--ct-theme-animation-duration, 300ms) ease,
+          -webkit-backdrop-filter var(--ct-theme-animation-duration, 300ms) ease;
         z-index: 998;
+        mask-image: radial-gradient(
+          circle at bottom right,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        -webkit-mask-image: radial-gradient(
+          circle at bottom right,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
       }
 
       .backdrop.active {
         background: radial-gradient(
           circle at bottom right,
-          rgba(0, 0, 0, 0.15) 0%,
-          rgba(0, 0, 0, 0.05) 40%,
+          rgba(0, 0, 0, 0.2) 0%,
+          rgba(0, 0, 0, 0.08) 40%,
           rgba(0, 0, 0, 0) 70%
         );
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         pointer-events: auto;
       }
 
@@ -280,8 +303,9 @@ export class CTFab extends BaseElement {
     }
   };
 
-  private _handleBackdropClick = () => {
+  private _handleBackdropClick = (e: MouseEvent) => {
     if (this.expanded) {
+      e.stopPropagation(); // Prevent event from bubbling to host element's onClick
       this.emit("ct-fab-backdrop-click");
     }
   };
