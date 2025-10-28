@@ -353,13 +353,12 @@ export interface IObjectCreator<T> {
   ): T;
 
   // In the SchemaObjectTraverser system, we don't need to annotate the object
+  // or even create a returned value.
   // In the validateAndTransform system, we may add the toCell and toOpaqueRef
-  // functions
-  // TODO: I think this link does not have the leading "value" that we'd see
-  // in an attestation
+  // functions or actualy create the cell.
   createObject(
     link: NormalizedFullLink,
-    value: T[] | Record<string, T>,
+    value: T[] | Record<string, T> | T,
   ): T;
 }
 
@@ -379,7 +378,7 @@ class StandardObjectCreator<T> implements IObjectCreator<T> {
   }
   createObject(
     _link: NormalizedFullLink,
-    value: T[] | Record<string, T>,
+    value: T[] | Record<string, T> | T,
   ): T {
     return value as T;
   }
@@ -1021,7 +1020,10 @@ export class SchemaObjectTraverser<T extends JSONValue>
       return undefined;
     }
     schemaContext = resolved;
-    if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
+    if (
+      ContextualFlowControl.isTrueSchema(schemaContext.schema) &&
+      !SchemaObjectTraverser.asCellOrStream(schemaContext.schema)
+    ) {
       const defaultValue = isObject(schemaContext.schema)
         ? schemaContext.schema["default"]
         : undefined;
@@ -1034,10 +1036,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
         this.schemaTracker,
         defaultValue,
       );
-    } else if (
-      schemaContext.schema === false ||
-      isObject(schemaContext.schema) && schemaContext.schema["not"] === true
-    ) {
+    } else if (ContextualFlowControl.isFalseSchema(schemaContext.schema)) {
       // This value rejects all objects - just return
       return undefined;
     } else if (typeof schemaContext.schema !== "object") {
@@ -1049,11 +1048,17 @@ export class SchemaObjectTraverser<T extends JSONValue>
     const schemaObj = schemaContext.schema;
     // FIXME: Need to clean up these casts
     if (doc.value === null) {
-      return this.isValidType(schemaObj, "null") ? doc.value as T : undefined;
+      return this.isValidType(schemaObj, "null")
+        ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
+        : undefined;
     } else if (isString(doc.value)) {
-      return this.isValidType(schemaObj, "string") ? doc.value as T : undefined;
+      return this.isValidType(schemaObj, "string")
+        ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
+        : undefined;
     } else if (isNumber(doc.value)) {
-      return this.isValidType(schemaObj, "number") ? doc.value as T : undefined;
+      return this.isValidType(schemaObj, "number")
+        ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
+        : undefined;
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
         const newValue: any = [];
@@ -1065,7 +1070,10 @@ export class SchemaObjectTraverser<T extends JSONValue>
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
         });
-        for (const item of entries as Immutable<OptJSONValue>[]) {
+        if (entries === undefined) {
+          return undefined;
+        }
+        for (const item of entries) {
           newValue.push(item);
         }
         return this.objectCreator.createObject(
@@ -1095,9 +1103,10 @@ export class SchemaObjectTraverser<T extends JSONValue>
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
         });
-        for (
-          const [k, v] of Object.entries(entries as Immutable<OptJSONObject>)
-        ) {
+        if (entries === undefined) {
+          return undefined;
+        }
+        for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
         }
         return this.objectCreator.createObject(
@@ -1114,9 +1123,15 @@ export class SchemaObjectTraverser<T extends JSONValue>
   }
 
   private isValidType(
-    schemaObj: Immutable<JSONObject>,
+    schema: JSONSchema,
     valueType: string,
   ): boolean {
+    if (ContextualFlowControl.isTrueSchema(schema)) {
+      return true;
+    } else if (ContextualFlowControl.isFalseSchema(schema)) {
+      return false;
+    }
+    const schemaObj = schema as JSONSchemaObj;
     if ("type" in schemaObj) {
       if (Array.isArray(schemaObj["type"])) {
         return schemaObj["type"].includes(valueType);
@@ -1130,11 +1145,13 @@ export class SchemaObjectTraverser<T extends JSONValue>
     return true;
   }
 
-  // Returned object should be annotated and have defaults applied
+  // Returned object is not annotated, and does not have defaults applied for
+  // the top level object.
+  // Entries within the object should have had this processing done.
   private traverseArrayWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): T | undefined {
+  ): T[] | undefined {
     const arrayObj: T[] = [];
     const schema = schemaContext.schema;
     for (
@@ -1163,22 +1180,16 @@ export class SchemaObjectTraverser<T extends JSONValue>
       }
       arrayObj.push(val);
     }
-    return this.objectCreator.createObject(
-      getNormalizedLink(
-        doc.address,
-        this.space,
-        schema,
-        schemaContext.rootSchema,
-      ),
-      arrayObj,
-    );
+    return arrayObj;
   }
 
-  // Returned object should be annotated and have defaults applied
+  // Returned object is not annotated, and does not have defaults applied for
+  // the top level object.
+  // Entries within the object should have had this processing done.
   private traverseObjectWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): T | undefined {
+  ): Record<string, T> | undefined {
     const filteredObj: Record<string, T> = {};
     const schema = schemaContext.schema;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
@@ -1225,15 +1236,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
         }
       }
     }
-    return this.objectCreator.createObject(
-      getNormalizedLink(
-        doc.address,
-        this.space,
-        schema,
-        schemaContext.rootSchema,
-      ),
-      filteredObj,
-    );
+    return filteredObj;
   }
 
   // This just has a schemaContext, since the portion of the doc.address.path
@@ -1269,6 +1272,37 @@ export class SchemaObjectTraverser<T extends JSONValue>
       return null as T;
     }
     return this.traverseWithSelector(newDoc, newSelector!);
+  }
+
+  private traversePrimitive(
+    doc: IAttestation,
+    schemaObj: JSONSchemaObj,
+    rootSchema: JSONSchema,
+  ): T {
+    if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
+      return this.objectCreator.createObject(
+        getNormalizedLink(
+          doc.address,
+          this.space,
+          schemaObj,
+          rootSchema,
+        ),
+        doc.value as T,
+      );
+    } else {
+      return doc.value as T;
+    }
+  }
+
+  static asCellOrStream(schema: JSONSchema): boolean {
+    if (typeof schema === "boolean") {
+      return false;
+    }
+    // TODO: Handle anyOf
+    if ("asCell" in schema || "asStream" in schema) {
+      return true;
+    }
+    return false;
   }
 }
 

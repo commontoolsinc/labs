@@ -377,7 +377,7 @@ export function validateAndTransformNew(
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
   // Our selector is relative to the "value" in our doc
   const selector = {
-    path: ["value"],
+    path: ["value", ...link.path],
     schemaContext: { schema: schema!, rootSchema: rootSchema! },
   };
   const traverser = new SchemaObjectTraverser<any>(tx!, selector, link.space);
@@ -584,7 +584,6 @@ export function validateAndTransformOrig(
         );
       }
     }
-    console.log("create cell link", link);
     return createCell(runtime, link, tx);
   }
 
@@ -926,6 +925,7 @@ export function validateAndTransformOrig(
   }
 
   // For primitive types, return as is
+  // FIXME: this is already done ~300 lines earlier)
   // if (
   //   value === undefined && isObject(resolvedSchema) &&
   //   resolvedSchema.default !== undefined

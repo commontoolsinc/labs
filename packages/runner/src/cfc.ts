@@ -679,4 +679,8 @@ export class ContextualFlowControl {
   static isInternalSchemaKey(key: string): boolean {
     return key === "ifc" || key === "asCell" || key === "asStream";
   }
+
+  static isFalseSchema(schema: JSONSchema): boolean {
+    return schema === false || (isObject(schema) && schema["not"] === true);
+  }
 }
