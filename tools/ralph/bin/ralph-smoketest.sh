@@ -32,13 +32,3 @@ LLM="./tools/ralph/bin/llm.sh"
 claude --print --dangerously-skip-permissions \
 --verbose --output-format=stream-json 2>&1 | \
 tee -a ./tools/ralph/logs/ralph-claude.log
-
-# Auto-stash changes if any exist
-if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A
-
-  # Generate commit message from staged changes
-  commit_msg=$(git diff --staged | $LLM "Summarize these changes into a short one-line description, output just that one line")
-
-  git stash push -m "$commit_msg"
-fi
