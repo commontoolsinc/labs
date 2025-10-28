@@ -6,7 +6,7 @@ import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
-import { createIfElseCall } from "../../builtins/ifelse.ts";
+import { createWhenCall } from "../../builtins/ifelse.ts";
 import { selectDataFlowsReferencedIn } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 
@@ -20,9 +20,9 @@ export const emitBinaryExpression: Emitter = ({
   if (!ts.isBinaryExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
 
-  // Optimize && operator: convert to ifElse instead of wrapping entire expression in derive
+  // Optimize && operator: convert to when instead of wrapping entire expression in derive
   // Example: foo.length > 0 && <div>...</div>
-  // Becomes: ifElse(derive(foo, foo => foo.length > 0), <div>...</div>, null)
+  // Becomes: when(derive(foo, foo => foo.length > 0), <div>...</div>)
   if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
     const leftDataFlows = selectDataFlowsReferencedIn(
       dataFlows,
@@ -32,7 +32,7 @@ export const emitBinaryExpression: Emitter = ({
     const shouldDeriveLeft = leftDataFlows.length > 0 &&
       !isSimpleOpaqueRefAccess(expression.left, context.checker);
 
-    // Only apply ifElse optimization if left side has opaque refs (needs derive)
+    // Only apply when optimization if left side has opaque refs (needs derive)
     // Right side is handled by rewriteChildren which processes any opaque refs appropriately
     if (shouldDeriveLeft) {
       let predicate: ts.Expression = expression.left;
@@ -47,24 +47,16 @@ export const emitBinaryExpression: Emitter = ({
       }
 
       // Process right side - rewrite children but don't wrap whole thing in derive
-      const whenTrue = rewriteChildren(expression.right) || expression.right;
+      const value = rewriteChildren(expression.right) || expression.right;
 
-      // Create ifElse(predicate, whenTrue, predicate)
-      // This preserves && semantics where falsy values are returned as-is
-      // We need to create a synthetic conditional expression to pass to createIfElseCall
-      const syntheticConditional = context.factory.createConditionalExpression(
-        predicate,
-        context.factory.createToken(ts.SyntaxKind.QuestionToken),
-        whenTrue,
-        context.factory.createToken(ts.SyntaxKind.ColonToken),
-        predicate,
-      );
-
-      return createIfElseCall({
-        expression: syntheticConditional,
+      // Create when(predicate, value)
+      // This is equivalent to: ifElse(predicate, value, predicate)
+      // Preserves && semantics where falsy values are returned as-is
+      return createWhenCall({
+        condition: predicate,
+        value,
         factory: context.factory,
         ctHelpers: context.ctHelpers,
-        sourceFile: context.sourceFile,
       });
     }
   }
