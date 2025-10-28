@@ -40,7 +40,8 @@ RUN add-apt-repository -y ppa:maveonair/helix-editor && \
 RUN npm install -g mystmd
 
 # Install Playwright browser and dependencies
-RUN npx playwright install --with-deps chromium
+RUN npx playwright install chrome && \
+    npx playwright install-deps chrome
 
 # Install Claude CLI and Codex globally (accessible to all users)
 RUN npm install -g @anthropic-ai/claude-code && \
