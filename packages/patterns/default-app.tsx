@@ -1,8 +1,12 @@
 /// <cts-enable />
 import {
+  type BuiltInLLMMessage,
   Cell,
+  cell,
   derive,
   handler,
+  ifElse,
+  lift,
   NAME,
   navigateTo,
   recipe,
@@ -92,6 +96,45 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
+const messagesToNotifications = lift<
+  {
+    messages: BuiltInLLMMessage[];
+    seen: Cell<number>;
+    notifications: Cell<{ id: string; text: string; timestamp: number }[]>;
+  }
+>(({ messages, seen, notifications }) => {
+  if (messages.length > 0) {
+    if (seen.get() >= messages.length) return;
+
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage.role === "assistant") {
+      seen.set(messages.length);
+
+      const contentText = typeof latestMessage.content === "string"
+        ? latestMessage.content
+        : latestMessage.content.map((part: any) => {
+          if (part.type === "text") return part.text;
+          if (part.type === "image") {
+            return "[Image]";
+          }
+          return "";
+        }).join("");
+
+      notifications.set([
+        ...notifications.get(),
+        {
+          id: `${Date.now()}`,
+          text: contentText,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  } else {
+    seen.set(0);
+    notifications.set([]);
+  }
+});
+
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -103,6 +146,19 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
     const fab = OmniboxFAB({
       mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+    });
+
+    const notifications = cell<
+      { id: string; text: string; timestamp: number }[]
+    >([]);
+    const seen = cell<number>(0);
+
+    messagesToNotifications({
+      messages: fab.messages,
+      seen: seen as unknown as Cell<number>,
+      notifications: notifications as unknown as Cell<
+        { id: string; text: string; timestamp: number }[]
+      >,
     });
 
     return {
@@ -185,7 +241,18 @@ export default recipe<CharmsListInput, CharmsListOutput>(
         </ct-screen>
       ),
       sidebarUI: fab.sidebarUI,
-      fabUI: fab[UI],
+      fabUI: (
+        <>
+          <ct-toast-stack
+            $notifications={notifications}
+            position="bottom-right"
+            auto-dismiss={5000}
+            max-toasts={5}
+            suppress={fab.fabExpanded}
+          />
+          {fab[UI]}
+        </>
+      ),
     };
   },
 );

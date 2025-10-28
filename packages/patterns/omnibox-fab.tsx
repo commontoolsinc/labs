@@ -98,6 +98,7 @@ export default recipe<OmniboxFABInput>(
 
     return {
       [NAME]: "OmniboxFAB",
+      messages: omnibot.messages,
       [UI]: (
         <ct-fab
           expanded={fabExpanded}

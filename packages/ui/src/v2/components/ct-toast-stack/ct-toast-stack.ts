@@ -32,6 +32,7 @@ function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
  * @attr {string} position - Stack position: "top-right" | "top-left" | "bottom-right" | "bottom-left" | "top-center" | "bottom-center"
  * @attr {number} auto-dismiss - Auto-dismiss duration in milliseconds (0 to disable)
  * @attr {number} max-toasts - Maximum number of toasts to display at once
+ * @attr {boolean} suppress - When true, hides toasts but continues processing updates
  *
  * @fires ct-toast-dismiss - Fired when a toast is dismissed (bubbles up from ct-toast)
  * @fires ct-toast-action - Fired when a toast action is clicked (bubbles up from ct-toast)
@@ -42,6 +43,7 @@ function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
  *   position="top-right"
  *   auto-dismiss={5000}
  *   max-toasts={5}
+ *   suppress={fabExpanded}
  * ></ct-toast-stack>
  */
 
@@ -130,6 +132,7 @@ export class CTToastStack extends BaseElement {
     position: { type: String, reflect: true },
     autoDismiss: { type: Number, attribute: "auto-dismiss" },
     maxToasts: { type: Number, attribute: "max-toasts" },
+    suppress: { type: Boolean, reflect: true },
     theme: { type: Object, attribute: false },
   };
 
@@ -149,6 +152,9 @@ export class CTToastStack extends BaseElement {
   @property({ type: Number, attribute: "max-toasts" })
   declare maxToasts: number;
 
+  @property({ type: Boolean, reflect: true })
+  declare suppress: boolean;
+
   private _dismissTimers = new Map<number, number>();
   private _unsubscribe: (() => void) | null = null;
 
@@ -158,6 +164,7 @@ export class CTToastStack extends BaseElement {
     this.position = "top-right";
     this.autoDismiss = 5000; // 5 seconds default
     this.maxToasts = 5;
+    this.suppress = false;
   }
 
   override firstUpdated(changed: Map<string | number | symbol, unknown>) {
@@ -208,6 +215,13 @@ export class CTToastStack extends BaseElement {
 
   override render() {
     if (!this.notifications) {
+      return html`
+
+      `;
+    }
+
+    // When suppressed, hide toasts but keep processing updates
+    if (this.suppress) {
       return html`
 
       `;
