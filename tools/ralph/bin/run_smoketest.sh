@@ -45,6 +45,7 @@ for ID in $RALPH_IDS; do
     -v "$LABS/tools/ralph/smoketest:/app/smoketest:z" \
     --cap-add=SYS_ADMIN \
     --security-opt seccomp=unconfined \
+    --shm-size=2g \
     --name ralph_$ID \
     ellyxir/ralph
 
@@ -72,7 +73,7 @@ for ID in $RALPH_IDS; do
   # Configure Claude MCP server for Playwright
   # Container runs as host user with HOME=/tmp/home
   if ! docker exec ralph_$ID claude mcp list 2>/dev/null | grep -q playwright; then
-    docker exec ralph_$ID claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox --disable-setuid-sandbox
+    docker exec ralph_$ID claude mcp add --scope user playwright npx "@playwright/mcp@latest" -- --headless --isolated --no-sandbox
   fi
 done
 
