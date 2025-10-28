@@ -1199,7 +1199,9 @@ function transformMapCallback(
     if (!baseName) continue;
 
     // Skip if an existing entry captures an equivalent expression
-    const existing = captureEntries.find((entry) => expressionsMatch(expr, entry.expr));
+    const existing = captureEntries.find((entry) =>
+      expressionsMatch(expr, entry.expr)
+    );
     if (existing) continue;
 
     let candidate = baseName;
