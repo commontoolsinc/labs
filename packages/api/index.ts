@@ -161,7 +161,7 @@ export type JSONSchemaObj = {
   // Subschema logic
   readonly allOf?: readonly (JSONSchema)[]; // not validated
   readonly anyOf?: readonly (JSONSchema)[]; // not always validated
-  readonly oneOf?: readonly (JSONSchema)[]; // not validated
+  readonly oneOf?: readonly (JSONSchema)[]; // not always validated
   readonly not?: JSONSchema;
   // Subschema conditionally - none applied
   readonly if?: JSONSchema;
@@ -169,7 +169,7 @@ export type JSONSchemaObj = {
   readonly else?: JSONSchema;
   readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
   // Subschema for array
-  readonly prefixItems?: (JSONSchema)[]; // not validated
+  readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
   readonly items?: Readonly<JSONSchema>;
   readonly contains?: JSONSchema; // not validated
   // Subschema for object
