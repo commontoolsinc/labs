@@ -108,13 +108,22 @@ export default recipe<OmniboxFABInput>(
           onClick={toggle({ value: fabExpanded })}
         >
           <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
+            {/* Chevron at top - the "handle" for the drawer */}
+            <div style="border-bottom: 1px solid #e5e5e5; flex-shrink: 0;">
+              <ct-chevron-button
+                expanded={showHistory}
+                onct-toggle={toggle({ value: showHistory })}
+              />
+            </div>
+
+            {/* History drawer - slides down from chevron */}
             <div
               style={derive(
                 showHistory,
                 (show) =>
                   `flex: ${
                     show ? "1" : "0"
-                  }; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid #e5e5e5; opacity: ${
+                  }; min-height: 0; display: flex; flex-direction: column; opacity: ${
                     show ? "1" : "0"
                   }; max-height: ${
                     show ? "480px" : "0"
@@ -123,17 +132,6 @@ export default recipe<OmniboxFABInput>(
                   };`,
               )}
             >
-              <div style="padding: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
-                <span style="font-size: 11px; text-transform: uppercase; color: #999; font-weight: 600; letter-spacing: 1px;">
-                  History
-                </span>
-                <button
-                  onClick={toggle({ value: showHistory })}
-                  style="background: none; border: 1px solid #ddd; border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; color: #666;"
-                >
-                  Hide
-                </button>
-              </div>
               <div style="padding: 8px 12px; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
                 {omnibot.ui.attachmentsAndTools}
               </div>
@@ -141,26 +139,8 @@ export default recipe<OmniboxFABInput>(
                 {omnibot.ui.chatLog}
               </div>
             </div>
-            <div
-              style={derive(
-                showHistory,
-                (show) =>
-                  `padding: 8px; border-bottom: 1px solid #e5e5e5; text-align: center; flex-shrink: 0; opacity: ${
-                    show ? "0" : "1"
-                  }; max-height: ${
-                    show ? "0" : "48px"
-                  }; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: ${
-                    show ? "none" : "auto"
-                  };`,
-              )}
-            >
-              <button
-                onClick={toggle({ value: showHistory })}
-                style="background: none; border: none; color: #666; font-size: 11px; cursor: pointer; padding: 4px 8px;"
-              >
-                ↓ Show History
-              </button>
-            </div>
+
+            {/* Peek preview - shown when history is closed but we have a message */}
             {ifElse(
               derive(
                 [showHistory, latestAssistantMessage, peekDismissed],
@@ -192,6 +172,8 @@ export default recipe<OmniboxFABInput>(
               </div>,
               null,
             )}
+
+            {/* Prompt input - always at bottom */}
             <div style="padding: 16px; flex-shrink: 0;">
               {omnibot.ui.promptInput}
             </div>

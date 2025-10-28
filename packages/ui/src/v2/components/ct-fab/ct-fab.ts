@@ -149,6 +149,46 @@ export class CTFab extends BaseElement {
         overflow: visible;
       }
 
+      /* Mobile responsive - don't exceed viewport */
+      @media (max-width: 768px) {
+        :host([expanded]) .fab {
+          width: calc(100vw - 48px);
+          max-width: 400px;
+          max-height: calc(100vh - 48px);
+        }
+
+        :host([position="bottom-right"]) .fab-container,
+        :host([position="bottom-left"]) .fab-container {
+          bottom: 16px;
+        }
+
+        :host([position="bottom-right"]) .fab-container {
+          right: 16px;
+        }
+
+        :host([position="bottom-left"]) .fab-container {
+          left: 16px;
+        }
+      }
+
+      /* Extra small screens - nearly full screen when expanded */
+      @media (max-width: 480px) {
+        :host([expanded]) .fab {
+          width: calc(100vw - 32px);
+          max-height: calc(100vh - 32px);
+        }
+
+        :host([position="bottom-right"]) .fab-container,
+        :host([position="bottom-left"]) .fab-container,
+        :host([position="top-right"]) .fab-container,
+        :host([position="top-left"]) .fab-container {
+          bottom: 12px;
+          right: 12px;
+          top: auto;
+          left: auto;
+        }
+      }
+
       /* Collapsing state - triggers content fade-out */
       :host([collapsing]) .fab {
         cursor: default;

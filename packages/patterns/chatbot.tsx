@@ -373,7 +373,13 @@ export default recipe<ChatInput, ChatOutput>(
     );
 
     const chatLog = (
-      <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+      <ct-vscroll
+        style="padding: 1rem;"
+        flex
+        showScrollbar
+        fadeEdges
+        snapToBottom
+      >
         <ct-chat
           theme={theme}
           $messages={messages}
