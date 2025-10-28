@@ -37,7 +37,7 @@ variable.
 
 **Option 1: Use the automated script (recommended)**
 
-Run multiple smoketests in parallel (currently configured for tasks 1-8):
+Run multiple smoketests in parallel (currently configured for tasks 1-9):
 
 ```bash
 ./tools/ralph/bin/run_smoketest.sh
@@ -113,6 +113,7 @@ Results are available on the host machine in
 - `ralph.log` - Complete log of Ralph's execution (stdout and stderr)
 - `SCORE.txt` - Contains SUCCESS, PARTIAL, or FAILURE
 - `RESULTS.md` - Summary of work including test results
+- `TIMING_SECONDS.txt` - Total execution time in seconds (decimal format)
 - Pattern files (created directly in this directory for automatic cleanup)
 
 No need to copy files from the container - the bind mount makes results
