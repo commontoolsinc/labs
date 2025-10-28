@@ -6,7 +6,7 @@ import {
   createDeriveCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
-import { createWhenCall } from "../../builtins/ifelse.ts";
+import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import { selectDataFlowsReferencedIn } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 
@@ -54,6 +54,47 @@ export const emitBinaryExpression: Emitter = ({
       // Preserves && semantics where falsy values are returned as-is
       return createWhenCall({
         condition: predicate,
+        value,
+        factory: context.factory,
+        ctHelpers: context.ctHelpers,
+      });
+    }
+  }
+
+  // Optimize || operator: convert to unless instead of wrapping entire expression in derive
+  // Example: fallbackValue || <div>...</div>
+  // Becomes: unless(derive(fallbackValue, v => v), <div>...</div>)
+  if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+    const leftDataFlows = selectDataFlowsReferencedIn(
+      dataFlows,
+      expression.left,
+    );
+
+    const shouldDeriveLeft = leftDataFlows.length > 0 &&
+      !isSimpleOpaqueRefAccess(expression.left, context.checker);
+
+    // Only apply unless optimization if left side has opaque refs (needs derive)
+    // Right side is handled by rewriteChildren which processes any opaque refs appropriately
+    if (shouldDeriveLeft) {
+      let condition: ts.Expression = expression.left;
+      const plan = createBindingPlan(leftDataFlows);
+      const derivedCondition = createDeriveCallForExpression(
+        expression.left,
+        plan,
+        context,
+      );
+      if (derivedCondition) {
+        condition = derivedCondition;
+      }
+
+      // Process right side - rewrite children but don't wrap whole thing in derive
+      const value = rewriteChildren(expression.right) || expression.right;
+
+      // Create unless(condition, value)
+      // This is equivalent to: ifElse(condition, condition, value)
+      // Preserves || semantics where truthy values are returned as-is
+      return createUnlessCall({
+        condition,
         value,
         factory: context.factory,
         ctHelpers: context.ctHelpers,

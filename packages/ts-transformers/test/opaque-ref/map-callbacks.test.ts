@@ -63,10 +63,10 @@ describe("OpaqueRef map callbacks", () => {
       output,
       "__ctHelpers.derive(index, index => index + 1)",
     );
-    // element[NAME] uses NAME from module scope (import), defaultName from params
+    // element[NAME] || defaultName should now use unless helper
     assertStringIncludes(
       output,
-      "element[NAME] || defaultName",
+      "__ctHelpers.unless(__ctHelpers.derive(element, element => element[NAME]), defaultName)",
     );
     // ifElse still gets derive for the negation
     assertStringIncludes(
