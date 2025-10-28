@@ -2,7 +2,7 @@ import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
 interface State {
     entries: Array<{
-        zero: number;
+        0: number;
     }>;
 }
 export default recipe({
@@ -13,11 +13,11 @@ export default recipe({
             items: {
                 type: "object",
                 properties: {
-                    zero: {
+                    0: {
                         type: "number"
                     }
                 },
-                required: ["zero"]
+                required: ["0"]
             }
         }
     },
@@ -32,11 +32,11 @@ export default recipe({
                     element: {
                         type: "object",
                         properties: {
-                            zero: {
+                            0: {
                                 type: "number"
                             }
                         },
-                        required: ["zero"]
+                        required: ["0"]
                     },
                     params: {
                         type: "object",
@@ -44,7 +44,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<span>{element.zero}</span>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<span>{element[0]}</span>)), {})}
       </div>),
     };
 });
