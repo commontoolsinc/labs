@@ -476,17 +476,23 @@ export const crmPipeline = recipe<PipelineArgs>(
       return sanitized === 0 ? 1000 : sanitized;
     })(defaultAmount);
 
-    const dealView = lift((value: DealInput[] | undefined) => {
-      const stagesValue = ensureStages(stageList.get());
-      return sanitizeDeals(value, stagesValue);
-    })(deals);
+    const dealView = derive(
+      { deals, stages: stageList },
+      ({ deals, stages }) => {
+        const stagesValue = ensureStages(stages);
+        return sanitizeDeals(deals, stagesValue);
+      },
+    );
 
-    const totals = lift((list: DealState[] | undefined) => {
-      const stagesValue = ensureStages(stageList.get());
-      const dealsValue = Array.isArray(list) ? list : [];
-      const result = computeStageTotals(stagesValue, dealsValue);
-      return result;
-    })(dealView);
+    const totals = derive(
+      { deals: dealView, stages: stageList },
+      ({ deals, stages }) => {
+        const stagesValue = ensureStages(stages);
+        const dealsValue = Array.isArray(deals) ? deals : [];
+        const result = computeStageTotals(stagesValue, dealsValue);
+        return result;
+      },
+    );
 
     const stageStats = derive(totals, (value) => value.stats);
     const totalForecast = derive(totals, (value) => value.weightedTotal);

@@ -113,12 +113,15 @@ export const counterWithBatchedHandlerUpdates = recipe<BatchedCounterArgs>(
       typeof input === "string" && input.length > 0 ? input : "idle"
     )(lastNote);
 
-    const lastTotal = derive(historyView, (entries) => {
-      if (entries.length === 0) {
-        return currentValue.get();
-      }
-      return entries[entries.length - 1];
-    });
+    const lastTotal = derive(
+      { entries: historyView, current: currentValue },
+      ({ entries, current }) => {
+        if (entries.length === 0) {
+          return current;
+        }
+        return entries[entries.length - 1];
+      },
+    );
 
     const summary =
       str`Processed ${processed} increments over ${batches} batches (${noteView})`;
