@@ -849,8 +849,7 @@ export default recipe<{
               border: `1px solid ${auth?.user?.email ? "#c3e6cb" : "#f5c6cb"}`,
             }}
           >
-            <strong>Auth Status:</strong>{" "}
-            {auth?.user?.email
+            <strong>Auth Status:</strong> {auth?.user?.email
               ? `✅ Authenticated as ${auth.user.email}`
               : "❌ Not authenticated - Please link to a gmail-auth charm"}
           </div>

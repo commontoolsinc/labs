@@ -1,10 +1,5 @@
 /// <cts-enable />
-import {
-  Default,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { Default, NAME, recipe, UI } from "commontools";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -68,7 +63,8 @@ export default recipe<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {auth?.user?.email ? "✅ Authenticated" : "⚠️  Not Authenticated"}
+              Status:{" "}
+              {auth?.user?.email ? "✅ Authenticated" : "⚠️  Not Authenticated"}
             </h3>
 
             {auth?.user?.email
@@ -106,8 +102,10 @@ export default recipe<Input, Output>(
               fontSize: "14px",
             }}
           >
-            <strong>💡 Usage:</strong> This charm provides Google OAuth authentication.
-            Link its <code>auth</code> output to any gmail importer charm's <code>auth</code> input.
+            <strong>💡 Usage:</strong>{" "}
+            This charm provides Google OAuth authentication. Link its{" "}
+            <code>auth</code> output to any gmail importer charm's{" "}
+            <code>auth</code> input.
           </div>
         </div>
       ),
