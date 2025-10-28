@@ -158,10 +158,14 @@ echo "Testing --input flag operations..."
 test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
 test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
 
+echo "Testing charm step..."
+
+# Recompute (one iteration) with updated inputs
+ct charm step $SPACE_ARGS --charm $CHARM_ID
+
 # Check space has new charm with correct inputs and title
 TITLE="Simple counter 2: 10"
-ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"
-if [ $? -ne 0 ]; then
+if ! ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"; then
   error "Charm did not appear in list of space charms."
 fi
 

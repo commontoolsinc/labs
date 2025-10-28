@@ -382,7 +382,7 @@ export class CharmManager {
   ): Promise<Cell<T>>;
   async get<T = unknown>(
     id: string | Cell<unknown>,
-    runIt: boolean = true,
+    runIt: boolean = false,
     asSchema?: JSONSchema,
   ): Promise<Cell<T>> {
     // Load the charm from storage.

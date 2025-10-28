@@ -143,7 +143,7 @@ export async function setCharmRecipe(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (entry.mainPath.endsWith(".iframe.js")) {
     await charm.setIframeRecipe(entry.mainPath);
   } else {
@@ -158,7 +158,7 @@ export async function saveCharmRecipe(
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   const meta = await charm.getRecipeMeta();
   const iframeRecipe = await charm.getIframeRecipe();
 
@@ -194,7 +194,7 @@ export async function applyCharmInput(
 ) {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   await charm.setInput(input);
 }
 
@@ -380,7 +380,7 @@ export async function inspectCharm(
 }> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
 
   const id = charm.id;
   const name = charm.name();
@@ -446,7 +446,7 @@ export async function getCellValue(
 ): Promise<unknown> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (options?.input) {
     return charm.input.get(path);
   } else {
@@ -462,7 +462,7 @@ export async function setCellValue(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (options?.input) {
     await charm.input.set(value, path);
   } else {
@@ -480,7 +480,7 @@ export async function callCharmHandler<T = any>(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, true);
 
   // Get the cell and traverse to the handler using .key()
   const cell = charm.getCell().asSchema({

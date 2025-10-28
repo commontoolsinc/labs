@@ -134,7 +134,11 @@ export class XAppView extends BaseView {
       ) {
         return current;
       }
-      const activeCharm = await rt.cc().get(app.activeCharmId, nameSchema);
+      const activeCharm = await rt.cc().get(
+        app.activeCharmId,
+        true,
+        nameSchema,
+      );
       // Record the charm as recently accessed so recents stay fresh.
       await rt.cc().manager().trackRecentCharm(activeCharm.getCell());
       this.#setTitleSubscription(activeCharm);

@@ -29,7 +29,7 @@ export async function renderCharm(
   // 2. Get charm controller to access the Cell
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, true);
   const cell = charm.getCell().asSchema({
     type: "object",
     properties: {
