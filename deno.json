@@ -75,7 +75,8 @@
       "exclude": [
         "jsx-no-useless-fragment",
         "no-explicit-any",
-        "require-yield"
+        "require-yield",
+        "ban-types"
       ]
     }
   },
