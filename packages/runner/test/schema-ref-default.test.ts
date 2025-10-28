@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "./builder/types.ts";
-import { resolveSchema } from "./schema.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { resolveSchema } from "../src/schema.ts";
 
 describe("$ref with default support", () => {
   describe("resolveSchema() with default", () => {
@@ -16,6 +16,7 @@ describe("$ref with default support", () => {
 
       const resolved = resolveSchema(schema, schema, false);
       expect(resolved).toEqual({
+        $defs: schema.$defs,
         type: "string",
         default: "ref-site-default",
       });
@@ -32,6 +33,7 @@ describe("$ref with default support", () => {
 
       const resolved = resolveSchema(schema, schema, false);
       expect(resolved).toEqual({
+        $defs: schema.$defs,
         type: "string",
         default: "ref-site-default",
       });
@@ -47,6 +49,7 @@ describe("$ref with default support", () => {
 
       const resolved = resolveSchema(schema, schema, false);
       expect(resolved).toEqual({
+        $defs: schema.$defs,
         type: "string",
         default: "target-default",
       });
@@ -64,9 +67,21 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(schema, schema, false);
-      // resolveSchema only resolves one level, so we still have a $ref
       expect(resolved).toHaveProperty("default", "outermost");
-      expect(resolved).toHaveProperty("$ref");
+    });
+
+    it("should handle chained refs with defaults at each level (outermost wins)", () => {
+      const schema: JSONSchema = {
+        $defs: {
+          Level3: { type: "string", default: "level3" },
+          Level2: { $ref: "#/$defs/Level3", default: "level2" },
+          Level1: { $ref: "#/$defs/Level2", default: "level1" },
+        },
+        $ref: "#/$defs/Level1",
+      };
+
+      const resolved = resolveSchema(schema, schema, false);
+      expect(resolved).toHaveProperty("default", "level1");
     });
 
     it("should preserve default even when filterAsCell is true", () => {
@@ -82,6 +97,7 @@ describe("$ref with default support", () => {
       const resolved = resolveSchema(schema, schema, true);
       // asCell should be filtered, but default should remain
       expect(resolved).toEqual({
+        $defs: schema.$defs,
         type: "string",
         default: "ref-default",
       });
@@ -99,6 +115,7 @@ describe("$ref with default support", () => {
       const resolved = resolveSchema(schema, schema, false);
       // Should convert boolean true to object to hold default
       expect(resolved).toEqual({
+        $defs: schema.$defs,
         default: "foo",
       });
     });
@@ -113,8 +130,12 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(schema, schema, false);
-      // false schema means nothing validates, can't add default
-      expect(resolved).toBeUndefined();
+      // false schema means nothing validates, but we can still have properties
+      expect(resolved).toEqual({
+        $defs: schema.$defs,
+        "not": true,
+        default: "foo",
+      });
     });
   });
 
@@ -156,6 +177,7 @@ describe("$ref with default support", () => {
       const resolved = resolveSchema(rootSchema, rootSchema, false);
 
       expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
         anyOf: [
           { type: "string", default: "str" },
           { type: "number", default: 42 },
@@ -196,7 +218,11 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(rootSchema, rootSchema, false);
-      expect(resolved).toEqual({ type: "number", default: 42 });
+      expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
+        type: "number",
+        default: 42,
+      });
     });
 
     it("should handle default with value of null", () => {
@@ -209,7 +235,11 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(rootSchema, rootSchema, false);
-      expect(resolved).toEqual({ type: ["string", "null"], default: null });
+      expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
+        type: ["string", "null"],
+        default: null,
+      });
     });
 
     it("should handle default with array value", () => {
@@ -223,6 +253,7 @@ describe("$ref with default support", () => {
 
       const resolved = resolveSchema(rootSchema, rootSchema, false);
       expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
         type: "array",
         items: { type: "string" },
         default: ["item1", "item2"],
@@ -246,6 +277,7 @@ describe("$ref with default support", () => {
 
       const resolved = resolveSchema(rootSchema, rootSchema, false);
       expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
         type: "object",
         properties: {
           name: { type: "string" },
@@ -290,6 +322,7 @@ describe("$ref with default support", () => {
       const resolved = resolveSchema(rootSchema, rootSchema, false);
 
       expect(resolved).toEqual({
+        $defs: rootSchema.$defs,
         type: "string",
         default: "ref-default",
         asCell: true,
