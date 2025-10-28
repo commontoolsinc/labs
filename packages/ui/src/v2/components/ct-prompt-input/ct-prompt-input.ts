@@ -305,7 +305,9 @@ export class CTPromptInput extends BaseElement {
 
       override connectedCallback(): void {
         super.connectedCallback();
-        this._resizeObs = new ResizeObserver(() => this._repositionMentionsOverlay());
+        this._resizeObs = new ResizeObserver(() =>
+          this._repositionMentionsOverlay()
+        );
         this._resizeObs.observe(this);
         globalThis.addEventListener("resize", this._onWindowChange, {
           passive: true,
@@ -345,7 +347,10 @@ export class CTPromptInput extends BaseElement {
           this._updateThemeProperties();
           // Update theme on overlay if it exists
           if (this._mentionsOverlay) {
-            applyThemeToElement(this._mentionsOverlay, this.theme || defaultTheme);
+            applyThemeToElement(
+              this._mentionsOverlay,
+              this.theme || defaultTheme,
+            );
           }
         }
         if (changedProperties.has("mentionable")) {
@@ -822,35 +827,35 @@ export class CTPromptInput extends BaseElement {
         // Inline styles so overlay has its own styling
         const tpl = html`
           <style>
-            .mentions-dropdown {
-              position: absolute;
-              background: var(--ct-theme-color-surface, #fff);
-              border: 1px solid var(--ct-theme-color-border, #e5e7eb);
-              border-radius: var(--ct-theme-border-radius, 0.375rem);
-              box-shadow: var(--ct-shadow-md, 0 10px 15px -3px rgba(0,0,0,0.1),
-                0 4px 6px -2px rgba(0,0,0,0.05));
-              max-height: 200px;
-              overflow-y: auto;
-              min-width: 200px;
-              pointer-events: auto;
-            }
-            .mention-item {
-              padding: 0.5rem 0.75rem;
-              cursor: pointer;
-              border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
-              transition: background-color 0.1s;
-            }
-            .mention-item:last-child {
-              border-bottom: none;
-            }
-            .mention-item:hover,
-            .mention-item.selected {
-              background-color: var(--ct-theme-surface, #f3f4f6);
-            }
-            .mention-name {
-              font-weight: 500;
-              color: var(--ct-theme-color-text, #111827);
-            }
+          .mentions-dropdown {
+            position: absolute;
+            background: var(--ct-theme-color-surface, #fff);
+            border: 1px solid var(--ct-theme-color-border, #e5e7eb);
+            border-radius: var(--ct-theme-border-radius, 0.375rem);
+            box-shadow: var(--ct-shadow-md, 0 10px 15px -3px rgba(0,0,0,0.1),
+              0 4px 6px -2px rgba(0,0,0,0.05));
+            max-height: 200px;
+            overflow-y: auto;
+            min-width: 200px;
+            pointer-events: auto;
+          }
+          .mention-item {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            border-bottom: 1px solid var(--ct-theme-color-border, #e5e7eb);
+            transition: background-color 0.1s;
+          }
+          .mention-item:last-child {
+            border-bottom: none;
+          }
+          .mention-item:hover,
+          .mention-item.selected {
+            background-color: var(--ct-theme-surface, #f3f4f6);
+          }
+          .mention-name {
+            font-weight: 500;
+            color: var(--ct-theme-color-text, #111827);
+          }
           </style>
           <div class="mentions-dropdown" role="listbox">
             ${filteredMentions.map((mention, index) =>

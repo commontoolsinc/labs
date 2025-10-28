@@ -735,17 +735,18 @@
     .simulate-btn:hover {
       transform: translateY(-2px);
     }
-  </style>
+
+</style>
 </head>
 <body>
   <!-- Demo: Simulate notification button -->
   <button class="simulate-btn" onclick="simulateNotification()">Simulate Notification</button>
 
-  <!-- Backdrop overlay -->
-  <div class="backdrop"></div>
+<!-- Backdrop overlay -->
+<div class="backdrop"></div>
 
-  <!-- FAB Container -->
-  <div class="fab-container">
+<!-- FAB Container -->
+<div class="fab-container">
     <!-- Notification bubble (when FAB is collapsed) -->
     <div class="notification-bubble">
       <div class="notification-content"></div>
@@ -807,9 +808,10 @@
         <div class="toast-content"></div>
       </div>
     </div>
-  </div>
 
-  <script>
+</div>
+
+<script>
     /* ==========================================================================
        MORPHING FAB - STATE MANAGEMENT & INTERACTION LOGIC
        ==========================================================================

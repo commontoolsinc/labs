@@ -5,6 +5,4 @@ if (!customElements.get("ct-fab")) {
 }
 
 export { CTFab };
-export type {
-  CTFab as CTFabElement,
-};
+export type { CTFab as CTFabElement };

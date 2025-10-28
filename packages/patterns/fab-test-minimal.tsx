@@ -13,9 +13,11 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-const closeFab = handler<any, { fabExpanded: Cell<boolean> }>((_, { fabExpanded }) => {
-  fabExpanded.set(false);
-});
+const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
+  (_, { fabExpanded }) => {
+    fabExpanded.set(false);
+  },
+);
 
 const sendMessage = handler<
   {
@@ -63,7 +65,9 @@ export default recipe(
           </ct-vstack>
 
           <ct-vstack flex padding="large" gap="normal">
-            <ct-label>Click the FAB in the bottom-right corner to start chatting!</ct-label>
+            <ct-label>
+              Click the FAB in the bottom-right corner to start chatting!
+            </ct-label>
             <ct-label>Press Escape to close it.</ct-label>
           </ct-vstack>
 

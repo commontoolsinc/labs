@@ -5,6 +5,4 @@ if (!customElements.get("ct-omnibox")) {
 }
 
 export { CTOmnibox };
-export type {
-  CTOmnibox as CTOmniboxElement,
-};
+export type { CTOmnibox as CTOmniboxElement };

@@ -136,16 +136,20 @@ export default recipe<FABDemoInput, FABDemoOutput>(
     });
 
     // Close FAB when backdrop clicked or escape pressed
-    const closeFab = handler((_: never, { expanded }: { expanded: Cell<boolean> }) => {
-      expanded.set(false);
-    });
+    const closeFab = handler(
+      (_: never, { expanded }: { expanded: Cell<boolean> }) => {
+        expanded.set(false);
+      },
+    );
 
     // Open FAB when in collapsed state (handled by parent)
-    const openFab = handler((_: never, { expanded }: { expanded: Cell<boolean> }) => {
-      if (!expanded.get()) {
-        expanded.set(true);
-      }
-    });
+    const openFab = handler(
+      (_: never, { expanded }: { expanded: Cell<boolean> }) => {
+        if (!expanded.get()) {
+          expanded.set(true);
+        }
+      },
+    );
 
     return {
       [NAME]: "FAB Demo",
