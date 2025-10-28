@@ -1,6 +1,7 @@
 import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
+import type { BrandedCell } from "@commontools/api";
 import {
   type Cell,
   ID,
@@ -96,9 +97,10 @@ declare module "@commontools/api" {
     // Keyable augmentation through the conditional type composition.
     key<K extends keyof UnwrapCell<T>>(
       valueKey: K,
-    ): Cell<
-      UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
-    >;
+    ): UnwrapCell<T>[K] extends never ? any
+      : UnwrapCell<T>[K] extends BrandedCell<infer U>
+        ? Cell<U>
+        : Cell<UnwrapCell<T>[K]>;
     resolveAsCell(): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
@@ -493,9 +495,10 @@ export class RegularCell<T> implements Cell<T> {
 
   key<K extends keyof UnwrapCell<T>>(
     valueKey: K,
-  ): Cell<
-    UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
-  > {
+  ): UnwrapCell<T>[K] extends never ? any
+    : UnwrapCell<T>[K] extends BrandedCell<infer U>
+      ? Cell<U>
+      : Cell<UnwrapCell<T>[K]> {
     const childSchema = this.runtime.cfc.getSchemaAtPath(
       this.schema,
       [valueKey.toString()],
@@ -511,9 +514,10 @@ export class RegularCell<T> implements Cell<T> {
       this.tx,
       false,
       this.synced,
-    ) as Cell<
-      UnwrapCell<T>[K] extends never ? any : UnwrapCell<T>[K]
-    >;
+    ) as UnwrapCell<T>[K] extends never ? any
+      : UnwrapCell<T>[K] extends BrandedCell<infer U>
+        ? Cell<U>
+        : Cell<UnwrapCell<T>[K]>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
