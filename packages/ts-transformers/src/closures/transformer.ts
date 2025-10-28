@@ -898,11 +898,49 @@ function transformDestructuredProperties(
   const elemName = elemParam?.name;
 
   // Collect destructured property names if the param is an object destructuring pattern
-  const destructuredProps = new Set<string>();
+  const destructuredProps = new Map<string, () => ts.Expression>();
   if (elemName && ts.isObjectBindingPattern(elemName)) {
     for (const element of elemName.elements) {
       if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
-        destructuredProps.add(element.name.text);
+        const alias = element.name.text;
+        const propertyName = element.propertyName;
+
+        destructuredProps.set(alias, () => {
+          const target = factory.createIdentifier("element");
+
+          if (!propertyName) {
+            return factory.createPropertyAccessExpression(
+              target,
+              factory.createIdentifier(alias),
+            );
+          }
+
+          if (ts.isIdentifier(propertyName)) {
+            return factory.createPropertyAccessExpression(
+              target,
+              factory.createIdentifier(propertyName.text),
+            );
+          }
+
+          if (
+            ts.isStringLiteral(propertyName) ||
+            ts.isNumericLiteral(propertyName)
+          ) {
+            return factory.createElementAccessExpression(target, propertyName);
+          }
+
+          if (ts.isComputedPropertyName(propertyName)) {
+            return factory.createElementAccessExpression(
+              target,
+              propertyName.expression,
+            );
+          }
+
+          return factory.createPropertyAccessExpression(
+            target,
+            factory.createIdentifier(alias),
+          );
+        });
       }
     }
   }
@@ -930,10 +968,8 @@ function transformDestructuredProperties(
           !(ts.isPropertyAccessExpression(node.parent) &&
             node.parent.name === node)
         ) {
-          return factory.createPropertyAccessExpression(
-            factory.createIdentifier("element"),
-            factory.createIdentifier(node.text),
-          );
+          const accessFactory = destructuredProps.get(node.text)!;
+          return accessFactory();
         }
       }
       return visitEachChildWithJsx(node, visitor, undefined);
