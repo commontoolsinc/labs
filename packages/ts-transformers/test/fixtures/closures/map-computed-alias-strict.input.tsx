@@ -18,7 +18,7 @@ export default recipe<State>("MapComputedAliasStrict", (state) => {
       <div>
         {state.items.map(({ [dynamicKey]: val }) => {
           "use strict";
-          return <span>{val * 2}</span>;
+          return <span key={val}>{val * 2}</span>;
         })}
       </div>
     ),
