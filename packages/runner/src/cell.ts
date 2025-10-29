@@ -1,7 +1,6 @@
 import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
-import type { BrandedCell } from "@commontools/api";
 import {
   type AnyCell,
   type Cell,
@@ -159,7 +158,6 @@ import type {
   ICell,
   IStreamable,
   KeyResultType,
-  UnwrapCell,
 } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
