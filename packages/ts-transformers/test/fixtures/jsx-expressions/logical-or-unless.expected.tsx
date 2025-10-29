@@ -5,7 +5,7 @@ export default recipe("LogicalOrUnless", (_state) => {
     return {
         [UI]: (<div>
         {/* Pattern: falsy check || fallback */}
-        {__ctHelpers.unless(__ctHelpers.derive(items, items => !items.length), <span>List is empty</span>)}
+        {__ctHelpers.unless(__ctHelpers.derive(items, items => items.length), <span>List is empty</span>)}
       </div>),
     };
 });
