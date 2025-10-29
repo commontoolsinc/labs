@@ -67,16 +67,22 @@ async function test() {
   return [cell1Contents, cell2Contents];
 }
 
-for (let i: number = 1; i <= 20; i++) {
-  const [result1, result2] = await test();
-  if (!deepEqual(result1, result2)) {
-    console.error("Mismatched results for iteration", i, result1, result2);
-    Deno.exit(1);
-  }
-  if (i % 5 == 0) {
-    console.log("completed", i, "...");
-  }
-}
+Deno.test({
+  name: "basic persistence test",
+  fn: async () => {
+    for (let i: number = 1; i <= 20; i++) {
+      const [result1, result2] = await test();
+      if (!deepEqual(result1, result2)) {
+        console.error("Mismatched results for iteration", i, result1, result2);
+        throw new Error(`Mismatched results for iteration ${i}`);
+      }
+      if (i % 5 == 0) {
+        console.log("completed", i, "...");
+      }
+    }
 
-console.log("\nDone");
-Deno.exit(0);
+    console.log("\nDone");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

@@ -141,10 +141,16 @@ async function test() {
   await runtime2.dispose();
 }
 
-for (let i: number = 1; i <= 20; i++) {
-  await test();
-  console.log("completed", i, "...");
-}
+Deno.test({
+  name: "pending nursery test",
+  fn: async () => {
+    for (let i: number = 1; i <= 20; i++) {
+      await test();
+      console.log("completed", i, "...");
+    }
 
-console.log("\nDone");
-Deno.exit(0);
+    console.log("\nDone");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

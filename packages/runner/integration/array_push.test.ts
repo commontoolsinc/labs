@@ -192,12 +192,12 @@ async function runTest() {
 }
 
 // Run the test with timeout
-try {
-  await Promise.race([runTest(), timeoutPromise]);
-  console.log("Test completed successfully within timeout");
-  Deno.exit(0);
-} catch (error) {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error("Test failed:", errorMessage, (error as Error).stack);
-  Deno.exit(1);
-}
+Deno.test({
+  name: "array push test",
+  fn: async () => {
+    await Promise.race([runTest(), timeoutPromise]);
+    console.log("Test completed successfully within timeout");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

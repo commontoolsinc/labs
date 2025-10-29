@@ -127,7 +127,12 @@ async function test() {
   await runtime2.dispose();
 }
 
-await test();
-
-console.log("\nDone");
-Deno.exit(0);
+Deno.test({
+  name: "sync schema path test",
+  fn: async () => {
+    await test();
+    console.log("\nDone");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

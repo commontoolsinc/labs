@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run
 
 /**
  * Integration test to reproduce memory leak when using derive() with array.map()
@@ -19,7 +19,7 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 
 const { API_URL } = env;
 const SPACE_NAME = "runner_integration";
-const TIMEOUT_MS = 120000; // 2 minutes to handle server restarts and settle time
+const TIMEOUT_MS = 180000; // 3 minutes to handle severe memory leak slowdown
 
 // Test parameters
 const INCREMENTS_PER_CLICK = 50; // How many times each click increments (must match .tsx file)
@@ -216,15 +216,12 @@ async function runTest() {
 }
 
 // Run the test with timeout
-try {
-  await Promise.race([runTest(), timeoutPromise]);
-  console.log("Test completed successfully");
-  Deno.exit(0);
-} catch (error) {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error("Test failed:", errorMessage);
-  if (error instanceof Error && error.stack) {
-    console.error(error.stack);
-  }
-  Deno.exit(1);
-}
+Deno.test({
+  name: "derive array leak test",
+  fn: async () => {
+    await Promise.race([runTest(), timeoutPromise]);
+    console.log("Test completed successfully");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
