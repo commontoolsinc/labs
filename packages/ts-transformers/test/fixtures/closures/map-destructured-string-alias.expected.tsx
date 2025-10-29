@@ -44,7 +44,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<span>{element.couponCode}</span>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: { couponCode: code }, params: {} }) => (<span>{code}</span>)), {})}
       </div>),
     };
 });

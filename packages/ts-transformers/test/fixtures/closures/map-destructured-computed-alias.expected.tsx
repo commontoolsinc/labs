@@ -64,10 +64,7 @@ export default recipe({
                         required: ["value", "other"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => {
-                const __ct_val_key = dynamicKey;
-                return (<span>{__ctHelpers.derive({ element, __ct_val_key }, ({ element: element, __ct_val_key: __ct_val_key }) => element[__ct_val_key])}</span>);
-            }), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: { [dynamicKey]: val }, params: {} }) => (<span>{val}</span>)), {})}
       </div>),
     };
 });
