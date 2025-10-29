@@ -2,7 +2,6 @@
 import {
   Cell,
   cell,
-  Default,
   derive,
   handler,
   ifElse,
@@ -38,7 +37,7 @@ const dismissPeek = handler<
 
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
-  ({ mentionable }) => {
+  ({ mentionable: _mentionable }) => {
     const omnibot = Chatbot({
       messages: [],
       tools: {
