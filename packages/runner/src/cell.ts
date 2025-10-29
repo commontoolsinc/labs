@@ -84,7 +84,7 @@ declare module "@commontools/api" {
    * Augment Cell to add all internal/system methods that are available
    * on Cell in the runner runtime.
    */
-  interface IAnyCell<T> {
+  interface IAnyCell<out T> {
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -176,6 +176,7 @@ declare module "@commontools/api" {
 export type { AnyCell, Cell, Stream } from "@commontools/api";
 import type {
   AnyCellWrapping,
+  AsCell,
   ICell,
   IStreamable,
   KeyResultType,
@@ -465,13 +466,9 @@ export class RegularCell<T> implements ICell<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends keyof UnwrapCell<T>>(
+  key<K extends PropertyKey>(
     valueKey: K,
-  ): KeyResultType<
-    T,
-    K,
-    Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
-  > {
+  ): KeyResultType<T, K, AsCell> {
     const childSchema = this.runtime.cfc.getSchemaAtPath(
       this.schema,
       [valueKey.toString()],
@@ -487,11 +484,7 @@ export class RegularCell<T> implements ICell<T> {
       this.tx,
       false,
       this.synced,
-    ) as KeyResultType<
-      T,
-      K,
-      Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
-    >;
+    ) as unknown as KeyResultType<T, K, AsCell>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -900,8 +893,18 @@ export function convertCellsToLinks(
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCell(value: any): value is AnyCell<any> {
+export function isCell(value: any): value is Cell<any> {
   return value instanceof RegularCell;
+}
+
+/**
+ * Check if value is any kind of cell.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isAnyCell(value: any): value is AnyCell<any> {
+  return value instanceof RegularCell || value instanceof StreamCell;
 }
 
 /**

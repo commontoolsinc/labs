@@ -2,6 +2,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
+  isAnyCell,
   isCell,
   isStream,
   type MemorySpace,
@@ -208,7 +209,7 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  */
 export function parseLink(
   value: AnyCell,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
@@ -247,7 +248,7 @@ export function parseLink(
 
     // If no id provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
@@ -294,7 +295,7 @@ export function parseLink(
 
     // If no cell provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
