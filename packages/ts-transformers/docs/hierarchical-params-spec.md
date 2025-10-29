@@ -158,10 +158,10 @@ params: {
 }
 ```
 
-The runtime contract continues to surface a `params` object to the callback,
-and we supply the capture tree as the second argument. Runtime passes that
-object through unchanged, so destructuring `params: { state }` recovers the
-original identifiers without an extra wrapper layer.
+The runtime contract continues to surface a `params` object to the callback, and
+we supply the capture tree as the second argument. Runtime passes that object
+through unchanged, so destructuring `params: { state }` recovers the original
+identifiers without an extra wrapper layer.
 
 ### 4. Parameter Naming (MODIFIED)
 

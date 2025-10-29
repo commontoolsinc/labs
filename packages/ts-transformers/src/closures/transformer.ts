@@ -4,7 +4,6 @@ import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
 import {
   buildHierarchicalParamsValue,
-  createCaptureAccessExpression,
   groupCapturesByRoot,
 } from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
