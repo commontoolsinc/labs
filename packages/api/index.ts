@@ -149,18 +149,17 @@ export type KeyResultType<T, K, Wrap extends HKT> = unknown extends K
       0 extends (1 & T) ? Apply<Wrap, any>
         : UnwrapCell<T>[K] extends never ? Apply<Wrap, any>
         : T extends BrandedCell<any, any>
-          ? T extends { key(k: K): infer R }
-            ? 0 extends (1 & R) ? Apply<
+          ? T extends { key(k: K): infer R } ? 0 extends (1 & R) ? Apply<
                 Wrap,
                 UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
                   : UnwrapCell<T>[K]
               >
-              : R
-            : Apply<
-                Wrap,
-                UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
-                  : UnwrapCell<T>[K]
-              >
+            : R
+          : Apply<
+            Wrap,
+            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
+              : UnwrapCell<T>[K]
+          >
         : Apply<Wrap, UnwrapCell<T>[K]>
     )
   : Apply<Wrap, any>;
