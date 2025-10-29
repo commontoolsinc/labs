@@ -11,7 +11,6 @@ import {
   llmDialog,
   NAME,
   navigateTo,
-  Opaque,
   recipe,
   Stream,
   UI,
