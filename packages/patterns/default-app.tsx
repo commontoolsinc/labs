@@ -60,6 +60,12 @@ const removeCharm = handler<
   }
 });
 
+const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+  (_, { fabExpanded }) => {
+    fabExpanded.set(!fabExpanded.get());
+  },
+);
+
 const spawnChatList = handler<void, void>((_, __) => {
   return navigateTo(ChatList({
     selectedCharm: { charm: undefined },
@@ -115,6 +121,18 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             alt
             preventDefault
             onct-keybind={spawnChatList()}
+          />
+          <ct-keybind
+            code="KeyO"
+            meta
+            preventDefault
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          />
+          <ct-keybind
+            code="KeyO"
+            ctrl
+            preventDefault
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
           />
 
           <ct-toolbar slot="header" sticky>
