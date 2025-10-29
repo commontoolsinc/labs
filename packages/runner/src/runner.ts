@@ -237,9 +237,9 @@ export class Runner implements IRunner {
     }, tx);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (isCell(argument) || isLink(argument)) {
+    if (isLink(argument)) {
       argument = createSigilLinkFromParsedLink(
-        parseLink(argument) as NormalizedFullLink,
+        parseLink(argument),
         { base: processCell, includeSchema: true, overwrite: "redirect" },
       ) as T;
     }
