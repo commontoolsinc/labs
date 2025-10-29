@@ -105,7 +105,7 @@ export default recipe("Charms Launcher", () => {
                 <ct-button onClick={goToCharm({ charm })}>
                   Go to Charm {__ctHelpers.derive(index, index => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
+                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => __ctHelpers.unless(__ctHelpers.derive(charm, charm => charm[NAME]), "Unnamed"))}</span>
               </li>))}
           </ul>)}
 

@@ -1,11 +1,11 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
-export default recipe("Optional Chain Predicate", () => {
+import { cell, recipe, UI } from "commontools";
+export default recipe("LogicalOrUnless", (_state) => {
     const items = cell<string[]>([]);
     return {
-        [NAME]: "Optional chain predicate",
         [UI]: (<div>
-        {__ctHelpers.when(__ctHelpers.derive(items, items => !items?.length), <span>No items</span>)}
+        {/* Pattern: falsy check || fallback */}
+        {__ctHelpers.unless(__ctHelpers.derive(items, items => items.length), <span>List is empty</span>)}
       </div>),
     };
 });

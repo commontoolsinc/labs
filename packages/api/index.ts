@@ -490,6 +490,16 @@ export type IfElseFunction = <T = any, U = any, V = any>(
   ifFalse: Opaque<V>,
 ) => OpaqueRef<U | V>;
 
+export type WhenFunction = <T = any, U = any>(
+  condition: Opaque<T>,
+  value: Opaque<U>,
+) => OpaqueRef<T | U>;
+
+export type UnlessFunction = <T = any, U = any>(
+  condition: Opaque<T>,
+  value: Opaque<U>,
+) => OpaqueRef<T | U>;
+
 export type LLMFunction = (
   params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState>;
@@ -589,6 +599,8 @@ export declare const compute: ComputeFunction;
 export declare const render: RenderFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
+export declare const when: WhenFunction;
+export declare const unless: UnlessFunction;
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
