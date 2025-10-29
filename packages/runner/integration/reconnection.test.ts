@@ -170,7 +170,22 @@ Deno.test({
 
     // Create a promise that resolves/rejects when test completes
     await new Promise<void>((resolve, reject) => {
+      let hasResolved = false;
+
+      const cleanup = () => {
+        if (!hasResolved) {
+          hasResolved = true;
+          clearInterval(intervalId);
+          clearTimeout(timeoutId);
+          storageManager1.close();
+          storageManager2.close();
+          storageManager3.close();
+        }
+      };
+
       const intervalId = setInterval(async () => {
+        if (hasResolved) return; // Don't continue if already resolved
+
         try {
           // Send an update as the second
           const result = await provider2.send([{
@@ -206,11 +221,7 @@ Deno.test({
               `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
             );
 
-            clearInterval(intervalId);
-            clearTimeout(timeoutId);
-            storageManager1.close();
-            storageManager2.close();
-            storageManager3.close();
+            cleanup();
             resolve(); // Test passed
           } else if (
             postReconnectUpdates3.length >= 3 &&
@@ -223,20 +234,20 @@ Deno.test({
               `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
             );
 
-            clearInterval(intervalId);
-            clearTimeout(timeoutId);
-            storageManager1.close();
-            storageManager2.close();
-            storageManager3.close();
+            cleanup();
             reject(
               new Error("Provider1 did not receive updates after reconnection"),
             );
           }
         } catch (error) {
-          console.log(
-            "Error sending update:",
+          // If there's an error, fail the test instead of continuing
+          console.error(
+            "FATAL ERROR in interval:",
             error instanceof Error ? error.message : String(error),
+            error instanceof Error ? error.stack : "",
           );
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
         }
       }, 1000);
 
@@ -246,10 +257,7 @@ Deno.test({
         console.log(
           `Final status - Provider1: ${updateCount1} updates, Provider3: ${updateCount3} updates`,
         );
-        clearInterval(intervalId);
-        storageManager1.close();
-        storageManager2.close();
-        storageManager3.close();
+        cleanup();
         reject(new Error("Test did not complete within 30 seconds"));
       }, 30000);
     });
