@@ -53,6 +53,16 @@ export class CTFab extends BaseElement {
           backdrop-filter var(--ct-theme-animation-duration, 300ms) ease,
           -webkit-backdrop-filter var(--ct-theme-animation-duration, 300ms) ease;
         z-index: 998;
+      }
+
+      .backdrop.active {
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        pointer-events: auto;
+      }
+
+      /* Position-specific backdrop masks */
+      :host([position="bottom-right"]) .backdrop {
         mask-image: radial-gradient(
           circle at bottom right,
           rgba(0, 0, 0, 1) 0%,
@@ -67,10 +77,49 @@ export class CTFab extends BaseElement {
         );
       }
 
-      .backdrop.active {
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        pointer-events: auto;
+      :host([position="bottom-left"]) .backdrop {
+        mask-image: radial-gradient(
+          circle at bottom left,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        -webkit-mask-image: radial-gradient(
+          circle at bottom left,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+      }
+
+      :host([position="top-right"]) .backdrop {
+        mask-image: radial-gradient(
+          circle at top right,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        -webkit-mask-image: radial-gradient(
+          circle at top right,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+      }
+
+      :host([position="top-left"]) .backdrop {
+        mask-image: radial-gradient(
+          circle at top left,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        -webkit-mask-image: radial-gradient(
+          circle at top left,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
       }
 
       /* FAB container - positioned by host */

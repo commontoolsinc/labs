@@ -899,7 +899,13 @@ export class CTPromptInput extends BaseElement {
          */
         private _handleModelChange(event: Event) {
           const select = event.target as HTMLSelectElement;
-          this._modelController.setValue(select.value);
+          const newValue = select.value;
+          this._modelController.setValue(newValue);
+
+          // When model is a plain string (not bound to Cell), update it directly
+          if (typeof this.model === "string") {
+            this.model = newValue;
+          }
         }
 
         /**
