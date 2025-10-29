@@ -906,11 +906,26 @@ function transformDestructuredProperties(
     if (statements.length === 0) return currentBody;
 
     if (ts.isBlock(currentBody)) {
+      // Find where directive prologues end (e.g., "use strict")
+      // Directives must be string literal expression statements at the start
+      let directiveEnd = 0;
+      for (const stmt of currentBody.statements) {
+        if (
+          ts.isExpressionStatement(stmt) &&
+          ts.isStringLiteral(stmt.expression)
+        ) {
+          directiveEnd++;
+        } else {
+          break; // First non-directive = end of prologue
+        }
+      }
+
       return factory.updateBlock(
         currentBody,
         factory.createNodeArray([
-          ...statements,
-          ...currentBody.statements,
+          ...currentBody.statements.slice(0, directiveEnd), // Keep directives first
+          ...statements, // Then our computed initializers
+          ...currentBody.statements.slice(directiveEnd), // Then rest of body
         ]),
       );
     }
