@@ -571,7 +571,7 @@ export type Props = {
     [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
 };
 /** A child in a view can be one of a few things */
-export type RenderNode = VNode | string | number | boolean | Cell<RenderNode> | RenderNode[];
+export type RenderNode = VNode | string | number | boolean | Cell<RenderNode> | undefined | Opaque<any> | RenderNode[];
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
     type: "vnode";

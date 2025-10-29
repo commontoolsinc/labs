@@ -1107,6 +1107,8 @@ export type RenderNode =
   | number
   | boolean
   | Cell<RenderNode>
+  | undefined
+  | Opaque<any>
   | RenderNode[];
 
 /** A "virtual view node", e.g. a virtual DOM element */
