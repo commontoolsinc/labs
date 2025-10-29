@@ -1,3 +1,7 @@
+# Change to repository root (parent of scripts directory)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR/.."
+
 # Parse command line arguments
 FORCE=false
 while [[ $# -gt 0 ]]; do
