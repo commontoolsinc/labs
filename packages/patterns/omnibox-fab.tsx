@@ -28,27 +28,12 @@ const closeFab = handler<any, { fabExpanded: Cell<boolean> }>(
   },
 );
 
-const dismissPeek = handler<any, { peekDismissed: Cell<boolean> }>(
-  (_, { peekDismissed }) => {
-    peekDismissed.set(true);
-  },
-);
-
-const sendMessage = handler<
-  {
-    detail: {
-      text: string;
-      attachments: any[];
-      mentions: any[];
-    };
-  },
-  { addMessage: any }
->((event, { addMessage }) => {
-  const { text } = event.detail;
-  addMessage.send({
-    role: "user",
-    content: text,
-  });
+const dismissPeek = handler<
+  any,
+  { peekDismissedIndex: Cell<number>; assistantMessageCount: number }
+>((_, { peekDismissedIndex, assistantMessageCount }) => {
+  // Store the current assistant message count so we know which message was dismissed
+  peekDismissedIndex.set(assistantMessageCount);
 });
 
 export default recipe<OmniboxFABInput>(
@@ -71,7 +56,13 @@ export default recipe<OmniboxFABInput>(
 
     const fabExpanded = cell(false);
     const showHistory = cell(false);
-    const peekDismissed = cell(false);
+    const peekDismissedIndex = cell(-1); // Track which message index was dismissed
+
+    // Derive assistant message count for dismiss tracking
+    const assistantMessageCount = derive(
+      omnibot.messages,
+      (messages) => messages.filter((m) => m.role === "assistant").length,
+    );
 
     // Derive latest assistant message for peek
     const latestAssistantMessage = derive(omnibot.messages, (messages) => {
@@ -86,9 +77,6 @@ export default recipe<OmniboxFABInput>(
               if (part.type === "text") return part.text;
               return "";
             }).join("");
-
-          // Reset peek dismissal when new message arrives
-          peekDismissed.set(false);
 
           return content;
         }
@@ -113,11 +101,11 @@ export default recipe<OmniboxFABInput>(
             <div style="border-bottom: 1px solid #e5e5e5; flex-shrink: 0;">
               <ct-chevron-button
                 expanded={showHistory}
+                loading={omnibot.pending}
                 onct-toggle={toggle({ value: showHistory })}
               />
             </div>
 
-            {/* History drawer - slides down from chevron */}
             <div
               style={derive(
                 showHistory,
@@ -141,16 +129,24 @@ export default recipe<OmniboxFABInput>(
               </div>
             </div>
 
-            {/* Peek preview - shown when history is closed but we have a message */}
             {ifElse(
               derive(
-                [showHistory, latestAssistantMessage, peekDismissed],
-                ([show, msg, dismissed]) => !show && msg && !dismissed,
+                [
+                  showHistory,
+                  latestAssistantMessage,
+                  peekDismissedIndex,
+                  assistantMessageCount,
+                ],
+                ([show, msg, dismissedIdx, count]) =>
+                  !show && msg && count !== dismissedIdx,
               ),
-              <div style="margin: 12px; padding: 0; flex-shrink: 0; position: relative;">
+              <div style="margin: .5rem; margin-bottom: 0; padding: 0; flex-shrink: 0; position: relative;">
                 <button
-                  onClick={dismissPeek({ peekDismissed })}
-                  style="position: absolute; top: 8px; right: 8px; z-index: 1; background: rgba(255, 255, 255, 0.9); border: 1px solid #ddd; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #666; padding: 0;"
+                  onClick={dismissPeek({
+                    peekDismissedIndex,
+                    assistantMessageCount,
+                  })}
+                  style="position: absolute; top: 0px; right: 0px; background: none; border: none; z-index: 1; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #bbb; padding: 0;"
                   title="Dismiss"
                 >
                   ×
@@ -161,21 +157,17 @@ export default recipe<OmniboxFABInput>(
                 >
                   <ct-chat-message
                     role="assistant"
+                    compact
                     content={latestAssistantMessage}
+                    pending={omnibot.pending}
                   />
-                </div>
-                <div
-                  onClick={toggle({ value: showHistory })}
-                  style="font-size: 10px; color: #666; margin-top: 8px; text-align: right; cursor: pointer; padding-right: 8px;"
-                >
-                  Click to view full history →
                 </div>
               </div>,
               null,
             )}
 
             {/* Prompt input - always at bottom */}
-            <div style="padding: 16px; flex-shrink: 0;">
+            <div style="padding: 0.5rem; flex-shrink: 0;">
               {omnibot.ui.promptInput}
             </div>
           </div>

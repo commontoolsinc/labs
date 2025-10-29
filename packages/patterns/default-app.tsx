@@ -173,8 +173,6 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             onct-keybind={spawnChatList()}
           />
 
-          {/* Escape key now handled by ct-fab itself */}
-
           <ct-toolbar slot="header" sticky>
             <div slot="start">
               <ct-button

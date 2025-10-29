@@ -104,8 +104,7 @@ export class CTFab extends BaseElement {
         width: 56px;
         height: 56px;
         background: var(--ct-theme-color-surface, #000);
-        border-radius: 50%;
-        border: 1px solid var(--ct-theme-color-border, #ccc);
+        border-radius: 16%;
         /*box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1),
           0 4px 16px rgba(0, 0, 0, 0.08);*/
         cursor: pointer;
@@ -139,6 +138,7 @@ export class CTFab extends BaseElement {
           cursor: default;
           background: var(--ct-theme-color-background, #fafafa);
           overflow: visible;
+          border: 1px solid var(--ct-theme-color-border, #ccc);
         }
 
         /* Mobile responsive - don't exceed viewport */
@@ -378,12 +378,7 @@ export class CTFab extends BaseElement {
                 <!-- Icon (collapsed state) -->
                 <div class="fab-icon" part="icon">
                   <slot name="icon">
-                    <!-- Default message icon -->
-                    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-                      <path
-                        d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"
-                      />
-                    </svg>
+                    <ct-logo width="44" height="44" background-color="transparent" />
                   </slot>
                 </div>
 

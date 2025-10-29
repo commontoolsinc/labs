@@ -8,6 +8,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @element ct-chevron-button
  *
  * @attr {boolean} expanded - Whether the chevron is in expanded (down) state
+ * @attr {boolean} loading - Whether to show loading animation instead of chevron
  * @attr {string} size - Size variant: "sm" | "md" | "lg" (default: "md")
  *
  * @fires ct-toggle - Fired when button is clicked
@@ -15,6 +16,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @example
  * <ct-chevron-button
  *   ?expanded=${showContent}
+ *   ?loading=${isPending}
  *   @ct-toggle=${handleToggle}
  * ></ct-chevron-button>
  */
@@ -37,7 +39,7 @@ export class CTChevronButton extends BaseElement {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 6px 0;
+        padding: 0;
         width: 100%;
         display: flex;
         align-items: center;
@@ -84,16 +86,42 @@ export class CTChevronButton extends BaseElement {
       :host([size="lg"]) svg {
         --chevron-size: 28px;
       }
+
+      /* Loading animation - scrolling sine wave */
+      .loading-wave {
+        display: flex;
+        overflow: hidden;
+        width: var(--chevron-size, 24px);
+      }
+
+      .loading-wave svg {
+        width: 48px;
+        min-width: 48px;
+        animation: wave-scroll 0.8s linear infinite;
+      }
+
+      @keyframes wave-scroll {
+        0% {
+          transform: translateX(-12px);
+        }
+        100% {
+          transform: translateX(-24px);
+        }
+      }
     `,
   ];
 
   static override properties = {
     expanded: { type: Boolean, reflect: true },
+    loading: { type: Boolean, reflect: true },
     size: { type: String, reflect: true },
   };
 
   @property({ type: Boolean, reflect: true })
   declare expanded: boolean;
+
+  @property({ type: Boolean, reflect: true })
+  declare loading: boolean;
 
   @property({ type: String, reflect: true })
   declare size: "sm" | "md" | "lg";
@@ -101,6 +129,7 @@ export class CTChevronButton extends BaseElement {
   constructor() {
     super();
     this.expanded = false;
+    this.loading = false;
     this.size = "md";
   }
 
@@ -113,22 +142,45 @@ export class CTChevronButton extends BaseElement {
       <button
         class="chevron-button"
         @click="${this._handleClick}"
-        aria-label="${this.expanded ? "Collapse" : "Expand"}"
+        aria-label="${this.loading
+          ? "Loading"
+          : this.expanded
+          ? "Collapse"
+          : "Expand"}"
         aria-expanded="${this.expanded}"
-        title="${this.expanded ? "Hide" : "Show"}"
+        title="${this.loading ? "Loading..." : this.expanded ? "Hide" : "Show"}"
       >
-        <span class="chevron-icon">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="18 15 12 9 6 15"></polyline>
-          </svg>
-        </span>
+        ${this.loading
+          ? html`
+            <span class="loading-wave">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M 0 12 Q 3 9, 6 12 T 12 12 T 18 12 T 24 12 T 30 12 T 36 12 T 42 12 T 48 12 T 54 12 T 60 12 T 66 12 T 72 12 T 78 12 T 84 12 T 90 12 T 96 12"
+                />
+              </svg>
+            </span>
+          `
+          : html`
+            <span class="chevron-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="18 15 12 9 6 15"></polyline>
+              </svg>
+            </span>
+          `}
       </button>
     `;
   }
