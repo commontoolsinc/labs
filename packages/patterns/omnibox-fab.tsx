@@ -177,12 +177,6 @@ export default recipe<OmniboxFABInput>(
         </ct-fab>
       ),
       fabExpanded,
-      sidebarUI: (
-        <div>
-          {omnibot.ui.attachmentsAndTools}
-          {omnibot.ui.chatLog}
-        </div>
-      ),
     };
   },
 );

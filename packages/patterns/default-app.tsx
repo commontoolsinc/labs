@@ -182,7 +182,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vscroll>
         </ct-screen>
       ),
-      sidebarUI: fab.sidebarUI,
+      sidebarUI: undefined,
       fabUI: fab[UI],
     };
   },
