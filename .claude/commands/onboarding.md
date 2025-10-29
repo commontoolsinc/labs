@@ -1,6 +1,14 @@
 # Common Tools Repository Onboarding Tour
 
+**Note**: This command provides an interactive tour of the codebase and concepts. If you want to actually set up a development environment and deploy your first pattern, use the `/setup` command instead.
+
 This command provides an interactive tour of the Common Tools platform repository, helping new contributors understand where to find information and how to navigate the codebase effectively.
+
+## Before You Start
+
+**New to this repository?**
+- Want to actually deploy a pattern and start coding? → Use `/setup` command
+- Want to understand the concepts and codebase structure first? → Continue with this tour
 
 ## Getting Started (Essential Foundation)
 
