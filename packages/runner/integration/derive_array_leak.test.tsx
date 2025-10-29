@@ -12,7 +12,7 @@ import {
 } from "commontools";
 
 // How many times to increment per click
-const INCREMENTS_PER_CLICK = 50;
+const INCREMENTS_PER_CLICK = 100;
 
 interface RecipeState {
   value: Default<number, 0>;
