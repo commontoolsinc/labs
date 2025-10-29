@@ -906,11 +906,26 @@ function transformDestructuredProperties(
     if (statements.length === 0) return currentBody;
 
     if (ts.isBlock(currentBody)) {
+      // Find where directive prologues end (e.g., "use strict")
+      // Directives must be string literal expression statements at the start
+      let directiveEnd = 0;
+      for (const stmt of currentBody.statements) {
+        if (
+          ts.isExpressionStatement(stmt) &&
+          ts.isStringLiteral(stmt.expression)
+        ) {
+          directiveEnd++;
+        } else {
+          break; // First non-directive = end of prologue
+        }
+      }
+
       return factory.updateBlock(
         currentBody,
         factory.createNodeArray([
-          ...statements,
-          ...currentBody.statements,
+          ...currentBody.statements.slice(0, directiveEnd), // Keep directives first
+          ...statements, // Then our computed initializers
+          ...currentBody.statements.slice(directiveEnd), // Then rest of body
         ]),
       );
     }
@@ -945,6 +960,31 @@ function transformDestructuredProperties(
         const propertyName = element.propertyName;
         usedTempNames.add(alias);
 
+        // For computed properties, create the temp variable upfront (not in the factory)
+        // so multiple uses of the same property share one temp variable
+        let computedTempIdentifier: ts.Identifier | undefined;
+        if (propertyName && ts.isComputedPropertyName(propertyName)) {
+          const tempName = registerTempName(alias);
+          computedTempIdentifier = factory.createIdentifier(tempName);
+
+          computedInitializers.push(
+            factory.createVariableStatement(
+              undefined,
+              factory.createVariableDeclarationList(
+                [
+                  factory.createVariableDeclaration(
+                    computedTempIdentifier,
+                    undefined,
+                    undefined,
+                    propertyName.expression,
+                  ),
+                ],
+                ts.NodeFlags.Const,
+              ),
+            ),
+          );
+        }
+
         destructuredProps.set(alias, () => {
           const target = factory.createIdentifier("element");
 
@@ -969,30 +1009,12 @@ function transformDestructuredProperties(
             return factory.createElementAccessExpression(target, propertyName);
           }
 
-          if (ts.isComputedPropertyName(propertyName)) {
-            const tempName = registerTempName(alias);
-            const tempIdentifier = factory.createIdentifier(tempName);
-
-            computedInitializers.push(
-              factory.createVariableStatement(
-                undefined,
-                factory.createVariableDeclarationList(
-                  [
-                    factory.createVariableDeclaration(
-                      tempIdentifier,
-                      undefined,
-                      undefined,
-                      propertyName.expression,
-                    ),
-                  ],
-                  ts.NodeFlags.Const,
-                ),
-              ),
-            );
-
+          if (
+            ts.isComputedPropertyName(propertyName) && computedTempIdentifier
+          ) {
             return factory.createElementAccessExpression(
               target,
-              tempIdentifier,
+              computedTempIdentifier,
             );
           }
 
