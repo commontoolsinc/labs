@@ -14,6 +14,7 @@ import {
   type MentionableArray,
 } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
+import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-button/ct-button.ts";
 import "../ct-chip/ct-chip.ts";
 
@@ -26,6 +27,14 @@ export interface PromptAttachment {
   type: "file" | "clipboard" | "mention";
   data?: File | Blob | string;
   charm?: Mentionable; // For mention-type attachments
+}
+
+/**
+ * Model picker item structure
+ */
+export interface ModelItem {
+  label: string;
+  value: string;
 }
 
 /**
@@ -43,6 +52,8 @@ export interface PromptAttachment {
  * @attr {number} rows - Initial number of rows for the textarea (default: 1)
  * @attr {number} maxRows - Maximum number of rows for auto-resize (default: 10)
  * @attr {Cell<MentionableArray>} mentionable - Array of mentionable items for @-mention autocomplete
+ * @attr {ModelItem[]} modelItems - Array of model options for the model picker
+ * @attr {Cell<string>|string} model - Selected model value (supports Cell binding)
  *
  * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: Mentionable[] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
@@ -114,14 +125,15 @@ export class CTPromptInput extends BaseElement {
           }
 
           .input-row {
+            position: relative;
             display: flex;
             align-items: flex-end;
-            gap: var(--ct-prompt-input-gap);
           }
 
           .textarea-wrapper {
             flex: 1;
             position: relative;
+            padding-right: 5rem; /* Space for overlayed button */
           }
 
           textarea {
@@ -147,11 +159,20 @@ export class CTPromptInput extends BaseElement {
             color: var(--ct-theme-color-text-muted, var(--ct-color-gray-400, #9ca3af));
           }
 
-          .actions {
+          .send-button-wrapper {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: flex-end;
+            gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+            padding-bottom: 0.125rem;
+          }
+
+          .controls-row {
             display: flex;
             align-items: center;
             gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
-            margin-bottom: 0.125rem; /* Slight adjustment for alignment */
           }
 
           ct-button {
@@ -214,15 +235,16 @@ export class CTPromptInput extends BaseElement {
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 2rem;
-            height: 2rem;
+            width: 1.5rem;
+            height: 1.5rem;
             border-radius: var(
               --ct-theme-border-radius,
-              var(--ct-radius-md, 0.375rem)
+              var(--ct-radius-sm, 0.25rem)
             );
             cursor: pointer;
             transition: background-color 0.15s;
             color: var(--ct-theme-color-text-muted, var(--ct-color-gray-500, #6b7280));
+            font-size: 1rem;
           }
 
           .upload-button:hover {
@@ -235,6 +257,55 @@ export class CTPromptInput extends BaseElement {
 
           input[type="file"] {
             display: none;
+          }
+
+          /* Model picker styles */
+          .model-select {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.625rem;
+            background: var(
+              --ct-theme-color-surface,
+              var(--ct-color-gray-100, #f5f5f5)
+            );
+            color: var(
+              --ct-theme-color-text,
+              var(--ct-color-gray-900, #212121)
+            );
+            border: 1px solid
+              var(--ct-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
+            border-radius: var(
+              --ct-theme-border-radius,
+              var(--ct-border-radius-full, 9999px)
+            );
+            font-size: 0.8125rem;
+            line-height: 1;
+            font-family: var(--ct-theme-font-family, inherit);
+            cursor: pointer;
+            transition:
+              background-color var(--ct-theme-animation-duration, 200ms) ease,
+              border-color var(--ct-theme-animation-duration, 200ms) ease;
+            appearance: none;
+            -moz-appearance: none;
+            -webkit-appearance: none;
+            outline: none;
+            height: auto;
+            min-width: 80px;
+            max-width: 150px;
+          }
+
+          .model-select:hover {
+            background: var(
+              --ct-theme-color-surface-hover,
+              var(--ct-color-gray-200, #eeeeee)
+            );
+          }
+
+          .model-select:focus {
+            border-color: var(--ct-theme-color-primary, #3b82f6);
+            box-shadow: 0 0 0 0.5px
+              var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
           }
         `,
       ];
@@ -252,6 +323,8 @@ export class CTPromptInput extends BaseElement {
         variant: { type: String, reflect: true },
         theme: { type: Object, attribute: false },
         mentionable: { type: Object, attribute: false },
+        modelItems: { type: Array, attribute: false },
+        model: { type: Object, attribute: false },
       };
 
       declare placeholder: string;
@@ -265,6 +338,8 @@ export class CTPromptInput extends BaseElement {
       declare size: string;
       declare variant: string;
       declare mentionable: Cell<MentionableArray> | null;
+      declare modelItems: ModelItem[];
+      declare model: Cell<string> | string | null;
 
       @consume({ context: themeContext, subscribe: true })
       @property({ attribute: false })
@@ -281,6 +356,11 @@ export class CTPromptInput extends BaseElement {
           this._insertMentionAtCursor(markdown, mention),
         getCursorPosition: () => this._getCursorPosition(),
         getContent: () => this.value,
+      });
+
+      // Model cell controller for binding
+      private _modelController = createCellController<string>(this, {
+        timing: { strategy: "immediate" },
       });
 
       // Overlay management for mentions dropdown (rendered in body)
@@ -301,6 +381,8 @@ export class CTPromptInput extends BaseElement {
         this.size = "";
         this.variant = "";
         this.mentionable = null;
+        this.modelItems = [];
+        this.model = null;
       }
 
       override connectedCallback(): void {
@@ -355,6 +437,9 @@ export class CTPromptInput extends BaseElement {
         }
         if (changedProperties.has("mentionable")) {
           this.mentionController.setMentionable(this.mentionable);
+        }
+        if (changedProperties.has("model")) {
+          this._modelController.bind(this.model);
         }
 
         // Manage mentions overlay based on controller state
@@ -597,63 +682,90 @@ export class CTPromptInput extends BaseElement {
                     part="textarea"
                   ></textarea>
                   <!-- Mentions dropdown now rendered in body via overlay -->
-                </div>
 
-                <div class="actions">
-                  <!-- Hidden file input -->
-                  <input
-                    type="file"
-                    multiple
-                    @change="${this._handleFileSelect}"
-                  />
-
-                  <!-- Upload button -->
-                  ${!this.pending
-                    ? html`
-                      <div
-                        class="upload-button"
-                        @click="${this._handleUploadClick}"
-                        role="button"
-                        aria-label="Upload file"
-                        title="Upload file"
-                      >
-                        📎
-                      </div>
-                    `
-                    : ""} ${this.pending
-                    ? html`
-                      <ct-button
-                        id="ct-prompt-input-stop-button"
-                        variant="secondary"
-                        size="${this.size === "sm"
-                          ? "sm"
-                          : this.size === "lg"
-                          ? "lg"
-                          : "md"}"
-                        ?disabled="${this.disabled}"
-                        @click="${this._handleStop}"
-                        part="stop-button"
-                      >
-                        Stop
-                      </ct-button>
-                    `
-                    : html`
-                      <ct-button
-                        id="ct-prompt-input-send-button"
-                        variant="primary"
-                        size="${this.size === "sm"
-                          ? "sm"
-                          : this.size === "lg"
-                          ? "lg"
-                          : "md"}"
-                        ?disabled="${this.disabled || !this.value?.trim()}"
-                        @click="${this._handleSend}"
-                        part="send-button"
-                      >
-                        ${this.buttonText}
-                      </ct-button>
-                    `}
+                  <!-- Send/Stop button overlayed on right -->
+                  <div class="send-button-wrapper">
+                    ${this.pending
+                      ? html`
+                        <ct-button
+                          id="ct-prompt-input-stop-button"
+                          variant="secondary"
+                          size="${this.size === "sm"
+                            ? "sm"
+                            : this.size === "lg"
+                            ? "lg"
+                            : "md"}"
+                          ?disabled="${this.disabled}"
+                          @click="${this._handleStop}"
+                          part="stop-button"
+                        >
+                          Stop
+                        </ct-button>
+                      `
+                      : html`
+                        <ct-button
+                          id="ct-prompt-input-send-button"
+                          variant="primary"
+                          size="${this.size === "sm"
+                            ? "sm"
+                            : this.size === "lg"
+                            ? "lg"
+                            : "md"}"
+                          ?disabled="${this.disabled || !this.value?.trim()}"
+                          @click="${this._handleSend}"
+                          part="send-button"
+                        >
+                          ${this.buttonText}
+                        </ct-button>
+                      `}
+                  </div>
                 </div>
+              </div>
+
+              <!-- Controls row underneath -->
+              <div class="controls-row">
+                <!-- Hidden file input -->
+                <input
+                  type="file"
+                  multiple
+                  @change="${this._handleFileSelect}"
+                />
+
+                <!-- Model picker -->
+                ${this.modelItems && this.modelItems.length > 0
+                  ? html`
+                    <select
+                      class="model-select"
+                      .value="${this._modelController.getValue() || ''}"
+                      @change="${this._handleModelChange}"
+                      ?disabled="${this.disabled || this.pending}"
+                      title="Select model"
+                    >
+                      ${this.modelItems.map((item) =>
+                        html`
+                          <option value="${item.value}">
+                            ${item.label}
+                          </option>
+                        `
+                      )}
+                    </select>
+                  `
+                  : ""}
+
+                <!-- Upload button -->
+                ${!this.pending
+                  ? html`
+                    <div
+                      class="upload-button"
+                      @click="${this._handleUploadClick}"
+                      role="button"
+                      aria-label="Upload file"
+                      title="Upload file"
+                    >
+                      📎
+                    </div>
+                  `
+                  : ""}
               </div>
             </div>
           </div>
@@ -780,6 +892,14 @@ export class CTPromptInput extends BaseElement {
 
         // Reset the input so the same file can be selected again
         input.value = "";
+      }
+
+      /**
+       * Handle model selection change
+       */
+      private _handleModelChange(event: Event) {
+        const select = event.target as HTMLSelectElement;
+        this._modelController.setValue(select.value);
       }
 
       /**

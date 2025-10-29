@@ -355,21 +355,18 @@ export default recipe<ChatInput, ChatOutput>(
     const title = TitleGenerator({ model, messages });
 
     const promptInput = (
-      <div slot="footer">
-        <ct-prompt-input
-          placeholder="Ask the LLM a question..."
-          pending={pending}
-          $mentionable={mentionable}
-          onct-send={sendMessage({ addMessage, allAttachments })}
-          onct-stop={cancelGeneration}
-          onct-attachment-add={addAttachment({ allAttachments })}
-          onct-attachment-remove={removeAttachment({ allAttachments })}
-        />
-        <ct-select
-          items={items}
-          $value={model}
-        />
-      </div>
+      <ct-prompt-input
+        slot="footer"
+        placeholder="Ask the LLM a question..."
+        pending={pending}
+        $mentionable={mentionable}
+        modelItems={items}
+        $model={model}
+        onct-send={sendMessage({ addMessage, allAttachments })}
+        onct-stop={cancelGeneration}
+        onct-attachment-add={addAttachment({ allAttachments })}
+        onct-attachment-remove={removeAttachment({ allAttachments })}
+      />
     );
 
     const chatLog = (

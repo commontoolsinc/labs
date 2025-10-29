@@ -131,10 +131,10 @@ export class CTFab extends BaseElement {
         /* Expanded state */
         :host([expanded]) .fab {
           width: 400px;
-          min-height: 160px;
-          max-height: 600px;
+          min-height: 128px;
+          max-height: 90vh;
           height: auto;
-          border-radius: 12px;
+          border-radius: 6px;
           cursor: default;
           background: var(--ct-theme-color-background, #fafafa);
           overflow: visible;

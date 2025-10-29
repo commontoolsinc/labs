@@ -121,7 +121,7 @@ export default recipe<OmniboxFABInput>(
                   };`,
               )}
             >
-              <div style="padding: .25rem; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
+              <div style="padding: .25rem; flex-shrink: 0;">
                 {omnibot.ui.attachmentsAndTools}
               </div>
               <div style="flex: 1; overflow-y: auto; min-height: 0;">
