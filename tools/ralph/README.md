@@ -25,6 +25,9 @@ variable.
   sudo usermod -aG docker $USER
   # Log out and back in for changes to take effect
   ```
+  Your user must not be root, otherwise the container user will also be 'root'
+  and Claude will not agree to run.
+
   **Important:** Running the script with `sudo` will cause it to look for Claude
   credentials in `/root/.claude.json` instead of your user's home directory,
   causing the smoketests to fail.
