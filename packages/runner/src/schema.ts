@@ -422,10 +422,7 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
     // If we have a schema without asCell or asStream, we should annotate the
     // object so we can get back to the cell if needed.
     // console.log("called createObject with", clearRuntime(value), link);
-    if (
-      link.schema === undefined ||
-      ContextualFlowControl.isTrueSchema(link.schema)
-    ) {
+    if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(this.runtime, this.tx, link);
     } else if (isObject(link.schema)) {
       const { asCell, asStream, ...restSchema } = link.schema;
@@ -439,6 +436,11 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
           { ...link, schema: restSchema },
           this.tx,
         ) as T;
+      }
+      // If it's not a cell/stream, but the schema is true-ish, use a
+      // QueryResultProxy
+      if (ContextualFlowControl.isTrueSchema(link.schema)) {
+        return createQueryResultProxy(this.runtime, this.tx, link);
       }
     }
     return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
