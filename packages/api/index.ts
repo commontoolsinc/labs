@@ -39,7 +39,7 @@ export type BrandedCell<T, Brand extends string = string> = {
 // Cell Capability Interfaces
 // ============================================================================
 
-// ts-lint-ignore no-empty-interface
+// deno-lint-ignore no-empty-interface
 export interface IAnyCell<T> {
 }
 
