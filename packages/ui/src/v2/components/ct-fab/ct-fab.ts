@@ -418,6 +418,11 @@ export class CTFab extends BaseElement {
                   this._showPreviewNotification();
                 }
               });
+            } else if (this.previewMessage && typeof this.previewMessage === 'string') {
+              // Handle plain string case
+              if (this.previewMessage && !this.expanded) {
+                this._showPreviewNotification();
+              }
             }
           }
 

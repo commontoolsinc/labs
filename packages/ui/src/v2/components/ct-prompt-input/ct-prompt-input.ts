@@ -438,7 +438,7 @@ export class CTPromptInput extends BaseElement {
           if (changedProperties.has("mentionable")) {
             this.mentionController.setMentionable(this.mentionable);
           }
-          if (changedProperties.has("model") && this.model) {
+          if (changedProperties.has("model") && this.model != null) {
             this._modelController.bind(this.model);
           }
 
