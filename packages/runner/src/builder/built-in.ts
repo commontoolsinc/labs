@@ -19,6 +19,7 @@ import type {
   BuiltInLLMParams,
   BuiltInLLMState,
   FetchOptions,
+  PatternToolFunction,
 } from "commontools";
 
 export const compileAndRun = createNodeFactory({
@@ -191,10 +192,13 @@ export type { createCell };
  * // Both result in type: OpaqueRef<{ query: string }>
  * ```
  */
-export function patternTool<T, E extends Partial<T>>(
+export const patternTool = (<
+  T,
+  E extends Partial<T> = Record<PropertyKey, never>,
+>(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
-): OpaqueRef<Omit<T, keyof E>> {
+): OpaqueRef<Omit<T, keyof E>> => {
   const pattern = isRecipe(fnOrRecipe)
     ? fnOrRecipe
     : recipe<T>("tool", fnOrRecipe);
@@ -203,4 +207,4 @@ export function patternTool<T, E extends Partial<T>>(
     pattern,
     extraParams: extraParams ?? {},
   } as any as OpaqueRef<Omit<T, keyof E>>;
-}
+}) as PatternToolFunction;
