@@ -1009,7 +1009,9 @@ function transformDestructuredProperties(
             return factory.createElementAccessExpression(target, propertyName);
           }
 
-          if (ts.isComputedPropertyName(propertyName) && computedTempIdentifier) {
+          if (
+            ts.isComputedPropertyName(propertyName) && computedTempIdentifier
+          ) {
             return factory.createElementAccessExpression(
               target,
               computedTempIdentifier,
