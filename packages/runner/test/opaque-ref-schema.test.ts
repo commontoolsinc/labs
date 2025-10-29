@@ -137,7 +137,7 @@ describe("OpaqueRef Schema Support", () => {
 
       // Access array element
       const itemsRef = ref.key("items");
-      const firstItemRef = itemsRef[0];
+      const firstItemRef = itemsRef.key(0);
       const idRef = firstItemRef.key("id");
 
       // Check schema for array element property

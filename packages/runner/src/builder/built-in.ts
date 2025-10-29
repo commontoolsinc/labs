@@ -59,7 +59,7 @@ export const fetchData = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
 export const streamData = createNodeFactory({
   type: "ref",
@@ -70,7 +70,7 @@ export const streamData = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
 export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition: Opaque<T>,

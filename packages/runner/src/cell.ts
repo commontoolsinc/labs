@@ -150,27 +150,6 @@ declare module "@commontools/api" {
     copyTrap: boolean;
     [toOpaqueRef]: () => OpaqueRef<any>;
   }
-
-  /**
-   * Augment Stream to add runtime-specific Stream methods
-   */
-  interface Stream<T> {
-    sink(callback: (event: AnyCellWrapping<T>) => Cancel | undefined): Cancel;
-    sync(): Promise<Stream<T>> | Stream<T>;
-    getRaw(options?: IReadOptions): any;
-    getAsNormalizedFullLink(): NormalizedFullLink;
-    getAsLink(
-      options?: {
-        base?: Cell<any>;
-        baseSpace?: MemorySpace;
-        includeSchema?: boolean;
-      },
-    ): SigilLink;
-    withTx(tx?: IExtendedStorageTransaction): Stream<T>;
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-    runtime: IRuntime;
-  }
 }
 
 export type { AnyCell, Cell, Stream } from "@commontools/api";
