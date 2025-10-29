@@ -2,6 +2,17 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
+import {
+  buildHierarchicalParamsValue,
+  createCaptureAccessExpression,
+  groupCapturesByRoot,
+} from "../utils/capture-tree.ts";
+import type { CaptureTreeNode } from "../utils/capture-tree.ts";
+import {
+  getUniqueIdentifier,
+  isSafeIdentifierText,
+  maybeReuseIdentifier,
+} from "../utils/identifiers.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -396,23 +407,144 @@ function isOpaqueRefArrayMapCall(
 
 /**
  * Extract the root identifier name from an expression.
- * For property access like state.discount, returns "discount".
- * For plain identifiers, returns the identifier name.
+ * For property access like state.discount, returns "state".
  */
-function getCaptureName(expr: ts.Expression): string | undefined {
-  if (ts.isPropertyAccessExpression(expr)) {
-    // For state.discount, capture as "discount"
-    return expr.name.text;
-  } else if (ts.isIdentifier(expr)) {
-    return expr.text;
-  }
-  return undefined;
+type CaptureTreeMap = Map<string, CaptureTreeNode>;
+
+function createSafePropertyName(
+  name: string,
+  factory: ts.NodeFactory,
+): ts.PropertyName {
+  return isSafeIdentifierText(name)
+    ? factory.createIdentifier(name)
+    : factory.createStringLiteral(name);
 }
 
-/**
- * Determine the element type for a map callback parameter.
- * Prefers explicit type annotation, falls back to inference from array type.
- */
+function normalizeBindingName(
+  name: ts.BindingName,
+  factory: ts.NodeFactory,
+  used: Set<string>,
+): ts.BindingName {
+  if (ts.isIdentifier(name)) {
+    return maybeReuseIdentifier(name, used);
+  }
+
+  if (ts.isObjectBindingPattern(name)) {
+    const elements = name.elements.map((element) =>
+      factory.createBindingElement(
+        element.dotDotDotToken,
+        element.propertyName,
+        normalizeBindingName(element.name, factory, used),
+        element.initializer as ts.Expression | undefined,
+      )
+    );
+    return factory.createObjectBindingPattern(elements);
+  }
+
+  if (ts.isArrayBindingPattern(name)) {
+    const elements = name.elements.map((element) => {
+      if (ts.isOmittedExpression(element)) {
+        return element;
+      }
+      if (ts.isBindingElement(element)) {
+        return factory.createBindingElement(
+          element.dotDotDotToken,
+          element.propertyName,
+          normalizeBindingName(element.name, factory, used),
+          element.initializer as ts.Expression | undefined,
+        );
+      }
+      return element;
+    });
+    return factory.createArrayBindingPattern(elements);
+  }
+
+  return name;
+}
+
+function typeNodeForExpression(
+  expr: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+  const exprType = checker.getTypeAtLocation(expr);
+  const node = checker.typeToTypeNode(
+    exprType,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
+  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+  const typeRegistry = context.options.typeRegistry;
+  if (typeRegistry) {
+    typeRegistry.set(node, exprType);
+  }
+
+  return node;
+}
+
+function buildCaptureTypeProperties(
+  node: CaptureTreeNode,
+  context: TransformationContext,
+): ts.TypeElement[] {
+  const { factory } = context;
+  const properties: ts.TypeElement[] = [];
+
+  for (const [propName, childNode] of node.properties) {
+    let typeNode: ts.TypeNode;
+    if (childNode.properties.size > 0 && !childNode.expression) {
+      const nested = buildCaptureTypeProperties(childNode, context);
+      typeNode = factory.createTypeLiteralNode(nested);
+    } else if (childNode.expression) {
+      typeNode = typeNodeForExpression(childNode.expression, context);
+    } else {
+      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
+
+    properties.push(
+      factory.createPropertySignature(
+        undefined,
+        createSafePropertyName(propName, factory),
+        undefined,
+        typeNode,
+      ),
+    );
+  }
+
+  return properties;
+}
+
+function buildParamsTypeElements(
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.TypeElement[] {
+  const { factory } = context;
+  const properties: ts.TypeElement[] = [];
+
+  for (const [rootName, rootNode] of captureTree) {
+    let typeNode: ts.TypeNode;
+    if (rootNode.properties.size > 0 && !rootNode.expression) {
+      const nested = buildCaptureTypeProperties(rootNode, context);
+      typeNode = factory.createTypeLiteralNode(nested);
+    } else if (rootNode.expression) {
+      typeNode = typeNodeForExpression(rootNode.expression, context);
+    } else {
+      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    }
+
+    properties.push(
+      factory.createPropertySignature(
+        undefined,
+        createSafePropertyName(rootName, factory),
+        undefined,
+        typeNode,
+      ),
+    );
+  }
+
+  return properties;
+}
+
 function determineElementType(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
@@ -421,13 +553,10 @@ function determineElementType(
   const { checker } = context;
   const typeRegistry = context.options.typeRegistry;
 
-  // Check if we have an explicit type annotation that's not 'any'
   if (elemParam?.type) {
     const annotationType = checker.getTypeFromTypeNode(elemParam.type);
     if (!(annotationType.flags & ts.TypeFlags.Any)) {
-      // Use the explicit annotation
       const result = { typeNode: elemParam.type, type: annotationType };
-      // Register with typeRegistry
       if (typeRegistry && annotationType) {
         typeRegistry.set(elemParam.type, annotationType);
       }
@@ -435,58 +564,11 @@ function determineElementType(
     }
   }
 
-  // No annotation or annotation is 'any', infer from array
   const inferred = inferElementType(mapCall, context);
-  // Register with typeRegistry
   if (typeRegistry && inferred.type) {
     typeRegistry.set(inferred.typeNode, inferred.type);
   }
   return inferred;
-}
-
-/**
- * Build params object type properties for captured variables.
- */
-function buildParamsProperties(
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
-  context: TransformationContext,
-): ts.TypeElement[] {
-  const { factory, checker } = context;
-  const typeRegistry = context.options.typeRegistry;
-  const paramsProperties: ts.TypeElement[] = [];
-
-  for (const varName of capturedVarNames) {
-    const expr = captures.get(varName);
-    if (!expr) continue;
-
-    // Get the Type of the captured expression
-    const exprType = checker.getTypeAtLocation(expr);
-
-    // Convert Type to TypeNode
-    const typeNode = checker.typeToTypeNode(
-      exprType,
-      context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-    // Register this property's TypeNode with its Type
-    if (typeRegistry) {
-      typeRegistry.set(typeNode, exprType);
-    }
-
-    paramsProperties.push(
-      factory.createPropertySignature(
-        undefined,
-        factory.createIdentifier(varName),
-        undefined,
-        typeNode,
-      ),
-    );
-  }
-
-  return paramsProperties;
 }
 
 /**
@@ -498,8 +580,7 @@ function buildCallbackParamTypeNode(
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
   arrayParam: ts.ParameterDeclaration | undefined,
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.TypeNode {
   const { factory } = context;
@@ -547,10 +628,9 @@ function buildCallbackParamTypeNode(
     );
   }
 
-  // 5. Build params object type with captured variables
-  const paramsProperties = buildParamsProperties(
-    capturedVarNames,
-    captures,
+  // 5. Build params object type with hierarchical captures
+  const paramsProperties = buildParamsTypeElements(
+    captureTree,
     context,
   );
 
@@ -701,21 +781,6 @@ function inferElementType(
 }
 
 /**
- * Recursively compare expressions for structural equality.
- */
-function expressionsMatch(a: ts.Expression, b: ts.Expression): boolean {
-  if (ts.isPropertyAccessExpression(a) && ts.isPropertyAccessExpression(b)) {
-    // Property names must match
-    if (a.name.text !== b.name.text) return false;
-    // Recursively compare the object expressions
-    return expressionsMatch(a.expression, b.expression);
-  } else if (ts.isIdentifier(a) && ts.isIdentifier(b)) {
-    return a.text === b.text;
-  }
-  return false;
-}
-
-/**
  * Check if a map call should be transformed to mapWithPattern.
  * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
@@ -816,302 +881,6 @@ function createMapTransformVisitor(
 }
 
 /**
- * Generic parameter reference transformer that handles:
- * - Renaming identifiers from oldName to newName
- * - Converting shorthand property assignments to preserve property names
- *   (e.g., { charm } becomes { charm: element })
- */
-function transformParameterReferences(
-  body: ts.ConciseBody,
-  param: ts.ParameterDeclaration | undefined,
-  newName: string,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  const paramName = param?.name;
-
-  if (paramName && ts.isIdentifier(paramName) && paramName.text !== newName) {
-    const oldName = paramName.text;
-    const visitor: ts.Visitor = (node) => {
-      // Handle shorthand property assignments: { oldName } -> { oldName: newName }
-      if (
-        ts.isShorthandPropertyAssignment(node) &&
-        node.name.text === oldName
-      ) {
-        return factory.createPropertyAssignment(
-          node.name, // Keep original property name
-          factory.createIdentifier(newName), // Use new variable name
-        );
-      }
-
-      if (ts.isIdentifier(node) && node.text === oldName) {
-        return factory.createIdentifier(newName);
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    return ts.visitNode(body, visitor) as ts.ConciseBody;
-  }
-
-  return body;
-}
-
-/**
- * Transform references to original element parameter to use "element" instead.
- */
-function transformElementReferences(
-  body: ts.ConciseBody,
-  elemParam: ts.ParameterDeclaration | undefined,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  return transformParameterReferences(body, elemParam, "element", factory);
-}
-
-/**
- * Transform references to original index parameter to use "index" instead.
- */
-function transformIndexReferences(
-  body: ts.ConciseBody,
-  indexParam: ts.ParameterDeclaration | undefined,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  return transformParameterReferences(body, indexParam, "index", factory);
-}
-
-/**
- * Transform references to original array parameter to use "array" instead.
- */
-function transformArrayReferences(
-  body: ts.ConciseBody,
-  arrayParam: ts.ParameterDeclaration | undefined,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  return transformParameterReferences(body, arrayParam, "array", factory);
-}
-
-/**
- * Transform destructured property references to use element.prop or element[index].
- */
-function transformDestructuredProperties(
-  body: ts.ConciseBody,
-  elemParam: ts.ParameterDeclaration | undefined,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  const elemName = elemParam?.name;
-
-  let transformedBody: ts.ConciseBody = body;
-
-  const prependStatements = (
-    statements: readonly ts.Statement[],
-    currentBody: ts.ConciseBody,
-  ): ts.ConciseBody => {
-    if (statements.length === 0) return currentBody;
-
-    if (ts.isBlock(currentBody)) {
-      // Find where directive prologues end (e.g., "use strict")
-      // Directives must be string literal expression statements at the start
-      let directiveEnd = 0;
-      for (const stmt of currentBody.statements) {
-        if (
-          ts.isExpressionStatement(stmt) &&
-          ts.isStringLiteral(stmt.expression)
-        ) {
-          directiveEnd++;
-        } else {
-          break; // First non-directive = end of prologue
-        }
-      }
-
-      return factory.updateBlock(
-        currentBody,
-        factory.createNodeArray([
-          ...currentBody.statements.slice(0, directiveEnd), // Keep directives first
-          ...statements, // Then our computed initializers
-          ...currentBody.statements.slice(directiveEnd), // Then rest of body
-        ]),
-      );
-    }
-
-    return factory.createBlock(
-      [
-        ...statements,
-        factory.createReturnStatement(currentBody as ts.Expression),
-      ],
-      true,
-    );
-  };
-
-  const destructuredProps = new Map<string, () => ts.Expression>();
-  const computedInitializers: ts.VariableStatement[] = [];
-  const usedTempNames = new Set<string>();
-
-  const registerTempName = (base: string): string => {
-    let candidate = `__ct_${base || "prop"}_key`;
-    let counter = 1;
-    while (usedTempNames.has(candidate)) {
-      candidate = `__ct_${base || "prop"}_key_${counter++}`;
-    }
-    usedTempNames.add(candidate);
-    return candidate;
-  };
-
-  if (elemName && ts.isObjectBindingPattern(elemName)) {
-    for (const element of elemName.elements) {
-      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
-        const alias = element.name.text;
-        const propertyName = element.propertyName;
-        usedTempNames.add(alias);
-
-        // For computed properties, create the temp variable upfront (not in the factory)
-        // so multiple uses of the same property share one temp variable
-        let computedTempIdentifier: ts.Identifier | undefined;
-        if (propertyName && ts.isComputedPropertyName(propertyName)) {
-          const tempName = registerTempName(alias);
-          computedTempIdentifier = factory.createIdentifier(tempName);
-
-          computedInitializers.push(
-            factory.createVariableStatement(
-              undefined,
-              factory.createVariableDeclarationList(
-                [
-                  factory.createVariableDeclaration(
-                    computedTempIdentifier,
-                    undefined,
-                    undefined,
-                    propertyName.expression,
-                  ),
-                ],
-                ts.NodeFlags.Const,
-              ),
-            ),
-          );
-        }
-
-        destructuredProps.set(alias, () => {
-          const target = factory.createIdentifier("element");
-
-          if (!propertyName) {
-            return factory.createPropertyAccessExpression(
-              target,
-              factory.createIdentifier(alias),
-            );
-          }
-
-          if (ts.isIdentifier(propertyName)) {
-            return factory.createPropertyAccessExpression(
-              target,
-              factory.createIdentifier(propertyName.text),
-            );
-          }
-
-          if (
-            ts.isStringLiteral(propertyName) ||
-            ts.isNumericLiteral(propertyName)
-          ) {
-            return factory.createElementAccessExpression(target, propertyName);
-          }
-
-          if (
-            ts.isComputedPropertyName(propertyName) && computedTempIdentifier
-          ) {
-            return factory.createElementAccessExpression(
-              target,
-              computedTempIdentifier,
-            );
-          }
-
-          return factory.createPropertyAccessExpression(
-            target,
-            factory.createIdentifier(alias),
-          );
-        });
-      }
-    }
-  }
-
-  const arrayDestructuredVars = new Map<string, number>();
-  if (elemName && ts.isArrayBindingPattern(elemName)) {
-    let index = 0;
-    for (const element of elemName.elements) {
-      if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
-        arrayDestructuredVars.set(element.name.text, index);
-      }
-      index++;
-    }
-  }
-
-  if (destructuredProps.size > 0) {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node) && destructuredProps.has(node.text)) {
-        if (
-          !node.parent ||
-          !(ts.isPropertyAccessExpression(node.parent) &&
-            node.parent.name === node)
-        ) {
-          const accessFactory = destructuredProps.get(node.text)!;
-          return accessFactory();
-        }
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(transformedBody, visitor) as ts.ConciseBody;
-  }
-
-  if (arrayDestructuredVars.size > 0) {
-    const visitor: ts.Visitor = (node) => {
-      if (ts.isIdentifier(node)) {
-        const index = arrayDestructuredVars.get(node.text);
-        if (index !== undefined) {
-          if (
-            !node.parent ||
-            !(ts.isPropertyAccessExpression(node.parent) &&
-              node.parent.name === node)
-          ) {
-            return factory.createElementAccessExpression(
-              factory.createIdentifier("element"),
-              factory.createNumericLiteral(index),
-            );
-          }
-        }
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(transformedBody, visitor) as ts.ConciseBody;
-  }
-
-  if (computedInitializers.length > 0) {
-    transformedBody = prependStatements(computedInitializers, transformedBody);
-  }
-
-  return transformedBody;
-}
-
-/**
- * Replace captured expressions with their parameter names.
- */
-function replaceCaptures(
-  body: ts.ConciseBody,
-  captures: Map<string, ts.Expression>,
-  factory: ts.NodeFactory,
-): ts.ConciseBody {
-  let transformedBody = body;
-
-  for (const [varName, capturedExpr] of captures) {
-    const visitor: ts.Visitor = (node) => {
-      // Check if this node matches the captured expression
-      if (ts.isExpression(node) && expressionsMatch(node, capturedExpr)) {
-        return factory.createIdentifier(varName);
-      }
-      return visitEachChildWithJsx(node, visitor, undefined);
-    };
-    transformedBody = ts.visitNode(
-      transformedBody,
-      visitor,
-    ) as ts.ConciseBody;
-  }
-
-  return transformedBody;
-}
-
-/**
  * Create the final recipe call with params object.
  */
 function createRecipeCallWithParams(
@@ -1121,57 +890,81 @@ function createRecipeCallWithParams(
   elemParam: ts.ParameterDeclaration | undefined,
   indexParam: ts.ParameterDeclaration | undefined,
   arrayParam: ts.ParameterDeclaration | undefined,
-  capturedVarNames: Set<string>,
-  captures: Map<string, ts.Expression>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.CallExpression {
   const { factory } = context;
 
-  // Create the destructured parameter
-  const properties: ts.BindingElement[] = [
+  const bindingElements: ts.BindingElement[] = [];
+  const usedBindingNames = new Set<string>();
+
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    if (isSafeIdentifierText(name) && !usedBindingNames.has(name)) {
+      usedBindingNames.add(name);
+      return factory.createIdentifier(name);
+    }
+    const fallback = name.length > 0 ? name : "ref";
+    const unique = getUniqueIdentifier(fallback, usedBindingNames, {
+      fallback: "ref",
+    });
+    return factory.createIdentifier(unique);
+  };
+
+  const elementBindingName = elemParam
+    ? normalizeBindingName(elemParam.name, factory, usedBindingNames)
+    : maybeReuseIdentifier(
+      factory.createIdentifier("element"),
+      usedBindingNames,
+    );
+  bindingElements.push(
     factory.createBindingElement(
       undefined,
-      undefined,
       factory.createIdentifier("element"),
+      elementBindingName,
       undefined,
     ),
-  ];
+  );
 
   if (indexParam) {
-    properties.push(
+    bindingElements.push(
       factory.createBindingElement(
         undefined,
-        undefined,
         factory.createIdentifier("index"),
+        normalizeBindingName(indexParam.name, factory, usedBindingNames),
         undefined,
       ),
     );
   }
 
   if (arrayParam) {
-    properties.push(
+    bindingElements.push(
       factory.createBindingElement(
         undefined,
-        undefined,
         factory.createIdentifier("array"),
+        normalizeBindingName(arrayParam.name, factory, usedBindingNames),
         undefined,
       ),
     );
   }
 
-  // Add params destructuring
-  const paramsPattern = factory.createObjectBindingPattern(
-    Array.from(capturedVarNames).map((name) =>
+  const paramsBindings: ts.BindingElement[] = [];
+  for (const [rootName] of captureTree) {
+    const propertyName = isSafeIdentifierText(rootName)
+      ? undefined
+      : createSafePropertyName(rootName, factory);
+    paramsBindings.push(
       factory.createBindingElement(
         undefined,
+        propertyName,
+        createBindingIdentifier(rootName),
         undefined,
-        factory.createIdentifier(name),
-        undefined,
-      )
-    ),
-  );
+      ),
+    );
+  }
 
-  properties.push(
+  const paramsPattern = factory.createObjectBindingPattern(paramsBindings);
+
+  bindingElements.push(
     factory.createBindingElement(
       undefined,
       factory.createIdentifier("params"),
@@ -1183,13 +976,12 @@ function createRecipeCallWithParams(
   const destructuredParam = factory.createParameterDeclaration(
     undefined,
     undefined,
-    factory.createObjectBindingPattern(properties),
+    factory.createObjectBindingPattern(bindingElements),
     undefined,
     undefined,
     undefined,
   );
 
-  // Create the new callback
   const newCallback = factory.createArrowFunction(
     callback.modifiers,
     callback.typeParameters,
@@ -1201,52 +993,49 @@ function createRecipeCallWithParams(
     transformedBody,
   );
 
-  // Mark this as a map callback for later transformers (e.g., OpaqueRefJSXTransformer)
   context.markAsMapCallback(newCallback);
 
-  // Build a TypeNode for the callback parameter to pass as a type argument to recipe<T>()
   const callbackParamTypeNode = buildCallbackParamTypeNode(
     mapCall,
     elemParam,
     indexParam,
     arrayParam,
-    capturedVarNames,
-    captures,
+    captureTree,
     context,
   );
 
-  // Wrap in recipe<T>() using type argument
   const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
   const recipeCall = factory.createCallExpression(
     recipeExpr,
-    [callbackParamTypeNode], // Type argument
+    [callbackParamTypeNode],
     [newCallback],
   );
 
-  // Create the params object
   const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [varName, expr] of captures) {
+  for (const [rootName, rootNode] of captureTree) {
     paramProperties.push(
       factory.createPropertyAssignment(
-        factory.createIdentifier(varName),
-        expr,
+        createSafePropertyName(rootName, factory),
+        buildHierarchicalParamsValue(rootNode, rootName, factory),
       ),
     );
   }
-  const paramsObject = factory.createObjectLiteralExpression(paramProperties);
 
-  // Create mapWithPattern property access
+  const paramsObject = factory.createObjectLiteralExpression(
+    paramProperties,
+    paramProperties.length > 0,
+  );
+
   if (!ts.isPropertyAccessExpression(mapCall.expression)) {
     throw new Error(
       "Expected mapCall.expression to be a PropertyAccessExpression",
     );
   }
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
-    mapCall.expression.expression, // state.items
+    mapCall.expression.expression,
     factory.createIdentifier("mapWithPattern"),
   );
 
-  // Return the transformed mapWithPattern call
   return factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,
@@ -1265,42 +1054,11 @@ function transformMapCallback(
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression {
-  const { factory, checker } = context;
+  const { checker } = context;
 
   // Collect captured variables from the callback
   const captureExpressions = collectCaptures(callback, checker);
-
-  // Build map of capture name -> expression
-  const captureEntries: Array<{ name: string; expr: ts.Expression }> = [];
-  const usedNames = new Set<string>(["element", "index", "array", "params"]);
-
-  for (const expr of captureExpressions) {
-    const baseName = getCaptureName(expr);
-    if (!baseName) continue;
-
-    // Skip if an existing entry captures an equivalent expression
-    const existing = captureEntries.find((entry) =>
-      expressionsMatch(expr, entry.expr)
-    );
-    if (existing) continue;
-
-    let candidate = baseName;
-    let counter = 2;
-    while (usedNames.has(candidate)) {
-      candidate = `${baseName}_${counter++}`;
-    }
-
-    usedNames.add(candidate);
-    captureEntries.push({ name: candidate, expr });
-  }
-
-  const captures = new Map<string, ts.Expression>();
-  for (const entry of captureEntries) {
-    captures.set(entry.name, entry.expr);
-  }
-
-  // Build set of captured variable names
-  const capturedVarNames = new Set<string>(captures.keys());
+  const captureTree = groupCapturesByRoot(captureExpressions);
 
   // Get callback parameters
   const originalParams = callback.parameters;
@@ -1311,39 +1069,10 @@ function transformMapCallback(
   // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
   // parameter names. This ensures nested callbacks can properly detect captures from
   // parent callback scope. Reuse the same visitor for consistency.
-  let transformedBody = ts.visitNode(callback.body, visitor) as ts.ConciseBody;
-
-  // Transform the callback body in stages:
-  // 1. Replace element parameter name
-  transformedBody = transformElementReferences(
-    transformedBody,
-    elemParam,
-    factory,
-  );
-
-  // 2. Replace index parameter name
-  transformedBody = transformIndexReferences(
-    transformedBody,
-    indexParam,
-    factory,
-  );
-
-  // 3. Replace array parameter name
-  transformedBody = transformArrayReferences(
-    transformedBody,
-    arrayParam,
-    factory,
-  );
-
-  // 4. Transform destructured properties
-  transformedBody = transformDestructuredProperties(
-    transformedBody,
-    elemParam,
-    factory,
-  );
-
-  // 5. Replace captured expressions with their parameter names
-  transformedBody = replaceCaptures(transformedBody, captures, factory);
+  const transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
 
   // Create the final recipe call with params
   return createRecipeCallWithParams(
@@ -1353,8 +1082,7 @@ function transformMapCallback(
     elemParam,
     indexParam,
     arrayParam,
-    capturedVarNames,
-    captures,
+    captureTree,
     context,
   );
 }

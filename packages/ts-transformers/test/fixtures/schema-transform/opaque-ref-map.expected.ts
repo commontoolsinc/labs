@@ -59,7 +59,7 @@ export default recipe({
                 required: ["title", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => element.title), {});
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.title), {});
     // This should also be transformed
     const filtered = items.mapWithPattern(__ctHelpers.recipe({
         $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -91,9 +91,9 @@ export default recipe({
                 required: ["title", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => ({
-        title: element.title,
-        done: element.done,
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: {} }) => ({
+        title: item.title,
+        done: item.done,
         position: index,
     })), {});
     return { mapped, filtered };

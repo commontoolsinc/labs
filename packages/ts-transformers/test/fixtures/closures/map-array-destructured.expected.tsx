@@ -56,8 +56,8 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div>
-            {element[0]}: {element[1]}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [date, pizza], params: {} }) => (<div>
+            {date}: {pizza}
           </div>)), {})}
 
         {/* Map with array destructured parameter and capture */}
@@ -71,12 +71,18 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    scale: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["scale"]
                             }
                         },
-                        required: ["scale"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -88,9 +94,13 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { scale } }) => (<div>
-            {element[0]}: {element[1]} (scale: {scale})
-          </div>)), { scale: state.scale })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [date, pizza], params: { state } }) => (<div>
+            {date}: {pizza} (scale: {state.scale})
+          </div>)), {
+                state: {
+                    scale: state.scale
+                }
+            })}
       </div>),
     };
 });

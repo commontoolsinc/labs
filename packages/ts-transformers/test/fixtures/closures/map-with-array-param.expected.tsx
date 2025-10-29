@@ -21,8 +21,8 @@ export default recipe("MapWithArrayParam", (_state) => {
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, array, params: {} }) => (<div>
-            Item {element} at index {index} of {array.length} total items
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, array: array, params: {} }) => (<div>
+            Item {item} at index {index} of {array.length} total items
           </div>)), {})}
       </div>),
     };

@@ -7,7 +7,10 @@ export default recipe("ElementAccessBothOpaque", (_state) => {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
-        <p>Selected item: {__ctHelpers.derive({ items, index }, ({ items: items, index: index }) => items[index])}</p>
+        <p>Selected item: {__ctHelpers.derive({
+            items: items,
+            index: index
+        }, ({ items, index }) => items[index])}</p>
       </div>),
     };
 });

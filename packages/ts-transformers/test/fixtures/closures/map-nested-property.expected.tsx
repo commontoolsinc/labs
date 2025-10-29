@@ -66,16 +66,28 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            firstName: {
-                                type: "string",
-                                asOpaque: true
-                            },
-                            lastName: {
-                                type: "string",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    currentUser: {
+                                        type: "object",
+                                        properties: {
+                                            firstName: {
+                                                type: "string",
+                                                asOpaque: true
+                                            },
+                                            lastName: {
+                                                type: "string",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["firstName", "lastName"]
+                                    }
+                                },
+                                required: ["currentUser"]
                             }
                         },
-                        required: ["firstName", "lastName"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -93,9 +105,16 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { firstName, lastName } }) => (<div>
-            {element.name} - edited by {firstName} {lastName}
-          </div>)), { firstName: state.currentUser.firstName, lastName: state.currentUser.lastName })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
+            {item.name} - edited by {state.currentUser.firstName} {state.currentUser.lastName}
+          </div>)), {
+                state: {
+                    currentUser: {
+                        firstName: state.currentUser.firstName,
+                        lastName: state.currentUser.lastName
+                    }
+                }
+            })}
       </div>),
     };
 });

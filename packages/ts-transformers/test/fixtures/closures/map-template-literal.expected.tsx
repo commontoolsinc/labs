@@ -55,16 +55,22 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            prefix: {
-                                type: "string",
-                                asOpaque: true
-                            },
-                            suffix: {
-                                type: "string",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    prefix: {
+                                        type: "string",
+                                        asOpaque: true
+                                    },
+                                    suffix: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["prefix", "suffix"]
                             }
                         },
-                        required: ["prefix", "suffix"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -82,7 +88,20 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { prefix, suffix } }) => (<div>{`${prefix} ${element.name} ${suffix}`}</div>)), { prefix: state.prefix, suffix: state.suffix })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>{__ctHelpers.derive({
+                state: {
+                    prefix: state.prefix,
+                    suffix: state.suffix
+                },
+                item: {
+                    name: item.name
+                }
+            }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>)), {
+                state: {
+                    prefix: state.prefix,
+                    suffix: state.suffix
+                }
+            })}
       </div>),
     };
 });

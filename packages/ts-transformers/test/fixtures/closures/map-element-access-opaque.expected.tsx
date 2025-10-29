@@ -35,22 +35,37 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            tagCounts: {
+                            state: {
                                 type: "object",
-                                properties: {},
-                                additionalProperties: {
-                                    type: "number"
+                                properties: {
+                                    tagCounts: {
+                                        type: "object",
+                                        properties: {},
+                                        additionalProperties: {
+                                            type: "number"
+                                        },
+                                        asOpaque: true
+                                    }
                                 },
-                                asOpaque: true
+                                required: ["tagCounts"]
                             }
                         },
-                        required: ["tagCounts"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { tagCounts } }) => (<span>
-            {element}: {__ctHelpers.derive({ tagCounts, element }, ({ tagCounts: tagCounts, element: element }) => tagCounts[element])}
-          </span>)), { tagCounts: state.tagCounts })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, params: { state } }) => (<span>
+            {tag}: {__ctHelpers.derive({
+                state: {
+                    tagCounts: state.tagCounts
+                },
+                tag: tag
+            }, ({ state, tag }) => state.tagCounts[tag])}
+          </span>)), {
+                state: {
+                    tagCounts: state.tagCounts
+                }
+            })}
       </div>),
     };
 });

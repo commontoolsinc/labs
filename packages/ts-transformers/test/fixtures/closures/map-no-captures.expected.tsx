@@ -64,7 +64,7 @@ export default recipe({
                         required: ["id", "price"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div>Item #{element.id}: ${element.price}</div>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>Item #{item.id}: ${item.price}</div>)), {})}
       </div>),
     };
 });

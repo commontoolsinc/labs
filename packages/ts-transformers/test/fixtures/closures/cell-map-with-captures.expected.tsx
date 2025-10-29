@@ -33,16 +33,31 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            multiplier: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    multiplier: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["multiplier"]
                             }
                         },
-                        required: ["multiplier"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { multiplier } }) => (<span>{__ctHelpers.derive({ element, multiplier }, ({ element: element, multiplier: multiplier }) => element * multiplier)}</span>)), { multiplier: state.multiplier })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, params: { state } }) => (<span>{__ctHelpers.derive({
+                value: value,
+                state: {
+                    multiplier: state.multiplier
+                }
+            }, ({ value, state }) => value * state.multiplier)}</span>)), {
+                state: {
+                    multiplier: state.multiplier
+                }
+            })}
       </div>),
     };
 });

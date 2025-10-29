@@ -16,7 +16,12 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__ctHelpers.derive({ n, state_multiplier: state.multiplier }, ({ n: n, state_multiplier: _v2 }) => n * _v2)}</span>))}
+        {plainArray.map((n) => (<span>{__ctHelpers.derive({
+                n: n,
+                state: {
+                    multiplier: state.multiplier
+                }
+            }, ({ n, state }) => n * state.multiplier)}</span>))}
       </div>),
     };
 });

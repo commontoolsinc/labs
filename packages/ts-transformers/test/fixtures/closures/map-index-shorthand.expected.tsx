@@ -67,8 +67,8 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<div key={index}>
-            Item #{index}: {element.name}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: i, params: {} }) => (<div key={i}>
+            Item #{i}: {item.name}
           </div>)), {})}
 
         {/* Map with idx as index parameter */}
@@ -102,8 +102,8 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<div key={index}>
-            Position {index}: {element.name}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: idx, params: {} }) => (<div key={idx}>
+            Position {idx}: {item.name}
           </div>)), {})}
       </div>),
     };

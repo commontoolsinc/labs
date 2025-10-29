@@ -61,7 +61,7 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div data-item={element[0]}>{element[0]}</div>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item], params: {} }) => (<div data-item={item}>{item}</div>)), {})}
 
         {/* Multiple array destructured params */}
         {items.mapWithPattern(__ctHelpers.recipe({
@@ -89,8 +89,8 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div key={element[0]}>
-            {element[0]}: {element[1]}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item, count], params: {} }) => (<div key={item}>
+            {item}: {count}
           </div>)), {})}
       </div>),
     };

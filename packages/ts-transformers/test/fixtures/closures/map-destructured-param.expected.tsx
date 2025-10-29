@@ -51,12 +51,18 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    scale: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["scale"]
                             }
                         },
-                        required: ["scale"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -74,9 +80,23 @@ export default recipe({
                         required: ["x", "y"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { scale } }) => (<div>
-            Point: ({__ctHelpers.derive({ element_x: element.x, scale }, ({ element_x: _v1, scale: scale }) => _v1 * scale)}, {__ctHelpers.derive({ element_y: element.y, scale }, ({ element_y: _v1, scale: scale }) => _v1 * scale)})
-          </div>)), { scale: state.scale })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: { x, y }, params: { state } }) => (<div>
+            Point: ({__ctHelpers.derive({
+                x: x,
+                state: {
+                    scale: state.scale
+                }
+            }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
+                y: y,
+                state: {
+                    scale: state.scale
+                }
+            }, ({ y, state }) => y * state.scale)})
+          </div>)), {
+                state: {
+                    scale: state.scale
+                }
+            })}
       </div>),
     };
 });

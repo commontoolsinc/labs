@@ -62,20 +62,25 @@ state.items.mapWithPattern(
   recipe({
     type: "object",
     properties: {
-      item: { ... },  // KEEP original name!
-      state: {        // PRESERVE hierarchy!
+      element: { ... },
+      params: {
         type: "object",
         properties: {
-          discount: { type: "number", asOpaque: true }
+          state: {
+            type: "object",
+            properties: {
+              discount: { type: "number", asOpaque: true }
+            }
+          }
         }
       }
     }
   },
-  ({ item, state }) => (
+  ({ element: item, params: { state } }) => (
     // BODY UNCHANGED!
     <span>{item.price * (1 - state.discount)}</span>
   )),
-  { state: { discount: state.discount } }  // Hierarchical params object
+  { state: { discount: state.discount } }
 )
 ```
 
@@ -84,7 +89,8 @@ state.items.mapWithPattern(
 1. Body is **completely unchanged** (except for nested map transforms)
 2. Original variable names preserved (`item`, `state`)
 3. Hierarchical structure maintained (`state.discount`)
-4. Direct parameters (not destructured binding elements)
+4. No explicit renaming pass required—destructuring aliases map canonical names
+   to the originals while preserving runtime expectations
 5. Symbol resolution works correctly
 6. Easier to debug/understand generated code
 
@@ -134,38 +140,42 @@ params: {
 }
 ```
 
-**Proposed:** Generates hierarchical params object
+**Proposed:** Keep the callback contract (`params` property) but mirror the
+capture tree inside it
 
 ```typescript
-state: {
+params: {
   type: "object",
   properties: {
-    discount: { type: "number", asOpaque: true },
-    taxRate: { type: "number", asOpaque: true }
+    state: {
+      type: "object",
+      properties: {
+        discount: { type: "number", asOpaque: true },
+        taxRate: { type: "number", asOpaque: true }
+      }
+    }
   }
 }
 ```
 
-The schema properties are now named after the **captured root identifiers**
-rather than using a generic "params" wrapper.
+The runtime contract continues to surface a `params` object to the callback,
+and we supply the capture tree as the second argument. Runtime passes that
+object through unchanged, so destructuring `params: { state }` recovers the
+original identifiers without an extra wrapper layer.
 
 ### 4. Parameter Naming (MODIFIED)
 
 **Current:** Fixed names `element`, `index`, `params` (then destructure params)
 
-**Proposed:** Use original names from source
+**Proposed:** Alias the canonical runtime names to the original identifiers via
+destructuring while keeping captures under `params`:
 
-- Element parameter: Use original callback parameter name (e.g., `item`)
-- Index parameter: Use original index parameter name if present
-- Captured roots: Use their original names (e.g., `state`, `other`)
+- Element parameter: `({ element: item })`
+- Index parameter (if present): `({ index: i })`
+- Captured roots: `({ params: { state, checkout } })`
 
-```typescript
-// Current
-({ element, params: { discount, taxRate } }) => ...
-
-// Proposed
-({ item, state }) => ...
-```
+The runtime still receives `{ element, index, array, params }`, but the callback
+body uses the original vocabulary with no additional rewrite pass.
 
 ### 5. Params Object Creation (MODIFIED)
 
@@ -175,7 +185,7 @@ rather than using a generic "params" wrapper.
 { discount: state.discount, taxRate: state.taxRate }
 ```
 
-**Proposed:** Hierarchical object matching schema structure
+**Proposed:** Hierarchical object matching the capture tree
 
 ```typescript
 {
@@ -196,13 +206,43 @@ rather than using a generic "params" wrapper.
 
 **Proposed transformations:**
 
-1. ~~Rename element parameter~~ ❌ REMOVED
+1. ~~Rename element parameter~~ ❌ REMOVED (handled via destructuring aliases)
 2. Transform destructured properties (`{price}` → `item.price`) ✅ KEEP (but use
-   original name)
-3. ~~Replace captures~~ ❌ REMOVED - captures already have correct names!
+   the aliased identifier)
+3. ~~Replace captures~~ ❌ REMOVED – captures already have correct names through
+   the hierarchical `params`
+4. Cache computed destructuring keys once per callback (e.g.,
+   `{ [nextKey()]: value }`) so expressions with side effects still run exactly
+   once. New regression fixture:
+   `packages/ts-transformers/test/fixtures/closures/map-computed-alias-side-effect.*`
 
-The key insight: **If params object structure matches original variable
-structure, no replacement needed!**
+The key insight: **If the params object mirrors the source structure we can
+preserve the original syntax with minimal AST edits while remaining compatible
+with the runtime contract.**
+
+### 7. Implementation Plan (UPDATED)
+
+1. Reuse `collectCaptures` + `groupCapturesByRoot` to build a capture tree of
+   root identifiers.
+2. Generate the recipe `TypeNode` and JSON schema with `element` plus
+   hierarchical properties under `params`.
+3. Emit the callback binding pattern that aliases `element/index/array/params`
+   to the original identifiers.
+4. Update the body by:
+   - rewriting destructured element bindings to property/element access using
+     the aliased identifier;
+   - caching computed property names once per callback (new regression fixture
+     ensures we never regress this behaviour);
+   - leaving capture references untouched.
+5. Build the runtime capture object from the tree (e.g., `{ state: { ... } }`)
+   and rely on runtime to expose it under the callback's `params` property.
+6. Extend regression coverage: keep the existing alias fixtures, numeric alias
+   test, collision fixture, and the new computed-side-effect case.
+
+> ⚠️ **Runtime contract reminder:** `mapWithPattern` still receives
+> `{ element, index, array, params }`. The refactor must continue to supply this
+> shape and rely on destructuring aliases to recover the original names. No
+> runtime changes required.
 
 ## Edge Cases
 
@@ -221,22 +261,27 @@ items.mapWithPattern(
   recipe({
     type: "object",
     properties: {
-      item: { ... },
-      state: {
+      element: { ... },
+      params: {
         type: "object",
         properties: {
-          discount: { type: "number", asOpaque: true }
-        }
-      },
-      config: {
-        type: "object",
-        properties: {
-          taxRate: { type: "number", asOpaque: true }
+          state: {
+            type: "object",
+            properties: {
+              discount: { type: "number", asOpaque: true }
+            }
+          },
+          config: {
+            type: "object",
+            properties: {
+              taxRate: { type: "number", asOpaque: true }
+            }
+          }
         }
       }
     }
   },
-  ({ item, state, config }) => (
+  ({ element: item, params: { state, config } }) => (
     item.price * state.discount + config.taxRate
   )),
   {
@@ -260,21 +305,26 @@ items.map((item) => item.price * state.pricing.discount);
 items.mapWithPattern(
   recipe({
     properties: {
-      item: { ... },
-      state: {
+      element: { ... },
+      params: {
         type: "object",
         properties: {
-          pricing: {
+          state: {
             type: "object",
             properties: {
-              discount: { type: "number", asOpaque: true }
+              pricing: {
+                type: "object",
+                properties: {
+                  discount: { type: "number", asOpaque: true }
+                }
+              }
             }
           }
         }
       }
     }
   },
-  ({ item, state }) => (
+  ({ element: item, params: { state } }) => (
     item.price * state.pricing.discount
   )),
   { state: { pricing: { discount: state.pricing.discount } } }

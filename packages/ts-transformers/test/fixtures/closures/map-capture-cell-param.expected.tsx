@@ -103,11 +103,13 @@ export default recipe({
                         required: ["text"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: { items } }) => (<li key={index}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: _, index: index, params: { items } }) => (<li key={index}>
               <ct-button onClick={removeItem({ items, index })}>
                 Remove
               </ct-button>
-            </li>)), { items: items })}
+            </li>)), {
+                items: items
+            })}
         </ul>),
     };
 });

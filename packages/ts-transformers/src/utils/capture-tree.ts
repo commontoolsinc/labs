@@ -1,0 +1,147 @@
+import ts from "typescript";
+
+import { isSafeIdentifierText } from "./identifiers.ts";
+
+export interface CapturePathInfo {
+  readonly root: string;
+  readonly path: readonly string[];
+  readonly expression: ts.Expression;
+}
+
+export interface CaptureTreeNode {
+  readonly properties: Map<string, CaptureTreeNode>;
+  readonly path: readonly string[];
+  expression?: ts.Expression;
+}
+
+export function parseCaptureExpression(
+  expr: ts.Expression,
+): CapturePathInfo | undefined {
+  if (ts.isIdentifier(expr)) {
+    return { root: expr.text, path: [], expression: expr };
+  }
+
+  if (ts.isPropertyAccessExpression(expr)) {
+    const segments: string[] = [];
+    let current: ts.Expression = expr;
+
+    while (ts.isPropertyAccessExpression(current)) {
+      segments.unshift(current.name.text);
+      current = current.expression;
+    }
+
+    if (ts.isIdentifier(current)) {
+      return { root: current.text, path: segments, expression: expr };
+    }
+  }
+
+  return undefined;
+}
+
+export function createCaptureTreeNode(
+  path: readonly string[],
+): CaptureTreeNode {
+  return { properties: new Map(), path };
+}
+
+function ensureChildNode(
+  parent: CaptureTreeNode,
+  key: string,
+): CaptureTreeNode {
+  let child = parent.properties.get(key);
+  if (!child) {
+    child = createCaptureTreeNode([...parent.path, key]);
+    parent.properties.set(key, child);
+  }
+  return child;
+}
+
+export function groupCapturesByRoot(
+  captureExpressions: Iterable<ts.Expression>,
+): Map<string, CaptureTreeNode> {
+  const rootMap = new Map<string, CaptureTreeNode>();
+
+  for (const expr of captureExpressions) {
+    const pathInfo = parseCaptureExpression(expr);
+    if (!pathInfo) continue;
+
+    const { root, path, expression } = pathInfo;
+    let rootNode = rootMap.get(root);
+    if (!rootNode) {
+      rootNode = createCaptureTreeNode([]);
+      rootMap.set(root, rootNode);
+    }
+
+    let currentNode = rootNode;
+
+    if (path.length === 0) {
+      currentNode.expression = expression;
+      currentNode.properties.clear();
+      continue;
+    }
+
+    if (currentNode.expression) {
+      continue;
+    }
+
+    for (const segment of path) {
+      currentNode = ensureChildNode(currentNode, segment);
+      if (currentNode.expression) {
+        break;
+      }
+    }
+
+    if (!currentNode.expression) {
+      currentNode.expression = expression;
+      currentNode.properties.clear();
+    }
+  }
+
+  return rootMap;
+}
+
+export function createCaptureAccessExpression(
+  rootName: string,
+  path: readonly string[],
+  factory: ts.NodeFactory,
+): ts.Expression {
+  let expr: ts.Expression = factory.createIdentifier(rootName);
+  for (const segment of path) {
+    expr = factory.createPropertyAccessExpression(
+      expr,
+      factory.createIdentifier(segment),
+    );
+  }
+  return expr;
+}
+
+export function buildHierarchicalParamsValue(
+  node: CaptureTreeNode,
+  rootName: string,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (node.expression && node.properties.size === 0) {
+    return createCaptureAccessExpression(rootName, node.path, factory);
+  }
+
+  const assignments: ts.PropertyAssignment[] = [];
+  for (const [propName, childNode] of node.properties) {
+    assignments.push(
+      factory.createPropertyAssignment(
+        isSafeIdentifierText(propName)
+          ? factory.createIdentifier(propName)
+          : factory.createStringLiteral(propName),
+        buildHierarchicalParamsValue(childNode, rootName, factory),
+      ),
+    );
+  }
+
+  if (assignments.length === 0 && node.expression) {
+    return createCaptureAccessExpression(rootName, node.path, factory);
+  }
+
+  return factory.createObjectLiteralExpression(
+    assignments,
+    assignments.length > 0,
+  );
+}
