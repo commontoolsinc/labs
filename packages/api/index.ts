@@ -39,6 +39,7 @@ export type BrandedCell<T, Brand extends string = string> = {
 // Cell Capability Interfaces
 // ============================================================================
 
+// ts-lint-ignore no-empty-interface
 export interface IAnyCell<T> {
 }
 
@@ -69,87 +70,112 @@ export interface IStreamable<T> {
   send(event: AnyCellWrapping<T>): void;
 }
 
-/**
- * Helper type for .key() return type logic.
- * - If T wraps another cell with .key(), delegates to that cell's return type
- * - If T[K] is a cell, unwraps it and wraps in Wrapper<>
- * - Otherwise wraps T[K] in Wrapper<>
- */
-export type KeyResultType<T, K extends keyof UnwrapCell<T>, Wrapper> =
-  UnwrapCell<T>[K] extends never ? any
-    : T extends BrandedCell<any>
-      ? T extends { key(k: K): infer R } ? R : Wrapper
-    : UnwrapCell<T>[K] extends BrandedCell<any> ? Wrapper
-    : Wrapper;
+// Lightweight HKT, so we can pass cell types to IKeyable<>.
+interface HKT {
+  _A: unknown;
+  type: unknown;
+}
+type Apply<F extends HKT, A> = (F & { _A: A })["type"];
 
 /**
- * Cells that support key() for property access - Cell variant.
+ * A key-addressable, **covariant** view over a structured value `T`.
+ *
+ * `IKeyableCell` exposes a single method, {@link IKeyableCell.key}, which selects a
+ * property from the (possibly branded) value `T` and returns it wrapped in a
+ * user-provided type constructor `Wrap` (default: `Cell<…>`). The interface is
+ * declared `out T` (covariant) and is designed so that calling `key` preserves
+ * both type inference and variance soundness.
+ *
+ * @template T
+ * The underlying (possibly branded) value type. `T` is treated **covariantly**:
+ * `IKeyableCell<Sub>` is assignable to `IKeyableCell<Super>` when `Sub` is
+ * assignable to `Super`.
+ *
+ * @template Wrap extends HKT
+ * A lightweight higher-kinded “wrapper” that determines the return container for
+ * selected fields. For example, `AsCell` wraps as `Cell<A>`, while other wrappers
+ * can project to `ReadonlyCell<A>`, `Stream<A>`, etc. Defaults to `AsCell`.
+ *
+ * @template Any
+ * The “fallback” return type used when the provided key does not match a known
+ * key (or is widened to `any`). This should usually be `Apply<Wrap, any>`.
+ *
+ * @remarks
+ * ### Variance & soundness
+ * The `key` signature is crafted to remain **covariant in `T`**. Internally,
+ * it guards the instantiation `K = any` with `unknown extends K ? … : …`, so
+ * the return type becomes `Any` (independent of `T`) in that case. For real keys
+ * (`K extends keyof UnwrapCell<T>`), the return type is precise and fully inferred.
+ *
+ * ### Branded / nested cells
+ * If a selected property is itself a branded cell (e.g., `BrandedCell<U>`),
+ * the brand is unwrapped so that the return becomes `Wrap<U>` rather than
+ * `Wrap<BrandedCell<U>>`. This keeps nested cell layers from accumulating at
+ * property boundaries.
+ *
+ * ### Key inference
+ * Passing a string/number/symbol that is a literal and a member of
+ * `keyof UnwrapCell<T>` yields precise field types; non-literal or unknown keys
+ * fall back to `Any` (e.g., `Cell<any>`).
+ *
+ * @example
+ * // Basic usage with the default wrapper (Cell)
+ * declare const userCell: IKeyableCell<{ id: string; profile: { name: string } }>;
+ * const idCell = userCell.key("id");         // Cell<string>
+ * const profileCell = userCell.key("profile"); // Cell<{ name: string }>
+ *
+ * // Unknown key falls back to Any (default: Cell<any>)
+ * const whatever = userCell.key(Symbol());   // Cell<any>
+ *
+ * @example
+ * // Using a custom wrapper, e.g., ReadonlyCell<A>
+ * interface AsReadonlyCell extends HKT { type: ReadonlyCell<this["_A"]> }
+ * type ReadonlyUserCell = IKeyableCell<{ id: string }, AsReadonlyCell, Apply<AsReadonlyCell, any>>;
+ * declare const ro: ReadonlyUserCell;
+ * const idRO = ro.key("id"); // ReadonlyCell<string>
+ *
+ * @example
+ * // Covariance works:
+ * declare const sub: IKeyableCell<{ a: string }>;
+ * const superCell: IKeyableCell<unknown> = sub; // OK (out T)
  */
-export interface IKeyableCell<T> {
-  key<K extends keyof UnwrapCell<T>>(
-    valueKey: K,
-  ): KeyResultType<
-    T,
-    K,
-    Cell<UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]>
-  >;
+export interface IKeyable<out T, Wrap extends HKT> {
+  key<K extends PropertyKey>(valueKey: K): KeyResultType<T, K, Wrap>;
 }
+
+export type KeyResultType<T, K, Wrap extends HKT> = unknown extends K
+  ? Apply<Wrap, any> // variance guard for K = any
+  : K extends keyof UnwrapCell<T> ? (
+      0 extends (1 & T) ? Apply<Wrap, any>
+        : UnwrapCell<T>[K] extends never ? Apply<Wrap, any>
+        : T extends BrandedCell<any, any> ? T extends { key(k: K): infer R } ? R
+          : Apply<
+            Wrap,
+            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
+              : UnwrapCell<T>[K]
+          >
+        : UnwrapCell<T>[K] extends BrandedCell<any, any> ? Apply<
+            Wrap,
+            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
+              : never // unreachable branch, here for completeness
+          >
+        : Apply<Wrap, UnwrapCell<T>[K]>
+    )
+  : Apply<Wrap, any>;
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
  * OpaqueCell is "sticky" and always returns OpaqueCell<>.
  */
 export interface IKeyableOpaque<T> {
-  key<K extends keyof UnwrapCell<T>>(
+  key<K extends PropertyKey>(
     valueKey: K,
-  ): UnwrapCell<T>[K] extends never ? any
-    : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U>
-    : OpaqueCell<UnwrapCell<T>[K]>;
-}
-
-/**
- * Cells that support key() for property access - ReadonlyCell variant.
- */
-export interface IKeyableReadonly<T> {
-  key<K extends keyof UnwrapCell<T>>(
-    valueKey: K,
-  ): KeyResultType<
-    T,
-    K,
-    ReadonlyCell<
-      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
-    >
-  >;
-}
-
-/**
- * Cells that support key() for property access - WriteonlyCell variant.
- */
-export interface IKeyableWriteonly<T> {
-  key<K extends keyof UnwrapCell<T>>(
-    valueKey: K,
-  ): KeyResultType<
-    T,
-    K,
-    WriteonlyCell<
-      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
-    >
-  >;
-}
-
-/**
- * Cells that support key() for property access - ComparableCell variant.
- */
-export interface IKeyableComparable<T> {
-  key<K extends keyof UnwrapCell<T>>(
-    valueKey: K,
-  ): KeyResultType<
-    T,
-    K,
-    ComparableCell<
-      UnwrapCell<T>[K] extends BrandedCell<infer U> ? U : UnwrapCell<T>[K]
-    >
-  >;
+  ): unknown extends K ? OpaqueCell<any>
+    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
+        : UnwrapCell<T>[K] extends never ? OpaqueCell<any>
+        : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U>
+        : OpaqueCell<UnwrapCell<T>[K]>)
+    : OpaqueCell<any>;
 }
 
 /**
@@ -231,6 +257,10 @@ export interface OpaqueCell<T>
  *
  * Note: This is an interface (not a type) to allow module augmentation by the runtime.
  */
+export interface AsCell extends HKT {
+  type: Cell<this["_A"]>;
+}
+
 export interface ICell<T>
   extends
     IAnyCell<T>,
@@ -238,7 +268,7 @@ export interface ICell<T>
     IWritable<T>,
     IStreamable<T>,
     IEquatable,
-    IKeyableCell<T>,
+    IKeyable<T, AsCell>,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = any> extends BrandedCell<T, "cell">, ICell<T> {}
@@ -258,37 +288,49 @@ export interface Stream<T>
  * Has .equals(), .key()
  * Does NOT have .resolveAsCell()/.get()/.set()/.send()
  */
+interface AsComparableCell extends HKT {
+  type: ComparableCell<this["_A"]>;
+}
+
 export interface ComparableCell<T>
   extends
     BrandedCell<T, "comparable">,
     IAnyCell<T>,
     IEquatable,
-    IKeyableComparable<T> {}
+    IKeyable<T, AsComparableCell> {}
 
 /**
  * Read-only cell variant.
  * Has .get(), .equals(), .key()
  * Does NOT have .resolveAsCell()/.set()/.send()
  */
+interface AsReadonlyCell extends HKT {
+  type: ReadonlyCell<this["_A"]>;
+}
+
 export interface ReadonlyCell<T>
   extends
     BrandedCell<T, "readonly">,
     IAnyCell<T>,
     IReadable<T>,
     IEquatable,
-    IKeyableReadonly<T> {}
+    IKeyable<T, AsReadonlyCell> {}
 
 /**
  * Write-only cell variant.
  * Has .set(), .update(), .push(), .key()
  * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
  */
+interface AsWriteonlyCell extends HKT {
+  type: WriteonlyCell<this["_A"]>;
+}
+
 export interface WriteonlyCell<T>
   extends
     BrandedCell<T, "writeonly">,
     IAnyCell<T>,
     IWritable<T>,
-    IKeyableWriteonly<T> {}
+    IKeyable<T, AsWriteonlyCell> {}
 
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell
@@ -327,6 +369,7 @@ export type CellLike<T> = AnyCell<T>;
  * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
  */
 export type Opaque<T> =
+  | T
   | OpaqueRef<T>
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
@@ -338,7 +381,7 @@ export type Opaque<T> =
  * UnwrapCell<BrandedCell<{ a: BrandedCell<number> }>> = { a: BrandedCell<number> }
  *
  * Special cases:
- * - UnwrapCell<any> = any (preserves any for backward compatibility)
+ * - UnwrapCell<any> = any
  * - UnwrapCell<unknown> = unknown (preserves unknown)
  */
 export type UnwrapCell<T> =
