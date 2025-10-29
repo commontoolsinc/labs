@@ -1,15 +1,10 @@
 /// <cts-enable />
 import {
-  BuiltInLLMMessage,
   Cell,
-  cell,
   derive,
   handler,
-  ifElse,
-  lift,
   NAME,
   navigateTo,
-  patternTool,
   recipe,
   str,
   UI,
@@ -21,7 +16,7 @@ import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
-import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
+import OmniboxFAB from "./omnibox-fab.tsx";
 
 type MinimalCharm = {
   [NAME]?: string;
@@ -61,9 +56,15 @@ const removeCharm = handler<
     console.log("charmListCopy before", charmListCopy.length);
     charmListCopy.splice(index, 1);
     console.log("charmListCopy after", charmListCopy.length);
-    state.allCharms.resolveAsCell().set(charmListCopy);
+    state.allCharms.set(charmListCopy);
   }
 });
+
+const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+  (_, { fabExpanded }) => {
+    fabExpanded.set(!fabExpanded.get());
+  },
+);
 
 const spawnChatList = handler<void, void>((_, __) => {
   return navigateTo(ChatList({
@@ -97,88 +98,17 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
-const toggle = handler<any, { value: Cell<boolean> }>((_, { value }) => {
-  value.set(!value.get());
-});
-
-const messagesToNotifications = lift<
-  {
-    messages: BuiltInLLMMessage[];
-    seen: Cell<number>;
-    notifications: Cell<{ text: string; timestamp: number }[]>;
-  }
->(({ messages, seen, notifications }) => {
-  if (messages.length > 0) {
-    if (seen.get() >= messages.length) {
-      // If messages length went backwards, reset seen counter
-      if (seen.get() > messages.length) {
-        seen.set(0);
-      } else {
-        return;
-      }
-    }
-
-    const latestMessage = messages[messages.length - 1];
-    if (latestMessage.role === "assistant") {
-      const contentText = typeof latestMessage.content === "string"
-        ? latestMessage.content
-        : latestMessage.content.map((part) => {
-          if (part.type === "text") {
-            return part.text;
-          } else if (part.type === "tool-call") {
-            return `Tool call: ${part.toolName}`;
-          } else if (part.type === "tool-result") {
-            return part.output.type === "text"
-              ? part.output.value
-              : JSON.stringify(part.output.value);
-          } else if (part.type === "image") {
-            return "[Image]";
-          }
-          return "";
-        }).join("");
-
-      notifications.push({
-        text: contentText,
-        timestamp: Date.now(),
-      });
-
-      seen.set(messages.length);
-    }
-  }
-});
-
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
     const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
+      wish<MentionableCharm[]>("#allCharms"),
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
-    const fabExpanded = cell(false);
-    const notifications = cell<{ text: string; timestamp: number }[]>([]);
-    const seen = cell<number>(0);
 
-    const omnibot = Chatbot({
-      messages: [],
-      tools: {
-        searchWeb: {
-          pattern: searchWeb,
-        },
-        readWebpage: {
-          pattern: readWebpage,
-        },
-        // Example of using patternTool with an existing recipe and extra params
-        calculator: patternTool(calculator, { base: 10 }),
-      },
-    });
-
-    messagesToNotifications({
-      messages: omnibot.messages,
-      seen: seen as unknown as Cell<number>,
-      notifications: notifications as unknown as Cell<
-        { id: string; text: string; timestamp: number }[]
-      >,
+    const fab = OmniboxFAB({
+      mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
     });
 
     return {
@@ -192,14 +122,20 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             preventDefault
             onct-keybind={spawnChatList()}
           />
-
           <ct-keybind
-            code="Escape"
+            code="KeyO"
+            meta
             preventDefault
-            onct-keybind={toggle({ value: fabExpanded })}
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          />
+          <ct-keybind
+            code="KeyO"
+            ctrl
+            preventDefault
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
           />
 
-          <ct-toolbar slot="header">
+          <ct-toolbar slot="header" sticky>
             <div slot="start">
               <ct-button
                 onClick={spawnChatList()}
@@ -264,28 +200,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
           </ct-vscroll>
         </ct-screen>
       ),
-      sidebarUI: (
-        <div>
-          {/* TODO(bf): Remove once we fix types to not require ReactNode */}
-          {omnibot.ui.attachmentsAndTools as any}
-          {omnibot.ui.chatLog as any}
-        </div>
-      ),
-      fabUI: (
-        <>
-          <ct-toast-stack
-            $notifications={notifications}
-            position="top-right"
-            auto-dismiss={5000}
-            max-toasts={5}
-          />
-          {ifElse(
-            fabExpanded,
-            omnibot.ui.promptInput,
-            <ct-button onClick={toggle({ value: fabExpanded })}>✨</ct-button>,
-          )}
-        </>
-      ),
+      sidebarUI: undefined,
+      fabUI: fab[UI],
     };
   },
 );

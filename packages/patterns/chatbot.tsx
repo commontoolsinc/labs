@@ -11,7 +11,6 @@ import {
   llmDialog,
   NAME,
   navigateTo,
-  Opaque,
   recipe,
   Stream,
   UI,
@@ -20,8 +19,8 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
+function schemaifyWish<T>(path: string) {
+  return derive<T, T>(wish<T>(path), (i) => i);
 }
 
 const addAttachment = handler<
@@ -274,10 +273,7 @@ export default recipe<ChatInput, ChatOutput>(
   ({ messages, tools, theme }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
-    const mentionable = schemaifyWish<MentionableCharm[]>(
-      "#mentionable",
-      [],
-    );
+    const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
 
     // Derive tools from attachments
     const dynamicTools = derive(allAttachments, (attachments) => {
@@ -358,25 +354,28 @@ export default recipe<ChatInput, ChatOutput>(
     const title = TitleGenerator({ model, messages });
 
     const promptInput = (
-      <div slot="footer">
-        <ct-prompt-input
-          placeholder="Ask the LLM a question..."
-          pending={pending}
-          $mentionable={mentionable}
-          onct-send={sendMessage({ addMessage, allAttachments })}
-          onct-stop={cancelGeneration}
-          onct-attachment-add={addAttachment({ allAttachments })}
-          onct-attachment-remove={removeAttachment({ allAttachments })}
-        />
-        <ct-select
-          items={items}
-          $value={model}
-        />
-      </div>
+      <ct-prompt-input
+        slot="footer"
+        placeholder="Ask the LLM a question..."
+        pending={pending}
+        $mentionable={mentionable}
+        modelItems={items}
+        $model={model}
+        onct-send={sendMessage({ addMessage, allAttachments })}
+        onct-stop={cancelGeneration}
+        onct-attachment-add={addAttachment({ allAttachments })}
+        onct-attachment-remove={removeAttachment({ allAttachments })}
+      />
     );
 
     const chatLog = (
-      <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
+      <ct-vscroll
+        style="padding: 1rem;"
+        flex
+        showScrollbar
+        fadeEdges
+        snapToBottom
+      >
         <ct-chat
           theme={theme}
           $messages={messages}
@@ -387,14 +386,15 @@ export default recipe<ChatInput, ChatOutput>(
     );
 
     const attachmentsAndTools = (
-      <ct-hstack gap="normal">
+      <ct-hstack align="center" gap="1">
         <ct-attachments-bar
           attachments={allAttachments}
           removable
           onct-remove={removeAttachment({ allAttachments })}
         />
         <ct-tools-chip tools={flattenedTools} />
-        <button
+        <ct-button
+          variant="pill"
           type="button"
           title="Clear chat"
           onClick={clearChat({
@@ -403,7 +403,7 @@ export default recipe<ChatInput, ChatOutput>(
           })}
         >
           Clear
-        </button>
+        </ct-button>
       </ct-hstack>
     );
 

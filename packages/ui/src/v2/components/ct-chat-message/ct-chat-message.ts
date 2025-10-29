@@ -27,6 +27,7 @@ import {
  * @attr {string|array} content - The message content (supports markdown and structured content)
  * @attr {string} avatar - Avatar URL for the message sender
  * @attr {string} name - Display name for the message sender
+ * @attr {boolean} compact - Hides the copy button and collapses spacing around the message
  *
  * @example
  * <ct-chat-message
@@ -305,6 +306,36 @@ export class CTChatMessage extends BaseElement {
       .code-block-container:hover .code-copy-button {
         opacity: 1;
       }
+
+      /* Compact mode styles */
+      :host([compact]) .message {
+        padding: var(--ct-theme-padding-compact, var(--ct-spacing-2, 0.5rem));
+      }
+
+      :host([compact]) .message-actions {
+        display: none;
+      }
+
+      :host([compact]) .message-avatar {
+        margin-right: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+      }
+
+      :host([compact][role="user"]) .message-avatar {
+        margin-right: 0;
+        margin-left: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+      }
+
+      :host([compact]) .tool-attachments {
+        margin-top: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+        gap: var(--ct-theme-spacing-compact, var(--ct-spacing-1, 0.25rem));
+      }
+
+      :host([compact]) .message-content p:not(:last-child) {
+        margin-bottom: var(
+          --ct-theme-spacing-compact,
+          var(--ct-spacing-1, 0.25rem)
+        );
+      }
     `,
   ];
 
@@ -322,6 +353,9 @@ export class CTChatMessage extends BaseElement {
 
   @property({ type: String })
   declare name?: string;
+
+  @property({ type: Boolean, reflect: true })
+  declare compact?: boolean;
 
   @consume({ context: themeContext, subscribe: true })
   @property({ attribute: false })

@@ -33,28 +33,28 @@ export class CTChip extends BaseElement {
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: var(--ct-theme-spacing-tight, var(--ct-spacing-1, 0.25rem));
+        gap: 0.375rem;
         padding: 0.25rem 0.625rem;
         background: var(
-          --ct-theme-surface,
-          var(--ct-color-gray-100, #f3f4f6)
+          --ct-theme-color-surface,
+          var(--ct-color-gray-100, #f5f5f5)
         );
         color: var(
           --ct-theme-color-text,
-          var(--ct-color-gray-900, #111827)
+          var(--ct-color-gray-900, #212121)
         );
         border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          var(--ct-theme-color-border, var(--ct-color-gray-300, #e0e0e0));
         border-radius: var(
           --ct-theme-border-radius,
-          var(--ct-radius-full, 9999px)
+          var(--ct-border-radius-full, 9999px)
         );
         font-size: 0.8125rem;
         line-height: 1;
         user-select: none;
         transition:
-          background-color var(--ct-theme-animation-duration, 150ms) ease,
-          border-color var(--ct-theme-animation-duration, 150ms) ease;
+          background-color var(--ct-theme-animation-duration, 200ms) ease,
+          border-color var(--ct-theme-animation-duration, 200ms) ease;
         }
 
         .chip.interactive {
@@ -64,7 +64,7 @@ export class CTChip extends BaseElement {
         .chip.interactive:hover {
           background: var(
             --ct-theme-color-surface-hover,
-            var(--ct-color-gray-200, #e5e7eb)
+            var(--ct-color-gray-200, #eeeeee)
           );
         }
 
@@ -103,7 +103,8 @@ export class CTChip extends BaseElement {
         .chip-icon {
           display: flex;
           align-items: center;
-          font-size: 0.875rem;
+          font-size: 0.8125rem;
+          line-height: 1;
         }
 
         .chip-label {
@@ -117,8 +118,8 @@ export class CTChip extends BaseElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 1rem;
-          height: 1rem;
+          width: 0.75rem;
+          height: 0.75rem;
           border-radius: 50%;
           cursor: pointer;
           transition: background-color 0.1s;

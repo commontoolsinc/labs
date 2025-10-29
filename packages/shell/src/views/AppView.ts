@@ -83,7 +83,7 @@ export class XAppView extends BaseView {
     const mod = isMac ? { meta: true } : { ctrl: true };
     this._unsubShortcuts.push(
       this.keyboard.register(
-        { code: "KeyO", ...mod, preventDefault: true },
+        { code: "KeyO", ...mod, shift: true, preventDefault: true },
         () => {
           this.command({ type: "set-show-quick-jump-view", show: true });
         },

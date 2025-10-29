@@ -32,7 +32,8 @@ export type ButtonVariant =
   | "destructive"
   | "outline"
   | "ghost"
-  | "link";
+  | "link"
+  | "pill";
 
 export type ButtonSize = "default" | "sm" | "lg" | "icon";
 
@@ -209,13 +210,29 @@ export class CTButton extends BaseElement {
         }
 
         .button.ghost {
-          color: var(--ct-theme-color-text, var(--ct-color-gray-700, #374151));
+          color: var(
+            --ct-theme-color-text-muted,
+            var(--ct-color-gray-500, #6b7280)
+          );
+          background-color: transparent;
+          border: none;
+          padding: 0;
         }
 
         .button.ghost:hover:not(:disabled) {
+          color: var(--ct-theme-color-text, var(--ct-color-gray-700, #374151));
           background-color: var(
             --ct-theme-color-surface-hover,
             var(--ct-color-gray-100, #f3f4f6)
+          );
+        }
+
+        .button.ghost.icon {
+          width: 1.5rem;
+          height: 1.5rem;
+          border-radius: var(
+            --ct-theme-border-radius,
+            var(--ct-border-radius-sm, 0.25rem)
           );
         }
 
@@ -226,6 +243,31 @@ export class CTButton extends BaseElement {
 
         .button.link:hover:not(:disabled) {
           text-decoration: underline;
+        }
+
+        .button.pill {
+          background: var(
+            --ct-theme-color-surface,
+            var(--ct-color-gray-100, #f3f4f6)
+          );
+          color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+          border: 1px solid
+            var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+          border-radius: var(
+            --ct-theme-border-radius-full,
+            var(--ct-radius-full, 9999px)
+          );
+          height: auto;
+          padding: 0.25rem 0.625rem;
+          font-size: 0.8125rem;
+          line-height: 1;
+        }
+
+        .button.pill:hover:not(:disabled) {
+          background: var(
+            --ct-theme-color-surface-hover,
+            var(--ct-color-gray-200, #e5e7eb)
+          );
         }
       `,
     ];
