@@ -120,7 +120,7 @@ describe("$ref with default support", () => {
       });
     });
 
-    it("should handle boolean false schema (cannot add default)", () => {
+    it("should handle boolean false schema", () => {
       const schema: JSONSchema = {
         $defs: {
           AlwaysFalse: false,
