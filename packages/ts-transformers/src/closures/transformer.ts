@@ -1271,12 +1271,32 @@ function transformMapCallback(
   const captureExpressions = collectCaptures(callback, checker);
 
   // Build map of capture name -> expression
-  const captures = new Map<string, ts.Expression>();
+  const captureEntries: Array<{ name: string; expr: ts.Expression }> = [];
+  const usedNames = new Set<string>(["element", "index", "array", "params"]);
+
   for (const expr of captureExpressions) {
-    const name = getCaptureName(expr);
-    if (name && !captures.has(name)) {
-      captures.set(name, expr);
+    const baseName = getCaptureName(expr);
+    if (!baseName) continue;
+
+    // Skip if an existing entry captures an equivalent expression
+    const existing = captureEntries.find((entry) =>
+      expressionsMatch(expr, entry.expr)
+    );
+    if (existing) continue;
+
+    let candidate = baseName;
+    let counter = 2;
+    while (usedNames.has(candidate)) {
+      candidate = `${baseName}_${counter++}`;
     }
+
+    usedNames.add(candidate);
+    captureEntries.push({ name: candidate, expr });
+  }
+
+  const captures = new Map<string, ts.Expression>();
+  for (const entry of captureEntries) {
+    captures.set(entry.name, entry.expr);
   }
 
   // Build set of captured variable names
