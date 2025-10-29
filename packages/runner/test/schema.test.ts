@@ -1066,7 +1066,18 @@ describe("Schema Support", () => {
       >(
         space,
         "should preserve types through key 1",
-        undefined,
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "object",
+              properties: { label: { type: "string" } },
+              required: ["label"],
+              asCell: true,
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
         tx,
       );
 
