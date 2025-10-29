@@ -121,7 +121,7 @@ export default recipe<OmniboxFABInput>(
                   };`,
               )}
             >
-              <div style="padding: 8px 12px; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
+              <div style="padding: .25rem; border-bottom: 1px solid #f0f0f0; flex-shrink: 0;">
                 {omnibot.ui.attachmentsAndTools}
               </div>
               <div style="flex: 1; overflow-y: auto; min-height: 0;">
@@ -141,16 +141,18 @@ export default recipe<OmniboxFABInput>(
                   !show && msg && count !== dismissedIdx,
               ),
               <div style="margin: .5rem; margin-bottom: 0; padding: 0; flex-shrink: 0; position: relative;">
-                <button
+                <ct-button
+                  variant="ghost"
+                  size="icon"
                   onClick={dismissPeek({
                     peekDismissedIndex,
                     assistantMessageCount,
                   })}
-                  style="position: absolute; top: 0px; right: 0px; background: none; border: none; z-index: 1; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #bbb; padding: 0;"
+                  style="position: absolute; top: 0px; right: 0px; z-index: 1; font-size: 16px;"
                   title="Dismiss"
                 >
                   ×
-                </button>
+                </ct-button>
                 <div
                   onClick={toggle({ value: showHistory })}
                   style="cursor: pointer;"

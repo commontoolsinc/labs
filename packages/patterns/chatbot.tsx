@@ -390,14 +390,15 @@ export default recipe<ChatInput, ChatOutput>(
     );
 
     const attachmentsAndTools = (
-      <ct-hstack gap="normal">
+      <ct-hstack align="center" gap="1">
         <ct-attachments-bar
           attachments={allAttachments}
           removable
           onct-remove={removeAttachment({ allAttachments })}
         />
         <ct-tools-chip tools={flattenedTools} />
-        <button
+        <ct-button
+          variant="pill"
           type="button"
           title="Clear chat"
           onClick={clearChat({
@@ -406,7 +407,7 @@ export default recipe<ChatInput, ChatOutput>(
           })}
         >
           Clear
-        </button>
+        </ct-button>
       </ct-hstack>
     );
 
