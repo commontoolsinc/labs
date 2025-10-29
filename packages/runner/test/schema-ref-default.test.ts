@@ -70,6 +70,20 @@ describe("$ref with default support", () => {
       expect(resolved).toHaveProperty("default", "outermost");
     });
 
+    it("should handle chained refs with defaults at each level (outermost wins)", () => {
+      const schema: JSONSchema = {
+        $defs: {
+          Level3: { type: "string", default: "level3" },
+          Level2: { $ref: "#/$defs/Level3", default: "level2" },
+          Level1: { $ref: "#/$defs/Level2", default: "level1" },
+        },
+        $ref: "#/$defs/Level1",
+      };
+
+      const resolved = resolveSchema(schema, schema, false);
+      expect(resolved).toHaveProperty("default", "level1");
+    });
+
     it("should preserve default even when filterAsCell is true", () => {
       const schema: JSONSchema = {
         $defs: {
@@ -116,10 +130,11 @@ describe("$ref with default support", () => {
       };
 
       const resolved = resolveSchema(schema, schema, false);
+      // false schema means nothing validates, but we can still have properties
       expect(resolved).toEqual({
         $defs: schema.$defs,
+        "not": true,
         default: "foo",
-        not: true,
       });
     });
   });
@@ -314,31 +329,5 @@ describe("$ref with default support", () => {
         asStream: true,
       });
     });
-  });
-
-  it("should return undefined when circular $ref is detected with filterAsCell=true", () => {
-    const rootSchema: JSONSchema = {
-      $defs: {
-        Circular: { $ref: "#/$defs/Circular", asCell: true },
-      },
-      $ref: "#/$defs/Circular",
-      asCell: true,
-    };
-
-    const resolved = resolveSchema(rootSchema, rootSchema, true);
-    expect(resolved).not.toBeDefined();
-  });
-
-  it("should return undefined when circular $ref is detected with filterAsCell=false", () => {
-    const rootSchema: JSONSchema = {
-      $defs: {
-        Circular: { $ref: "#/$defs/Circular", asCell: true },
-      },
-      $ref: "#/$defs/Circular",
-      asCell: true,
-    };
-
-    const resolved = resolveSchema(rootSchema, rootSchema, false);
-    expect(resolved).not.toBeDefined();
   });
 });

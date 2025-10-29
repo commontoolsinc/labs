@@ -357,6 +357,89 @@ export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Ar
     [K in keyof T]: StripCell<T[K]>;
 } : T;
 export type WishKey = `/${string}` | `#${string}`;
+/**
+ * Split a JSON Pointer reference into path segments.
+ *
+ * Examples:
+ * - "#" -> []
+ * - "#/$defs/Address" -> ["$defs", "Address"]
+ * - "#/properties/name" -> ["properties", "name"]
+ *
+ * Note: Does not handle JSON Pointer escaping (~0, ~1) at type level.
+ * Refs with ~ in keys will not work correctly in TypeScript types.
+ */
+type SplitPath<S extends string> = S extends "#" ? [] : S extends `#/${infer Rest}` ? SplitPathSegments<Rest> : never;
+type SplitPathSegments<S extends string> = S extends `${infer First}/${infer Rest}` ? [First, ...SplitPathSegments<Rest>] : [S];
+/**
+ * Navigate through a schema following a path of keys.
+ * Returns never if the path doesn't exist.
+ */
+type NavigatePath<Schema extends JSONSchema, Path extends readonly string[], Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : Path extends readonly [
+    infer First extends string,
+    ...infer Rest extends string[]
+] ? Schema extends Record<string, any> ? First extends keyof Schema ? NavigatePath<Schema[First], Rest, DecrementDepth<Depth>> : never : never : Schema;
+/**
+ * Resolve a $ref string to the target schema.
+ *
+ * Supports:
+ * - "#" (self-reference to root)
+ * - "#/path/to/def" (JSON Pointer within document)
+ *
+ * External refs (URLs) return any.
+ */
+type ResolveRef<RefString extends string, Root extends JSONSchema, Depth extends DepthLevel> = RefString extends "#" ? Root : RefString extends `#/${string}` ? SplitPath<RefString> extends infer Path extends readonly string[] ? NavigatePath<Root, Path, Depth> : never : any;
+/**
+ * Merge two schemas, with left side taking precedence.
+ * Used to apply ref site siblings to resolved target schema.
+ */
+type MergeSchemas<Left extends JSONSchema, Right extends JSONSchema> = Left extends boolean ? Left : Right extends boolean ? Right extends true ? Left : false : {
+    [K in keyof Left | keyof Right]: K extends keyof Left ? Left[K] : K extends keyof Right ? Right[K] : never;
+};
+/**
+ * Merge ref site schema with resolved target, then process with Schema<>.
+ * Implements JSON Schema spec: ref site siblings override target.
+ */
+type MergeRefSiteWithTarget<RefSite extends JSONSchema, Target extends JSONSchema, Root extends JSONSchema, Depth extends DepthLevel> = RefSite extends {
+    $ref: string;
+} ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends infer Merged extends JSONSchema ? Schema<Merged, Root, Depth> : never : never;
+/**
+ * Merge ref site schema with resolved target, then process with SchemaWithoutCell<>.
+ * Same as MergeRefSiteWithTarget but doesn't wrap in Cell/Stream.
+ */
+type MergeRefSiteWithTargetWithoutCell<RefSite extends JSONSchema, Target extends JSONSchema, Root extends JSONSchema, Depth extends DepthLevel> = RefSite extends {
+    $ref: string;
+} ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends infer Merged extends JSONSchema ? SchemaWithoutCell<Merged, Root, Depth> : never : never;
+/**
+ * Convert a JSON Schema to its TypeScript type equivalent.
+ *
+ * Supports:
+ * - Primitive types (string, number, boolean, null)
+ * - Objects with properties (required/optional)
+ * - Arrays with items
+ * - anyOf unions
+ * - $ref resolution (including JSON Pointers)
+ * - asCell/asStream reactive wrappers
+ * - default values (makes properties required)
+ *
+ * $ref Support:
+ * - "#" (self-reference to root schema)
+ * - "#/$defs/Name" (JSON Pointer to definition)
+ * - "#/properties/field" (JSON Pointer to any schema location)
+ * - External refs (http://...) return type `any`
+ *
+ * Default Precedence:
+ * When both ref site and target have `default`, ref site takes precedence
+ * per JSON Schema 2020-12 specification.
+ *
+ * Limitations:
+ * - JSON Pointer escaping (~0, ~1) not supported at type level
+ * - Depth limited to 9 levels to prevent infinite recursion
+ * - Complex allOf/oneOf logic may not match runtime exactly
+ *
+ * @template T - The JSON Schema to convert
+ * @template Root - Root schema for $ref resolution
+ * @template Depth - Recursion depth limit (0-9)
+ */
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
 } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>> : T extends {
@@ -364,8 +447,8 @@ export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth exte
 } ? Stream<Schema<Omit<T, "asStream">, Root, Depth>> : T extends {
     $ref: "#";
 } ? Schema<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : T extends {
-    $ref: string;
-} ? any : T extends {
+    $ref: infer RefStr extends string;
+} ? MergeRefSiteWithTarget<T, ResolveRef<RefStr, Root, DecrementDepth<Depth>>, Root, DecrementDepth<Depth>> : T extends {
     enum: infer E extends readonly any[];
 } ? E[number] : T extends {
     anyOf: infer U extends readonly JSONSchema[];
@@ -427,8 +510,8 @@ export type SchemaWithoutCell<T extends JSONSchema, Root extends JSONSchema = T,
 } ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth> : T extends {
     $ref: "#";
 } ? SchemaWithoutCell<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>> : T extends {
-    $ref: string;
-} ? any : T extends {
+    $ref: infer RefStr extends string;
+} ? MergeRefSiteWithTargetWithoutCell<T, ResolveRef<RefStr, Root, DecrementDepth<Depth>>, Root, DecrementDepth<Depth>> : T extends {
     enum: infer E extends readonly any[];
 } ? E[number] : T extends {
     anyOf: infer U extends readonly JSONSchema[];
