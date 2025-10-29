@@ -27,13 +27,6 @@ console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
 console.log(`API URL: ${API_URL}`);
 
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
-
 // Main test function
 async function runTest() {
   const account = await Identity.fromPassphrase(ANYONE);
@@ -195,8 +188,19 @@ async function runTest() {
 Deno.test({
   name: "array push test",
   fn: async () => {
-    await Promise.race([runTest(), timeoutPromise]);
-    console.log("Test completed successfully within timeout");
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+      console.log("Test completed successfully within timeout");
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   },
   sanitizeResources: false,
   sanitizeOps: false,

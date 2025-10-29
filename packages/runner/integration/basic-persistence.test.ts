@@ -69,13 +69,6 @@ async function test() {
   return [cell1Contents, cell2Contents];
 }
 
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
-
 async function runTest() {
   for (let i: number = 1; i <= 20; i++) {
     const [result1, result2] = await test();
@@ -94,7 +87,18 @@ async function runTest() {
 Deno.test({
   name: "basic persistence test",
   fn: async () => {
-    await Promise.race([runTest(), timeoutPromise]);
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   },
   sanitizeResources: false,
   sanitizeOps: false,

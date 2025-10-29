@@ -59,7 +59,9 @@ function previous(value: number) {
 
 export default recipe<RecipeState, RecipeOutput>("Counter", (state) => {
   const array = derive(state.value, (value: number) => {
-    return new Array(value).fill(0);
+    // Clamp to prevent negative array length
+    const length = Math.max(0, value);
+    return new Array(length).fill(0);
   });
   return {
     [NAME]: str`Simple counter: ${state.value}`,

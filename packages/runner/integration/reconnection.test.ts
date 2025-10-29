@@ -168,94 +168,91 @@ Deno.test({
     // Send test updates and check if subscription still works
     console.log("Sending test updates after disconnection...");
 
-    // Declare timeoutId before intervalId so it's in scope
-    // deno-lint-ignore prefer-const
-    let timeoutId: number;
-
-    const intervalId = setInterval(async () => {
-      try {
-        // Send an update as the second
-        const result = await provider2.send([{
-          uri,
-          value: {
+    // Create a promise that resolves/rejects when test completes
+    await new Promise<void>((resolve, reject) => {
+      const intervalId = setInterval(async () => {
+        try {
+          // Send an update as the second
+          const result = await provider2.send([{
+            uri,
             value: {
-              value: testValue++,
-              timestamp: new Date().toISOString(),
+              value: {
+                value: testValue++,
+                timestamp: new Date().toISOString(),
+              },
             },
-          },
-        }]);
-        console.log(result);
+          }]);
+          console.log(result);
 
-        // Check if we've received updates with value >= 100 (post-reconnection)
-        const postReconnectUpdates1 = updates1.filter((u) => u.value >= 100);
-        const postReconnectUpdates3 = updates3.filter((u) => u.value >= 100);
+          // Check if we've received updates with value >= 100 (post-reconnection)
+          const postReconnectUpdates1 = updates1.filter((u) => u.value >= 100);
+          const postReconnectUpdates3 = updates3.filter((u) => u.value >= 100);
 
-        console.log(
-          `Status - Provider1 post-reconnect updates: ${postReconnectUpdates1.length}, Provider3: ${postReconnectUpdates3.length}`,
-        );
-
-        if (
-          postReconnectUpdates1.length >= 3 && postReconnectUpdates3.length >= 3
-        ) {
           console.log(
-            "SUCCESS: Both providers received updates after reconnection!",
-          );
-          console.log(
-            `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
-          );
-          console.log(
-            `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
+            `Status - Provider1 post-reconnect updates: ${postReconnectUpdates1.length}, Provider3: ${postReconnectUpdates3.length}`,
           );
 
-          clearInterval(intervalId);
-          clearTimeout(timeoutId);
-          storageManager1.close();
-          storageManager2.close();
-          storageManager3.close();
-          return; // Test passed
-        } else if (
-          postReconnectUpdates3.length >= 3 &&
-          postReconnectUpdates1.length === 0
-        ) {
-          console.log(
-            `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
-          );
-          console.log(
-            `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
-          );
+          if (
+            postReconnectUpdates1.length >= 3 &&
+            postReconnectUpdates3.length >= 3
+          ) {
+            console.log(
+              "SUCCESS: Both providers received updates after reconnection!",
+            );
+            console.log(
+              `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
+            );
+            console.log(
+              `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
+            );
 
-          clearInterval(intervalId);
-          clearTimeout(timeoutId);
-          storageManager1.close();
-          storageManager2.close();
-          storageManager3.close();
-          throw new Error(
-            "Provider1 did not receive updates after reconnection",
+            clearInterval(intervalId);
+            clearTimeout(timeoutId);
+            storageManager1.close();
+            storageManager2.close();
+            storageManager3.close();
+            resolve(); // Test passed
+          } else if (
+            postReconnectUpdates3.length >= 3 &&
+            postReconnectUpdates1.length === 0
+          ) {
+            console.log(
+              `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
+            );
+            console.log(
+              `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
+            );
+
+            clearInterval(intervalId);
+            clearTimeout(timeoutId);
+            storageManager1.close();
+            storageManager2.close();
+            storageManager3.close();
+            reject(
+              new Error("Provider1 did not receive updates after reconnection"),
+            );
+          }
+        } catch (error) {
+          console.log(
+            "Error sending update:",
+            error instanceof Error ? error.message : String(error),
           );
         }
-      } catch (error) {
+      }, 1000);
+
+      // Timeout after 30 seconds
+      const timeoutId = setTimeout(() => {
+        console.error("TIMEOUT: Test did not complete within 30 seconds");
         console.log(
-          "Error sending update:",
-          error instanceof Error ? error.message : String(error),
+          `Final status - Provider1: ${updateCount1} updates, Provider3: ${updateCount3} updates`,
         );
-      }
-    }, 1000);
-
-    // Timeout after 30 seconds
-    timeoutId = setTimeout(() => {
-      console.error("TIMEOUT: Test did not complete within 30 seconds");
-      console.log(
-        `Final status - Provider1: ${updateCount1} updates, Provider3: ${updateCount3} updates`,
-      );
-      clearInterval(intervalId);
-      storageManager1.close();
-      storageManager2.close();
-      storageManager3.close();
-      throw new Error("Test did not complete within 30 seconds");
-    }, 30000);
-
-    // Keep the process running until test completes or times out
-    await new Promise(() => {});
+        clearInterval(intervalId);
+        storageManager1.close();
+        storageManager2.close();
+        storageManager3.close();
+        reject(new Error("Test did not complete within 30 seconds"));
+      }, 30000);
+    });
   },
   sanitizeResources: false,
   sanitizeOps: false,

@@ -79,13 +79,6 @@ async function getServerMemoryMB(): Promise<number> {
   return rssKB / 1024; // Convert KB to MB
 }
 
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
-
 // Main test function
 async function runTest() {
   const account = await Identity.fromPassphrase(ANYONE);
@@ -219,8 +212,19 @@ async function runTest() {
 Deno.test({
   name: "derive array leak test",
   fn: async () => {
-    await Promise.race([runTest(), timeoutPromise]);
-    console.log("Test completed successfully");
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+      console.log("Test completed successfully");
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   },
   sanitizeResources: false,
   sanitizeOps: false,

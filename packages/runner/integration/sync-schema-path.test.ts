@@ -129,13 +129,6 @@ async function test() {
   await runtime2.dispose();
 }
 
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
-
 async function runTest() {
   await test();
   console.log("\nDone");
@@ -144,7 +137,18 @@ async function runTest() {
 Deno.test({
   name: "sync schema path test",
   fn: async () => {
-    await Promise.race([runTest(), timeoutPromise]);
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   },
   sanitizeResources: false,
   sanitizeOps: false,
