@@ -117,7 +117,9 @@ describe("Schema Support", () => {
       );
       innerCell.withTx(tx).set({ label: "first" });
 
-      const cell = runtime.getCell(
+      const cell = runtime.getCell<
+        { value: string; current: Cell<{ label: string }> }
+      >(
         space,
         "should support nested sinks 2",
         {
@@ -164,7 +166,7 @@ describe("Schema Support", () => {
       cell.key("current")
         .key("label")
         .sink((value) => {
-          currentByKeyValues.push(value);
+          currentByKeyValues.push(value as unknown as string);
         });
 
       // .get() the currently selected cell
@@ -305,7 +307,9 @@ describe("Schema Support", () => {
       tx.commit();
       tx = runtime.edit();
 
-      const root = docCell.asSchema(schema);
+      const root = docCell.asSchema<
+        { value: string; current: Cell<{ label: string }> }
+      >(schema);
 
       const rootValues: any[] = [];
       const currentValues: any[] = [];
@@ -326,8 +330,8 @@ describe("Schema Support", () => {
 
       // Querying for a value tied to the currently selected sub-document
       const current = root.key("current").key("label");
-      current.sink((value: string) => {
-        currentByKeyValues.push(value);
+      current.sink((value) => {
+        currentByKeyValues.push(value as unknown as string);
       });
 
       // Make sure the schema is correct and it is still anchored at the root
@@ -1033,8 +1037,63 @@ describe("Schema Support", () => {
       const profileCell = userCell.key("profile");
       const value = profileCell.get();
 
+      // Runtime checks
       expect(value.name).toBe("John");
       expect(isCell(value.metadata)).toBe(true);
+
+      // TypeScript type checks - these will fail to compile if types are 'any'
+      type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+      // Check that userCell is NOT any
+      type UserCellIsAny = IsAny<typeof userCell>;
+      const _assertUserCellNotAny: UserCellIsAny extends false ? true : never =
+        true;
+
+      // Check that profileCell is NOT any
+      type ProfileCellIsAny = IsAny<typeof profileCell>;
+      const _assertProfileCellNotAny: ProfileCellIsAny extends false ? true
+        : never = true;
+
+      // Check that value is NOT any
+      type ValueIsAny = IsAny<typeof value>;
+      const _assertValueNotAny: ValueIsAny extends false ? true : never = true;
+    });
+
+    it("should preserve types through key() with explicit Cell types", () => {
+      // Create a cell with explicit nested Cell type (not using Schema<>)
+      const cell = runtime.getCell<
+        { value: string; current: Cell<{ label: string }> }
+      >(
+        space,
+        "should preserve types through key 1",
+        undefined,
+        tx,
+      );
+
+      // Navigate using .key()
+      const currentCell = cell.key("current");
+      const currentValue = currentCell.get();
+      const labelCell = currentValue.key("label");
+      const labelValue = labelCell.get();
+
+      // Type checks - verify types are NOT any
+      type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+      type CurrentCellIsAny = IsAny<typeof currentValue>;
+      const _assertCurrentCellNotAny: CurrentCellIsAny extends false ? true
+        : never = true;
+
+      type LabelCellIsAny = IsAny<typeof labelValue>;
+      const _assertLabelCellNotAny: LabelCellIsAny extends false ? true
+        : never = true;
+
+      // Verify that currentCell is Cell<Cell<{ label: string }>> (nested Cell, not unwrapped)
+      type CurrentCellUnwrapped = typeof currentCell extends Cell<infer U> ? U
+        : never;
+      type CurrentIsCell = CurrentCellUnwrapped extends Cell<any> ? true
+        : false;
+      const _assertCurrentIsNestedCell: CurrentIsCell extends true ? true
+        : never = true;
     });
   });
 

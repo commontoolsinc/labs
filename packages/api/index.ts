@@ -148,17 +148,19 @@ export type KeyResultType<T, K, Wrap extends HKT> = unknown extends K
   : K extends keyof UnwrapCell<T> ? (
       0 extends (1 & T) ? Apply<Wrap, any>
         : UnwrapCell<T>[K] extends never ? Apply<Wrap, any>
-        : T extends BrandedCell<any, any> ? T extends { key(k: K): infer R } ? R
-          : Apply<
-            Wrap,
-            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
-              : UnwrapCell<T>[K]
-          >
-        : UnwrapCell<T>[K] extends BrandedCell<any, any> ? Apply<
-            Wrap,
-            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
-              : never // unreachable branch, here for completeness
-          >
+        : T extends BrandedCell<any, any>
+          ? T extends { key(k: K): infer R }
+            ? 0 extends (1 & R) ? Apply<
+                Wrap,
+                UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
+                  : UnwrapCell<T>[K]
+              >
+              : R
+            : Apply<
+                Wrap,
+                UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
+                  : UnwrapCell<T>[K]
+              >
         : Apply<Wrap, UnwrapCell<T>[K]>
     )
   : Apply<Wrap, any>;
@@ -237,7 +239,7 @@ export interface IOpaquable<T> {
  * interface with internal only API. Uses a second symbol brand to distinguish
  * from core cell brand without any methods.
  */
-export interface AnyCell<T = any> extends BrandedCell<T>, IAnyCell<T> {
+export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
 }
 
 /**
@@ -271,7 +273,7 @@ export interface ICell<T>
     IKeyable<T, AsCell>,
     IResolvable<T, Cell<T>> {}
 
-export interface Cell<T = any> extends BrandedCell<T, "cell">, ICell<T> {}
+export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 
 /**
  * Stream-only cell - can only send events, not read or write.
@@ -866,7 +868,7 @@ export type FetchDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type StreamDataFunction = <T>(
   params: Opaque<{
@@ -874,7 +876,7 @@ export type StreamDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,

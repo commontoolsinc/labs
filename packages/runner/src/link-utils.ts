@@ -55,8 +55,6 @@ export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
  * A type reflecting all possible link formats, including cells themselves.
  */
 export type CellLink =
-  | Cell<any>
-  | Stream<any>
   | SigilLink
   | QueryResultInternals
   | LegacyJSONCellLink // @deprecated
@@ -146,8 +144,6 @@ export function isLink(
   return (
     isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
-    isCell(value) ||
-    isStream(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
@@ -208,8 +204,7 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: AnyCell,
-  base?: AnyCell | NormalizedLink,
+  value: AnyCell<unknown> | Cell<unknown> | Stream<unknown>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
