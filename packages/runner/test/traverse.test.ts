@@ -79,7 +79,7 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const traverser = new SchemaObjectTraverser(tx, {
-      path: [],
+      path: ["value"],
       schemaContext: { schema: true, rootSchema: true },
     }, "did:null:null");
 
