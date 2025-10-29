@@ -404,6 +404,8 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
   ) {
     //obj[key] = value;
   }
+  // TODO: this interface should probably be combined with createObject call
+  // since there's a lot of overlap.
   applyDefault<T>(
     link: NormalizedFullLink,
     value: T,
@@ -414,7 +416,7 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
   // If not, we will actually resolve our links to get to our values.
   createObject<T>(
     link: NormalizedFullLink,
-    value: T[] | Record<string, T>,
+    value: T[] | Record<string, T> | T,
   ): T | undefined {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
@@ -430,7 +432,7 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
         // FIXME: wrong type cast -- Cell<T>
         // TODO: deal with anyOf/oneOf with asCell/asStream
         // TODO:: Figure out if we should purge asCell/asStream from restSchema children
-        console.log("create cell link", link);
+        //console.log("create cell link", link);
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
@@ -462,10 +464,10 @@ export function validateAndTransform(
   link: NormalizedFullLink,
   seen: Array<[string, any]> = [],
 ): any {
-  console.log("Calling VAT with", link);
+  //console.log("Calling VAT with", link);
   const rv = validateAndTransformNew(runtime, tx, link, seen);
   //const rv = validateAndTransformOrig(runtime, tx, link, seen);
-  console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
+  //console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
   return rv;
 }
 

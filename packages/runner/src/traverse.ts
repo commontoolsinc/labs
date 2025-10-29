@@ -1040,7 +1040,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
     } else if (ContextualFlowControl.isFalseSchema(schemaContext.schema)) {
       // This value rejects all objects - just return
       return undefined;
-    } else if (typeof schemaContext.schema !== "object") {
+    } else if (!isObject(schemaContext.schema)) {
       logger.warn(
         () => ["Invalid schema is not an object", schemaContext.schema],
       );
@@ -1048,7 +1048,11 @@ export class SchemaObjectTraverser<T extends JSONValue>
     }
     const schemaObj = schemaContext.schema;
     // FIXME: Need to clean up these casts
-    if (doc.value === null) {
+    if (doc.value === undefined) {
+      // If we have a default, annotate it and return it
+      // Otherwise, return null
+      return this.applyDefault(doc, schemaContext.schema);
+    } else if (doc.value === null) {
       return this.isValidType(schemaObj, "null")
         ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
         : undefined;
@@ -1304,6 +1308,16 @@ export class SchemaObjectTraverser<T extends JSONValue>
       return true;
     }
     return false;
+  }
+
+  private applyDefault(doc: IAttestation, schema: JSONSchema): T {
+    if (isObject(schema) && schema.default !== undefined) {
+      return this.objectCreator.applyDefault(
+        { ...doc.address, space: this.space },
+        schema.default as T,
+      );
+    }
+    return null as T;
   }
 }
 

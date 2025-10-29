@@ -2884,6 +2884,28 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(toOpaqueRef in result).toBe(true);
     });
 
+    it("top level defaults work for cells with undefined value", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          value: { type: "number", default: 10 },
+        },
+        default: { value: 100 },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{ value?: number }>(
+        space,
+        "hook-schema-default",
+        schema,
+        tx,
+      );
+
+      const result = c.get();
+      expect(result.value).toBe(100);
+      expect(toCell in result).toBe(true);
+      expect(toOpaqueRef in result).toBe(true);
+    });
+
     it("should add hooks to default values from schema", () => {
       const schema = {
         type: "object",
