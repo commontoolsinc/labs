@@ -1,6 +1,8 @@
 import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
+import type { Cell } from "@commontools/runner";
+import { isCell } from "@commontools/runner";
 import { fabAnimations } from "./styles.ts";
 
 /**
@@ -210,188 +212,295 @@ export class CTFab extends BaseElement {
             transform: scale(0.5) rotate(90deg);
           }
 
-          /* Panel content */
-          .fab-panel {
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            transform: scale(0.95);
-            pointer-events: none;
-            transition:
-              opacity calc(var(--ct-theme-animation-duration, 300ms) * 0.5) ease,
-              transform calc(var(--ct-theme-animation-duration, 300ms) * 0.5)
-              cubic-bezier(0.34, 1.56, 0.64, 1);
+          /* Preview notification */
+            .preview-notification {
+              position: fixed;
+              bottom: 88px;
+              right: 24px;
+              max-width: 360px;
+              background: none;
+              padding: 0;
+              z-index: 998;
+              animation: slideIn 300ms ease;
             }
 
-            :host([expanded]) .fab-panel {
-              opacity: 1;
-              transform: scale(1);
-              pointer-events: auto;
-              transition-delay: calc(var(--ct-theme-animation-duration, 300ms) * 0.3);
+            @keyframes slideIn {
+              from {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
             }
 
-            :host([collapsing]) .fab-panel {
+            /* Panel content */
+            .fab-panel {
+              width: 100%;
+              height: 100%;
               opacity: 0;
               transform: scale(0.95);
               pointer-events: none;
-              transition-delay: 0s;
-            }
-
-            /* ARIA */
-            .fab[aria-expanded="false"] {
-              cursor: pointer;
-            }
-          `,
-        ];
-
-        static override properties = {
-          expanded: { type: Boolean, reflect: true },
-          variant: { type: String, reflect: true },
-          position: { type: String, reflect: true },
-        };
-
-        /**
-         * Whether the FAB is expanded (controlled by parent)
-         */
-        @property({ type: Boolean, reflect: true })
-        declare expanded: boolean;
-
-        /**
-         * Visual variant
-         */
-        @property({ type: String, reflect: true })
-        declare variant: "default" | "primary";
-
-        /**
-         * Screen position
-         */
-        @property({ type: String, reflect: true })
-        declare position:
-          | "bottom-right"
-          | "bottom-left"
-          | "top-right"
-          | "top-left";
-
-        /**
-         * Internal collapsing state for animation timing
-         */
-        @state()
-        private collapsing = false;
-
-        private collapseTimeout: number | null = null;
-
-        constructor() {
-          super();
-          this.expanded = false;
-          this.variant = "default";
-          this.position = "bottom-right";
-        }
-
-        override connectedCallback() {
-          super.connectedCallback();
-          document.addEventListener("keydown", this._handleKeydown);
-        }
-
-        override disconnectedCallback() {
-          super.disconnectedCallback();
-          document.removeEventListener("keydown", this._handleKeydown);
-          if (this.collapseTimeout !== null) {
-            clearTimeout(this.collapseTimeout);
-          }
-        }
-
-        override updated(changedProperties: Map<string, unknown>) {
-          super.updated(changedProperties);
-
-          if (changedProperties.has("expanded")) {
-            if (!this.expanded && changedProperties.get("expanded") === true) {
-              // Started collapsing
-              this.collapsing = true;
-              this.toggleAttribute("collapsing", true);
-
-              // Clear any existing timeout
-              if (this.collapseTimeout !== null) {
-                clearTimeout(this.collapseTimeout);
+              transition:
+                opacity calc(var(--ct-theme-animation-duration, 300ms) * 0.5) ease,
+                transform calc(var(--ct-theme-animation-duration, 300ms) * 0.5)
+                cubic-bezier(0.34, 1.56, 0.64, 1);
               }
 
-              // Reset collapsing state after animation completes
-              this.collapseTimeout = setTimeout(() => {
+              :host([expanded]) .fab-panel {
+                opacity: 1;
+                transform: scale(1);
+                pointer-events: auto;
+                transition-delay: calc(var(--ct-theme-animation-duration, 300ms) * 0.3);
+              }
+
+              :host([collapsing]) .fab-panel {
+                opacity: 0;
+                transform: scale(0.95);
+                pointer-events: none;
+                transition-delay: 0s;
+              }
+
+              /* ARIA */
+              .fab[aria-expanded="false"] {
+                cursor: pointer;
+              }
+            `,
+          ];
+
+          static override properties = {
+            expanded: { type: Boolean, reflect: true },
+            variant: { type: String, reflect: true },
+            position: { type: String, reflect: true },
+            previewMessage: { type: Object, attribute: false },
+            pending: { type: Boolean, reflect: true },
+          };
+
+          /**
+           * Whether the FAB is expanded (controlled by parent)
+           */
+          @property({ type: Boolean, reflect: true })
+          declare expanded: boolean;
+
+          /**
+           * Visual variant
+           */
+          @property({ type: String, reflect: true })
+          declare variant: "default" | "primary";
+
+          /**
+           * Screen position
+           */
+          @property({ type: String, reflect: true })
+          declare position:
+            | "bottom-right"
+            | "bottom-left"
+            | "top-right"
+            | "top-left";
+
+          /**
+           * Latest message to show as preview notification
+           */
+          @property({ type: Object, attribute: false })
+          declare previewMessage: Cell<string> | string | undefined;
+
+          /**
+           * Whether the FAB is in pending/loading state
+           */
+          @property({ type: Boolean, reflect: true })
+          declare pending: boolean;
+
+          /**
+           * Internal collapsing state for animation timing
+           */
+          @state()
+          private collapsing = false;
+
+          @state()
+          private showPreview = false;
+
+          private collapseTimeout: number | null = null;
+          private _previewUnsubscribe: (() => void) | null = null;
+          private _previewTimeout: number | null = null;
+
+          constructor() {
+            super();
+            this.expanded = false;
+            this.variant = "default";
+            this.position = "bottom-right";
+            this.pending = false;
+          }
+
+          override connectedCallback() {
+            super.connectedCallback();
+            document.addEventListener("keydown", this._handleKeydown);
+          }
+
+          override disconnectedCallback() {
+            super.disconnectedCallback();
+            document.removeEventListener("keydown", this._handleKeydown);
+            if (this.collapseTimeout !== null) {
+              clearTimeout(this.collapseTimeout);
+            }
+            if (this._previewUnsubscribe) {
+              this._previewUnsubscribe();
+              this._previewUnsubscribe = null;
+            }
+            if (this._previewTimeout !== null) {
+              clearTimeout(this._previewTimeout);
+            }
+          }
+
+          override updated(changedProperties: Map<string, unknown>) {
+            super.updated(changedProperties);
+
+            // Handle preview message Cell subscription
+            if (changedProperties.has("previewMessage")) {
+              if (this._previewUnsubscribe) {
+                this._previewUnsubscribe();
+                this._previewUnsubscribe = null;
+              }
+
+              if (this.previewMessage && isCell(this.previewMessage)) {
+                this._previewUnsubscribe = this.previewMessage.sink(() => {
+                  const msg = (this.previewMessage as Cell<string>).get();
+                  if (msg && !this.expanded) {
+                    this._showPreviewNotification();
+                  }
+                });
+              }
+            }
+
+            if (changedProperties.has("expanded")) {
+              if (
+                !this.expanded && changedProperties.get("expanded") === true
+              ) {
+                // Started collapsing
+                this.collapsing = true;
+                this.toggleAttribute("collapsing", true);
+
+                // Clear any existing timeout
+                if (this.collapseTimeout !== null) {
+                  clearTimeout(this.collapseTimeout);
+                }
+
+                // Reset collapsing state after animation completes
+                this.collapseTimeout = setTimeout(() => {
+                  this.collapsing = false;
+                  this.toggleAttribute("collapsing", false);
+                  this.collapseTimeout = null;
+                }, 400) as unknown as number;
+              } else if (this.expanded) {
+                // Expanding - clear collapsing state immediately
                 this.collapsing = false;
                 this.toggleAttribute("collapsing", false);
-                this.collapseTimeout = null;
-              }, 400) as unknown as number;
-            } else if (this.expanded) {
-              // Expanding - clear collapsing state immediately
-              this.collapsing = false;
-              this.toggleAttribute("collapsing", false);
-              if (this.collapseTimeout !== null) {
-                clearTimeout(this.collapseTimeout);
-                this.collapseTimeout = null;
+                if (this.collapseTimeout !== null) {
+                  clearTimeout(this.collapseTimeout);
+                  this.collapseTimeout = null;
+                }
               }
             }
           }
-        }
 
-        private _handleFabClick = (e: MouseEvent) => {
-          // When collapsed, let the click bubble up to parent's onClick handler
-          // When expanded, ignore clicks on the FAB content area
-          if (this.expanded) {
-            // Don't let clicks on expanded content close the FAB
-            e.stopPropagation();
+          private _handleFabClick = (e: MouseEvent) => {
+            // When collapsed, let the click bubble up to parent's onClick handler
+            // When expanded, ignore clicks on the FAB content area
+            if (this.expanded) {
+              // Don't let clicks on expanded content close the FAB
+              e.stopPropagation();
+            }
+          };
+
+          private _handleBackdropClick = (e: MouseEvent) => {
+            if (this.expanded) {
+              e.stopPropagation(); // Prevent event from bubbling to host element's onClick
+              this.emit("ct-fab-backdrop-click");
+            }
+          };
+
+          private _handleKeydown = (e: KeyboardEvent) => {
+            if (e.key === "Escape" && this.expanded) {
+              this.emit("ct-fab-escape");
+            }
+          };
+
+          private _showPreviewNotification() {
+            this.showPreview = true;
+
+            // Clear any existing timeout
+            if (this._previewTimeout !== null) {
+              clearTimeout(this._previewTimeout);
+            }
+
+            // Hide after 5 seconds
+            this._previewTimeout = setTimeout(() => {
+              this.showPreview = false;
+              this._previewTimeout = null;
+            }, 5000) as unknown as number;
           }
-        };
 
-        private _handleBackdropClick = (e: MouseEvent) => {
-          if (this.expanded) {
-            e.stopPropagation(); // Prevent event from bubbling to host element's onClick
-            this.emit("ct-fab-backdrop-click");
-          }
-        };
+          override render() {
+            const previewMsg =
+              this.previewMessage && isCell(this.previewMessage)
+                ? this.previewMessage.get()
+                : this.previewMessage;
 
-        private _handleKeydown = (e: KeyboardEvent) => {
-          if (e.key === "Escape" && this.expanded) {
-            this.emit("ct-fab-escape");
-          }
-        };
-
-        override render() {
-          return html`
-            <!-- Backdrop -->
-            <div
-              class="backdrop ${this.expanded ? "active" : ""}"
-              @click="${this._handleBackdropClick}"
-              part="backdrop"
-            >
-            </div>
-
-            <!-- FAB Container -->
-            <div class="fab-container">
+            return html`
+              <!-- Backdrop -->
               <div
-                class="fab"
-                @click="${this._handleFabClick}"
-                role="button"
-                aria-expanded="${this.expanded}"
-                aria-label="${this.expanded ? "Close" : "Open"}"
-                tabindex="${this.expanded ? "-1" : "0"}"
-                part="fab"
+                class="backdrop ${this.expanded ? "active" : ""}"
+                @click="${this._handleBackdropClick}"
+                part="backdrop"
               >
-                <!-- Icon (collapsed state) -->
-                <div class="fab-icon" part="icon">
-                  <slot name="icon">
-                    <ct-logo width="44" height="44" background-color="transparent" />
-                  </slot>
-                </div>
+              </div>
 
-                <!-- Panel content (expanded state) -->
-                <div class="fab-panel" part="panel">
-                  <slot></slot>
+              <!-- FAB Container -->
+              <div class="fab-container">
+                <div
+                  class="fab"
+                  @click="${this._handleFabClick}"
+                  role="button"
+                  aria-expanded="${this.expanded}"
+                  aria-label="${this.expanded ? "Close" : "Open"}"
+                  tabindex="${this.expanded ? "-1" : "0"}"
+                  part="fab"
+                >
+                  <!-- Icon (collapsed state) -->
+                  <div class="fab-icon" part="icon">
+                    <slot name="icon">
+                      <ct-logo
+                        width="44"
+                        height="44"
+                        background-color="transparent"
+                        ?loading=${this.pending}
+                      />
+                    </slot>
+                  </div>
+
+                  <!-- Panel content (expanded state) -->
+                  <div class="fab-panel" part="panel">
+                    <slot></slot>
+                  </div>
                 </div>
               </div>
-            </div>
-          `;
-        }
-      }
 
-      if (!globalThis.customElements.get("ct-fab")) {
-        globalThis.customElements.define("ct-fab", CTFab);
-      }
+              <!-- Message preview notification -->
+              ${this.showPreview && !this.expanded && previewMsg
+                ? html`
+                  <div class="preview-notification">
+                    <ct-chat-message
+                      role="assistant"
+                      compact
+                      .content="${previewMsg}"
+                    />
+                  </div>
+                `
+                : nothing}
+            `;
+          }
+        }
+
+        if (!globalThis.customElements.get("ct-fab")) {
+          globalThis.customElements.define("ct-fab", CTFab);
+        }

@@ -92,6 +92,8 @@ export default recipe<OmniboxFABInput>(
           expanded={fabExpanded}
           variant="primary"
           position="bottom-right"
+          pending={omnibot.pending}
+          $previewMessage={latestAssistantMessage}
           onct-fab-backdrop-click={closeFab({ fabExpanded })}
           onct-fab-escape={closeFab({ fabExpanded })}
           onClick={toggle({ value: fabExpanded })}
