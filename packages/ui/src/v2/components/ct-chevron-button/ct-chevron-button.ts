@@ -140,6 +140,7 @@ export class CTChevronButton extends BaseElement {
   override render() {
     return html`
       <button
+        type="button"
         class="chevron-button"
         @click="${this._handleClick}"
         aria-label="${this.loading
