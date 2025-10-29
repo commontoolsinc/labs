@@ -127,7 +127,7 @@ describe("Query", () => {
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: [], schemaContext: schemaContext },
+      { path: ["value"], schemaContext: schemaContext },
       "did:null:null",
       tracker,
       schemaTracker,
@@ -148,11 +148,11 @@ describe("Query", () => {
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector2).toEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selector1).toEqual({
-      path: ["employees", "0", "fullName"],
+      path: ["value", "employees", "0", "fullName"],
       schemaContext: {
         schema: schemaContext.schema.properties.name,
         rootSchema: true,
@@ -214,7 +214,7 @@ describe("Query", () => {
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: [], schemaContext: schemaContext },
+      { path: ["value"], schemaContext: schemaContext },
       "did:null:null",
       tracker,
       schemaTracker,
@@ -235,11 +235,11 @@ describe("Query", () => {
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector2).toEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selector1).toEqual({
-      path: ["employees", "0", "name"],
+      path: ["value", "employees", "0", "name"],
       schemaContext: {
         schema: true,
         rootSchema: true,
@@ -294,7 +294,7 @@ describe("Query", () => {
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: [], schemaContext: schemaContext },
+      { path: ["value"], schemaContext: schemaContext },
       "did:null:null",
       tracker,
       schemaTracker,
@@ -309,11 +309,11 @@ describe("Query", () => {
     );
     expect(selectorSet1?.size).toBe(2);
     expect(selectorSet1).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selectorSet1).toContainEqual({
-      path: ["name"],
+      path: ["value", "name"],
       schemaContext: schemaContext,
     });
   });
@@ -401,7 +401,7 @@ describe("Query", () => {
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: [], schemaContext },
+      { path: ["value"], schemaContext },
       "did:null:null",
       tracker,
       schemaTracker,
@@ -426,7 +426,7 @@ describe("Query", () => {
     expect(selectors1).not.toBeUndefined();
     expect(selectors1?.size).toBe(2);
     expect(selectors1).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext,
     });
 
@@ -436,7 +436,7 @@ describe("Query", () => {
     expect(selectors2).not.toBeUndefined();
     expect(selectors2?.size).toBe(2);
     expect(selectors2).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext,
     });
   });
@@ -479,7 +479,7 @@ describe("Query", () => {
 
     const schema = { "type": "string" } as const satisfies JSONSchema;
     const selector = {
-      path: ["employees", "0", "address", "street"],
+      path: ["value", "employees", "0", "address", "street"],
       schemaContext: {
         schema: schema,
         rootSchema: schema,
@@ -522,7 +522,7 @@ describe("Query", () => {
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector1).toEqual({
-      path: ["home", "street"],
+      path: ["value", "home", "street"],
       schemaContext: {
         schema: schema, // {"type": "string"}
         rootSchema: schema,
