@@ -127,9 +127,7 @@ type Apply<F extends HKT, A> = (F & { _A: A })["type"];
  *
  * ### Branded / nested cells
  * If a selected property is itself a branded cell (e.g., `BrandedCell<U>`),
- * the brand is unwrapped so that the return becomes `Wrap<U>` rather than
- * `Wrap<BrandedCell<U>>`. This keeps nested cell layers from accumulating at
- * property boundaries.
+ * the return value is a wrapped branded cell, i.e. `Wrap<BrandedCell<U>>`.
  *
  * ### Key inference
  * Passing a string/number/symbol that is a literal and a member of
