@@ -911,9 +911,8 @@ function createRecipeCallWithParams(
 
   const elementBindingName = elemParam
     ? normalizeBindingName(elemParam.name, factory, usedBindingNames)
-    : maybeReuseIdentifier(
-      factory.createIdentifier("element"),
-      usedBindingNames,
+    : createBindingIdentifier(
+      captureTree.has("element") ? "__ct_element" : "element",
     );
   bindingElements.push(
     factory.createBindingElement(
