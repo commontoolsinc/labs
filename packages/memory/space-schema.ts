@@ -348,18 +348,16 @@ function addToSelection(
 }
 
 // Get the ValueEntry objects for the facts that match our selector
-function getMatchingFacts<Space extends MemorySpace>(
+function* getMatchingFacts<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   factSelector: FactSelector,
 ): Iterable<IAttestation & { cause: CauseString; since: number }> {
-  const results = [];
   for (const fact of selectFacts(session, factSelector)) {
-    results.push({
+    yield {
       value: fact.is,
       address: { id: fact.of, type: fact.the, path: [] },
       cause: fact.cause,
       since: fact.since,
-    });
+    };
   }
-  return results;
 }

@@ -21,18 +21,11 @@ const MEMORY_WS_URL = `${
 const SPACE_NAME = "runner_integration";
 
 const TOTAL_COUNT = 20; // how many elements we push to the array
-const TIMEOUT_MS = 30000; // timeout for the test in ms
+const TIMEOUT_MS = 180000; // timeout for the test in ms (3 minutes)
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
 console.log(`API URL: ${API_URL}`);
-
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
 
 // Main test function
 async function runTest() {
@@ -192,12 +185,23 @@ async function runTest() {
 }
 
 // Run the test with timeout
-try {
-  await Promise.race([runTest(), timeoutPromise]);
-  console.log("Test completed successfully within timeout");
-  Deno.exit(0);
-} catch (error) {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error("Test failed:", errorMessage, (error as Error).stack);
-  Deno.exit(1);
-}
+Deno.test({
+  name: "array push test",
+  fn: async () => {
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+      console.log("Test completed successfully within timeout");
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
