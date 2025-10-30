@@ -45,6 +45,9 @@ export function isOpaqueRefType(
   }
 
   // Primary method: Check CELL_BRAND property
+  // Note: In practice, this almost never succeeds in the transformer because we receive
+  // TypeReference types (references to generic interface declarations like OpaqueCell<T>),
+  // and type.getProperty() doesn't expose properties from generic interface declarations.
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
     // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
@@ -52,7 +55,9 @@ export function isOpaqueRefType(
   }
 
   // Fallback: Check type reference target symbol name
-  // This is needed when CELL_BRAND isn't accessible (e.g., during certain type resolution stages)
+  // This is the workaround for TypeReference types where CELL_BRAND isn't accessible.
+  // We check the symbol name of the interface (e.g., "OpaqueCell", "Cell", "Stream")
+  // instead of trying to read the CELL_BRAND property value.
   if (type.flags & ts.TypeFlags.Object) {
     const objectType = type as ts.ObjectType;
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
