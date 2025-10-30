@@ -22,7 +22,7 @@ export declare const CELL_BRAND: unique symbol;
 export type BrandedCell<T, Brand extends string = string> = {
     [CELL_BRAND]: Brand;
 };
-type IsThisObject = BrandedCell<JSONArray | JSONObject> | BrandedCell<Array<unknown>> | BrandedCell<Array<any>> | BrandedCell<Record<string, unknown | any>> | BrandedCell<unknown> | BrandedCell<any>;
+type IsThisObject = IsThisArray | BrandedCell<JSONObject> | BrandedCell<Record<string, unknown>>;
 type IsThisArray = BrandedCell<JSONArray> | BrandedCell<Array<unknown>> | BrandedCell<Array<any>> | BrandedCell<unknown> | BrandedCell<any>;
 export interface IAnyCell<T> {
 }
