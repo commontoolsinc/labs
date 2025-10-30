@@ -13,7 +13,7 @@ const { API_URL } = env;
 
 const MEMORY_WS_URL = `${
   API_URL.replace("http://", "ws://")
-}/api/storage/memory`;
+}api/storage/memory`;
 const TEST_DOC_ID = "test-reconnection-counter";
 
 Deno.test({
