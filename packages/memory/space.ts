@@ -588,9 +588,6 @@ export const selectFacts = function <Space extends MemorySpace>(
   const stmt = store.prepare(EXPORT);
   try {
     const results = [];
-    // Note: Cannot finalize() in a generator function's finally block because
-    // the finally block runs when the generator returns (immediately), not when
-    // it's exhausted. The statement will be finalized when the store is closed.
     for (
       const row of stmt.iter({
         the: the === SelectAllString ? null : the,
