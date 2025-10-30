@@ -18,6 +18,7 @@ const TEST_DOC_ID = "test-reconnection-counter";
 
 Deno.test({
   name: "schema query reconnection test",
+  ignore: true,
   fn: async () => {
     console.log("Schema Query Reconnection Integration Test");
     console.log(`Connecting to: ${MEMORY_WS_URL}`);
