@@ -364,9 +364,32 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Check if a type is an OpaqueRef type (intersection with OpaqueRefMethods)
+   * Get the CELL_BRAND string value from a type, if it has one.
+   * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
+   */
+  private getCellBrand(type: ts.Type, checker: ts.TypeChecker): string | undefined {
+    // Check for CELL_BRAND property
+    const brandSymbol = type.getProperty("CELL_BRAND");
+    if (brandSymbol && brandSymbol.valueDeclaration) {
+      const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, brandSymbol.valueDeclaration);
+      // The brand type should be a string literal
+      if (brandType.flags & ts.TypeFlags.StringLiteral) {
+        return (brandType as ts.StringLiteralType).value;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Check if a type is an OpaqueRef type (has CELL_BRAND with "opaque" or is intersection with OpaqueCell/OpaqueRefMethods)
    */
   private isOpaqueRefType(type: ts.Type): boolean {
+    // Check for CELL_BRAND property first (most reliable)
+    const brand = this.getCellBrand(type, (type as any).checker);
+    if (brand === "opaque") {
+      return true;
+    }
+
     // OpaqueRef types are intersection types
     if (!(type.flags & ts.TypeFlags.Intersection)) {
       return false;
@@ -379,7 +402,8 @@ export class CommonToolsFormatter implements TypeFormatter {
         if (objectType.objectFlags & ts.ObjectFlags.Reference) {
           const typeRef = objectType as ts.TypeReference;
           const name = typeRef.target?.symbol?.name;
-          if (name === "OpaqueRefMethods") {
+          // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell) names
+          if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
             return true;
           }
         }
@@ -389,7 +413,7 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Extract the type argument T from OpaqueRef<T>
+   * Extract the type argument T from OpaqueRef<T> or OpaqueCell<T>
    */
   private extractOpaqueRefTypeArgument(
     type: ts.Type,
@@ -406,8 +430,9 @@ export class CommonToolsFormatter implements TypeFormatter {
         if (objectType.objectFlags & ts.ObjectFlags.Reference) {
           const typeRef = objectType as ts.TypeReference;
           const name = typeRef.target?.symbol?.name;
-          if (name === "OpaqueRefMethods") {
-            // Found OpaqueRefMethods<T>, extract T
+          // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell, BrandedCell) names
+          if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell" || name === "BrandedCell") {
+            // Found wrapper type with type argument, extract T
             const typeArgs = checker.getTypeArguments(typeRef);
             if (typeArgs && typeArgs.length > 0) {
               return typeArgs[0];
@@ -433,15 +458,17 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
         const typeRef = objectType as ts.TypeReference;
         const name = typeRef.target?.symbol?.name;
-        if (name === "Cell" || name === "Stream" || name === "OpaqueRef") {
-          return { kind: name, typeRef };
+        if (name === "Cell" || name === "Stream" || name === "OpaqueRef" || name === "OpaqueCell") {
+          // OpaqueCell should be treated as OpaqueRef
+          const kind = name === "OpaqueCell" ? "OpaqueRef" : name;
+          return { kind, typeRef };
         }
       }
     }
 
-    // OpaqueRef with literal type arguments becomes an intersection
-    // e.g., OpaqueRef<"initial"> expands to: OpaqueRefMethods<"initial"> & "initial"
-    // We need to detect OpaqueRefMethods to handle this case
+    // OpaqueRef/OpaqueCell with literal type arguments becomes an intersection
+    // e.g., OpaqueRef<"initial"> expands to: OpaqueCell<"initial"> & IOpaqueCell<"initial">
+    // We need to detect these internal types to handle this case
     if (type.flags & ts.TypeFlags.Intersection) {
       const intersectionType = type as ts.IntersectionType;
       for (const constituent of intersectionType.types) {
@@ -450,8 +477,8 @@ export class CommonToolsFormatter implements TypeFormatter {
           if (objectType.objectFlags & ts.ObjectFlags.Reference) {
             const typeRef = objectType as ts.TypeReference;
             const name = typeRef.target?.symbol?.name;
-            // OpaqueRefMethods is the internal type that OpaqueRef expands to
-            if (name === "OpaqueRefMethods") {
+            // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell) internal types
+            if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
               return { kind: "OpaqueRef", typeRef };
             }
           }
