@@ -10,19 +10,104 @@ function getCellBrand(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): string | undefined {
-  // Check for CELL_BRAND property
-  const brandSymbol = type.getProperty("CELL_BRAND");
-  if (brandSymbol) {
-    const brandType = checker.getTypeOfSymbolAtLocation(
-      brandSymbol,
-      brandSymbol.valueDeclaration!,
-    );
-    // The brand type should be a string literal
-    if (brandType.flags & ts.TypeFlags.StringLiteral) {
-      return (brandType as ts.StringLiteralType).value;
+  const brandSymbol = findCellBrandSymbol(type, checker, new Set());
+  if (!brandSymbol) return undefined;
+
+  const declaration =
+    brandSymbol.valueDeclaration ?? brandSymbol.declarations?.[0];
+  if (!declaration) return undefined;
+
+  const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, declaration);
+  if (brandType && (brandType.flags & ts.TypeFlags.StringLiteral)) {
+    return (brandType as ts.StringLiteralType).value;
+  }
+
+  return undefined;
+}
+
+function findCellBrandSymbol(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Type>,
+): ts.Symbol | undefined {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+
+  const direct = getBrandSymbolFromType(type, checker);
+  if (direct) return direct;
+
+  const apparent = checker.getApparentType(type);
+  if (apparent !== type) {
+    const fromApparent = findCellBrandSymbol(apparent, checker, seen);
+    if (fromApparent) return fromApparent;
+  }
+
+  if (type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) {
+    const compound = type as ts.UnionOrIntersectionType;
+    for (const child of compound.types) {
+      const childSymbol = findCellBrandSymbol(child, checker, seen);
+      if (childSymbol) return childSymbol;
+    }
+  }
+
+  if (!(type.flags & ts.TypeFlags.Object)) {
+    return undefined;
+  }
+
+  const objectType = type as ts.ObjectType;
+
+  if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+    const typeRef = objectType as ts.TypeReference;
+    if (typeRef.target) {
+      const fromTarget = findCellBrandSymbol(typeRef.target, checker, seen);
+      if (fromTarget) return fromTarget;
+    }
+  }
+
+  if (objectType.objectFlags & ts.ObjectFlags.ClassOrInterface) {
+    const baseTypes = checker.getBaseTypes(objectType as ts.InterfaceType) ?? [];
+    for (const base of baseTypes) {
+      const fromBase = findCellBrandSymbol(base, checker, seen);
+      if (fromBase) return fromBase;
+    }
+  }
+
+  return undefined;
+}
+
+function getBrandSymbolFromType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  for (const prop of checker.getPropertiesOfType(type)) {
+    if (isCellBrandSymbol(prop)) {
+      return prop;
     }
   }
   return undefined;
+}
+
+function isCellBrandSymbol(symbol: ts.Symbol): boolean {
+  const name = symbol.getName();
+  if (name === "CELL_BRAND" || name.startsWith("__@CELL_BRAND")) {
+    return true;
+  }
+
+  const declarations = symbol.getDeclarations() ?? [];
+  for (const declaration of declarations) {
+    if (
+      (ts.isPropertySignature(declaration) ||
+        ts.isPropertyDeclaration(declaration)) &&
+      ts.isComputedPropertyName(declaration.name)
+    ) {
+      const expr = declaration.name.expression;
+      if (ts.isIdentifier(expr) && expr.text === "CELL_BRAND") {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -47,10 +132,7 @@ export function isOpaqueRefType(
     );
   }
 
-  // Primary method: Check CELL_BRAND property
-  // Note: In practice, this almost never succeeds in the transformer because we receive
-  // TypeReference types (references to generic interface declarations like OpaqueCell<T>),
-  // and type.getProperty() doesn't expose properties from generic interface declarations.
+  // Primary method: look for the CELL_BRAND unique symbol on the type.
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
     // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
@@ -58,39 +140,7 @@ export function isOpaqueRefType(
       .includes(brand);
   }
 
-  // Fallback: Check type reference target symbol name
-  // This is the workaround for TypeReference types where CELL_BRAND isn't accessible.
-  // We check the symbol name of the interface (e.g., "OpaqueCell", "Cell", "Stream")
-  // instead of trying to read the CELL_BRAND property value.
-  if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const typeRef = objectType as ts.TypeReference;
-      if (typeRef.target?.symbol) {
-        return isCellTypeName(typeRef.target.symbol.getName());
-      }
-    }
-  }
-
   return false;
-}
-
-/**
- * Check if a symbol name matches a known cell type interface name
- */
-function isCellTypeName(name: string): boolean {
-  return name === "OpaqueRef" ||
-    name === "OpaqueRefMethods" ||
-    name === "OpaqueRefBase" ||
-    name === "OpaqueCell" ||
-    name === "IOpaqueCell" ||
-    name === "Cell" ||
-    name === "ICell" ||
-    name === "Stream" ||
-    name === "ComparableCell" ||
-    name === "ReadonlyCell" ||
-    name === "WriteonlyCell" ||
-    name === "Opaque";
 }
 
 /**
