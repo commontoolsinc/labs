@@ -18,9 +18,9 @@ export default recipe({
         [UI]: (<div>
         {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value + 1), __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.value + 1), __ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value + 2), "undefined")}
+            } }, ({ state }) => state.value + 2), "undefined")}
       </div>),
     };
 });

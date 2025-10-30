@@ -41,18 +41,18 @@ export default recipe({
         <h3>Ternary with Comparisons</h3>
         <span>{__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count > 10), "High", "Low")}</span>
+            } }, ({ state }) => state.count > 10), "High", "Low")}</span>
         <span>{__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 score: state.score
-            } }, state => state.score >= 90), "A", __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.score >= 90), "A", __ctHelpers.derive({ state: {
                 score: state.score
-            } }, state => state.score >= 80 ? "B" : "C"))}</span>
+            } }, ({ state }) => state.score >= 80 ? "B" : "C"))}</span>
         <span>
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count === 0), "Empty", __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.count === 0), "Empty", __ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count === 1
+            } }, ({ state }) => state.count === 1
             ? "Single"
             : "Multiple"))}
         </span>
@@ -61,14 +61,14 @@ export default recipe({
         <span>
           {__ctHelpers.ifElse(state.isActive, __ctHelpers.derive({ state: {
                 isPremium: state.isPremium
-            } }, state => (state.isPremium ? "Premium Active" : "Regular Active")), "Inactive")}
+            } }, ({ state }) => (state.isPremium ? "Premium Active" : "Regular Active")), "Inactive")}
         </span>
         <span>
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 userType: state.userType
-            } }, state => state.userType === "admin"), "Admin", __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.userType === "admin"), "Admin", __ctHelpers.derive({ state: {
                 userType: state.userType
-            } }, state => state.userType === "user"
+            } }, ({ state }) => state.userType === "user"
             ? "User"
             : "Guest"))}
         </span>
@@ -78,18 +78,18 @@ export default recipe({
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 isActive: state.isActive,
                 hasPermission: state.hasPermission
-            } }, state => state.isActive && state.hasPermission), "Full Access", "Limited Access")}
+            } }, ({ state }) => state.isActive && state.hasPermission), "Full Access", "Limited Access")}
         </span>
         <span>
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count > 0 && state.count < 10), "In Range", "Out of Range")}
+            } }, ({ state }) => state.count > 0 && state.count < 10), "In Range", "Out of Range")}
         </span>
         <span>
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 isPremium: state.isPremium,
                 score: state.score
-            } }, state => state.isPremium || state.score > 100), "Premium Features", "Basic Features")}
+            } }, ({ state }) => state.isPremium || state.score > 100), "Premium Features", "Basic Features")}
         </span>
 
         <h3>IfElse Component</h3>
@@ -97,7 +97,7 @@ export default recipe({
 
         {ifElse(__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count > 5), <ul>
+            } }, ({ state }) => state.count > 5), <ul>
             <li>Many items: {state.count}</li>
           </ul>, <p>Few items: {state.count}</p>)}
       </div>),

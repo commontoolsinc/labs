@@ -49,7 +49,7 @@ export default recipe({
         <ul>
           <li>next number: {__ctHelpers.ifElse(state.value, __ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value + 1), "unknown")}</li>
+            } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),

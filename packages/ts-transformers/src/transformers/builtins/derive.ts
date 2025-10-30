@@ -140,18 +140,23 @@ function createParameterForPlan(
     );
   }
 
-  if (bindings.length === 1) {
-    const sole = bindings[0]!;
-    if (!sole.propertyName && !sole.dotDotDotToken && !sole.initializer) {
-      return factory.createParameterDeclaration(
-        undefined,
-        undefined,
-        sole.name,
-        undefined,
-        undefined,
-        undefined,
-      );
-    }
+  const shouldInlineSoleBinding =
+    bindings.length === 1 &&
+    captureTree.size === 0 &&
+    fallbackEntries.length === 1 &&
+    !bindings[0]!.propertyName &&
+    !bindings[0]!.dotDotDotToken &&
+    !bindings[0]!.initializer;
+
+  if (shouldInlineSoleBinding) {
+    return factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      bindings[0]!.name,
+      undefined,
+      undefined,
+      undefined,
+    );
   }
 
   return factory.createParameterDeclaration(

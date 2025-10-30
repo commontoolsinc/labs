@@ -66,7 +66,7 @@ export default recipe({
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: { [dynamicKey]: val }, params: {} }) => {
                 "use strict";
-                return <span key={val}>{__ctHelpers.derive(val, val => val * 2)}</span>;
+                return <span key={val}>{__ctHelpers.derive(val, ({ val }) => val * 2)}</span>;
             }), {})}
       </div>),
     };

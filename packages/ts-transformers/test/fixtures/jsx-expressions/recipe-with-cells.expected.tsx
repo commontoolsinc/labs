@@ -14,10 +14,10 @@ export default recipe({
         <p>Current value: {cell.value}</p>
         <p>Next value: {__ctHelpers.derive({ cell: {
                 value: cell.value
-            } }, cell => cell.value + 1)}</p>
+            } }, ({ cell }) => cell.value + 1)}</p>
         <p>Double: {__ctHelpers.derive({ cell: {
                 value: cell.value
-            } }, cell => cell.value * 2)}</p>
+            } }, ({ cell }) => cell.value * 2)}</p>
       </div>),
         value: cell.value,
     };

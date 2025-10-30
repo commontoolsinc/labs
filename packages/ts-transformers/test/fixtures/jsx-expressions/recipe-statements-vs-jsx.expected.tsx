@@ -60,19 +60,19 @@ export default recipe({
           <br />
           Next number: {__ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value + 1)}
+            } }, ({ state }) => state.value + 1)}
           <br />
           Previous: {__ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value - 1)}
+            } }, ({ state }) => state.value - 1)}
           <br />
           Doubled: {__ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value * 2)}
+            } }, ({ state }) => state.value * 2)}
           <br />
           Status: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 value: state.value
-            } }, state => state.value > 10), "High", "Low")}
+            } }, ({ state }) => state.value > 10), "High", "Low")}
         </p>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),

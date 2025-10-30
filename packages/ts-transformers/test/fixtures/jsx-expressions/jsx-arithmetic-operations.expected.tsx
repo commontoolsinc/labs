@@ -29,52 +29,52 @@ export default recipe({
         <h3>Basic Arithmetic</h3>
         <p>Count + 1: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count + 1)}</p>
+            } }, ({ state }) => state.count + 1)}</p>
         <p>Count - 1: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count - 1)}</p>
+            } }, ({ state }) => state.count - 1)}</p>
         <p>Count * 2: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count * 2)}</p>
+            } }, ({ state }) => state.count * 2)}</p>
         <p>Price / 2: {__ctHelpers.derive({ state: {
                 price: state.price
-            } }, state => state.price / 2)}</p>
+            } }, ({ state }) => state.price / 2)}</p>
         <p>Count % 3: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count % 3)}</p>
+            } }, ({ state }) => state.count % 3)}</p>
 
         <h3>Complex Expressions</h3>
         <p>Discounted Price: {__ctHelpers.derive({ state: {
                 price: state.price,
                 discount: state.discount
-            } }, state => state.price - (state.price * state.discount))}</p>
+            } }, ({ state }) => state.price - (state.price * state.discount))}</p>
         <p>Total: {__ctHelpers.derive({ state: {
                 price: state.price,
                 quantity: state.quantity
-            } }, state => state.price * state.quantity)}</p>
+            } }, ({ state }) => state.price * state.quantity)}</p>
         <p>With Tax (8%): {__ctHelpers.derive({ state: {
                 price: state.price,
                 quantity: state.quantity
-            } }, state => (state.price * state.quantity) * 1.08)}</p>
+            } }, ({ state }) => (state.price * state.quantity) * 1.08)}</p>
         <p>
           Complex: {__ctHelpers.derive({ state: {
                 count: state.count,
                 quantity: state.quantity,
                 price: state.price,
                 discount: state.discount
-            } }, state => (state.count + state.quantity) * state.price -
+            } }, ({ state }) => (state.count + state.quantity) * state.price -
             (state.price * state.discount))}
         </p>
 
         <h3>Multiple Same Ref</h3>
         <p>Count³: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => state.count * state.count * state.count)}</p>
+            } }, ({ state }) => state.count * state.count * state.count)}</p>
         <p>Price Range: ${__ctHelpers.derive({ state: {
                 price: state.price
-            } }, state => state.price - 10)} - ${__ctHelpers.derive({ state: {
+            } }, ({ state }) => state.price - 10)} - ${__ctHelpers.derive({ state: {
                 price: state.price
-            } }, state => state.price + 10)}</p>
+            } }, ({ state }) => state.price + 10)}</p>
       </div>),
     };
 });

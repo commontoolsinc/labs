@@ -47,7 +47,7 @@ export default recipe({
         {/* Method chain: filter then map, both with captures */}
         {__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items
+            } }, ({ state }) => state.items
             .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",

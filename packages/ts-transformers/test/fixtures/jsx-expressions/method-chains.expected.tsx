@@ -109,7 +109,7 @@ export default recipe({
         {/* Simple chain */}
         <p>Trimmed lower: {__ctHelpers.derive({ state: {
                 text: state.text
-            } }, state => state.text.trim().toLowerCase())}</p>
+            } }, ({ state }) => state.text.trim().toLowerCase())}</p>
 
         {/* Chain with reactive argument */}
         <p>
@@ -117,7 +117,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 text: state.text,
                 searchTerm: state.searchTerm
-            } }, state => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()))}
+            } }, ({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()))}
         </p>
 
         {/* Longer chain */}
@@ -125,7 +125,7 @@ export default recipe({
           Processed:{" "}
           {__ctHelpers.derive({ state: {
                 text: state.text
-            } }, state => state.text.trim().toLowerCase().replace("old", "new").toUpperCase())}
+            } }, ({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase())}
         </p>
 
         <h3>Array Method Chains</h3>
@@ -135,7 +135,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, state => state.items.filter((x) => x > state.threshold).length)}
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}
         </p>
 
         {/* Filter then map */}
@@ -143,7 +143,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, state => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
@@ -188,7 +188,7 @@ export default recipe({
                 items: state.items,
                 start: state.start,
                 end: state.end
-            } }, state => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
+            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
@@ -198,7 +198,7 @@ export default recipe({
                 items: state.items,
                 start: state.start,
                 end: state.end
-            } }, state => state.items.slice(state.start, state.end).join(", "))}
+            } }, ({ state }) => state.items.slice(state.start, state.end).join(", "))}
         </p>
 
         {/* String methods with reactive args */}
@@ -207,7 +207,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 names: state.names,
                 prefix: state.prefix
-            } }, state => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
+            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}
@@ -215,7 +215,7 @@ export default recipe({
           First match: {__ctHelpers.derive({ state: {
                 names: state.names,
                 searchTerm: state.searchTerm
-            } }, state => state.names.find((n) => n.includes(state.searchTerm)))}
+            } }, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)))}
         </p>
 
         <h3>Complex Method Combinations</h3>
@@ -234,7 +234,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<li>{__ctHelpers.derive(name, name => name.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<li>{__ctHelpers.derive(name, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
         </ul>
 
         {/* Reduce with reactive accumulator */}
@@ -242,7 +242,7 @@ export default recipe({
           Total with discount: {__ctHelpers.derive({ state: {
                 prices: state.prices,
                 discount: state.discount
-            } }, state => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
+            } }, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
         </p>
 
         {/* Method result used in computation */}
@@ -251,7 +251,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 items: state.items,
                 factor: state.factor
-            } }, state => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
+            } }, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
             state.factor)}
         </p>
 
@@ -261,7 +261,7 @@ export default recipe({
           Formatted price: {__ctHelpers.derive({ state: {
                 prices: state.prices,
                 discount: state.discount
-            } }, state => (state.prices[0] * (1 - state.discount)).toFixed(2))}
+            } }, ({ state }) => (state.prices[0] * (1 - state.discount)).toFixed(2))}
         </p>
 
         {/* Method on conditional result */}
@@ -270,7 +270,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 text: state.text,
                 prefix: state.prefix
-            } }, state => (state.text.length > 10 ? state.text : state.prefix).trim())}
+            } }, ({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim())}
         </p>
 
         {/* Method chain on computed value */}
@@ -279,7 +279,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 text: state.text,
                 prefix: state.prefix
-            } }, state => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
+            } }, ({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
             .join("-"))}
         </p>
 
@@ -290,7 +290,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 users: state.users,
                 minAge: state.minAge
-            } }, state => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
+            } }, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
         </p>
 
         {/* Map with conditional logic */}
@@ -322,9 +322,9 @@ export default recipe({
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse(u.active, __ctHelpers.derive({ u: {
                     name: u.name
-                } }, u => u.name.toUpperCase()), __ctHelpers.derive({ u: {
+                } }, ({ u }) => u.name.toUpperCase()), __ctHelpers.derive({ u: {
                     name: u.name
-                } }, u => u.name.toLowerCase()))}</li>)), {})}
+                } }, ({ u }) => u.name.toLowerCase()))}</li>)), {})}
         </ul>
 
         {/* Some/every with reactive predicates */}
@@ -333,11 +333,11 @@ export default recipe({
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 users: state.users,
                 minAge: state.minAge
-            } }, state => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
+            } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
         </p>
         <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 users: state.users
-            } }, state => state.users.every((u) => u.active)), "Yes", "No")}</p>
+            } }, ({ state }) => state.users.every((u) => u.active)), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
         {/* Method result in arithmetic */}
@@ -345,7 +345,7 @@ export default recipe({
           Length sum: {__ctHelpers.derive({ state: {
                 text: state.text,
                 prefix: state.prefix
-            } }, state => state.text.trim().length + state.prefix.trim().length)}
+            } }, ({ state }) => state.text.trim().length + state.prefix.trim().length)}
         </p>
 
         {/* Method result in comparison */}
@@ -353,14 +353,14 @@ export default recipe({
           Is long: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 text: state.text,
                 threshold: state.threshold
-            } }, state => state.text.trim().length > state.threshold), "Yes", "No")}
+            } }, ({ state }) => state.text.trim().length > state.threshold), "Yes", "No")}
         </p>
 
         {/* Multiple method results combined */}
         <p>Joined: {__ctHelpers.derive({ state: {
                 words: state.words,
                 separator: state.separator
-            } }, state => state.words.join(state.separator).toUpperCase())}</p>
+            } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
       </div>),
     };
 });

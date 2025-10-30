@@ -44,19 +44,19 @@ export default recipe({
         <p>Item: {__ctHelpers.derive({ state: {
                 items: state.items,
                 index: state.index
-            } }, state => state.items[state.index])}</p>
+            } }, ({ state }) => state.items[state.index])}</p>
 
         {/* Computed index */}
         <p>Last: {__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items[state.items.length - 1])}</p>
+            } }, ({ state }) => state.items[state.items.length - 1])}</p>
 
         {/* Double indexing */}
         <p>Matrix: {__ctHelpers.derive({ state: {
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
-            } }, state => state.matrix[state.row][state.col])}</p>
+            } }, ({ state }) => state.matrix[state.row][state.col])}</p>
       </div>),
     };
 });

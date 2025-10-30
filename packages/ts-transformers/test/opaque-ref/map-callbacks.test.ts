@@ -61,7 +61,7 @@ describe("OpaqueRef map callbacks", () => {
     // Index parameter still gets derive wrapping for the arithmetic operation
     assertStringIncludes(
       output,
-      "__ctHelpers.derive(index, index => index + 1)",
+      "__ctHelpers.derive(index, ({ index }) => index + 1)",
     );
     // element[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
@@ -71,7 +71,7 @@ describe("OpaqueRef map callbacks", () => {
     // ifElse still gets derive for the negation and preserves callback body
     assertStringIncludes(
       output,
-      "state => !state.charms.length",
+      "({ state }) => !state.charms.length",
     );
   });
 });

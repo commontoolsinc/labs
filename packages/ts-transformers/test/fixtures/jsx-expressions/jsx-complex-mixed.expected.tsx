@@ -63,7 +63,7 @@ export default recipe({
           {__ctHelpers.derive({ state: {
                 items: state.items,
                 filter: state.filter
-            } }, state => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -155,28 +155,28 @@ export default recipe({
         <p>Item count: {state.items.length}</p>
         <p>Active items: {__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items.filter((i) => i.active).length)}</p>
+            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({ state: {
                 discount: state.discount
-            } }, state => state.discount * 100)}%</p>
+            } }, ({ state }) => state.discount * 100)}%</p>
         <p>Tax percent: {__ctHelpers.derive({ state: {
                 taxRate: state.taxRate
-            } }, state => state.taxRate * 100)}%</p>
+            } }, ({ state }) => state.taxRate * 100)}%</p>
 
         <h3>Array Predicates</h3>
         <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items.every((i) => i.active)), "Yes", "No")}</p>
+            } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
         <p>Any active: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items.some((i) => i.active)), "Yes", "No")}</p>
+            } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items.some((i) => i.price > 100)), "Yes", "No")}
+            } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
@@ -184,7 +184,7 @@ export default recipe({
                 filter: {
                     length: state.filter.length
                 }
-            } }, state => state.filter.length > 0)} data-discount={state.discount}>
+            } }, ({ state }) => state.filter.length > 0)} data-discount={state.discount}>
           Object attributes
         </div>
       </div>),

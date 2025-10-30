@@ -35,53 +35,53 @@ export default recipe({
                 title: state.title,
                 firstName: state.firstName,
                 lastName: state.lastName
-            } }, state => state.title + ": " + state.firstName + " " + state.lastName)}</h1>
+            } }, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName)}</h1>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName,
                 lastName: state.lastName
-            } }, state => state.firstName + state.lastName)}</p>
+            } }, ({ state }) => state.firstName + state.lastName)}</p>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName
-            } }, state => "Hello, " + state.firstName + "!")}</p>
+            } }, ({ state }) => "Hello, " + state.firstName + "!")}</p>
 
         <h3>Template Literals</h3>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName
-            } }, state => `Welcome, ${state.firstName}!`)}</p>
+            } }, ({ state }) => `Welcome, ${state.firstName}!`)}</p>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName,
                 lastName: state.lastName
-            } }, state => `Full name: ${state.firstName} ${state.lastName}`)}</p>
+            } }, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`)}</p>
         <p>{__ctHelpers.derive({ state: {
                 title: state.title,
                 firstName: state.firstName,
                 lastName: state.lastName
-            } }, state => `${state.title}: ${state.firstName} ${state.lastName}`)}</p>
+            } }, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`)}</p>
 
         <h3>String Methods</h3>
         <p>Uppercase: {__ctHelpers.derive({ state: {
                 firstName: state.firstName
-            } }, state => state.firstName.toUpperCase())}</p>
+            } }, ({ state }) => state.firstName.toUpperCase())}</p>
         <p>Lowercase: {__ctHelpers.derive({ state: {
                 title: state.title
-            } }, state => state.title.toLowerCase())}</p>
+            } }, ({ state }) => state.title.toLowerCase())}</p>
         <p>Length: {state.message.length}</p>
         <p>Substring: {__ctHelpers.derive({ state: {
                 message: state.message
-            } }, state => state.message.substring(0, 5))}</p>
+            } }, ({ state }) => state.message.substring(0, 5))}</p>
 
         <h3>Mixed String and Number</h3>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName,
                 count: state.count
-            } }, state => state.firstName + " has " + state.count + " items")}</p>
+            } }, ({ state }) => state.firstName + " has " + state.count + " items")}</p>
         <p>{__ctHelpers.derive({ state: {
                 firstName: state.firstName,
                 count: state.count
-            } }, state => `${state.firstName} has ${state.count} items`)}</p>
+            } }, ({ state }) => `${state.firstName} has ${state.count} items`)}</p>
         <p>Count as string: {__ctHelpers.derive({ state: {
                 count: state.count
-            } }, state => "Count: " + state.count)}</p>
+            } }, ({ state }) => "Count: " + state.count)}</p>
       </div>),
     };
 });

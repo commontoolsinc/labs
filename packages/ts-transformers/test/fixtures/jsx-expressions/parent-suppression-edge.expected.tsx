@@ -335,7 +335,7 @@ export default recipe({
                         bio: state.user.profile.bio
                     }
                 }
-            } }, state => state.user.name + " from " + state.user.profile.location + " - " +
+            } }, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
             state.user.profile.bio)}
         </p>
 
@@ -345,12 +345,12 @@ export default recipe({
                 user: {
                     age: state.user.age
                 }
-            } }, state => state.user.age * 12)} months, or{" "}
+            } }, ({ state }) => state.user.age * 12)} months, or{" "}
           {__ctHelpers.derive({ state: {
                 user: {
                     age: state.user.age
                 }
-            } }, state => state.user.age * 365)} days
+            } }, ({ state }) => state.user.age * 365)} days
         </p>
 
         <h3>Deeply Nested Property Chains</h3>
@@ -422,12 +422,12 @@ export default recipe({
                         theme: state.user.settings.theme
                     }
                 }
-            } }, state => state.user.name + " has notifications on with " +
+            } }, ({ state }) => state.user.name + " has notifications on with " +
             state.user.settings.theme + " theme"), __ctHelpers.derive({ state: {
                 user: {
                     name: state.user.name
                 }
-            } }, state => state.user.name + " has notifications off"))}
+            } }, ({ state }) => state.user.name + " has notifications off"))}
         </p>
 
         {/* Computed expression with shared base */}
@@ -442,7 +442,7 @@ export default recipe({
                         }
                     }
                 }
-            } }, state => state.config.theme.spacing.small +
+            } }, ({ state }) => state.config.theme.spacing.small +
             state.config.theme.spacing.medium +
             state.config.theme.spacing.large)} total
         </p>
@@ -457,7 +457,7 @@ export default recipe({
                         animations: state.config.features.animations
                     }
                 }
-            } }, state => state.config.features.darkMode && state.config.features.animations), "Full features", "Limited features")}
+            } }, ({ state }) => state.config.features.darkMode && state.config.features.animations), "Full features", "Limited features")}
         </p>
 
         <h3>Method Calls on Shared Bases</h3>
@@ -467,12 +467,12 @@ export default recipe({
                 user: {
                     name: state.user.name
                 }
-            } }, state => state.user.name.toUpperCase())} -{" "}
+            } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
           {__ctHelpers.derive({ state: {
                 user: {
                     email: state.user.email
                 }
-            } }, state => state.user.email.toLowerCase())}
+            } }, ({ state }) => state.user.email.toLowerCase())}
         </p>
 
         {/* Property access and method calls mixed */}

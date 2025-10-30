@@ -12,7 +12,7 @@ export default recipe("MapNestedConditional", (_state) => {
             {items.map((item) => (<div>
                 {__ctHelpers.derive({ item: {
                     name: item.name
-                } }, item => item.name && <span>{item.name}</span>)}
+                } }, ({ item }) => item.name && <span>{item.name}</span>)}
               </div>))}
           </div>))}
       </div>),

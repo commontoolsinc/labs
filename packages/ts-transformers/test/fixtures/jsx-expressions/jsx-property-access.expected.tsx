@@ -154,13 +154,13 @@ export default recipe({
                 user: {
                     age: state.user.age
                 }
-            } }, state => state.user.age + 1)}</p>
+            } }, ({ state }) => state.user.age + 1)}</p>
         <p>Name length: {state.user.name.length}</p>
         <p>Uppercase name: {__ctHelpers.derive({ state: {
                 user: {
                     name: state.user.name
                 }
-            } }, state => state.user.name.toUpperCase())}</p>
+            } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
           Location includes city:{" "}
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
@@ -169,22 +169,22 @@ export default recipe({
                         location: state.user.profile.location
                     }
                 }
-            } }, state => state.user.profile.location.includes("City")), "Yes", "No")}
+            } }, ({ state }) => state.user.profile.location.includes("City")), "Yes", "No")}
         </p>
 
         <h3>Array Element Access</h3>
         <p>Item at index: {__ctHelpers.derive({ state: {
                 items: state.items,
                 index: state.index
-            } }, state => state.items[state.index])}</p>
+            } }, ({ state }) => state.items[state.index])}</p>
         <p>First item: {state.items[0]}</p>
         <p>Last item: {__ctHelpers.derive({ state: {
                 items: state.items
-            } }, state => state.items[state.items.length - 1])}</p>
+            } }, ({ state }) => state.items[state.items.length - 1])}</p>
         <p>Number at index: {__ctHelpers.derive({ state: {
                 numbers: state.numbers,
                 index: state.index
-            } }, state => state.numbers[state.index])}</p>
+            } }, ({ state }) => state.numbers[state.index])}</p>
 
         <h3>Config Access with Styles</h3>
         <p style={{
@@ -195,7 +195,7 @@ export default recipe({
                             fontSize: state.config.theme.fontSize
                         }
                     }
-                } }, state => state.config.theme.fontSize + "px"),
+                } }, ({ state }) => state.config.theme.fontSize + "px"),
         }}>
           Styled text
         </p>
@@ -214,14 +214,14 @@ export default recipe({
                         location: state.user.profile.location
                     }
                 }
-            } }, state => state.user.name + " from " + state.user.profile.location)}</p>
+            } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
         <p>Font size + 2: {__ctHelpers.derive({ state: {
                 config: {
                     theme: {
                         fontSize: state.config.theme.fontSize
                     }
                 }
-            } }, state => state.config.theme.fontSize + 2)}px</p>
+            } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
         <p>
           Has beta and dark mode:{" "}
           {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
@@ -231,7 +231,7 @@ export default recipe({
                         darkMode: state.config.features.darkMode
                     }
                 }
-            } }, state => state.config.features.beta && state.config.features.darkMode), "Yes", "No")}
+            } }, ({ state }) => state.config.features.beta && state.config.features.darkMode), "Yes", "No")}
         </p>
       </div>),
     };
