@@ -1,19 +1,22 @@
 import ts from "typescript";
-import {
-  resolvesToCommonToolsSymbol,
-  symbolDeclaresCommonToolsDefault,
-} from "../../core/mod.ts";
+import { symbolDeclaresCommonToolsDefault } from "../../core/mod.ts";
 import { getMemberSymbol } from "../../ast/mod.ts";
 
 /**
  * Get the CELL_BRAND string value from a type, if it has one.
  * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
  */
-function getCellBrand(type: ts.Type, checker: ts.TypeChecker): string | undefined {
+function getCellBrand(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): string | undefined {
   // Check for CELL_BRAND property
   const brandSymbol = type.getProperty("CELL_BRAND");
   if (brandSymbol) {
-    const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, brandSymbol.valueDeclaration!);
+    const brandType = checker.getTypeOfSymbolAtLocation(
+      brandSymbol,
+      brandSymbol.valueDeclaration!,
+    );
     // The brand type should be a string literal
     if (brandType.flags & ts.TypeFlags.StringLiteral) {
       return (brandType as ts.StringLiteralType).value;
@@ -51,7 +54,8 @@ export function isOpaqueRefType(
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
     // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
-    return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"].includes(brand);
+    return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"]
+      .includes(brand);
   }
 
   // Fallback: Check type reference target symbol name
@@ -94,7 +98,10 @@ function isCellTypeName(name: string): boolean {
  * Maps other cell types to their logical category.
  * Returns undefined if not a cell type.
  */
-export function getCellKind(type: ts.Type, checker: ts.TypeChecker): "opaque" | "cell" | "stream" | undefined {
+export function getCellKind(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): "opaque" | "cell" | "stream" | undefined {
   const brand = getCellBrand(type, checker);
   if (brand === undefined) return undefined;
 
