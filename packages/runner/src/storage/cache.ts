@@ -1080,7 +1080,10 @@ export class Replica {
       this.heap.merge(
         revisions,
         Replica.put,
-        (revision) => revision === undefined || !resolved.has(revision),
+        (revision) => {
+          const isCurrent = current.some((c) => c === revision);
+          return revision === undefined || !resolved.has(revision) || isCurrent;
+        },
       );
 
       // This is mostly redundant, since any current Fact isn't pending, but
@@ -1123,7 +1126,10 @@ export class Replica {
     this.heap.merge(
       revisions,
       Replica.put,
-      (state) => state === undefined || !resolved.has(state),
+      (state) => {
+        const isCurrent = current.some((c) => c === state);
+        return state === undefined || !resolved.has(state) || isCurrent;
+      },
     );
 
     this.subscription.next({

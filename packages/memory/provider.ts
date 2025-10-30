@@ -494,46 +494,47 @@ class MemoryProviderSession<
     // Eventually, we should support multiple spaces, but currently the since handling is per-space
     // Our websockets are also per-space, so there's larger issues involved.
     for (const [id, subscription] of this.schemaChannels) {
-      if (
-        Subscription.match(transaction, subscription.watchedObjects)
-      ) {
-        // Re-run our original query, but not as a subscription
-        const newArgs = { ...subscription.invocation.args, subscribe: false };
-        const newInvocation = { ...subscription.invocation, args: newArgs };
-        // We need to bypass the perform queue to avoid a deadlock
-        const result = await Memory.querySchema(
-          this.memory as Memory.Memory,
-          newInvocation,
-        );
-        if (result.error) {
-          console.warn("Encountered querySchema error", result.error);
-          continue;
-        }
-        const factSelection = result.ok![space];
-        const factVersions = [...FactModule.iterate(factSelection)];
-        const includedFacts = new Map(
-          factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
-        );
-        const since = factVersions.reduce(
-          (acc, cur, _i) => cur.since > acc ? cur.since : acc,
-          -1,
-        );
-        // We only need to include the facts that are newer than our query
-        const newFacts = includedFacts.entries().filter((
-          [address, factVersion],
-        ) =>
-          factVersion.since > subscription.since ||
-          !subscription.watchedObjects.has(address)
-        );
-        for (const [address, factVersion] of newFacts) {
-          schemaMatches.set(address, factVersion);
-        }
-        // Update our subscription
-        subscription.watchedObjects = new Set(includedFacts.keys());
-        subscription.since = since;
-        lastId = id;
-        maxSince = since > maxSince ? since : maxSince;
+      // For schema subscriptions, we always need to re-run the query to see if
+      // new facts match the schema, even if watchedObjects is empty (fresh database).
+      // This ensures that when a new fact is committed, all schema subscriptions
+      // are checked to see if they match, regardless of what was previously watched.
+      // Re-run our original query, but not as a subscription
+      const newArgs = { ...subscription.invocation.args, subscribe: false };
+      const newInvocation = { ...subscription.invocation, args: newArgs };
+      // We need to bypass the perform queue to avoid a deadlock
+      const result = await Memory.querySchema(
+        this.memory as Memory.Memory,
+        newInvocation,
+      );
+      if (result.error) {
+        console.warn("Encountered querySchema error", result.error);
+        continue;
       }
+      const factSelection = result.ok![space];
+      const factVersions = [...FactModule.iterate(factSelection)];
+      const includedFacts = new Map(
+        factVersions.map((fv) => [this.formatAddress(space, fv), fv]),
+      );
+      const since = factVersions.reduce(
+        (acc, cur, _i) => cur.since > acc ? cur.since : acc,
+        -1,
+      );
+      // We only need to include the facts that are newer than our query
+      const newFacts = includedFacts.entries().filter((
+        [address, factVersion],
+      ) =>
+        factVersion.since > subscription.since ||
+        !subscription.watchedObjects.has(address)
+      );
+      const newFactsArray = Array.from(newFacts);
+      for (const [address, factVersion] of newFactsArray) {
+        schemaMatches.set(address, factVersion);
+      }
+      // Update our subscription
+      subscription.watchedObjects = new Set(includedFacts.keys());
+      subscription.since = since;
+      lastId = id;
+      maxSince = since > maxSince ? since : maxSince;
     }
     return [lastId, maxSince, [...schemaMatches.values()]];
   }
