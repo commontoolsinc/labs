@@ -414,24 +414,29 @@ const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: MIME; of: URI },
 ): Revision<Fact> | null => {
-  const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
-  if (row) {
-    const revision: Revision<Fact> = {
-      the,
-      of,
-      cause: row.cause
-        ? (fromString(row.cause) as Reference<Assertion>)
-        : refer(unclaimed({ the, of })),
-      since: row.since,
-    };
+  const stmt = store.prepare(EXPORT);
+  try {
+    const row = stmt.get({ the, of }) as StateRow | undefined;
+    if (row) {
+      const revision: Revision<Fact> = {
+        the,
+        of,
+        cause: row.cause
+          ? (fromString(row.cause) as Reference<Assertion>)
+          : refer(unclaimed({ the, of })),
+        since: row.since,
+      };
 
-    if (row.is) {
-      revision.is = JSON.parse(row.is);
+      if (row.is) {
+        revision.is = JSON.parse(row.is);
+      }
+
+      return revision;
+    } else {
+      return null;
     }
-
-    return revision;
-  } else {
-    return null;
+  } finally {
+    stmt.finalize();
   }
 };
 
@@ -457,20 +462,25 @@ const _causeChain = <Space extends MemorySpace>(
   excludeFact: string | undefined,
 ): Revision<Fact>[] => {
   const { store } = session;
-  const rows = store.prepare(CAUSE_CHAIN).all({ of, the }) as CauseRow[];
-  const revisions = [];
-  if (rows && rows.length) {
-    for (const result of rows) {
-      if (result.fact === excludeFact) {
-        continue;
-      }
-      const revision = getFact(session, { fact: result.fact });
-      if (revision) {
-        revisions.push(revision);
+  const stmt = store.prepare(CAUSE_CHAIN);
+  try {
+    const rows = stmt.all({ of, the }) as CauseRow[];
+    const revisions = [];
+    if (rows && rows.length) {
+      for (const result of rows) {
+        if (result.fact === excludeFact) {
+          continue;
+        }
+        const revision = getFact(session, { fact: result.fact });
+        if (revision) {
+          revisions.push(revision);
+        }
       }
     }
+    return revisions;
+  } finally {
+    stmt.finalize();
   }
-  return revisions;
 };
 
 /**
@@ -485,26 +495,31 @@ const getFact = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { fact }: { fact: string },
 ): Revision<Fact> | undefined => {
-  const row = store.prepare(GET_FACT).get({ fact }) as StateRow | undefined;
-  if (row === undefined) {
-    return undefined;
+  const stmt = store.prepare(GET_FACT);
+  try {
+    const row = stmt.get({ fact }) as StateRow | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    // It's possible to have more than one matching fact, but since the fact's id
+    // incorporates its cause chain, we would have to have issued a retraction,
+    // followed by the same chain of facts. At that point, it really is the same.
+    // Since `the` and `of` are part of the fact reference, they are also unique.
+    const revision: Revision<Fact> = {
+      the: row.the as MIME,
+      of: row.of as URI,
+      cause: row.cause
+        ? (fromString(row.cause) as Reference<Assertion>)
+        : refer(unclaimed(row as FactAddress)),
+      since: row.since,
+    };
+    if (row.is) {
+      revision.is = JSON.parse(row.is);
+    }
+    return revision;
+  } finally {
+    stmt.finalize();
   }
-  // It's possible to have more than one matching fact, but since the fact's id
-  // incorporates its cause chain, we would have to have issued a retraction,
-  // followed by the same chain of facts. At that point, it really is the same.
-  // Since `the` and `of` are part of the fact reference, they are also unique.
-  const revision: Revision<Fact> = {
-    the: row.the as MIME,
-    of: row.of as URI,
-    cause: row.cause
-      ? (fromString(row.cause) as Reference<Assertion>)
-      : refer(unclaimed(row as FactAddress)),
-    since: row.since,
-  };
-  if (row.is) {
-    revision.is = JSON.parse(row.is);
-  }
-  return revision;
 };
 
 const select = <Space extends MemorySpace>(
@@ -566,24 +581,30 @@ const toFact = function (row: StateRow): SelectedFact {
 };
 
 // Select facts matching the selector. Facts are ordered by since.
-export const selectFacts = function* <Space extends MemorySpace>(
+export const selectFacts = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
-): Iterable<SelectedFact> {
+): SelectedFact[] {
   const stmt = store.prepare(EXPORT);
-  // Note: Cannot finalize() in a generator function's finally block because
-  // the finally block runs when the generator returns (immediately), not when
-  // it's exhausted. The statement will be finalized when the store is closed.
-  for (
-    const row of stmt.iter({
-      the: the === SelectAllString ? null : the,
-      of: of === SelectAllString ? null : of,
-      cause: cause === SelectAllString ? null : cause,
-      is: is === undefined ? null : {},
-      since: since ?? null,
-    }) as Iterable<StateRow>
-  ) {
-    yield toFact(row);
+  try {
+    const results = [];
+    // Note: Cannot finalize() in a generator function's finally block because
+    // the finally block runs when the generator returns (immediately), not when
+    // it's exhausted. The statement will be finalized when the store is closed.
+    for (
+      const row of stmt.iter({
+        the: the === SelectAllString ? null : the,
+        of: of === SelectAllString ? null : of,
+        cause: cause === SelectAllString ? null : cause,
+        is: is === undefined ? null : {},
+        since: since ?? null,
+      }) as Iterable<StateRow>
+    ) {
+      results.push(toFact(row));
+    }
+    return results;
+  } finally {
+    stmt.finalize();
   }
 };
 
@@ -763,9 +784,11 @@ const commit = <Space extends MemorySpace>(
 ): Commit<Space> => {
   const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
-  const row = session.store.prepare(EXPORT).get({ the, of }) as
+  const stmt = session.store.prepare(EXPORT);
+  const row = stmt.get({ the, of }) as
     | StateRow
     | undefined;
+  stmt.finalize();
 
   const [since, cause] = row
     ? [
