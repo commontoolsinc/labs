@@ -782,10 +782,14 @@ const commit = <Space extends MemorySpace>(
   const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
   const stmt = session.store.prepare(EXPORT);
-  const row = stmt.get({ the, of }) as
-    | StateRow
-    | undefined;
-  stmt.finalize();
+  let row: StateRow | undefined;
+  try {
+    row = stmt.get({ the, of }) as
+      | StateRow
+      | undefined;
+  } finally {
+    stmt.finalize();
+  }
 
   const [since, cause] = row
     ? [
