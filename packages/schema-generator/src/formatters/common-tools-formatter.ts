@@ -277,7 +277,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // If this is an OpaqueRef type, extract its type argument and recurse
-    if (this.isOpaqueRefType(type)) {
+    if (this.isOpaqueRefType(type, checker)) {
       const innerType = this.extractOpaqueRefTypeArgument(type, checker);
       if (innerType) {
         return this.recursivelyUnwrapOpaqueRef(
@@ -327,7 +327,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     for (const member of members) {
       // Check if this member is an OpaqueRef type (it will be an intersection)
-      const isOpaqueRef = this.isOpaqueRefType(member);
+      const isOpaqueRef = this.isOpaqueRefType(member, checker);
       if (isOpaqueRef) {
         opaqueRefMember = member;
       } else {
@@ -371,26 +371,45 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Check if a type is an OpaqueRef type by checking constituent type names.
-   * All cell types (OpaqueCell, Cell, Stream) are intersections with CELL_BRAND,
-   * so we need to check the actual interface names to distinguish them.
+   * Get the CELL_BRAND string value from a type, if it has one.
+   * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
    */
-  private isOpaqueRefType(type: ts.Type): boolean {
-    // OpaqueRef types are intersection types
-    if (!(type.flags & ts.TypeFlags.Intersection)) {
-      return false;
+  private getCellBrand(type: ts.Type, checker: ts.TypeChecker): string | undefined {
+    const brandSymbol = type.getProperty("CELL_BRAND");
+    if (brandSymbol && brandSymbol.valueDeclaration) {
+      const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, brandSymbol.valueDeclaration);
+      if (brandType.flags & ts.TypeFlags.StringLiteral) {
+        return (brandType as ts.StringLiteralType).value;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Check if a type is an OpaqueRef type by checking the CELL_BRAND property.
+   * All cell types (OpaqueCell, Cell, Stream) are intersections with CELL_BRAND,
+   * but only OpaqueCell has brand "opaque".
+   */
+  private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    // Try CELL_BRAND first - most reliable method
+    const brand = this.getCellBrand(type, checker);
+    if (brand === "opaque") {
+      return true;
     }
 
-    const intersectionType = type as ts.IntersectionType;
-    for (const constituent of intersectionType.types) {
-      if (constituent.flags & ts.TypeFlags.Object) {
-        const objectType = constituent as ts.ObjectType;
-        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-          const typeRef = objectType as ts.TypeReference;
-          const name = typeRef.target?.symbol?.name;
-          // Check for OpaqueRef-specific interface names (old and new)
-          if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
-            return true;
+    // Fallback: check by constituent interface names for backward compatibility
+    if (type.flags & ts.TypeFlags.Intersection) {
+      const intersectionType = type as ts.IntersectionType;
+      for (const constituent of intersectionType.types) {
+        if (constituent.flags & ts.TypeFlags.Object) {
+          const objectType = constituent as ts.ObjectType;
+          if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+            const typeRef = objectType as ts.TypeReference;
+            const name = typeRef.target?.symbol?.name;
+            // Check for OpaqueRef-specific interface names (old and new)
+            if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
+              return true;
+            }
           }
         }
       }
