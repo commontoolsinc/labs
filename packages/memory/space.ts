@@ -571,21 +571,23 @@ export const selectFacts = function* <Space extends MemorySpace>(
   { the, of, cause, is, since }: FactSelector,
 ): Iterable<SelectedFact> {
   const stmt = store.prepare(EXPORT);
-  try {
-    for (
-      const row of stmt.iter({
-        the: the === SelectAllString ? null : the,
-        of: of === SelectAllString ? null : of,
-        cause: cause === SelectAllString ? null : cause,
-        is: is === undefined ? null : {},
-        since: since ?? null,
-      }) as Iterable<StateRow>
-    ) {
-      yield toFact(row);
-    }
-  } finally {
-    stmt.finalize();
+  // Collect all results before finalizing the statement
+  const results: SelectedFact[] = [];
+  for (
+    const row of stmt.iter({
+      the: the === SelectAllString ? null : the,
+      of: of === SelectAllString ? null : of,
+      cause: cause === SelectAllString ? null : cause,
+      is: is === undefined ? null : {},
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    results.push(toFact(row));
   }
+  // Finalize the statement after collecting all results
+  stmt.finalize();
+  // Now yield the results
+  yield* results;
 };
 
 export const selectFact = function <Space extends MemorySpace>(
