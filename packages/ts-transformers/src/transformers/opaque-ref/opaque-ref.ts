@@ -44,106 +44,88 @@ export function isOpaqueRefType(
     );
   }
 
-  // Try to get the cell brand first - this is the most reliable method
+  // Primary method: Check CELL_BRAND property
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
     // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
     return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"].includes(brand);
   }
 
-  // Fallback to legacy detection for backward compatibility
+  // Fallback: Name-based detection for cases where CELL_BRAND isn't accessible
+  // This handles edge cases in TypeScript's type resolution where the brand property
+  // might not be directly exposed (e.g., certain alias resolutions, interface references)
+  return isCellTypeByName(type, checker);
+}
+
+/**
+ * Fallback detection using symbol and alias names.
+ * Used when CELL_BRAND property isn't directly accessible.
+ */
+function isCellTypeByName(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Check direct object type reference
   if (type.flags & ts.TypeFlags.Object) {
     const objectType = type as ts.ObjectType;
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       const typeRef = objectType as ts.TypeReference;
-      const target = typeRef.target;
-      if (target && target.symbol) {
-        const symbolName = target.symbol.getName();
-        // Check for all cell type variants
-        if (
-          symbolName === "OpaqueRef" ||
-          symbolName === "OpaqueCell" ||
-          symbolName === "Cell" ||
-          symbolName === "Stream" ||
-          symbolName === "ComparableCell" ||
-          symbolName === "ReadonlyCell" ||
-          symbolName === "WriteonlyCell"
-        ) {
+      if (typeRef.target?.symbol) {
+        const name = typeRef.target.symbol.getName();
+        if (isCellTypeName(name)) return true;
+        if (resolvesToCommonToolsSymbol(typeRef.target.symbol, checker, "Default")) {
           return true;
         }
-        if (
-          resolvesToCommonToolsSymbol(target.symbol, checker, "Default")
-        ) {
-          return true;
-        }
-        const qualified = checker.getFullyQualifiedName(target.symbol);
-        if (
-          qualified.includes("OpaqueRef") ||
-          qualified.includes("OpaqueCell") ||
-          qualified.includes("Cell") ||
-          qualified.includes("Stream")
-        ) {
+        if (containsCellTypeName(checker.getFullyQualifiedName(typeRef.target.symbol))) {
           return true;
         }
       }
     }
+
+    // Check type symbol
     const symbol = type.getSymbol();
     if (symbol) {
-      if (
-        symbol.name === "OpaqueRef" ||
-        symbol.name === "OpaqueRefMethods" ||
-        symbol.name === "OpaqueRefBase" ||
-        symbol.name === "OpaqueCell" ||
-        symbol.name === "Cell" ||
-        symbol.name === "Stream" ||
-        symbol.name === "ComparableCell" ||
-        symbol.name === "ReadonlyCell" ||
-        symbol.name === "WriteonlyCell"
-      ) {
-        return true;
-      }
-      if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) {
-        return true;
-      }
-      const qualified = checker.getFullyQualifiedName(symbol);
-      if (
-        qualified.includes("OpaqueRef") ||
-        qualified.includes("OpaqueCell") ||
-        qualified.includes("Cell") ||
-        qualified.includes("Stream")
-      ) {
-        return true;
-      }
+      if (isCellTypeName(symbol.name)) return true;
+      if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) return true;
+      if (containsCellTypeName(checker.getFullyQualifiedName(symbol))) return true;
     }
   }
+
+  // Check type alias
   if (type.aliasSymbol) {
-    const aliasName = type.aliasSymbol.getName();
-    if (
-      aliasName === "OpaqueRef" ||
-      aliasName === "OpaqueCell" ||
-      aliasName === "Opaque" ||
-      aliasName === "Cell" ||
-      aliasName === "Stream" ||
-      aliasName === "ComparableCell" ||
-      aliasName === "ReadonlyCell" ||
-      aliasName === "WriteonlyCell"
-    ) {
-      return true;
-    }
-    if (resolvesToCommonToolsSymbol(type.aliasSymbol, checker, "Default")) {
-      return true;
-    }
-    const qualified = checker.getFullyQualifiedName(type.aliasSymbol);
-    if (
-      qualified.includes("OpaqueRef") ||
-      qualified.includes("OpaqueCell") ||
-      qualified.includes("Cell") ||
-      qualified.includes("Stream")
-    ) {
+    if (isCellTypeName(type.aliasSymbol.getName())) return true;
+    if (resolvesToCommonToolsSymbol(type.aliasSymbol, checker, "Default")) return true;
+    if (containsCellTypeName(checker.getFullyQualifiedName(type.aliasSymbol))) {
       return true;
     }
   }
+
   return false;
+}
+
+/**
+ * Check if a name matches a known cell type interface name
+ */
+function isCellTypeName(name: string): boolean {
+  return name === "OpaqueRef" ||
+    name === "OpaqueRefMethods" ||
+    name === "OpaqueRefBase" ||
+    name === "OpaqueCell" ||
+    name === "IOpaqueCell" ||
+    name === "Cell" ||
+    name === "ICell" ||
+    name === "Stream" ||
+    name === "ComparableCell" ||
+    name === "ReadonlyCell" ||
+    name === "WriteonlyCell" ||
+    name === "Opaque";
+}
+
+/**
+ * Check if a qualified name contains a cell type name
+ */
+function containsCellTypeName(qualified: string): boolean {
+  return qualified.includes("OpaqueRef") ||
+    qualified.includes("OpaqueCell") ||
+    qualified.includes("Cell") ||
+    qualified.includes("Stream");
 }
 
 /**
