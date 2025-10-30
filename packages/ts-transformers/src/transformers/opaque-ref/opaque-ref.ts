@@ -51,49 +51,15 @@ export function isOpaqueRefType(
     return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"].includes(brand);
   }
 
-  // Fallback: Name-based detection for cases where CELL_BRAND isn't accessible
-  // This handles edge cases in TypeScript's type resolution where the brand property
-  // might not be directly exposed (e.g., certain alias resolutions, interface references)
-  return isCellTypeByName(type, checker);
-}
-
-/**
- * Fallback detection using symbol and alias names.
- * Used when CELL_BRAND property isn't directly accessible.
- */
-function isCellTypeByName(type: ts.Type, checker: ts.TypeChecker): boolean {
-  // Check direct object type reference
+  // Fallback: Check type reference target symbol name
+  // This is needed when CELL_BRAND isn't accessible (e.g., during certain type resolution stages)
   if (type.flags & ts.TypeFlags.Object) {
     const objectType = type as ts.ObjectType;
     if (objectType.objectFlags & ts.ObjectFlags.Reference) {
       const typeRef = objectType as ts.TypeReference;
       if (typeRef.target?.symbol) {
-        const name = typeRef.target.symbol.getName();
-        if (isCellTypeName(name)) return true;
-        if (resolvesToCommonToolsSymbol(typeRef.target.symbol, checker, "Default")) {
-          return true;
-        }
-        if (containsCellTypeName(checker.getFullyQualifiedName(typeRef.target.symbol))) {
-          return true;
-        }
+        return isCellTypeName(typeRef.target.symbol.getName());
       }
-    }
-
-    // Check type symbol
-    const symbol = type.getSymbol();
-    if (symbol) {
-      if (isCellTypeName(symbol.name)) return true;
-      if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) return true;
-      if (containsCellTypeName(checker.getFullyQualifiedName(symbol))) return true;
-    }
-  }
-
-  // Check type alias
-  if (type.aliasSymbol) {
-    if (isCellTypeName(type.aliasSymbol.getName())) return true;
-    if (resolvesToCommonToolsSymbol(type.aliasSymbol, checker, "Default")) return true;
-    if (containsCellTypeName(checker.getFullyQualifiedName(type.aliasSymbol))) {
-      return true;
     }
   }
 
@@ -101,7 +67,7 @@ function isCellTypeByName(type: ts.Type, checker: ts.TypeChecker): boolean {
 }
 
 /**
- * Check if a name matches a known cell type interface name
+ * Check if a symbol name matches a known cell type interface name
  */
 function isCellTypeName(name: string): boolean {
   return name === "OpaqueRef" ||
@@ -116,16 +82,6 @@ function isCellTypeName(name: string): boolean {
     name === "ReadonlyCell" ||
     name === "WriteonlyCell" ||
     name === "Opaque";
-}
-
-/**
- * Check if a qualified name contains a cell type name
- */
-function containsCellTypeName(qualified: string): boolean {
-  return qualified.includes("OpaqueRef") ||
-    qualified.includes("OpaqueCell") ||
-    qualified.includes("Cell") ||
-    qualified.includes("Stream");
 }
 
 /**
