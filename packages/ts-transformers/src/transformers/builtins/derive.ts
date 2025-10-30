@@ -140,8 +140,7 @@ function createParameterForPlan(
     );
   }
 
-  const shouldInlineSoleBinding =
-    bindings.length === 1 &&
+  const shouldInlineSoleBinding = bindings.length === 1 &&
     captureTree.size === 0 &&
     fallbackEntries.length === 1 &&
     !bindings[0]!.propertyName &&
