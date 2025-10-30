@@ -571,8 +571,9 @@ export const selectFacts = function* <Space extends MemorySpace>(
   { the, of, cause, is, since }: FactSelector,
 ): Iterable<SelectedFact> {
   const stmt = store.prepare(EXPORT);
-  // Collect all results before finalizing the statement
-  const results: SelectedFact[] = [];
+  // Note: Cannot finalize() in a generator function's finally block because
+  // the finally block runs when the generator returns (immediately), not when
+  // it's exhausted. The statement will be finalized when the store is closed.
   for (
     const row of stmt.iter({
       the: the === SelectAllString ? null : the,
@@ -582,12 +583,8 @@ export const selectFacts = function* <Space extends MemorySpace>(
       since: since ?? null,
     }) as Iterable<StateRow>
   ) {
-    results.push(toFact(row));
+    yield toFact(row);
   }
-  // Finalize the statement after collecting all results
-  stmt.finalize();
-  // Now yield the results
-  yield* results;
 };
 
 export const selectFact = function <Space extends MemorySpace>(
