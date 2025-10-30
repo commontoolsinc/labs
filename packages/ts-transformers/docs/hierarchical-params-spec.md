@@ -172,3 +172,34 @@ derive(items, () => _v1());
 
 With these changes in place the closure transformer is significantly more
 predictable, and we have a solid foundation for the remaining roadmap items.
+
+## Appendix
+
+### Code & Fixture References
+
+- `packages/ts-transformers/src/closures/transformer.ts`: hierarchical capture
+  tree and map callback rewriting logic.
+- `packages/ts-transformers/src/utils/capture-tree.ts`: rebuilds access
+  expressions (including optional chaining) based on the original AST.
+- `packages/ts-transformers/src/utils/identifiers.ts`: shared identifier
+  normalisation helpers.
+- `packages/ts-transformers/src/transformers/builtins/derive.ts`: derives share
+  the same capture/alias strategy as map closures.
+
+Representative fixtures documenting the new behaviour:
+
+- Map closures:
+  `packages/ts-transformers/test/fixtures/closures/map-outer-element.*`,
+  `map-computed-alias-side-effect.*`, `map-destructured-numeric-alias.*`.
+- Derive transformer:
+  `packages/ts-transformers/test/fixtures/ast-transform/ternary_derive.*` and
+  unit test `test/derive/create-derive-call.test.ts`.
+- Optional chaining:
+  `packages/ts-transformers/test/fixtures/jsx-expressions/optional-chain-captures.*`.
+
+### Test Commands
+
+- `deno task test` (from `packages/ts-transformers/`) – runs unit and fixture
+  suites covering closures, derive, and opaque-ref transforms.
+- `deno lint` / `deno fmt` – keep transformer and fixture files consistent (lint
+  excludes expected fixtures by default).
