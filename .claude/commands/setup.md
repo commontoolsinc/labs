@@ -27,17 +27,7 @@ If not installed, tell the user:
 
 ### Step 2: Build ct Binary (if needed)
 
-Check if ct binary exists:
-```bash
-ls -la ./dist/ct
-```
-
-If it doesn't exist, build it:
-```bash
-deno task build-binaries --cli-only
-```
-
-Tell the user: "Building the ct command-line tool... (this takes about 30 seconds)"
+Use the `ct` skill to build the binary if needed. The ct skill documents the binary vs source approach and build commands.
 
 ### Step 3: Create Identity Key (if needed)
 
@@ -95,31 +85,16 @@ Tell the user:
    - Click '🔒 I've Saved It - Continue'
    - You'll see your checkbox demo running!
 
-**3. Deploy another pattern:**
-   Try deploying a different pattern from packages/patterns/:
+**3. Next steps for development:**
+   - Use the `pattern-dev` skill for iterative pattern development workflow
+   - The pattern-dev skill's workflow-guide.md explains:
+     - How to deploy more patterns
+     - How to modify and update patterns with `setsrc`
+     - Best practices for building multi-pattern architectures
+   - Browse packages/patterns/ for examples
+   - Use the `ct` skill for all ct command usage
 
-   ```bash
-   ./dist/ct charm new --identity claude.key --api-url http://localhost:8000 --space test-space packages/patterns/dice.tsx
-   ```
-
-   Then visit: http://localhost:5173/test-space/[NEW_CHARM_ID]
-
-**4. Modify a pattern:**
-   Edit packages/patterns/ct-checkbox-cell.tsx, then update:
-
-   ```bash
-   ./dist/ct charm setsrc --identity claude.key --api-url http://localhost:8000 --space test-space --charm [CHARM_ID] packages/patterns/ct-checkbox-cell.tsx
-   ```
-
-   Refresh your browser to see changes!
-
-**5. Next steps:**
-   - Use `pattern-dev` skill for AI-assisted pattern development
-   - Browse packages/patterns/ for more examples
-   - Read docs/common/RECIPES.md to understand how patterns work
-   - Run `./dist/ct --help` to see all available commands
-
-**Recommended patterns to try:**
+**Good patterns to try next:**
 - ct-select.tsx - Dropdown component
 - dice.tsx - Random dice roller
 - counter.tsx - Simple counter with handlers
