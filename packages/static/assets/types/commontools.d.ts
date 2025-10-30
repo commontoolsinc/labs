@@ -122,9 +122,11 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K] ? Appl
 /**
  * Cells that support key() for property access - OpaqueCell variant.
  * OpaqueCell is "sticky" and always returns OpaqueCell<>.
+ *
+ * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
-    key<K extends PropertyKey>(this: IsThisObject, valueKey: K): unknown extends K ? OpaqueCell<any> : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any> : UnwrapCell<T>[K] extends never ? OpaqueCell<any> : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U> : OpaqueCell<UnwrapCell<T>[K]>) : OpaqueCell<any>;
+    key<K extends PropertyKey>(this: IsThisObject, valueKey: K): unknown extends K ? OpaqueRef<any> : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueRef<any> : UnwrapCell<T>[K] extends never ? OpaqueRef<any> : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueRef<U> : OpaqueRef<UnwrapCell<T>[K]>) : OpaqueRef<any>;
 }
 /**
  * Cells that can be resolved back to a Cell.
