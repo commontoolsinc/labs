@@ -35,6 +35,21 @@ developers read the transformed file as if it were hand-written.
   Example: `{ state: { pricing: { discount: … } } }` instead of
   `{ discount: … }`.
 
+#### Before/after: single state capture
+
+```
+// Source
+state.items.map((item) => item.price * state.discount);
+
+// Old output (simplified)
+({ element, params: { discount } }) => element.price * discount
+{ discount: state.discount }
+
+// New output
+({ element: item, params: { state } }) => item.price * state.discount
+{ state: { discount: state.discount } }
+```
+
 ### 2. Destructuring aliases recover original names
 
 - Runtime still delivers `{ element, index, array, params }` to the recipe
@@ -44,6 +59,19 @@ developers read the transformed file as if it were hand-written.
 - New helpers normalise identifiers across transformers, ensuring shared
   behaviour when we need fresh names.
 
+#### Before/after: optional chaining & nested structure
+
+```
+// Source
+orders.map((order) => order.customer?.address ?? state.fallback);
+
+// Old output rewrote the chain and flattened params
+({ element, params: { fallback } }) => element.customer.address ?? fallback
+
+// New output preserves the body and structure
+({ element: order, params: { state } }) => order.customer?.address ?? state.fallback
+```
+
 ### 3. Body rewriting is minimal and safer
 
 - We no longer rename identifiers or replace capture references.
@@ -52,6 +80,19 @@ developers read the transformed file as if it were hand-written.
   `{ [nextKey()]: value }` run exactly once).
 - Optional chaining is preserved because params are built from the original AST
   rather than reconstructed manually.
+
+#### Before/after: outer `element` variable collision
+
+```
+const element = highlight;
+items.map(() => <span>{element}</span>);
+
+// Old output shadowed the outer variable
+({ element }) => <span>{element}</span>
+
+// New output aliases the runtime value and keeps the capture intact
+({ element: __ct_element, params: { element } }) => <span>{element}</span>
+```
 
 ### 4. Supporting utilities were aligned
 
@@ -64,6 +105,35 @@ developers read the transformed file as if it were hand-written.
   intact; a focused regression test guards the collision case we fixed there.
 - Regression fixtures were updated manually to document the new structure and to
   add coverage for numeric aliases, computed keys, and collision scenarios.
+
+#### Before/after: computed property caching
+
+```
+// Source
+items.map(({ [nextKey()]: value }) => value);
+
+// Old output re-evaluated nextKey() for every read
+const __ct_amount_key = nextKey();
+({ element }) => element[__ct_amount_key]
+
+// New output caches once and threads the key through derive
+const __ct_val_key = nextKey();
+({ element }) => derive({ element, __ct_val_key }, ({ element, __ct_val_key: key }) => element[key])
+```
+
+#### Before/after: derive callback collision fix
+
+```
+// Source
+const fallback = _v1();
+derive(items, () => _v1());
+
+// Old output reused _v1 inside the lambda, shadowing the capture
+({ _v1 }) => _v1()
+
+// New output generates a stable alias
+({ _v1_1 }) => _v1_1()
+```
 
 ## Impact & Benefits
 
