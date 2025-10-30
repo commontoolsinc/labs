@@ -20,6 +20,7 @@ export type {
   MemorySpace,
 } from "./storage/interface.ts";
 export {
+  debugTransactionWrites,
   formatTransactionSummary,
   summarizeTransaction,
   type TransactionSummary,

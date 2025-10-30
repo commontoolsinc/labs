@@ -31,11 +31,34 @@ export interface TransactionSummary {
   /** Changed object IDs (shortened) */
   changedObjects: string[];
 
-  /** Number of novelty (new) attestations */
-  noveltyCount: number;
+  /** Actual writes with values */
+  writes: WriteDetail[];
 
   /** Transaction status */
   status: "ready" | "pending" | "done" | "error";
+}
+
+/**
+ * Details of what was actually written
+ */
+export interface WriteDetail {
+  /** Object ID (shortened) */
+  objectId: string;
+
+  /** Full object ID */
+  fullObjectId: string;
+
+  /** Path that was written to */
+  path: string;
+
+  /** The value that was written */
+  value: unknown;
+
+  /** The previous value (if available) */
+  previousValue?: unknown;
+
+  /** Whether this was a deletion */
+  isDeleted: boolean;
 }
 
 /**
@@ -58,20 +81,17 @@ export function summarizeTransaction(
   // Get changed objects
   const changedObjects = extractChangedObjects(journal);
 
-  // Count novelty
-  let noveltyCount = 0;
-  if (space) {
-    noveltyCount = Array.from(journal.novelty(space)).length;
-  }
+  // Extract actual writes with values
+  const writes = space ? extractWrites(journal, space) : [];
 
   // Generate summary
-  const summary = generateSummary(activity, changedObjects.length, status.status);
+  const summary = generateSummary(activity, writes, status.status);
 
   return {
     summary,
     activity,
     changedObjects,
-    noveltyCount,
+    writes,
     status: status.status,
   };
 }
@@ -91,37 +111,110 @@ export function formatTransactionSummary(
 
   const parts: string[] = [];
 
-  // Status
-  parts.push(`Status: ${summary.status}`);
+  // If there are detailed writes, format them grouped by object
+  if (summary.writes.length > 0) {
+    // Group writes by object
+    const byObject = new Map<string, WriteDetail[]>();
+    for (const write of summary.writes) {
+      const existing = byObject.get(write.fullObjectId) || [];
+      existing.push(write);
+      byObject.set(write.fullObjectId, existing);
+    }
 
-  // Main summary
-  parts.push(summary.summary);
+    const objectIds = Array.from(byObject.keys());
 
-  // Activity details
-  if (summary.activity.writes > 0 || summary.activity.reads > 0) {
-    parts.push(
-      `Activity: ${summary.activity.writes} write(s), ${summary.activity.reads} read(s)`,
-    );
+    // If single object, skip the header
+    if (objectIds.length === 1) {
+      const writes = byObject.get(objectIds[0])!;
+      for (const write of writes) {
+        parts.push(formatWrite(write));
+      }
+    } else {
+      // Multiple objects, show headers
+      for (const objectId of objectIds) {
+        const writes = byObject.get(objectId)!;
+        parts.push(`Object ${shortenId(objectId)}:`);
+        for (const write of writes) {
+          parts.push(`  ${formatWrite(write)}`);
+        }
+      }
+    }
+  } else if (summary.activity.writes > 0 && !space) {
+    // Hint that we need the space parameter
+    parts.push("(pass space parameter to see what was written)");
+  } else if (summary.activity.writes === 0) {
+    parts.push(summary.summary);
   }
 
-  // Changed objects
-  if (summary.changedObjects.length > 0) {
-    const objectList = summary.changedObjects
-      .slice(0, 3)
-      .map((id) => shortenId(id))
-      .join(", ");
-    const more = summary.changedObjects.length > 3
-      ? ` and ${summary.changedObjects.length - 3} more`
-      : "";
-    parts.push(`Modified: ${objectList}${more}`);
+  // Add read count if significant
+  if (summary.activity.reads > 10) {
+    parts.push(`(${summary.activity.reads} reads for context)`);
   }
 
-  // Novelty
-  if (summary.noveltyCount > 0) {
-    parts.push(`New attestations: ${summary.noveltyCount}`);
+  return parts.join("\n");
+}
+
+/**
+ * Format a single write as "path: old → new" or "path = value"
+ */
+function formatWrite(write: WriteDetail): string {
+  if (write.isDeleted) {
+    return `${write.path}: deleted`;
   }
 
-  return parts.join(". ");
+  const newVal = formatValueForSummary(write.value);
+
+  // If we have previous value, show before → after
+  if (write.previousValue !== undefined) {
+    const oldVal = formatValueForSummary(write.previousValue);
+    return `${write.path}: ${oldVal} → ${newVal}`;
+  }
+
+  // No previous value, just show assignment
+  return `${write.path} = ${newVal}`;
+}
+
+/**
+ * Debug helper to see all write operations regardless of space
+ * Useful for understanding what's happening when writes aren't showing up
+ */
+export function debugTransactionWrites(
+  tx: IExtendedStorageTransaction,
+): string {
+  const status = tx.status();
+  const journal = status.journal;
+
+  const parts: string[] = [];
+  parts.push("=== Transaction Debug ===");
+
+  // List all write operations from activity
+  const writes: IMemorySpaceAddress[] = [];
+  for (const activity of journal.activity()) {
+    if ("write" in activity && activity.write) {
+      writes.push(activity.write);
+    }
+  }
+
+  parts.push(`Total writes in activity: ${writes.length}`);
+
+  for (const write of writes) {
+    const pathStr = write.path.join(".");
+    parts.push(`  Write to: ${write.id}/${pathStr} (space: ${write.space})`);
+  }
+
+  // List all spaces that have novelty
+  parts.push("\nSpaces with novelty:");
+  const spaces = new Set<MemorySpace>();
+  for (const write of writes) {
+    spaces.add(write.space);
+  }
+
+  for (const space of spaces) {
+    const noveltyCount = Array.from(journal.novelty(space)).length;
+    parts.push(`  ${space}: ${noveltyCount} attestation(s)`);
+  }
+
+  return parts.join("\n");
 }
 
 /**
@@ -166,11 +259,72 @@ function extractChangedObjects(journal: ITransactionJournal): string[] {
 }
 
 /**
+ * Extract actual writes with their values from novelty attestations
+ */
+function extractWrites(
+  journal: ITransactionJournal,
+  space: MemorySpace,
+): WriteDetail[] {
+  // Build a map of previous values from history
+  const previousValues = new Map<string, unknown>();
+  for (const attestation of journal.history(space)) {
+    const key = `${attestation.address.id}:${attestation.address.path.join(".")}`;
+    previousValues.set(key, attestation.value);
+  }
+
+  const writes: WriteDetail[] = [];
+
+  for (const attestation of journal.novelty(space)) {
+    const fullObjectId = attestation.address.id;
+    const path = attestation.address.path.join(".");
+    const value = attestation.value;
+    const isDeleted = value === undefined;
+
+    const key = `${fullObjectId}:${path}`;
+    const previousValue = previousValues.get(key);
+
+    writes.push({
+      objectId: shortenId(fullObjectId),
+      fullObjectId,
+      path,
+      value: truncateValue(value, 100),
+      previousValue: truncateValue(previousValue, 100),
+      isDeleted,
+    });
+  }
+
+  return writes;
+}
+
+/**
+ * Truncate a value for display
+ */
+function truncateValue(value: unknown, maxLength: number): unknown {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  if (typeof value === "string") {
+    return value.length > maxLength ? value.substring(0, maxLength) + "..." : value;
+  }
+
+  if (Array.isArray(value)) {
+    return `[Array: ${value.length} items]`;
+  }
+
+  if (typeof value === "object") {
+    const str = JSON.stringify(value);
+    return str.length > maxLength ? str.substring(0, maxLength) + "..." : value;
+  }
+
+  return value;
+}
+
+/**
  * Generate a human-readable summary
  */
 function generateSummary(
   activity: { writes: number; reads: number },
-  objectsChanged: number,
+  writes: WriteDetail[],
   status: string,
 ): string {
   if (status === "error") {
@@ -178,22 +332,50 @@ function generateSummary(
   }
 
   if (activity.writes === 0 && activity.reads === 0) {
-    return "No objects modified";
+    return "Empty transaction";
   }
 
   if (activity.writes === 0) {
     return "Read-only transaction";
   }
 
-  if (objectsChanged === 0) {
-    return "No objects modified";
+  if (writes.length === 0) {
+    return `${activity.writes} write(s) (details unavailable without space parameter)`;
   }
 
-  if (objectsChanged === 1) {
-    return "Modified 1 object";
+  // Describe the actual writes
+  const parts: string[] = [];
+
+  for (const write of writes.slice(0, 3)) {
+    if (write.isDeleted) {
+      parts.push(`Deleted ${write.path}`);
+    } else {
+      const valueStr = formatValueForSummary(write.value);
+      parts.push(`${write.path} = ${valueStr}`);
+    }
   }
 
-  return `Modified ${objectsChanged} objects`;
+  if (writes.length > 3) {
+    parts.push(`... and ${writes.length - 3} more`);
+  }
+
+  return parts.join("; ");
+}
+
+/**
+ * Format a value for the summary line
+ */
+function formatValueForSummary(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  if (typeof value === "string") {
+    const truncated = value.length > 50 ? value.substring(0, 50) + "..." : value;
+    return `"${truncated}"`;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }
 
 /**
