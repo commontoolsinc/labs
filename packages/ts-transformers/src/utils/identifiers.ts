@@ -40,7 +40,31 @@ export function sanitizeIdentifierCandidate(
   raw: string,
   options: SanitizeIdentifierOptions = {},
 ): string {
-  const fallback = options.fallback ?? DEFAULT_FALLBACK;
+  const fallbackValue = options.fallback ?? DEFAULT_FALLBACK;
+
+  const normaliseFallback = (value: string): string => {
+    let text = value;
+    if (options.trimLeadingUnderscores) {
+      text = text.replace(/^_+/, "");
+    }
+    text = text.replace(/[^A-Za-z0-9_$]/g, "_");
+
+    if (text.length === 0) {
+      return DEFAULT_FALLBACK;
+    }
+
+    if (!ts.isIdentifierStart(text.charCodeAt(0), ts.ScriptTarget.ESNext)) {
+      text = `${DEFAULT_FALLBACK}${text}`;
+    }
+
+    if (!isSafeIdentifierText(text)) {
+      return DEFAULT_FALLBACK;
+    }
+
+    return text;
+  };
+
+  const fallback = normaliseFallback(fallbackValue);
 
   let candidate = raw;
   if (options.trimLeadingUnderscores) {
@@ -64,16 +88,12 @@ export function sanitizeIdentifierCandidate(
   candidate = ensureIdentifierStart(candidate);
 
   if (!isSafeIdentifierText(candidate)) {
-    candidate = ensureIdentifierStart(fallback);
+    candidate = fallback;
   }
 
   let safe = candidate;
-  if (!isSafeIdentifierText(safe)) {
-    safe = fallback;
-  }
-
   while (!isSafeIdentifierText(safe)) {
-    safe = `${safe}_`;
+    safe = ensureIdentifierStart(`${safe}_`);
   }
 
   return safe;
