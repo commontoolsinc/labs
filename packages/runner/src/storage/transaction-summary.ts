@@ -128,7 +128,8 @@ export function formatTransactionSummary(
   } else if (summary.activity.writes > 0 && !space) {
     // Hint that we need the space parameter
     parts.push("(pass space parameter to see what was written)");
-  } else if (summary.activity.writes === 0) {
+  } else {
+    // No writes or writes occurred elsewhere - show generic summary
     parts.push(summary.summary);
   }
 
