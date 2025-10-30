@@ -815,8 +815,7 @@ async function invokeToolCall(
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
-        // Debug: uncomment to see what's actually in the transaction
-        // logger.info("Transaction details:", debugTransactionWrites(completedTx));
+        logger.info("Handler tx:", debugTransactionWrites(completedTx));
 
         const summary = formatTransactionSummary(completedTx, space);
         const value = result.withTx(completedTx).get();
