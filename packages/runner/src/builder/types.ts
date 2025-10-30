@@ -78,6 +78,7 @@ export type {
   ModuleFactory,
   NodeFactory,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
   Props,
   Recipe,

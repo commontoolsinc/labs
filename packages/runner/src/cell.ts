@@ -340,8 +340,8 @@ export class RegularCell<T> implements ICell<T> {
     this.set(newValue, onCommit);
   }
 
-  update<V extends AnyCellWrapping<Partial<T>> | Partial<T>>(
-    values: V extends object ? V : never,
+  update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
+    values: V extends object ? AnyCellWrapping<V> : never,
   ): void {
     if (!this.tx) throw new Error("Transaction required for update");
     if (!isRecord(values)) {
@@ -389,7 +389,9 @@ export class RegularCell<T> implements ICell<T> {
     }
   }
 
-  push(...value: T extends (infer U)[] ? AnyCellWrapping<U>[] : any[]): void {
+  push(
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
+  ): void {
     if (!this.tx) throw new Error("Transaction required for push");
 
     // No await for the sync, just kicking this off, so we have the data to

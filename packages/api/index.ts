@@ -39,6 +39,22 @@ export type BrandedCell<T, Brand extends string = string> = {
 // Cell Capability Interfaces
 // ============================================================================
 
+// To constrain methods that only exists on objects
+type IsThisObject =
+  | BrandedCell<JSONArray | JSONObject>
+  | BrandedCell<Array<unknown>>
+  | BrandedCell<Array<any>>
+  | BrandedCell<Record<string, unknown | any>>
+  | BrandedCell<unknown>
+  | BrandedCell<any>;
+
+type IsThisArray =
+  | BrandedCell<JSONArray>
+  | BrandedCell<Array<unknown>>
+  | BrandedCell<Array<any>>
+  | BrandedCell<unknown>
+  | BrandedCell<any>;
+
 // deno-lint-ignore no-empty-interface
 export interface IAnyCell<T> {
 }
@@ -56,10 +72,12 @@ export interface IReadable<T> {
 export interface IWritable<T> {
   set(value: T | AnyCellWrapping<T>): void;
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
-    values: V extends object ? V : never,
+    this: IsThisObject,
+    values: V extends object ? AnyCellWrapping<V> : never,
   ): void;
   push(
-    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : any[]
+    this: IsThisArray,
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
   ): void;
 }
 
@@ -140,7 +158,10 @@ type Apply<F extends HKT, A> = (F & { _A: A })["type"];
  * const superCell: IKeyableCell<unknown> = sub; // OK (out T)
  */
 export interface IKeyable<out T, Wrap extends HKT> {
-  key<K extends PropertyKey>(valueKey: K): KeyResultType<T, K, Wrap>;
+  key<K extends PropertyKey>(
+    this: IsThisObject,
+    valueKey: K,
+  ): KeyResultType<T, K, Wrap>;
 }
 
 export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
@@ -156,6 +177,7 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
  */
 export interface IKeyableOpaque<T> {
   key<K extends PropertyKey>(
+    this: IsThisObject,
     valueKey: K,
   ): unknown extends K ? OpaqueCell<any>
     : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
@@ -188,6 +210,7 @@ export interface IEquatable {
  */
 export interface IDerivable<T> {
   map<S>(
+    this: IsThisObject,
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
@@ -195,6 +218,7 @@ export interface IDerivable<T> {
     ) => Opaque<S>,
   ): OpaqueRef<S[]>;
   mapWithPattern<S>(
+    this: IsThisObject,
     op: Recipe,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
