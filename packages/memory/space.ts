@@ -570,15 +570,16 @@ export const selectFacts = function* <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, cause, is, since }: FactSelector,
 ): Iterable<SelectedFact> {
-  const rows = store.prepare(EXPORT).all({
-    the: the === SelectAllString ? null : the,
-    of: of === SelectAllString ? null : of,
-    cause: cause === SelectAllString ? null : cause,
-    is: is === undefined ? null : {},
-    since: since ?? null,
-  }) as StateRow[];
-
-  for (const row of rows) {
+  const stmt = store.prepare(EXPORT);
+  for (
+    const row of stmt.iter({
+      the: the === SelectAllString ? null : the,
+      of: of === SelectAllString ? null : of,
+      cause: cause === SelectAllString ? null : cause,
+      is: is === undefined ? null : {},
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
     yield toFact(row);
   }
 };
@@ -587,14 +588,19 @@ export const selectFact = function <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of, since }: { the: MIME; of: URI; since?: number },
 ): SelectedFact | undefined {
-  const rows = store.prepare(EXPORT).all({
-    the: the,
-    of: of,
-    cause: null,
-    is: null,
-    since: since ?? null,
-  }) as StateRow[];
-  return (rows.length > 0) ? toFact(rows[0]) : undefined;
+  const stmt = store.prepare(EXPORT);
+  for (
+    const row of stmt.iter({
+      the: the,
+      of: of,
+      cause: null,
+      is: null,
+      since: since ?? null,
+    }) as Iterable<StateRow>
+  ) {
+    return toFact(row);
+  }
+  return undefined;
 };
 
 /**
