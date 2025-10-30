@@ -364,32 +364,18 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Get the CELL_BRAND string value from a type, if it has one.
-   * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
+   * Check if a type has a CELL_BRAND property (is a cell type)
    */
-  private getCellBrand(type: ts.Type, checker: ts.TypeChecker): string | undefined {
-    // Check for CELL_BRAND property
-    const brandSymbol = type.getProperty("CELL_BRAND");
-    if (brandSymbol && brandSymbol.valueDeclaration) {
-      const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, brandSymbol.valueDeclaration);
-      // The brand type should be a string literal
-      if (brandType.flags & ts.TypeFlags.StringLiteral) {
-        return (brandType as ts.StringLiteralType).value;
-      }
-    }
-    return undefined;
+  private isCellType(type: ts.Type): boolean {
+    return type.getProperty("CELL_BRAND") !== undefined;
   }
 
   /**
-   * Check if a type is an OpaqueRef type (has CELL_BRAND with "opaque" or is intersection with OpaqueCell/OpaqueRefMethods)
+   * Check if a type is an OpaqueRef type by checking constituent type names.
+   * All cell types (OpaqueCell, Cell, Stream) are intersections with CELL_BRAND,
+   * so we need to check the actual interface names to distinguish them.
    */
   private isOpaqueRefType(type: ts.Type): boolean {
-    // Check for CELL_BRAND property first (most reliable)
-    const brand = this.getCellBrand(type, (type as any).checker);
-    if (brand === "opaque") {
-      return true;
-    }
-
     // OpaqueRef types are intersection types
     if (!(type.flags & ts.TypeFlags.Intersection)) {
       return false;
@@ -402,7 +388,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         if (objectType.objectFlags & ts.ObjectFlags.Reference) {
           const typeRef = objectType as ts.TypeReference;
           const name = typeRef.target?.symbol?.name;
-          // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell) names
+          // Check for OpaqueRef-specific interface names (old and new)
           if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
             return true;
           }
