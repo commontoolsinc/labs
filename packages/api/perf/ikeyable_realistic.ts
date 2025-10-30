@@ -50,24 +50,24 @@ type UserProfileCell = Cell<UserProfile>;
 declare const user: UserProfileCell;
 
 // Literal keys – most common usage
-const literalId = user.key("id");
-const literalStats = user.key("stats");
-const literalSettings = user.key("settings");
-const literalPrefs = user.key("preferences");
-const literalNotificationPrefs = user.key("notificationPrefs");
+const _literalId = user.key("id");
+const _literalStats = user.key("stats");
+const _literalSettings = user.key("settings");
+const _literalPrefs = user.key("preferences");
+const _literalNotificationPrefs = user.key("notificationPrefs");
 
 // Nested literal access
-const statsFollowers = user.key("stats").key("followers");
-const statsEngagement = user.key("stats").key("engagementScore");
-const statsLiveFeed = user.key("stats").key("liveFeed");
-const settingsTheme = user.key("settings").key("theme");
-const notificationEmail = user.key("notificationPrefs").key("email");
-const nestedAuditUser = user.key("nested").key("audit").key("lastUpdatedBy");
+const _statsFollowers = user.key("stats").key("followers");
+const _statsEngagement = user.key("stats").key("engagementScore");
+const _statsLiveFeed = user.key("stats").key("liveFeed");
+const _settingsTheme = user.key("settings").key("theme");
+const _notificationEmail = user.key("notificationPrefs").key("email");
+const _nestedAuditUser = user.key("nested").key("audit").key("lastUpdatedBy");
 
 // Dynamic string keys (fallback to any)
 declare const stringKey: string;
-const stringAccess = user.key(stringKey);
-const nestedViaString = user.key(stringKey).key("theme");
+const _stringAccess = user.key(stringKey);
+const _nestedViaString = user.key(stringKey).key("theme");
 
 // Random access of flags to simulate loops with string inputs
 declare const runtimeKeys: string[];
@@ -161,10 +161,10 @@ type Account = {
 type AccountCell = Cell<Account>;
 declare const account: AccountCell;
 
-const accountProfile = account.key("profile");
-const accountActivityRecent = account.key("activity").key("recent");
-const accountActivityEvents = account.key("activity").key("events");
-const accountEmergencyContacts = account.key("emergencyContacts");
+const _accountProfile = account.key("profile");
+const _accountActivityRecent = account.key("activity").key("recent");
+const _accountActivityEvents = account.key("activity").key("events");
+const _accountEmergencyContacts = account.key("emergencyContacts");
 
 // Additional amplification on account structure
 type AccountPaths = [

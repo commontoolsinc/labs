@@ -12,7 +12,6 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
   type UnsafeBinding,
-  type UnwrapCell,
 } from "./types.ts";
 import { toOpaqueRef } from "../back-to-cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
