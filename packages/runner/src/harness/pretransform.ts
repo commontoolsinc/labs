@@ -31,13 +31,25 @@ export function transformInjectHelperModule(
 // Injects a new entry at root `/index.ts` to re-export
 // the entry contents because otherwise `typescript`
 // flattens the output, eliding the common prefix.
+//
+// NOTE: For URL-based programs (where main is a URL), we skip this transformation
+// entirely since URLs are already globally unique and don't need prefixing.
+// Creating a synthetic index file that re-exports from a URL would cause
+// TypeScript module resolution to fail.
 export function transformProgramWithPrefix(
   program: RuntimeProgram,
   id: string,
 ): RuntimeProgram {
   const main = program.main;
-  const exportNameds = `export * from "${prefix(main, id)}";`;
-  const exportDefault = `export { default } from "${prefix(main, id)}";`;
+
+  // Skip prefix transformation entirely for URL-based programs
+  if (main.startsWith("http://") || main.startsWith("https://")) {
+    return program;
+  }
+
+  const prefixedMain = prefix(main, id);
+  const exportNameds = `export * from "${prefixedMain}";`;
+  const exportDefault = `export { default } from "${prefixedMain}";`;
   const hasDefault = !program.mainExport || program.mainExport === "default";
   const files = [
     ...program.files.map((source) => ({
@@ -49,6 +61,7 @@ export function transformProgramWithPrefix(
       contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
     },
   ];
+
   return {
     main: `/index.ts`,
     files,
@@ -56,5 +69,10 @@ export function transformProgramWithPrefix(
 }
 
 function prefix(filename: string, id: string): string {
+  // Don't prefix URLs - they're already globally unique
+  // and prefixing breaks URL resolution
+  if (filename.startsWith("http://") || filename.startsWith("https://")) {
+    return filename;
+  }
   return `/${id}${filename}`;
 }

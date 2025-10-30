@@ -175,7 +175,24 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     return moduleLiterals.map((literal) => {
       const name = literal.text;
       if (name[0] === "." || name[0] === "/") {
-        const resolved = path.join(path.dirname(containingFile), name);
+        let resolved: string;
+
+        // Handle URL-based files differently from file system paths
+        // Using path.dirname on URLs corrupts them (https:// becomes https:/)
+        if (containingFile.startsWith("http://") || containingFile.startsWith("https://")) {
+          try {
+            // Use URL class for proper URL resolution
+            const url = new URL(name[0] === "/" ? name : `./${name}`, containingFile);
+            resolved = url.href;
+          } catch (e) {
+            // Fall back to path resolution if URL resolution fails
+            resolved = path.join(path.dirname(containingFile), name);
+          }
+        } else {
+          // Use path resolution for file system sources
+          resolved = path.join(path.dirname(containingFile), name);
+        }
+
         return {
           resolvedModule: {
             resolvedFileName: resolved,
@@ -415,9 +432,15 @@ class SourceCollector {
 
   transformer(): ts.TransformerFactory<ts.SourceFile> {
     return () => (sourceFile) => {
+      const fileName = sourceFile.fileName;
+      // Don't normalize URLs - path.normalize corrupts them (https:// becomes https:/)
+      const normalizedName = fileName.startsWith("http://") || fileName.startsWith("https://")
+        ? fileName
+        : path.normalize(fileName);
+
       this.#sources.push({
         contents: this.#printer.printFile(sourceFile),
-        name: path.normalize(sourceFile.fileName),
+        name: normalizedName,
       });
       return sourceFile;
     };
