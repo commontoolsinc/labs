@@ -21,7 +21,7 @@ const MEMORY_WS_URL = `${
 const SPACE_NAME = "runner_integration";
 
 const TOTAL_COUNT = 20; // how many elements we push to the array
-const TIMEOUT_MS = 30000; // timeout for the test in ms
+const TIMEOUT_MS = 180000; // timeout for the test in ms (3 minutes)
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);

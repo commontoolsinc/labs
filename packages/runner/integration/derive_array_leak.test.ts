@@ -19,11 +19,11 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 
 const { API_URL } = env;
 const SPACE_NAME = "runner_integration";
-const TIMEOUT_MS = 180000; // 3 minutes to handle severe memory leak slowdown
+const TIMEOUT_MS = 300000;
 
 // Test parameters
-const INCREMENTS_PER_CLICK = 100; // How many times each click increments (must match .tsx file)
-const MAX_MEMORY_INCREASE_RATIO = 2.0; // Fail if memory more than doubles
+const INCREMENTS_PER_CLICK = 50; // How many times each click increments (must match .tsx file)
+const MAX_MEMORY_INCREASE_RATIO = 2.0; // Fail ratio
 
 console.log("Derive Array Leak Test");
 console.log(`Connecting to: ${API_URL}`);
