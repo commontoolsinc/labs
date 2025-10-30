@@ -6,6 +6,7 @@ import {
   type NodeFactory,
   type NodeRef,
   type Opaque,
+  type OpaqueCell,
   type OpaqueRef,
   type Recipe,
   type SchemaWithoutCell,
@@ -201,7 +202,7 @@ export function opaqueRef<T>(
         if (typeof prop === "symbol") {
           return methods[prop as keyof IOpaqueCell<T>];
         } else {
-          return methods.key(prop as unknown as keyof UnwrapCell<T>);
+          return (methods as unknown as OpaqueCell<unknown>).key(prop);
         }
       },
       set(_, prop, value) {
