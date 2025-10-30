@@ -782,11 +782,12 @@ const commit = <Space extends MemorySpace>(
   const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
   const stmt = session.store.prepare(EXPORT);
-  const row = stmt.get({ the, of }) as
-    | StateRow
-    | undefined;
-  stmt.finalize();
-
+  let row;
+  try {
+    row = stmt.get({ the, of }) as StateRow | undefined;
+  } finally {
+    stmt.finalize();
+  }
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
