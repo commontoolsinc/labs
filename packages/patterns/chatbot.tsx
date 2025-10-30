@@ -122,6 +122,7 @@ type ChatInput = {
   messages: Default<Array<BuiltInLLMMessage>, []>;
   tools: any;
   theme?: any;
+  system?: string;
 };
 
 type PromptAttachment = {
@@ -287,7 +288,7 @@ const listRecent = handler<
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools, theme }) => {
+  ({ messages, tools, theme, system }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
     const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
@@ -352,7 +353,9 @@ export default recipe<ChatInput, ChatOutput>(
       navigateToAttachment: {
         description:
           "Navigate to a mentionable by its ID in the attachments array.",
-        handler: navigateToAttachment({ allAttachments: attachmentsWithRecent }),
+        handler: navigateToAttachment({
+          allAttachments: attachmentsWithRecent,
+        }),
       },
       listAttachments: {
         description: "List all attachments in the attachments array.",
@@ -390,8 +393,9 @@ export default recipe<ChatInput, ChatOutput>(
 
     const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog(
       {
-        system:
-          "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
+        system: derive(system, (s) =>
+          s ??
+            "You are a polite but efficient assistant."),
         messages,
         tools: mergedTools,
         model,
@@ -422,7 +426,10 @@ export default recipe<ChatInput, ChatOutput>(
         $mentionable={mentionable}
         modelItems={items}
         $model={model}
-        onct-send={sendMessage({ addMessage, allAttachments: attachmentsWithRecent })}
+        onct-send={sendMessage({
+          addMessage,
+          allAttachments: attachmentsWithRecent,
+        })}
         onct-stop={cancelGeneration}
         onct-attachment-add={addAttachment({ allAttachments })}
         onct-attachment-remove={removeAttachment({ allAttachments })}
