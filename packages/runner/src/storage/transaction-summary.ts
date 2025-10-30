@@ -23,19 +23,12 @@ export interface TransactionSummary {
 
   /** Activity statistics */
   activity: {
-    totalOperations: number;
     reads: number;
     writes: number;
   };
 
-  /** Changed object IDs (shortened) */
-  changedObjects: string[];
-
   /** Actual writes with values */
   writes: WriteDetail[];
-
-  /** Transaction status */
-  status: "ready" | "pending" | "done" | "error";
 }
 
 /**
@@ -78,9 +71,6 @@ export function summarizeTransaction(
   // Summarize activity
   const activity = summarizeActivity(journal);
 
-  // Get changed objects
-  const changedObjects = extractChangedObjects(journal);
-
   // Extract actual writes with values
   const writes = space ? extractWrites(journal, space) : [];
 
@@ -90,9 +80,7 @@ export function summarizeTransaction(
   return {
     summary,
     activity,
-    changedObjects,
     writes,
-    status: status.status,
   };
 }
 
@@ -221,7 +209,6 @@ export function debugTransactionWrites(
  * Summarize activity from transaction journal
  */
 function summarizeActivity(journal: ITransactionJournal): {
-  totalOperations: number;
   reads: number;
   writes: number;
 } {
@@ -236,26 +223,7 @@ function summarizeActivity(journal: ITransactionJournal): {
     }
   }
 
-  return {
-    totalOperations: reads + writes,
-    reads,
-    writes,
-  };
-}
-
-/**
- * Extract unique object IDs that were written to
- */
-function extractChangedObjects(journal: ITransactionJournal): string[] {
-  const objectIds = new Set<string>();
-
-  for (const activity of journal.activity()) {
-    if ("write" in activity && activity.write) {
-      objectIds.add(activity.write.id);
-    }
-  }
-
-  return Array.from(objectIds);
+  return { reads, writes };
 }
 
 /**
