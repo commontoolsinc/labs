@@ -1,7 +1,14 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { summarizeTransaction, formatTransactionSummary } from "../src/storage/transaction-summary.ts";
-import type { IExtendedStorageTransaction, ITransactionJournal, IAttestation } from "../src/storage/interface.ts";
+import {
+  formatTransactionSummary,
+  summarizeTransaction,
+} from "../src/storage/transaction-summary.ts";
+import type {
+  IAttestation,
+  IExtendedStorageTransaction,
+  ITransactionJournal,
+} from "../src/storage/interface.ts";
 
 // Simple test transaction journal
 class TestJournal implements ITransactionJournal {
@@ -36,7 +43,10 @@ function attestation(id: string, path: string[], value?: any): IAttestation {
 }
 
 // Simple test transaction
-function createTestTransaction(novelty: IAttestation[], history: IAttestation[] = []): IExtendedStorageTransaction {
+function createTestTransaction(
+  novelty: IAttestation[],
+  history: IAttestation[] = [],
+): IExtendedStorageTransaction {
   const journal = new TestJournal(novelty, history);
   return {
     journal,
@@ -107,7 +117,7 @@ describe("transaction-summary", () => {
     const formatted = formatTransactionSummary(tx, "did:key:test" as any);
 
     assertEquals(formatted.includes("value.count: 3 → 5"), true);
-    assertEquals(formatted.includes("value.title = \"Test\""), true);
+    assertEquals(formatted.includes('value.title = "Test"'), true);
   });
 
   it("should show object headers for multiple objects", () => {

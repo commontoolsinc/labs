@@ -7,10 +7,8 @@
 
 import type {
   IExtendedStorageTransaction,
-  ITransactionJournal,
-  Activity,
   IMemorySpaceAddress,
-  IAttestation,
+  ITransactionJournal,
 } from "./interface.ts";
 import type { MemorySpace } from "../runtime.ts";
 
@@ -236,7 +234,9 @@ function extractWrites(
   // Build a map of previous values from history
   const previousValues = new Map<string, unknown>();
   for (const attestation of journal.history(space)) {
-    const key = `${attestation.address.id}:${attestation.address.path.join(".")}`;
+    const key = `${attestation.address.id}:${
+      attestation.address.path.join(".")
+    }`;
     previousValues.set(key, attestation.value);
   }
 
@@ -272,7 +272,9 @@ function truncateValue(value: unknown, maxLength: number): unknown {
   if (value === null) return null;
 
   if (typeof value === "string") {
-    return value.length > maxLength ? value.substring(0, maxLength) + "..." : value;
+    return value.length > maxLength
+      ? value.substring(0, maxLength) + "..."
+      : value;
   }
 
   if (Array.isArray(value)) {
@@ -337,7 +339,9 @@ function formatValueForSummary(value: unknown): string {
   if (value === undefined) return "undefined";
   if (value === null) return "null";
   if (typeof value === "string") {
-    const truncated = value.length > 50 ? value.substring(0, 50) + "..." : value;
+    const truncated = value.length > 50
+      ? value.substring(0, 50) + "..."
+      : value;
     return `"${truncated}"`;
   }
   if (typeof value === "number" || typeof value === "boolean") {
