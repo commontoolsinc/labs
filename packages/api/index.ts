@@ -41,12 +41,9 @@ export type BrandedCell<T, Brand extends string = string> = {
 
 // To constrain methods that only exists on objects
 type IsThisObject =
-  | BrandedCell<JSONArray | JSONObject>
-  | BrandedCell<Array<unknown>>
-  | BrandedCell<Array<any>>
-  | BrandedCell<Record<string, unknown | any>>
-  | BrandedCell<unknown>
-  | BrandedCell<any>;
+  | IsThisArray
+  | BrandedCell<JSONObject>
+  | BrandedCell<Record<string, unknown>>;
 
 type IsThisArray =
   | BrandedCell<JSONArray>
