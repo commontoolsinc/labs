@@ -1052,151 +1052,113 @@ type MergeSchemas<
       : never;
   };
 
-/**
- * Merge ref site schema with resolved target, then process with Schema<>.
- * Implements JSON Schema spec: ref site siblings override target.
- */
-type MergeRefSiteWithTarget<
+type MergeRefSiteWithTargetGeneric<
   RefSite extends JSONSchema,
   Target extends JSONSchema,
   Root extends JSONSchema,
   Depth extends DepthLevel,
+  WrapCells extends boolean,
 > = RefSite extends { $ref: string }
   ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
-    infer Merged extends JSONSchema ? Schema<Merged, Root, Depth>
+    infer Merged extends JSONSchema
+    ? SchemaInner<Merged, Root, Depth, WrapCells>
   : never
   : never;
 
-/**
- * Merge ref site schema with resolved target, then process with SchemaWithoutCell<>.
- * Same as MergeRefSiteWithTarget but doesn't wrap in Cell/Stream.
- */
-type MergeRefSiteWithTargetWithoutCell<
-  RefSite extends JSONSchema,
-  Target extends JSONSchema,
+type SchemaAnyOf<
+  Schemas extends readonly JSONSchema[],
   Root extends JSONSchema,
   Depth extends DepthLevel,
-> = RefSite extends { $ref: string }
-  ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
-    infer Merged extends JSONSchema ? SchemaWithoutCell<Merged, Root, Depth>
-  : never
-  : never;
+  WrapCells extends boolean,
+> = {
+  [I in keyof Schemas]: Schemas[I] extends JSONSchema
+    ? SchemaInner<Schemas[I], Root, DecrementDepth<Depth>, WrapCells>
+    : never;
+}[number];
 
-/**
- * Convert a JSON Schema to its TypeScript type equivalent.
- *
- * Supports:
- * - Primitive types (string, number, boolean, null)
- * - Objects with properties (required/optional)
- * - Arrays with items
- * - anyOf unions
- * - $ref resolution (including JSON Pointers)
- * - asCell/asStream reactive wrappers
- * - default values (makes properties required)
- *
- * $ref Support:
- * - "#" (self-reference to root schema)
- * - "#/$defs/Name" (JSON Pointer to definition)
- * - "#/properties/field" (JSON Pointer to any schema location)
- * - External refs (http://...) return type `any`
- *
- * Default Precedence:
- * When both ref site and target have `default`, ref site takes precedence
- * per JSON Schema 2020-12 specification.
- *
- * Limitations:
- * - JSON Pointer escaping (~0, ~1) not supported at type level
- * - Depth limited to 9 levels to prevent infinite recursion
- * - Complex allOf/oneOf logic may not match runtime exactly
- *
- * @template T - The JSON Schema to convert
- * @template Root - Root schema for $ref resolution
- * @template Depth - Recursion depth limit (0-9)
- */
+type SchemaArrayItems<
+  Items,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+  WrapCells extends boolean,
+> = Items extends JSONSchema
+  ? Array<SchemaInner<Items, Root, DecrementDepth<Depth>, WrapCells>>
+  : unknown[];
+
+type SchemaCore<
+  T extends JSONSchema,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+  WrapCells extends boolean,
+> = T extends { $ref: "#" } ? SchemaInner<
+    Omit<Root, "asCell" | "asStream">,
+    Root,
+    DecrementDepth<Depth>,
+    WrapCells
+  >
+  : T extends { $ref: infer RefStr extends string }
+    ? MergeRefSiteWithTargetGeneric<
+      T,
+      ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells
+    >
+  : T extends { enum: infer E extends readonly any[] } ? E[number]
+  : T extends { anyOf: infer U extends readonly JSONSchema[] }
+    ? SchemaAnyOf<U, Root, Depth, WrapCells>
+  : T extends { type: "string" } ? string
+  : T extends { type: "number" | "integer" } ? number
+  : T extends { type: "boolean" } ? boolean
+  : T extends { type: "null" } ? null
+  : T extends { type: "array" }
+    ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
+    : unknown[]
+  : T extends { type: "object" }
+    ? T extends { properties: infer P }
+      ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
+          P,
+          T extends { required: readonly string[] } ? T["required"] : [],
+          Root,
+          Depth,
+          T extends { additionalProperties: infer AP extends JSONSchema } ? AP
+            : false,
+          GetDefaultKeys<T>,
+          WrapCells
+        >
+      : Record<string, unknown>
+    : T extends { additionalProperties: infer AP }
+      ? AP extends false ? Record<string | number | symbol, never>
+      : AP extends true ? Record<string | number | symbol, unknown>
+      : AP extends JSONSchema ? Record<
+          string | number | symbol,
+          SchemaInner<AP, Root, DecrementDepth<Depth>, WrapCells>
+        >
+      : Record<string | number | symbol, unknown>
+    : Record<string, unknown>
+  : any;
+
+type SchemaInner<
+  T extends JSONSchema,
+  Root extends JSONSchema = T,
+  Depth extends DepthLevel = 9,
+  WrapCells extends boolean = true,
+> = Depth extends 0 ? unknown
+  : T extends { asCell: true }
+    ? WrapCells extends true
+      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
+  : T extends { asStream: true }
+    ? WrapCells extends true
+      ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>
+  : SchemaCore<T, Root, Depth, WrapCells>;
+
 export type Schema<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> =
-  // If we're out of depth, short-circuit
-  Depth extends 0 ? unknown
-    // Handle asCell attribute - wrap the result in Cell<T>
-    : T extends { asCell: true } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>>
-    // Handle asStream attribute - wrap the result in Stream<T>
-    : T extends { asStream: true }
-      ? Stream<Schema<Omit<T, "asStream">, Root, Depth>>
-    // Handle $ref: "#" (self-reference) specially to preserve recursion
-    : T extends { $ref: "#" }
-      ? Schema<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>>
-    // Handle $ref - resolve and merge with ref site schema
-    : T extends { $ref: infer RefStr extends string } ? MergeRefSiteWithTarget<
-        T,
-        ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle enum values
-    : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema ?
-    //         | Schema<F, Root, DecrementDepth<Depth>>
-    //         | Schema<{ oneOf: R }, Root, Depth>
-    //       : never
-    //     : never
-    // Handle anyOf
-    : T extends { anyOf: infer U extends readonly JSONSchema[] }
-      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-        ? F extends JSONSchema ?
-            | Schema<F, Root, DecrementDepth<Depth>>
-            | Schema<{ anyOf: R }, Root, Depth>
-        : never
-      : never
-    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema
-    //       ? Schema<F, Root, Depth> & Schema<{ allOf: R }, Root, Depth>
-    //     : never
-    //   : Record<string | number | symbol, never>
-    // Handle different primitive types
-    : T extends { type: "string" } ? string
-    : T extends { type: "number" | "integer" } ? number
-    : T extends { type: "boolean" } ? boolean
-    : T extends { type: "null" } ? null
-    // Handle array type
-    : T extends { type: "array" }
-      ? T extends { items: infer I }
-        ? I extends JSONSchema ? Array<Schema<I, Root, DecrementDepth<Depth>>>
-        : unknown[]
-      : unknown[] // No items specified, allow any items
-    // Handle object type
-    : T extends { type: "object" }
-      ? T extends { properties: infer P }
-        ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
-            P,
-            T extends { required: readonly string[] } ? T["required"] : [],
-            Root,
-            Depth,
-            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
-              : false,
-            GetDefaultKeys<T>
-          >
-        : Record<string, unknown>
-        // Object without properties - check additionalProperties
-      : T extends { additionalProperties: infer AP }
-        ? AP extends false ? Record<string | number | symbol, never> // Empty object
-        : AP extends true ? Record<string | number | symbol, unknown>
-        : AP extends JSONSchema ? Record<
-            string | number | symbol,
-            Schema<AP, Root, DecrementDepth<Depth>>
-          >
-        : Record<string | number | symbol, unknown>
-        // Default for object with no properties and no additionalProperties specified
-      : Record<string, unknown>
-    // Default case
-    : any;
+> = SchemaInner<T, Root, Depth, true>;
 
 // Get keys from the default object
 type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
@@ -1212,29 +1174,31 @@ type ObjectFromProperties<
   Depth extends DepthLevel,
   AP extends JSONSchema = false,
   DK extends string = never,
+  WrapCells extends boolean = true,
 > =
-  // Required properties (either explicitly required or has a default value)
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? K : never
         : never
-    ]: Schema<P[K], Root, DecrementDepth<Depth>>;
+    ]: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
   }
-  // Optional properties (not required and no default)
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? never : K
         : never
-    ]?: Schema<P[K], Root, DecrementDepth<Depth>>;
+    ]?: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
   }
-  // Additional properties
   & (
-    AP extends false
-      // Additional properties off => no-op instead of empty record
-      ? Record<never, never>
+    AP extends false ? Record<never, never>
       : AP extends true ? { [key: string]: unknown }
-      : AP extends JSONSchema
-        ? { [key: string]: Schema<AP, Root, DecrementDepth<Depth>> }
+      : AP extends JSONSchema ? {
+          [key: string]: SchemaInner<
+            AP,
+            Root,
+            DecrementDepth<Depth>,
+            WrapCells
+          >;
+        }
       : Record<string | number | symbol, never>
   )
   & IDFields;
@@ -1259,139 +1223,11 @@ type Decrement = {
 // Helper function to safely get decremented depth
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 
-// Same as above, but ignoring asCell, so we never get cells. This is used for
-// calls of lifted functions and handlers, since they can pass either cells or
-// values.
-
 export type SchemaWithoutCell<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> =
-  // If we're out of depth, short-circuit
-  Depth extends 0 ? unknown
-    // Handle asCell attribute - but DON'T wrap in Cell, just use the inner type
-    : T extends { asCell: true }
-      ? SchemaWithoutCell<Omit<T, "asCell">, Root, Depth>
-    // Handle asStream attribute - but DON'T wrap in Stream, just use the inner type
-    : T extends { asStream: true }
-      ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth>
-    // Handle $ref: "#" (self-reference) specially to preserve recursion
-    : T extends { $ref: "#" } ? SchemaWithoutCell<
-        Omit<Root, "asCell" | "asStream">,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle $ref - resolve and merge with ref site schema
-    : T extends { $ref: infer RefStr extends string }
-      ? MergeRefSiteWithTargetWithoutCell<
-        T,
-        ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle enum values
-    : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema ?
-    //         | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
-    //         | SchemaWithoutCell<{ oneOf: R }, Root, Depth>
-    //       : never
-    //     : never
-    // Handle anyOf
-    : T extends { anyOf: infer U extends readonly JSONSchema[] }
-      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-        ? F extends JSONSchema ?
-            | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
-            | SchemaWithoutCell<{ anyOf: R }, Root, Depth>
-        : never
-      : never
-    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema
-    //       ?
-    //         & SchemaWithoutCell<F, Root, Depth>
-    //         & MergeAllOfWithoutCell<{ allOf: R }, Root, Depth>
-    //     : never
-    //   : Record<string | number | symbol, never>
-    // Handle different primitive types
-    : T extends { type: "string" } ? string
-    : T extends { type: "number" | "integer" } ? number
-    : T extends { type: "boolean" } ? boolean
-    : T extends { type: "null" } ? null
-    // Handle array type
-    : T extends { type: "array" }
-      ? T extends { items: infer I }
-        ? I extends JSONSchema
-          ? SchemaWithoutCell<I, Root, DecrementDepth<Depth>>[]
-        : unknown[]
-      : unknown[] // No items specified, allow any items
-    // Handle object type
-    : T extends { type: "object" }
-      ? T extends { properties: infer P }
-        ? P extends Record<string, JSONSchema>
-          ? ObjectFromPropertiesWithoutCell<
-            P,
-            T extends { required: readonly string[] } ? T["required"] : [],
-            Root,
-            Depth,
-            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
-              : false,
-            GetDefaultKeys<T>
-          >
-        : Record<string, unknown>
-        // Object without properties - check additionalProperties
-      : T extends { additionalProperties: infer AP }
-        ? AP extends false ? Record<string | number | symbol, never> // Empty object
-        : AP extends true ? Record<string | number | symbol, unknown>
-        : AP extends JSONSchema ? Record<
-            string | number | symbol,
-            SchemaWithoutCell<AP, Root, DecrementDepth<Depth>>
-          >
-        : Record<string | number | symbol, unknown>
-        // Default for object with no properties and no additionalProperties specified
-      : Record<string, unknown>
-    // Default case
-    : any;
-
-type ObjectFromPropertiesWithoutCell<
-  P extends Record<string, JSONSchema>,
-  R extends readonly string[] | never,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  AP extends JSONSchema = false,
-  DK extends string = never,
-> =
-  // Required properties (either explicitly required or has a default value)
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? K : never
-        : never
-    ]: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
-  }
-  // Optional properties (not required and no default)
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? never : K
-        : never
-    ]?: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
-  }
-  // Additional properties
-  & (
-    AP extends false
-      // Additional properties off => no-op instead of empty record
-      ? Record<never, never>
-      : AP extends true
-      // Additional properties on => unknown
-        ? { [key: string]: unknown }
-      : AP extends JSONSchema
-      // Additional properties is another schema => map them
-        ? { [key: string]: SchemaWithoutCell<AP, Root, DecrementDepth<Depth>> }
-      : Record<string | number | symbol, never>
-  );
+> = SchemaInner<T, Root, Depth, false>;
 
 /**
  * Fragment element name used for JSX fragments.
