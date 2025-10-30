@@ -24,8 +24,8 @@ type SampleValue = {
 
 type SampleKeyable = IKeyable<Cell<SampleValue>, AsCell>;
 
-type Access<K extends PropertyKey> =
-  SampleKeyable["key"] extends (key: K) => infer R ? R : never;
+type Access<K extends PropertyKey> = SampleKeyable["key"] extends
+  (key: K) => infer R ? R : never;
 
 type ProfileAccess = Access<"profile">;
 type PostsAccess = Access<"posts">;

@@ -123,7 +123,8 @@ type StressMatrix = {
   };
 };
 
-type StressCrossUnion = StressMatrix[keyof StressMatrix]["cross"][keyof StressMatrix];
+type StressCrossUnion =
+  StressMatrix[keyof StressMatrix]["cross"][keyof StressMatrix];
 
 type StressSummary = {
   entries: StressCrossUnion;

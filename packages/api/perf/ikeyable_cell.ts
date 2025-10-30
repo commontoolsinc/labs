@@ -59,7 +59,9 @@ type ComplexValue = {
       watchTime: Cell<number>;
     }>;
     trends: Cell<Array<Cell<{ label: Cell<string>; delta: Cell<number> }>>>;
-    segments: Cell<Record<string, Cell<{ users: Cell<number>; score: Cell<number> }>>>;
+    segments: Cell<
+      Record<string, Cell<{ users: Cell<number>; score: Cell<number> }>>
+    >;
   }>;
   registry: Cell<{
     active: Cell<Record<string, Cell<RegistryEntry>>>;
@@ -85,8 +87,8 @@ type ComplexValue = {
 
 type ComplexKeyable = IKeyable<Cell<ComplexValue>, AsCell>;
 
-type KeyAccess<K extends PropertyKey> =
-  ComplexKeyable["key"] extends (key: K) => infer R ? R : never;
+type KeyAccess<K extends PropertyKey> = ComplexKeyable["key"] extends
+  (key: K) => infer R ? R : never;
 
 type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 
@@ -110,7 +112,8 @@ type StressKeyMatrix = {
   };
 };
 
-type StressKeyUnion = StressKeyMatrix[keyof StressKeyMatrix]["cross"][keyof StressKeyMatrix];
+type StressKeyUnion =
+  StressKeyMatrix[keyof StressKeyMatrix]["cross"][keyof StressKeyMatrix];
 
 type StressKeySummary = {
   entries: StressKeyUnion;
@@ -126,7 +129,7 @@ type StressKeyGrid = {
     KeyAccess<K | keyof ComplexValue>,
     KeyAccess<K | `${K & string}_${Digit}`>,
     KeyAccess<K | "timeline">,
-    KeyAccess<K | "registry" | "analytics">
+    KeyAccess<K | "registry" | "analytics">,
   ];
 };
 
@@ -134,5 +137,5 @@ type StressKeyExpansion = [
   StressKeyMatrix,
   StressKeyUnion,
   StressKeySummary,
-  StressKeyGrid[keyof StressKeyGrid]
+  StressKeyGrid[keyof StressKeyGrid],
 ];
