@@ -143,26 +143,12 @@ export interface IKeyable<out T, Wrap extends HKT> {
   key<K extends PropertyKey>(valueKey: K): KeyResultType<T, K, Wrap>;
 }
 
-export type KeyResultType<T, K, Wrap extends HKT> = unknown extends K
+export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
   ? Apply<Wrap, any> // variance guard for K = any
-  : K extends keyof UnwrapCell<T> ? (
-      0 extends (1 & T) ? Apply<Wrap, any>
-        : UnwrapCell<T>[K] extends never ? Apply<Wrap, any>
-        : T extends BrandedCell<any, any>
-          ? T extends { key(k: K): infer R } ? 0 extends (1 & R) ? Apply<
-                Wrap,
-                UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
-                  : UnwrapCell<T>[K]
-              >
-            : R
-          : Apply<
-            Wrap,
-            UnwrapCell<T>[K] extends BrandedCell<infer U, any> ? U
-              : UnwrapCell<T>[K]
-          >
-        : Apply<Wrap, UnwrapCell<T>[K]>
-    )
-  : Apply<Wrap, any>;
+  : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
+  : T extends BrandedCell<any, any> // wrapping a cell? delegate to it's .key
+    ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
+  : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
