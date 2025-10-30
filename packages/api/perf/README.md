@@ -7,10 +7,9 @@ that we can profile the types independently.
 
 ## Prerequisites
 
-The commands below assume you are inside the repo root (`labs-secondary`) and
-that the vendored TypeScript binary at
-`node_modules/.deno/typescript@5.8.3/node_modules/typescript/bin/tsc` is
-available. Use `bash` to run the snippets exactly as shown.
+The commands below assume you are inside the repo root and that the vendored
+TypeScript binary at `tsc` is available. Use `bash` to run the snippets
+exactlyas shown.
 
 ## Quick Metrics
 
@@ -18,7 +17,7 @@ Run the compiler with `--extendedDiagnostics` to get counts of type
 instantiations, memory usage, etc.
 
 ```bash
-node_modules/.deno/typescript@5.8.3/node_modules/typescript/bin/tsc \
+tsc \
   --project packages/api/perf/tsconfig.key.json \
   --extendedDiagnostics --pretty false
 ```
@@ -44,7 +43,7 @@ profile…”.
 
 ```bash
 NODE_OPTIONS=--max-old-space-size=4096 \
-node_modules/.deno/typescript@5.8.3/node_modules/typescript/bin/tsc \
+tsc \
   --project packages/api/perf/tsconfig.ikeyable-cell.json \
   --generateCpuProfile packages/api/perf/traces/ikeyable-cell.cpuprofile
 ```
@@ -64,7 +63,7 @@ exceed V8’s heap limit on the heavy scenarios.
 ```bash
 mkdir -p packages/api/perf/traces/ikeyable-cell \
   && NODE_OPTIONS=--max-old-space-size=4096 \
-     node_modules/.deno/typescript@5.8.3/node_modules/typescript/bin/tsc \
+     tsc \
        --project packages/api/perf/tsconfig.ikeyable-cell.json \
        --generateTrace packages/api/perf/traces/ikeyable-cell
 ```
@@ -84,7 +83,7 @@ There are no bespoke scripts yet; ad-hoc analysis can be performed with Node.js
 like so:
 
 ```bash
-node -e 'const trace=require("./packages/api/perf/traces/ikeyable-cell/trace.json");\
+deno -e 'const trace=require("./packages/api/perf/traces/ikeyable-cell/trace.json");\
 const totals=new Map();\
 for (const e of trace) if (e.ph==="X") totals.set(e.name,(totals.get(e.name)||0)+e.dur);\
 console.log([...totals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10));'
