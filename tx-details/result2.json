@@ -1,0 +1,84 @@
+{
+    "ok": {
+        "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f": {
+            "application/commit+json": {
+                "ba4jcbnjznfbjjza5yny6hfghhh2tlxymtsnqiaxiyg2oi3i25yqwwmoz": {
+                    "is": {
+                        "since": 151,
+                        "transaction": {
+                            "cmd": "/memory/transact",
+                            "sub": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                            "args": {
+                                "changes": {
+                                    "of:baedreibio3kxqblsokn3tfnna24s2wkefbkblcx5dlr24j7rmkv7twdtqi": {
+                                        "application/json": {
+                                            "ba4jcaaiw3aw2eep5tpda23qm3vfklv5pfyvn4ifhj44tzjlgz7srdt3w": true
+                                        }
+                                    },
+                                    "of:baedreiebukh75cklqudutddiatk45ptx3dh4dau5le6crg5vgotgaos3oe": {
+                                        "application/json": {
+                                            "ba4jcbm2t7vh2qxwphm7pvouxgdlcg4xexhtgui6kyygcygbckbzv25gf": true
+                                        }
+                                    },
+                                    "of:baedreicw57gfkzm77cu2paqxnbyyjzyfviddbswnjixqxnfm6anx43khgi": {
+                                        "application/json": {
+                                            "ba4jcb2ot6b6lv2rd7bywwcidsdyqbef5yawlrl2rxwdkovuxbacu3gvk": true
+                                        }
+                                    },
+                                    "of:baedreievf6keesyk2g22lrcsa2kh3juccslx2zodpfe2hznxvlmonovoyu": {
+                                        "application/json": {
+                                            "ba4jcaim6ylep3gs6qarbdegrrcdiobommb3fwdzzjrslb4hxquepny7r": true
+                                        }
+                                    },
+                                    "of:baedreigx4zhe2s67gh5pivamq733btokma6feclod7mhxs7d3xi2jvtvsi": {
+                                        "application/json": {
+                                            "ba4jcaqaihqdvauicyyzvzley5infcjywbemrzww3u73lsl5wslvluykh": true
+                                        }
+                                    },
+                                    "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate": {
+                                        "application/json": {
+                                            "ba4jcbfcjlpyd2wwy3x4ugo6a3yg5fn2tt47wewrdmpe6jcqs7ly3gqa5": true
+                                        }
+                                    },
+                                    "of:baedreice6o6avutf6zodfjew64dnqxmn7aj4ejh2okrzy4hjmifgv5djvy": {
+                                        "application/json": {
+                                            "ba4jcbs3q2ec7qntspmgsbmpjge7huflytyubqpjyyjwwddflqzxzmqsx": true
+                                        }
+                                    },
+                                    "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm": {
+                                        "application/json": {
+                                            "ba4jcboi7b2wec3ljscrhv3aayac53mmniunutp7lz37pwemevzz6yohi": true
+                                        }
+                                    },
+                                    "of:baedreifxn3yfhj55cdm2xqxbte7goytdmmdjoeswzw2grdc24vokdczdvm": {
+                                        "application/json": {
+                                            "ba4jcbckkps7ny7a74ke5ira7v4ta37eqhl6q3l57sv6kvbmbun2ov2fj": true
+                                        }
+                                    },
+                                    "of:baedreicn6snug3h2rafzobqwj4kf4n4b4zjntdlshao7xlctb46effrgpy": {
+                                        "application/json": {
+                                            "ba4jcbjo2i6qrklrkpjh4szk5xmn7jivsehsrfqf26tugggagiztg255o": true
+                                        }
+                                    },
+                                    "of:baedreieewq66rmgba3rn4mi5jjh3sfp7o4xvlgmmncxdfyxyu7nhpnlnzu": {
+                                        "application/json": {
+                                            "ba4jcbymnol2utyzubchmrrsfiqhn22srls5laxw57xnjgwrwzfwz64z6": {
+                                                "is": {
+                                                    "value": "[\"DefaultCharmList (3)\",\"New Notek\",\"Untitled Chat\"]"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "iss": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                            "prf": [],
+                            "iat": 1761786970,
+                            "exp": 1761790570
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

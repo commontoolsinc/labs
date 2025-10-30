@@ -1,0 +1,648 @@
+{
+    "ok": {
+        "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f": {
+            "application/commit+json": {
+                "ba4jcboxiltqfonv53vcvqmclrsad73xgsxmmxdopxw33ssaiid6ikghw": {
+                    "is": {
+                        "since": 152,
+                        "transaction": {
+                            "cmd": "/memory/transact",
+                            "sub": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                            "args": {
+                                "changes": {
+                                    "of:baedreidlcix7v5npxunqbx4zxpuwvbig6rjmqftpicm4dpqbc7xlp7hqyy": {
+                                        "application/json": {
+                                            "ba4jcaxp5ftlq6y33tar25ewhzugdmqouwkvuxvvmzdflkbahyxb5red6": {
+                                                "is": {
+                                                    "value": {
+                                                        "addMessage": {
+                                                            "$stream": true
+                                                        },
+                                                        "cancelGeneration": {
+                                                            "$stream": true
+                                                        },
+                                                        "flattenedTools": {
+                                                            "navigateToAttachment": {
+                                                                "description": "Navigate to a mentionable by its ID in the attachments array.",
+                                                                "handler": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "$event"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "pattern": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "navigateToAttachment",
+                                                                                "pattern"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "charm": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "navigateToAttachment",
+                                                                                "charm"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "listAttachments": {
+                                                                "description": "List all attachments in the attachments array.",
+                                                                "handler": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#1stream"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "pattern": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "listAttachments",
+                                                                                "pattern"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "charm": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "listAttachments",
+                                                                                "charm"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "listMentionable": {
+                                                                "description": "List all mentionable NAMEs in the space.",
+                                                                "handler": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#3stream"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "pattern": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "listMentionable",
+                                                                                "pattern"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "charm": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "listMentionable",
+                                                                                "charm"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "addAttachment": {
+                                                                "description": "Add a new attachment to the attachments array by its mentionable NAME.",
+                                                                "handler": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#4stream"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "pattern": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "addAttachment",
+                                                                                "pattern"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "charm": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "addAttachment",
+                                                                                "charm"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "removeAttachment": {
+                                                                "description": "Remove an attachment from the attachments array by its mentionable NAME.",
+                                                                "handler": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#5stream"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "pattern": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "removeAttachment",
+                                                                                "pattern"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "charm": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "tools",
+                                                                                "removeAttachment",
+                                                                                "charm"
+                                                                            ],
+                                                                            "id": "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "pending": true
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "of:baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm": {
+                                        "application/json": {
+                                            "ba4jcboi7b2wec3ljscrhv3aayac53mmniunutp7lz37pwemevzz6yohi": {
+                                                "is": {
+                                                    "value": {
+                                                        "$TYPE": "ba4jcbw6aagfeittr53hfkepnq2g5xmm3y5wpri7nzhi5btxgysmgn4zc",
+                                                        "resultRef": {
+                                                            "/": {
+                                                                "link@1": {
+                                                                    "path": [],
+                                                                    "id": "of:baedreice6o6avutf6zodfjew64dnqxmn7aj4ejh2okrzy4hjmifgv5djvy"
+                                                                }
+                                                            }
+                                                        },
+                                                        "internal": {
+                                                            "1": {},
+                                                            "model": "anthropic:claude-sonnet-4-5",
+                                                            "clearChat": {
+                                                                "$stream": true
+                                                            },
+                                                            "attachments": [],
+                                                            "$event": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#1stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#3stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#4stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#5stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#6stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#7stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#8stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#9stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#10stream": {
+                                                                "$stream": true
+                                                            },
+                                                            "__#0": {
+                                                                "/": {
+                                                                    "link@1": {
+                                                                        "path": [],
+                                                                        "id": "of:baedreidlcix7v5npxunqbx4zxpuwvbig6rjmqftpicm4dpqbc7xlp7hqyy",
+                                                                        "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "defaultValue": {
+                                                                "pending": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [],
+                                                                            "id": "of:baedreih5mh2nrogtk67opqc2p3prul7es7tbfzu4sf42ccogbghw2yj2me",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "result": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [],
+                                                                            "id": "of:baedreihckzazeoorh56tfbv7l7hxfjgaphos537qyogtix7qjdbrcrpvtu",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "error": {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [],
+                                                                            "id": "of:baedreigusyp2crdmls57gqrqktqbkpolwhcpnxuhnulq2q42dgkpcdjqrm",
+                                                                            "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "$NAME": {
+                                                                "/": {
+                                                                    "link@1": {
+                                                                        "path": [],
+                                                                        "id": "of:baedreifxn3yfhj55cdm2xqxbte7goytdmmdjoeswzw2grdc24vokdczdvm"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "value": {
+                                                                "/": {
+                                                                    "link@1": {
+                                                                        "path": [
+                                                                            "internal",
+                                                                            "mentionable"
+                                                                        ],
+                                                                        "id": "of:baedreiebukh75cklqudutddiatk45ptx3dh4dau5le6crg5vgotgaos3oe",
+                                                                        "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "tools": {
+                                                                "navigateToAttachment": {
+                                                                    "description": "Navigate to a mentionable by its ID in the attachments array.",
+                                                                    "handler": {
+                                                                        "$alias": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "$event"
+                                                                            ],
+                                                                            "schema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "id": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "id"
+                                                                                ]
+                                                                            },
+                                                                            "rootSchema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "id": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "id"
+                                                                                ]
+                                                                            },
+                                                                            "cell": {
+                                                                                "/": "baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "listAttachments": {
+                                                                    "description": "List all attachments in the attachments array.",
+                                                                    "handler": {
+                                                                        "$alias": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#1stream"
+                                                                            ],
+                                                                            "schema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "result": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "result"
+                                                                                ]
+                                                                            },
+                                                                            "rootSchema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "result": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "result"
+                                                                                ]
+                                                                            },
+                                                                            "cell": {
+                                                                                "/": "baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "listMentionable": {
+                                                                    "description": "List all mentionable NAMEs in the space.",
+                                                                    "handler": {
+                                                                        "$alias": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#3stream"
+                                                                            ],
+                                                                            "schema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "result": {
+                                                                                        "type": "string",
+                                                                                        "description": "A cell to store the result text"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "result"
+                                                                                ]
+                                                                            },
+                                                                            "rootSchema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "result": {
+                                                                                        "type": "string",
+                                                                                        "description": "A cell to store the result text"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "result"
+                                                                                ]
+                                                                            },
+                                                                            "cell": {
+                                                                                "/": "baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "addAttachment": {
+                                                                    "description": "Add a new attachment to the attachments array by its mentionable NAME.",
+                                                                    "handler": {
+                                                                        "$alias": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#4stream"
+                                                                            ],
+                                                                            "schema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "mentionableName": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "mentionableName"
+                                                                                ]
+                                                                            },
+                                                                            "rootSchema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "mentionableName": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "mentionableName"
+                                                                                ]
+                                                                            },
+                                                                            "cell": {
+                                                                                "/": "baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "removeAttachment": {
+                                                                    "description": "Remove an attachment from the attachments array by its mentionable NAME.",
+                                                                    "handler": {
+                                                                        "$alias": {
+                                                                            "path": [
+                                                                                "internal",
+                                                                                "__#5stream"
+                                                                            ],
+                                                                            "schema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "mentionableName": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "mentionableName"
+                                                                                ]
+                                                                            },
+                                                                            "rootSchema": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                    "mentionableName": {
+                                                                                        "type": "string"
+                                                                                    }
+                                                                                },
+                                                                                "required": [
+                                                                                    "mentionableName"
+                                                                                ]
+                                                                            },
+                                                                            "cell": {
+                                                                                "/": "baedreicp5suyvwxlx3wyrt7xpw7r7ll3jy63s5phbgvkhhx7oskjiglllm"
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "__#2": {
+                                                                "/": {
+                                                                    "link@1": {
+                                                                        "path": [
+                                                                            "internal",
+                                                                            "mentionable"
+                                                                        ],
+                                                                        "id": "of:baedreiebukh75cklqudutddiatk45ptx3dh4dau5le6crg5vgotgaos3oe",
+                                                                        "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "__#11": [
+                                                                {
+                                                                    "label": "anthropic:claude-opus-4-1",
+                                                                    "value": "anthropic:claude-opus-4-1"
+                                                                },
+                                                                {
+                                                                    "label": "anthropic:claude-opus-4-1-thinking",
+                                                                    "value": "anthropic:claude-opus-4-1-thinking"
+                                                                },
+                                                                {
+                                                                    "label": "anthropic:claude-sonnet-4-0",
+                                                                    "value": "anthropic:claude-sonnet-4-0"
+                                                                },
+                                                                {
+                                                                    "label": "anthropic:claude-sonnet-4-0-thinking",
+                                                                    "value": "anthropic:claude-sonnet-4-0-thinking"
+                                                                },
+                                                                {
+                                                                    "label": "anthropic:claude-sonnet-4-5",
+                                                                    "value": "anthropic:claude-sonnet-4-5"
+                                                                },
+                                                                {
+                                                                    "label": "anthropic:claude-sonnet-4-5-thinking",
+                                                                    "value": "anthropic:claude-sonnet-4-5-thinking"
+                                                                }
+                                                            ]
+                                                        },
+                                                        "spell": {
+                                                            "/": {
+                                                                "link@1": {
+                                                                    "id": "of:baedreig3nfdxpelix2yirz2grpk5qz4xwlgx5eou3bnofxbarxigy4mw54"
+                                                                }
+                                                            }
+                                                        },
+                                                        "argument": {
+                                                            "messages": [
+                                                                {
+                                                                    "/": {
+                                                                        "link@1": {
+                                                                            "path": [],
+                                                                            "id": "of:baedreicn7r6i2dmq2w4oe3dd6x4kg4tcgedbwmxpjhirv5o6txfzoh7sle"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "of:baedreicn7r6i2dmq2w4oe3dd6x4kg4tcgedbwmxpjhirv5o6txfzoh7sle": {
+                                        "application/json": {
+                                            "ba4jcbiewxzdfkrb2btx6vti3g5gypyfrgaaxmcuszkrezzkvkrdx2mcp": {
+                                                "is": {
+                                                    "value": {
+                                                        "role": "user",
+                                                        "content": "hi",
+                                                        "result": {
+                                                            "/": {
+                                                                "link@1": {
+                                                                    "path": [],
+                                                                    "id": "of:baedreigsyarma3tg5j2ljyjhziwrfsd3e7rhsihkkgd5qtkuxiohvuyyxq",
+                                                                    "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "of:baedreicovphso7xfcnkqpsdacxf4327wkkib6zdj462kttj2sdr4itokry": {
+                                        "application/json": {
+                                            "ba4jcbrg2tilnvpjg3d7mbchms5gj5vsiyoj6cvwwrtybwkgmovnlbvhu": {
+                                                "is": {
+                                                    "value": {
+                                                        "requestId": "1ac60dff-1e33-493f-a9ad-c0675b0c63fc",
+                                                        "lastActivity": 1761787715018
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "iss": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                            "prf": [],
+                            "iat": 1761787710,
+                            "exp": 1761791310
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,2822 @@
+{
+    "branches": {},
+    "activity": [
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "cell",
+                    "/"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "cell",
+                    "/"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "cell",
+                    "/"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "detail": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "detail"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "cell",
+                    "/"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$event",
+                    "detail",
+                    "value"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "cell",
+                    "/"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "asCell": true
+                        }
+                    },
+                    "required": [
+                        "content"
+                    ]
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "content",
+                    "/",
+                    "link@1"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string",
+                    "asCell": true
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "content",
+                    "$alias",
+                    "path"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string",
+                    "asCell": true
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "path": [
+                    "value",
+                    "$ctx",
+                    "content"
+                ],
+                "id": "data:application/json,%7B%22value%22%3A%7B%22%24ctx%22%3A%7B%22content%22%3A%7B%22%24alias%22%3A%7B%22path%22%3A%5B%22argument%22%2C%22content%22%5D%2C%22schema%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%2C%22rootSchema%22%3A%7B%22type%22%3A%22object%22%2C%22properties%22%3A%7B%22title%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22Untitled%20Note%22%7D%2C%22content%22%3A%7B%22type%22%3A%22string%22%2C%22default%22%3A%22%22%7D%7D%2C%22required%22%3A%5B%22title%22%2C%22content%22%5D%7D%2C%22cell%22%3A%7B%22%2F%22%3A%22baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate%22%7D%7D%7D%7D%2C%22%24event%22%3A%7B%22detail%22%3A%7B%22value%22%3A%2212345%22%7D%2C%22result%22%3A%7B%22%2F%22%3A%7B%22link%401%22%3A%7B%22path%22%3A%5B%5D%2C%22id%22%3A%22of%3Abaedreihjpvrqsgiqhzt62655bc3umq3qjbqvb35najqgmnu4otwwyvdhuy%22%2C%22space%22%3A%22did%3Akey%3Az6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f%22%7D%7D%7D%7D%7D%7D",
+                "type": "application/json",
+                "schema": {
+                    "type": "string",
+                    "asCell": true
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string",
+                    "default": ""
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "default": "Untitled Note"
+                        },
+                        "content": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    "required": [
+                        "title",
+                        "content"
+                    ]
+                },
+                "overwrite": "redirect",
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "cell",
+                    "/"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "$alias",
+                    "path"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "cell",
+                    "/"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "$alias",
+                    "path"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "cell",
+                    "/"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "$alias",
+                    "path"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content",
+                    "/",
+                    "link@1"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "read": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f",
+                "meta": {}
+            }
+        },
+        {
+            "write": {
+                "id": "of:baedreicdazy6vm7pszguymknotivgw7igvrvn4oaoewcergwdvdwsgtate",
+                "path": [
+                    "value",
+                    "argument",
+                    "content"
+                ],
+                "type": "application/json",
+                "schema": {
+                    "type": "string"
+                },
+                "rootSchema": {
+                    "type": "object",
+                    "properties": {
+                        "$event": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "detail"
+                            ]
+                        },
+                        "$ctx": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "asCell": true
+                                }
+                            },
+                            "required": [
+                                "content"
+                            ]
+                        }
+                    }
+                },
+                "space": "did:key:z6MktCfWXiNSojxgbSUAFTTseYnroLjmKouE1mwQQ6peVz2f"
+            }
+        }
+    ],
+    "status": "closed",
+    "reason": {
+        "ok": {}
+    }
+}

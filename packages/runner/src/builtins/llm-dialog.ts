@@ -811,6 +811,8 @@ async function invokeToolCall(
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
+        // can we insert the changeset from completedTx into the conversation somehow?
+
         resolve(result.withTx(completedTx).get()); // withTx likely superfluous
       }); // TODO(bf): why any needed?
     } else {
