@@ -13,8 +13,8 @@ function getCellBrand(
   const brandSymbol = findCellBrandSymbol(type, checker, new Set());
   if (!brandSymbol) return undefined;
 
-  const declaration =
-    brandSymbol.valueDeclaration ?? brandSymbol.declarations?.[0];
+  const declaration = brandSymbol.valueDeclaration ??
+    brandSymbol.declarations?.[0];
   if (!declaration) return undefined;
 
   const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, declaration);
@@ -65,7 +65,8 @@ function findCellBrandSymbol(
   }
 
   if (objectType.objectFlags & ts.ObjectFlags.ClassOrInterface) {
-    const baseTypes = checker.getBaseTypes(objectType as ts.InterfaceType) ?? [];
+    const baseTypes = checker.getBaseTypes(objectType as ts.InterfaceType) ??
+      [];
     for (const base of baseTypes) {
       const fromBase = findCellBrandSymbol(base, checker, seen);
       if (fromBase) return fromBase;
