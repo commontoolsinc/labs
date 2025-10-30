@@ -30,7 +30,10 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
     const rootIdentifier = factory.createIdentifier("_v1");
     const fallbackExpr = factory.createParenthesizedExpression(rootIdentifier);
 
-    const derive = createDeriveCall(fallbackExpr, [rootIdentifier, fallbackExpr], {
+    const derive = createDeriveCall(fallbackExpr, [
+      rootIdentifier,
+      fallbackExpr,
+    ], {
       factory,
       tsContext: context,
       ctHelpers,
