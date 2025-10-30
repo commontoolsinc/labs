@@ -268,15 +268,71 @@ const listMentionable = handler<
   },
 );
 
+const listRecent = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { recentCharms: MentionableCharm[] }
+>(
+  (args, state) => {
+    try {
+      const namesList = state.recentCharms.map((charm) => charm[NAME]);
+      args.result.set(JSON.stringify(namesList));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme }) => {
     const model = cell<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = cell<Array<PromptAttachment>>([]);
     const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
+    const recentCharms = schemaifyWish<MentionableCharm[]>("#recent");
 
-    // Derive tools from attachments
-    const dynamicTools = derive(allAttachments, (attachments) => {
+    // Auto-attach the most recent charm (union with user attachments)
+    const attachmentsWithRecent = derive(
+      [allAttachments, recentCharms],
+      ([userAttachments, recent]: [
+        Array<PromptAttachment>,
+        Array<MentionableCharm>,
+      ]): Array<PromptAttachment> => {
+        const attachments = userAttachments || [];
+
+        // If there's a most recent charm, auto-inject it
+        if (recent && recent.length > 0) {
+          const mostRecent = recent[0];
+          const mostRecentName = mostRecent[NAME];
+
+          // Check if it's already in the attachments
+          const alreadyAttached = attachments.some(
+            (a) => a.type === "mention" && a.name === mostRecentName,
+          );
+
+          if (!alreadyAttached && mostRecentName) {
+            // Add the most recent charm to the beginning
+            const id = `attachment-auto-recent-${mostRecentName}`;
+            return [
+              {
+                id,
+                name: mostRecentName,
+                type: "mention" as const,
+                charm: mostRecent,
+              },
+              ...attachments,
+            ];
+          }
+        }
+
+        return attachments;
+      },
+    );
+
+    // Derive tools from attachments (including auto-attached recent charm)
+    const dynamicTools = derive(attachmentsWithRecent, (attachments) => {
       const tools: Record<string, any> = {};
 
       for (const attachment of attachments || []) {
@@ -296,15 +352,19 @@ export default recipe<ChatInput, ChatOutput>(
       navigateToAttachment: {
         description:
           "Navigate to a mentionable by its ID in the attachments array.",
-        handler: navigateToAttachment({ allAttachments }),
+        handler: navigateToAttachment({ allAttachments: attachmentsWithRecent }),
       },
       listAttachments: {
         description: "List all attachments in the attachments array.",
-        handler: listAttachments({ allAttachments }),
+        handler: listAttachments({ allAttachments: attachmentsWithRecent }),
       },
       listMentionable: {
         description: "List all mentionable NAMEs in the space.",
         handler: listMentionable({ mentionable }),
+      },
+      listRecent: {
+        description: "List all recently viewed charms in the space.",
+        handler: listRecent({ recentCharms }),
       },
       addAttachment: {
         description:
@@ -362,7 +422,7 @@ export default recipe<ChatInput, ChatOutput>(
         $mentionable={mentionable}
         modelItems={items}
         $model={model}
-        onct-send={sendMessage({ addMessage, allAttachments })}
+        onct-send={sendMessage({ addMessage, allAttachments: attachmentsWithRecent })}
         onct-stop={cancelGeneration}
         onct-attachment-add={addAttachment({ allAttachments })}
         onct-attachment-remove={removeAttachment({ allAttachments })}
@@ -389,7 +449,7 @@ export default recipe<ChatInput, ChatOutput>(
     const attachmentsAndTools = (
       <ct-hstack align="center" gap="1">
         <ct-attachments-bar
-          attachments={allAttachments}
+          attachments={attachmentsWithRecent}
           removable
           onct-remove={removeAttachment({ allAttachments })}
         />
@@ -431,7 +491,7 @@ export default recipe<ChatInput, ChatOutput>(
       }),
       cancelGeneration,
       title,
-      attachments: allAttachments,
+      attachments: attachmentsWithRecent,
       tools: flattenedTools,
       ui: {
         chatLog,
