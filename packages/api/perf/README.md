@@ -33,8 +33,8 @@ Available projects:
 - `tsconfig.ikeyable-cell.json` – heavy `IKeyable<Cell<…>>` stress case.
 - `tsconfig.ikeyable-schema.json` – `IKeyable` over `Cell<Schema<…>>`.
 
-Each run prints metrics; compare the “Instantiations”, “Types”, and
-“Check time” fields against the baseline to see relative cost.
+Each run prints metrics; compare the “Instantiations”, “Types”, and “Check time”
+fields against the baseline to see relative cost.
 
 ## CPU Profiles
 

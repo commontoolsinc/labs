@@ -1,10 +1,4 @@
-import type {
-  AsCell,
-  Cell,
-  IKeyable,
-  JSONSchema,
-  Schema,
-} from "../index.ts";
+import type { AsCell, Cell, IKeyable, JSONSchema, Schema } from "../index.ts";
 
 type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 type OverrideKey = `override_${Digit}${Digit}`;
@@ -28,7 +22,7 @@ type ModuleProperties = {
           readonly ref: { readonly $ref: "#/$defs/config" };
         };
         readonly additionalProperties: false;
-      }
+      },
     ];
   };
   readonly overrides: {
@@ -87,7 +81,7 @@ type StressDefs =
               readonly items: { readonly type: "string" };
             };
           };
-        }
+        },
       ];
     };
     readonly history: {
@@ -110,7 +104,7 @@ type StressDefs =
         readonly extended: {
           readonly anyOf: readonly [
             { readonly $ref: "#/$defs/config" },
-            { readonly $ref: "#/$defs/advancedConfig" }
+            { readonly $ref: "#/$defs/advancedConfig" },
           ];
         };
       };
@@ -139,7 +133,7 @@ type StressSchema = {
   readonly additionalProperties: {
     readonly anyOf: readonly [
       { readonly type: "null" },
-      { readonly $ref: "#/$defs/config" }
+      { readonly $ref: "#/$defs/config" },
     ];
   };
   readonly allOf: readonly [
@@ -162,9 +156,9 @@ type StressSchema = {
     {
       readonly anyOf: readonly [
         { readonly required: readonly ["modules"] },
-        { readonly required: readonly ["registry"] }
+        { readonly required: readonly ["registry"] },
       ];
-    }
+    },
   ];
   readonly $defs: StressDefs;
 } & JSONSchema;
@@ -173,8 +167,8 @@ type SchemaValue = Schema<StressSchema>;
 type SchemaCell = Cell<SchemaValue>;
 type SchemaKeyable = IKeyable<SchemaCell, AsCell>;
 
-type SchemaKeyAccess<K extends PropertyKey> =
-  SchemaKeyable["key"] extends (key: K) => infer R ? R : never;
+type SchemaKeyAccess<K extends PropertyKey> = SchemaKeyable["key"] extends
+  (key: K) => infer R ? R : never;
 
 type SchemaDirectKeys = keyof SchemaValue & string;
 
@@ -201,8 +195,9 @@ type SchemaStressMatrix = {
     composed: SchemaKeyAccess<K | `${K & string}_${Digit}${Digit}`>;
     variant: {
       [P in keyof VariantKeyables]: VariantKeyables[P]["key"] extends (
-        key: K | P
-      ) => infer R ? R : never;
+        key: K | P,
+      ) => infer R ? R
+        : never;
     };
     cascade: {
       [P in SchemaStressLiteral]: SchemaKeyAccess<
@@ -212,14 +207,18 @@ type SchemaStressMatrix = {
   };
 };
 
-type SchemaStressUnion = SchemaStressMatrix[keyof SchemaStressMatrix]["cascade"][keyof SchemaStressMatrix];
+type SchemaStressUnion =
+  SchemaStressMatrix[keyof SchemaStressMatrix]["cascade"][
+    keyof SchemaStressMatrix
+  ];
 
 type SchemaStressSummary = {
   entries: SchemaStressUnion;
   literal: SchemaKeyAccess<"modules" | "registry" | "states" | "variants">;
   variantUnion: VariantKeyables[keyof VariantKeyables]["key"] extends (
-    key: infer K
-  ) => infer R ? (K extends PropertyKey ? R : never) : never;
+    key: infer K,
+  ) => infer R ? (K extends PropertyKey ? R : never)
+    : never;
   fallback: SchemaKeyAccess<string | number | symbol>;
   dynamic: SchemaKeyAccess<SchemaStressLiteral>;
 };
@@ -230,7 +229,7 @@ type SchemaStressGrid = {
     SchemaKeyAccess<K | SchemaDirectKeys>,
     SchemaKeyAccess<K | `branch_${Digit}${Digit}`>,
     SchemaKeyAccess<K | "variants">,
-    SchemaKeyAccess<K | `${SchemaStressLiteral & string}_${Digit}${Digit}`>
+    SchemaKeyAccess<K | `${SchemaStressLiteral & string}_${Digit}${Digit}`>,
   ];
 };
 
@@ -238,5 +237,5 @@ type SchemaStressExpansion = [
   SchemaStressMatrix,
   SchemaStressUnion,
   SchemaStressSummary,
-  SchemaStressGrid[keyof SchemaStressGrid]
+  SchemaStressGrid[keyof SchemaStressGrid],
 ];

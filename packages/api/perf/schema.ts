@@ -9,7 +9,10 @@ type ComplexSchema = {
       readonly type: "object";
       readonly required: readonly ["name", "address"];
       readonly properties: {
-        readonly name: { readonly type: "string"; readonly default: "Anonymous" };
+        readonly name: {
+          readonly type: "string";
+          readonly default: "Anonymous";
+        };
         readonly address: { readonly $ref: "#/$defs/address" };
         readonly preferences: {
           readonly $ref: "#/$defs/preferences";
@@ -26,8 +29,11 @@ type ComplexSchema = {
     };
     readonly timeline: {
       readonly anyOf: readonly [
-        { readonly type: "array"; readonly items: { readonly $ref: "#/$defs/event" } },
-        { readonly type: "null" }
+        {
+          readonly type: "array";
+          readonly items: { readonly $ref: "#/$defs/event" };
+        },
+        { readonly type: "null" },
       ];
     };
   };
@@ -56,7 +62,10 @@ type ComplexSchema = {
           readonly type: "object";
           readonly required: readonly ["email", "sms", "push"];
           readonly properties: {
-            readonly email: { readonly type: "boolean"; readonly default: false };
+            readonly email: {
+              readonly type: "boolean";
+              readonly default: false;
+            };
             readonly sms: { readonly type: "boolean"; readonly default: false };
             readonly push: { readonly type: "boolean"; readonly default: true };
           };
@@ -77,7 +86,7 @@ type ComplexSchema = {
         readonly metadata: {
           readonly anyOf: readonly [
             { readonly $ref: "#/$defs/itemMetadata" },
-            { readonly type: "null" }
+            { readonly type: "null" },
           ];
         };
       };
@@ -141,9 +150,9 @@ type NestedRefResult = Schema<
             readonly items: { readonly $ref: "#/$defs/node" };
           };
         };
+      };
     };
-  };
-} & JSONSchema
+  } & JSONSchema
 >;
 
 type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
@@ -169,7 +178,7 @@ type ModuleProperties = {
           readonly ref: { readonly $ref: "#/$defs/config" };
         };
         readonly additionalProperties: false;
-      }
+      },
     ];
   };
   readonly overrides: {
@@ -228,7 +237,7 @@ type StressDefs =
               readonly items: { readonly type: "string" };
             };
           };
-        }
+        },
       ];
     };
     readonly history: {
@@ -251,7 +260,7 @@ type StressDefs =
         readonly extended: {
           readonly anyOf: readonly [
             { readonly $ref: "#/$defs/config" },
-            { readonly $ref: "#/$defs/advancedConfig" }
+            { readonly $ref: "#/$defs/advancedConfig" },
           ];
         };
       };
@@ -289,9 +298,9 @@ type StressSchema = {
     {
       readonly anyOf: readonly [
         { readonly required: readonly ["modules"] },
-        { readonly required: readonly ["registry"] }
+        { readonly required: readonly ["registry"] },
       ];
-    }
+    },
   ];
   readonly $defs: StressDefs;
 } & JSONSchema;
@@ -300,7 +309,11 @@ type StressSchemaResult = Schema<StressSchema>;
 type StressSchemaVariants = { [K in VariantKey]: Schema<StressSchema> };
 type StressSchemaUnion = StressSchemaVariants[keyof StressSchemaVariants];
 type StressSchemaWithoutCells = SchemaWithoutCell<StressSchema>;
-type StressSchemaCombined = [StressSchemaResult, StressSchemaUnion, StressSchemaWithoutCells];
+type StressSchemaCombined = [
+  StressSchemaResult,
+  StressSchemaUnion,
+  StressSchemaWithoutCells,
+];
 
 type ParameterizedSchema<L extends string> = Schema<
   StressSchema & { readonly title: L }
@@ -312,4 +325,5 @@ type StressSchemaMatrix = {
   };
 };
 
-type StressSchemaCross = StressSchemaMatrix[keyof StressSchemaMatrix][keyof StressSchemaMatrix];
+type StressSchemaCross =
+  StressSchemaMatrix[keyof StressSchemaMatrix][keyof StressSchemaMatrix];
