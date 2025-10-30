@@ -5,7 +5,7 @@ import { Cell } from "@commontools/runner";
 import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
-import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
+import { compileAndRunRecipe, compileRecipe, generateNewRecipeVersion } from "./iterate.ts";
 import { CharmManager, nameSchema } from "./manager.ts";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
@@ -131,6 +131,83 @@ export async function addGithubRecipe(
     src,
     spec,
     runOptions,
+  );
+}
+
+/**
+ * Load and instantiate a pattern from an arbitrary URL.
+ * This enables cross-repo pattern references by fetching pattern source from any accessible URL.
+ * Automatically resolves and fetches relative imports (e.g., "./handlers.ts") from the same base URL.
+ *
+ * @param charmManager The CharmManager instance
+ * @param url Full URL to the pattern source code (e.g., raw GitHub URL)
+ * @param spec Pattern specification/description
+ * @param runOptions Initial pattern inputs
+ * @param parents Optional parent charm IDs for tracking lineage
+ * @param cacheBust If true, appends timestamp to URL to bypass cache (default: true)
+ * @returns Cell representing the instantiated charm
+ *
+ * @example
+ * // Load counter.tsx with its handler dependencies from labs repo
+ * await addRecipeFromUrl(
+ *   manager,
+ *   "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
+ *   "Counter pattern",
+ *   { value: 0 }
+ * );
+ * // Automatically fetches counter-handlers.ts from the same directory
+ *
+ * @example
+ * // Load from recipes repo
+ * await addRecipeFromUrl(
+ *   manager,
+ *   "https://raw.githubusercontent.com/commontoolsinc/recipes/main/recipes/todo-list.tsx",
+ *   "Todo list",
+ *   { items: [] }
+ * );
+ */
+export async function addRecipeFromUrl(
+  charmManager: CharmManager,
+  url: string,
+  spec: string,
+  runOptions: unknown,
+  parents?: string[],
+  cacheBust = true,
+): Promise<Cell<unknown>> {
+  // Import HttpProgramResolver from js-runtime
+  const { HttpProgramResolver } = await import("@commontools/js-runtime");
+
+  // Construct fetch URL with optional cache busting
+  const fetchUrl = cacheBust ? `${url}?${Date.now()}` : url;
+
+  // Create HTTP-based program resolver
+  // This will automatically fetch relative imports using URL resolution
+  const resolver = new HttpProgramResolver(fetchUrl);
+
+  // Resolve the program (fetches main file and all dependencies)
+  // This is where the URL resolution magic happens:
+  //   import { foo } from "./handlers.ts"
+  // gets resolved to the full URL and fetched automatically
+  const program = await charmManager.runtime.harness.resolve(resolver);
+
+  // Use the existing compile and run flow from iterate.ts
+  const recipe = await compileRecipe(
+    program,
+    spec,
+    charmManager.runtime,
+    charmManager.getSpace(),
+    parents,
+  );
+
+  if (!recipe) {
+    throw new Error("Failed to compile recipe");
+  }
+
+  return await charmManager.runPersistent(
+    recipe,
+    runOptions,
+    undefined,
+    undefined,
   );
 }
 
