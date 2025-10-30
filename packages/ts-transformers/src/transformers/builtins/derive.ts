@@ -98,6 +98,7 @@ function createParameterForPlan(
   factory: ts.NodeFactory,
   captureTree: ReturnType<typeof groupCapturesByRoot>,
   fallbackEntries: readonly FallbackEntry[],
+  refToParamName: Map<ts.Expression, string>,
 ): ts.ParameterDeclaration {
   const bindings: ts.BindingElement[] = [];
   const usedNames = new Set<string>();
@@ -130,6 +131,10 @@ function createParameterForPlan(
 
   for (const entry of fallbackEntries) {
     const bindingIdentifier = register(entry.paramName);
+    const currentName = refToParamName.get(entry.ref);
+    if (currentName !== bindingIdentifier.text) {
+      refToParamName.set(entry.ref, bindingIdentifier.text);
+    }
     bindings.push(
       factory.createBindingElement(
         undefined,
@@ -229,6 +234,13 @@ export function createDeriveCall(
     return undefined;
   }
 
+  const parameter = createParameterForPlan(
+    factory,
+    captureTree,
+    fallbackEntries,
+    refToParamName,
+  );
+
   const lambdaBody = replaceOpaqueRefsWithParams(
     expression,
     refToParamName,
@@ -239,7 +251,7 @@ export function createDeriveCall(
   const arrowFunction = factory.createArrowFunction(
     undefined,
     undefined,
-    [createParameterForPlan(factory, captureTree, fallbackEntries)],
+    [parameter],
     undefined,
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     lambdaBody,
