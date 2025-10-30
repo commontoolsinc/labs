@@ -374,10 +374,16 @@ export class CommonToolsFormatter implements TypeFormatter {
    * Get the CELL_BRAND string value from a type, if it has one.
    * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
    */
-  private getCellBrand(type: ts.Type, checker: ts.TypeChecker): string | undefined {
+  private getCellBrand(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): string | undefined {
     const brandSymbol = type.getProperty("CELL_BRAND");
     if (brandSymbol && brandSymbol.valueDeclaration) {
-      const brandType = checker.getTypeOfSymbolAtLocation(brandSymbol, brandSymbol.valueDeclaration);
+      const brandType = checker.getTypeOfSymbolAtLocation(
+        brandSymbol,
+        brandSymbol.valueDeclaration,
+      );
       if (brandType.flags & ts.TypeFlags.StringLiteral) {
         return (brandType as ts.StringLiteralType).value;
       }
@@ -407,7 +413,10 @@ export class CommonToolsFormatter implements TypeFormatter {
             const typeRef = objectType as ts.TypeReference;
             const name = typeRef.target?.symbol?.name;
             // Check for OpaqueRef-specific interface names (old and new)
-            if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
+            if (
+              name === "OpaqueRefMethods" || name === "OpaqueCell" ||
+              name === "IOpaqueCell"
+            ) {
               return true;
             }
           }
@@ -436,7 +445,10 @@ export class CommonToolsFormatter implements TypeFormatter {
           const typeRef = objectType as ts.TypeReference;
           const name = typeRef.target?.symbol?.name;
           // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell, BrandedCell) names
-          if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell" || name === "BrandedCell") {
+          if (
+            name === "OpaqueRefMethods" || name === "OpaqueCell" ||
+            name === "IOpaqueCell" || name === "BrandedCell"
+          ) {
             // Found wrapper type with type argument, extract T
             const typeArgs = checker.getTypeArguments(typeRef);
             if (typeArgs && typeArgs.length > 0) {
@@ -463,7 +475,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
         const typeRef = objectType as ts.TypeReference;
         const name = typeRef.target?.symbol?.name;
-        if (name === "Cell" || name === "Stream" || name === "OpaqueRef" || name === "OpaqueCell") {
+        if (
+          name === "Cell" || name === "Stream" || name === "OpaqueRef" ||
+          name === "OpaqueCell"
+        ) {
           // OpaqueCell should be treated as OpaqueRef
           const kind = name === "OpaqueCell" ? "OpaqueRef" : name;
           return { kind, typeRef };
@@ -483,7 +498,10 @@ export class CommonToolsFormatter implements TypeFormatter {
             const typeRef = objectType as ts.TypeReference;
             const name = typeRef.target?.symbol?.name;
             // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell) internal types
-            if (name === "OpaqueRefMethods" || name === "OpaqueCell" || name === "IOpaqueCell") {
+            if (
+              name === "OpaqueRefMethods" || name === "OpaqueCell" ||
+              name === "IOpaqueCell"
+            ) {
               return { kind: "OpaqueRef", typeRef };
             }
           }
