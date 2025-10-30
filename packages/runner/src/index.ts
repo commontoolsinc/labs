@@ -19,6 +19,11 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export {
+  formatTransactionSummary,
+  summarizeTransaction,
+  type TransactionSummary,
+} from "./storage/transaction-summary.ts";
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,

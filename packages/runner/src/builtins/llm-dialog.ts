@@ -20,6 +20,7 @@ import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { parseLink } from "../link-utils.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
@@ -811,7 +812,9 @@ async function invokeToolCall(
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
-        // can we insert the changeset from completedTx into the conversation somehow?
+        // TODO: Consider adding transaction summary to tool call result
+        // const txSummary = formatTransactionSummary(completedTx);
+        // Could be included in the tool call result for LLM debugging
 
         resolve(result.withTx(completedTx).get()); // withTx likely superfluous
       }); // TODO(bf): why any needed?
