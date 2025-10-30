@@ -104,7 +104,49 @@ export function createCaptureAccessExpression(
   rootName: string,
   path: readonly string[],
   factory: ts.NodeFactory,
+  template?: ts.Expression,
 ): ts.Expression {
+  if (template) {
+    const rebuild = (expr: ts.Expression): ts.Expression | undefined => {
+      if (ts.isIdentifier(expr)) {
+        return factory.createIdentifier(rootName);
+      }
+      if (ts.isPropertyAccessExpression(expr)) {
+        const target = rebuild(expr.expression);
+        if (!target) return undefined;
+        if (ts.isPropertyAccessChain(expr)) {
+          return factory.createPropertyAccessChain(
+            target,
+            factory.createToken(ts.SyntaxKind.QuestionDotToken),
+            expr.name,
+          );
+        }
+        return factory.createPropertyAccessExpression(target, expr.name);
+      }
+      if (ts.isElementAccessExpression(expr)) {
+        const target = rebuild(expr.expression);
+        if (!target) return undefined;
+        if (ts.isElementAccessChain(expr)) {
+          return factory.createElementAccessChain(
+            target,
+            factory.createToken(ts.SyntaxKind.QuestionDotToken),
+            expr.argumentExpression,
+          );
+        }
+        return factory.createElementAccessExpression(
+          target,
+          expr.argumentExpression,
+        );
+      }
+      return undefined;
+    };
+
+    const rebuilt = rebuild(template);
+    if (rebuilt) {
+      return rebuilt;
+    }
+  }
+
   let expr: ts.Expression = factory.createIdentifier(rootName);
   for (const segment of path) {
     expr = factory.createPropertyAccessExpression(
@@ -121,7 +163,12 @@ export function buildHierarchicalParamsValue(
   factory: ts.NodeFactory,
 ): ts.Expression {
   if (node.expression && node.properties.size === 0) {
-    return createCaptureAccessExpression(rootName, node.path, factory);
+    return createCaptureAccessExpression(
+      rootName,
+      node.path,
+      factory,
+      node.expression,
+    );
   }
 
   const assignments: ts.PropertyAssignment[] = [];
@@ -137,7 +184,12 @@ export function buildHierarchicalParamsValue(
   }
 
   if (assignments.length === 0 && node.expression) {
-    return createCaptureAccessExpression(rootName, node.path, factory);
+    return createCaptureAccessExpression(
+      rootName,
+      node.path,
+      factory,
+      node.expression,
+    );
   }
 
   return factory.createObjectLiteralExpression(
