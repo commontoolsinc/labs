@@ -1211,8 +1211,7 @@ type ObjectFromProperties<
           >;
         }
       : Record<string | number | symbol, never>
-  )
-  & IDFields;
+  );
 
 // Restrict Depth to these numeric literal types
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;

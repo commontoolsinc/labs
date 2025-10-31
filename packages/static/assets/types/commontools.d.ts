@@ -698,7 +698,7 @@ type ObjectFromProperties<P extends Record<string, JSONSchema>, R extends readon
     [key: string]: unknown;
 } : AP extends JSONSchema ? {
     [key: string]: SchemaInner<AP, Root, DecrementDepth<Depth>, WrapCells>;
-} : Record<string | number | symbol, never>) & IDFields;
+} : Record<string | number | symbol, never>);
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 type Decrement = {
     0: 0;
