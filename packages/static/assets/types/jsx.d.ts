@@ -2902,6 +2902,12 @@ interface CTAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CTFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
+interface CTGoogleOAuthElement extends CTHTMLElement {}
+
+interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
+  "$auth"?: any;
+  "scopes"?: string[]
+}
 
 interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "integration"?: string;
@@ -3125,7 +3131,7 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
-  "value"?: string;
+  "value"?: CellLike<string>;
   "placeholder"?: string;
   "appearance"?: string;
   "customStyle"?: string;
@@ -3789,6 +3795,10 @@ declare global {
         CTSendMessageAttributes<CTSendMessageElement>,
         CTSendMessageElement
       >;
+      "common-google-oauth": CTDOM.DetailedHTMLProps<
+        CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
+        CTGoogleOAuthElement
+      >; 
       // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,
