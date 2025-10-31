@@ -280,14 +280,14 @@ This would be the Level 2 categorized view from above. When you link them:
 
 ```bash
 # Deploy both charms
-./dist/ct charm new --identity key.json --api-url ... --space myspace editor.tsx
+deno task ct charm new --identity key.json --api-url ... --space myspace editor.tsx
 # Returns: editor-charm-id
 
-./dist/ct charm new --identity key.json --api-url ... --space myspace viewer.tsx
+deno task ct charm new --identity key.json --api-url ... --space myspace viewer.tsx
 # Returns: viewer-charm-id
 
 # Link the items from editor to viewer
-./dist/ct charm link --identity key.json --api-url ... --space myspace \
+deno task ct charm link --identity key.json --api-url ... --space myspace \
   editor-charm-id/items viewer-charm-id/items
 ```
 
@@ -693,7 +693,7 @@ export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
 
 **2. Test Locally (2 minutes)**
 ```bash
-./dist/ct dev my-pattern.tsx
+deno task ct dev my-pattern.tsx
 ```
 
 Fix any syntax errors before continuing.
@@ -713,19 +713,19 @@ const removeItem = handler(/* ... */);
 Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
 ```bash
 # Deploy
-./dist/ct charm new --identity key.json --api-url ... --space test pattern.tsx
+deno task ct charm new --identity key.json --api-url ... --space test pattern.tsx
 # Returns: pattern-charm-id
 
 # Test with real data
 echo '{"title": "Test", "done": false}' | \
-  ./dist/ct charm set --identity key.json --api-url ... \
+  deno task ct charm set --identity key.json --api-url ... \
   --space test --charm pattern-charm-id testItem
 ```
 
 **5. Iterate Quickly (1-2 minutes per iteration)**
 ```bash
 # Update existing charm (much faster than creating new)
-./dist/ct charm setsrc --identity key.json --api-url ... \
+deno task ct charm setsrc --identity key.json --api-url ... \
   --space test --charm pattern-charm-id pattern.tsx
 ```
 
@@ -734,29 +734,29 @@ echo '{"title": "Test", "done": false}' | \
 Read `./docs/common/PATTERN_DEV_DEPLOY.md` for more information on how to deploy
 ```bash
 # Check syntax only (fast)
-./dist/ct dev pattern.tsx --no-run
+deno task ct dev pattern.tsx --no-run
 
 # Test execution locally
-./dist/ct dev pattern.tsx
+deno task ct dev pattern.tsx
 
 # Deploy and iterate
-./dist/ct charm new --identity key.json --api-url ... --space test pattern.tsx
+deno task ct charm new --identity key.json --api-url ... --space test pattern.tsx
 
 # Update existing charm (faster for iteration)
-./dist/ct charm setsrc --identity key.json --api-url ... --space test \
+deno task ct charm setsrc --identity key.json --api-url ... --space test \
   --charm charm-id pattern.tsx
 
 # Inspect charm data
-./dist/ct charm inspect --identity key.json --api-url ... --space test \
+deno task ct charm inspect --identity key.json --api-url ... --space test \
   --charm charm-id
 
 # Get specific field
-./dist/ct charm get --identity key.json --api-url ... --space test \
+deno task ct charm get --identity key.json --api-url ... --space test \
   --charm charm-id items/0/title
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  ./dist/ct charm set --identity key.json --api-url ... --space test \
+  deno task ct charm set --identity key.json --api-url ... --space test \
   --charm charm-id testItem
 ```
 

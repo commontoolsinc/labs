@@ -96,7 +96,7 @@ const addItem = handler<
 
 #### Debugging Process
 
-1. **Check TypeScript errors first** - Run `./dist/ct dev pattern.tsx --no-run`
+1. **Check TypeScript errors first** - Run `deno task ct dev pattern.tsx --no-run`
 2. **Consult the docs** - Match error pattern to relevant doc:
    - Type errors → `HANDLERS.md`
    - Component issues → `COMPONENTS.md`
@@ -188,28 +188,19 @@ Then use Playwright to:
 ### Prerequisite: `ct` tool availability
 
 ```bash
-# Verify ct binary exists
-ls -la ./dist/ct
-
-# If missing, you have two options:
-# Option 1: Build the binary
-deno task build-binaries --cli-only
-
-# Option 2: Use ct from source
+# Verify ct is accessible
 deno task ct --help
 
 # Create identity if needed
-ls -la claude.key || ./dist/ct id new > claude.key
-# Or with deno task: deno task ct id new > claude.key
+ls -la claude.key || deno task ct id new > claude.key
 
 # Initialize TypeScript in your patterns directory
-cd /path/to/patterns && ./dist/ct init
-# Or with deno task: deno task ct init
+cd /path/to/patterns && deno task ct init
 ```
 
 ### Prerequisites
 
-Run `./dist/ct --help` and `./dist/ct charm --help` to discover available commands.
+Run `deno task ct --help` and `deno task ct charm --help` to discover available commands.
 
 This tool is used to:
 - Deploy a pattern as a new charm
@@ -224,21 +215,21 @@ This tool is used to:
 
 ```bash
 # 1. Test syntax (optional)
-./dist/ct dev pattern.tsx --no-run
+deno task ct dev pattern.tsx --no-run
 
 # 2. Deploy to test space
-./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space pattern.tsx
+deno task ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space pattern.tsx
 # Record the charm ID returned
 
 # 3. Inspect deployed charm
-./dist/ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id]
+deno task ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id]
 ```
 
 #### Iteration Cycle
 
 ```bash
 # Update existing charm (much faster than deploying new)
-./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id] pattern.tsx
+deno task ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space test-space --charm [charm-id] pattern.tsx
 ```
 
 **Note:** Don't pre-test syntax unless deployment fails. The deployment process validates automatically.
@@ -247,26 +238,26 @@ This tool is used to:
 
 ```bash
 # Get source from deployed charm
-./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space [space] --charm [id] ./pattern.tsx
+deno task ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net --space [space] --charm [id] ./pattern.tsx
 ```
 
 ### Quick Command Reference
 
 ```bash
 # Test syntax
-./dist/ct dev pattern.tsx --no-run
+deno task ct dev pattern.tsx --no-run
 
 # Deploy new charm
-./dist/ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net -s space pattern.tsx
+deno task ct charm new -i claude.key -a https://toolshed.saga-castor.ts.net -s space pattern.tsx
 
 # Update existing charm
-./dist/ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id pattern.tsx
+deno task ct charm setsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id pattern.tsx
 
 # Inspect charm
-./dist/ct charm inspect -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id
+deno task ct charm inspect -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id
 
 # Get source from charm
-./dist/ct charm getsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id output.tsx
+deno task ct charm getsrc -i claude.key -a https://toolshed.saga-castor.ts.net -s space -c charm-id output.tsx
 
 # For full ct command reference, use the ct skill
 ```

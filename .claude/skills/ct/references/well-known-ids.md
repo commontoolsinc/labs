@@ -12,7 +12,7 @@ CommonTools provides well-known IDs for accessing system-level data within a spa
 
 **Example:**
 ```bash
-./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [target-charm]/allCharms
+deno task ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [target-charm]/allCharms
 ```
 
 **Use Cases:**
