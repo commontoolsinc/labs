@@ -110,7 +110,8 @@ export class CTAttachmentsBar extends BaseElement {
             html`
               <ct-chip
                 variant="${this._getVariant(attachment.type)}"
-                ?removable="${this.removable && (attachment.removable !== false)}"
+                ?removable="${this.removable &&
+                  (attachment.removable !== false)}"
                 interactive
                 @ct-remove="${(e: Event) =>
                   this._handleRemove(attachment.id, e)}"
