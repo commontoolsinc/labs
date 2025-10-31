@@ -131,6 +131,7 @@ type PromptAttachment = {
   type: "file" | "clipboard" | "mention";
   data?: any; // File | Blob | string
   charm?: any;
+  removable?: boolean; // Whether this attachment can be removed
 };
 
 type ChatOutput = {
@@ -234,6 +235,7 @@ const addAttachmentTool = handler<
     name: mentionableName,
     type: "mention",
     charm,
+    removable: true, // User-added attachments can be removed
   });
 });
 
@@ -322,6 +324,7 @@ export default recipe<ChatInput, ChatOutput>(
                 name: mostRecentName,
                 type: "mention" as const,
                 charm: mostRecent,
+                removable: false, // Auto-attached charm cannot be removed
               },
               ...attachments,
             ];
