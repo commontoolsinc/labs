@@ -168,7 +168,11 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
   : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
   : T extends BrandedCell<any, any> // wrapping a cell? delegate to it's .key
     ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
-  : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
+  : K extends keyof T
+    ? T[K] extends BrandedCell<any, any>
+      ? T[K]
+      : Apply<Wrap, T[K]>
+    : Apply<Wrap, any>; // select key, fallback to any
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
