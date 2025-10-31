@@ -101,8 +101,11 @@ const spawnNote = handler<void, void>((_, __) => {
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
-    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms"),
+    const { allCharms } = derive<
+      { allCharms: MentionableCharm[] },
+      { allCharms: MentionableCharm[] }
+    >(
+      wish<{ allCharms: MentionableCharm[] }>("/"),
       (c) => c,
     );
     const index = BacklinksIndex({ allCharms });
