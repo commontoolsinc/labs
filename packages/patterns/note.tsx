@@ -186,7 +186,7 @@ const Note = recipe<Input, Output>(
 
           return derive(result, ({ pending, result }) => {
             if (pending) return undefined;
-            if (!result) return "Error occured";
+            if (result == null) return "Error occured";
             return result;
           });
         },
