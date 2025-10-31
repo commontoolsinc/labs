@@ -46,7 +46,7 @@ export interface ModelItem {
  * @attr {string} placeholder - Placeholder text for the textarea
  * @attr {string} buttonText - Text for the send button (default: "Send")
  * @attr {boolean} disabled - Whether the textarea and button are disabled (prevents any action)
- * @attr {boolean} pending - Whether the component is in pending state (blocks editing, shows stop button)
+ * @attr {boolean} pending - Whether the component is in pending state (blocks submit, shows stop button)
  * @attr {string} value - Current textarea value
  * @attr {boolean} autoResize - Whether textarea auto-resizes to fit content (default: true)
  * @attr {number} rows - Initial number of rows for the textarea (default: 1)
@@ -182,11 +182,8 @@ export class CTPromptInput extends BaseElement {
             padding: 0 0.75rem;
           }
 
-          /* Pending state - blocks editing but allows stop */
-          :host([pending]) textarea {
-            opacity: 0.7;
-            pointer-events: none;
-          }
+          /* Pending state - allow editing, just block submit */
+          :host([pending]) textarea {}
 
           /* Disabled state */
           :host([disabled]) .container {
@@ -499,26 +496,30 @@ export class CTPromptInput extends BaseElement {
         }
 
         private _handleKeyDown(event: KeyboardEvent) {
-          // Don't handle shortcuts if disabled or pending
-          if (this.disabled || this.pending) return;
+          // Don't handle shortcuts if disabled
+          if (this.disabled) return;
 
           // Let mention controller handle keyboard events first
           if (this.mentionController.handleKeyDown(event)) {
             return;
           }
 
-          // Enter without Shift sends the message
+          // Enter without Shift sends the message (blocked if pending)
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            this._handleSend();
+            if (!this.pending) {
+              this._handleSend();
+            }
             return;
           }
 
           // Shift+Enter adds new line (default textarea behavior)
-          // Ctrl/Cmd+Enter also sends (alternative shortcut)
+          // Ctrl/Cmd+Enter also sends (alternative shortcut, blocked if pending)
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
-            this._handleSend();
+            if (!this.pending) {
+              this._handleSend();
+            }
             return;
           }
         }
@@ -753,19 +754,15 @@ export class CTPromptInput extends BaseElement {
                     : ""}
 
                   <!-- Upload button -->
-                  ${!this.pending
-                    ? html`
-                      <div
-                        class="upload-button"
-                        @click="${this._handleUploadClick}"
-                        role="button"
-                        aria-label="Upload file"
-                        title="Upload file"
-                      >
-                        📎
-                      </div>
-                    `
-                    : ""}
+                  <div
+                    class="upload-button"
+                    @click="${this._handleUploadClick}"
+                    role="button"
+                    aria-label="Upload file"
+                    title="Upload file"
+                  >
+                    📎
+                  </div>
                 </div>
               </div>
             </div>
