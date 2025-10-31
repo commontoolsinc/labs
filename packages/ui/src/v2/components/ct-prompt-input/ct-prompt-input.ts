@@ -183,8 +183,7 @@ export class CTPromptInput extends BaseElement {
           }
 
           /* Pending state - allow editing, just block submit */
-          :host([pending]) textarea {
-          }
+          :host([pending]) textarea {}
 
           /* Disabled state */
           :host([disabled]) .container {
