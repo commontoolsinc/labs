@@ -1,12 +1,13 @@
 import { isRecord } from "@commontools/utils/types";
 import {
+  type IOpaqueCell,
   isOpaqueRefMarker,
   type JSONSchema,
   type NodeFactory,
   type NodeRef,
   type Opaque,
+  type OpaqueCell,
   type OpaqueRef,
-  type OpaqueRefMethods,
   type Recipe,
   type SchemaWithoutCell,
   type ShadowRef,
@@ -64,8 +65,8 @@ export function opaqueRef<T>(
     nestedSchema: JSONSchema | undefined,
     rootSchema: JSONSchema | undefined,
   ): OpaqueRef<any> {
-    const methods: OpaqueRefMethods<any> = {
-      get: () => unsafe_materialize(unsafe_binding, path),
+    const methods: IOpaqueCell<T> = {
+      get: () => unsafe_materialize(unsafe_binding, path) as T,
       set: (newValue: Opaque<any>) => {
         if (unsafe_binding) {
           unsafe_materialize(unsafe_binding, path); // TODO(seefeld): Set value
@@ -78,7 +79,7 @@ export function opaqueRef<T>(
           : cfc.getSchemaAtPath(nestedSchema, [key.toString()], rootSchema);
         return createNestedProxy(
           [...path, key],
-          key in methods ? methods[key as keyof OpaqueRefMethods<any>] : store,
+          key in methods ? methods[key as keyof IOpaqueCell<T>] : store,
           childSchema,
           childSchema === undefined ? undefined : rootSchema,
         );
@@ -120,11 +121,11 @@ export function opaqueRef<T>(
       },
       map: <S>(
         fn: (
-          element: OpaqueRef<Required<T extends Array<infer U> ? U : T>>,
+          element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
           index: OpaqueRef<number>,
-          array: T,
+          array: OpaqueRef<T>,
         ) => Opaque<S>,
-      ) => {
+      ): OpaqueRef<S[]> => {
         // Create the factory if it doesn't exist. Doing it here to avoid
         // circular dependency.
         mapFactory ||= createNodeFactory({
@@ -198,13 +199,13 @@ export function opaqueRef<T>(
     const proxy = new Proxy(target || {}, {
       get(_, prop) {
         if (typeof prop === "symbol") {
-          return methods[prop as keyof OpaqueRefMethods<any>];
+          return methods[prop as keyof IOpaqueCell<T>];
         } else {
-          return methods.key(prop);
+          return (methods as unknown as OpaqueCell<unknown>).key(prop);
         }
       },
       set(_, prop, value) {
-        methods.set({ [prop]: value });
+        methods.set({ [prop]: value } as Opaque<Partial<T>>);
         return true;
       },
     });

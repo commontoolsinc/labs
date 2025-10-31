@@ -9,7 +9,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { Runtime } from "../src/index.ts";
+import { Runtime, Stream } from "../src/index.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;
@@ -114,8 +114,12 @@ async function runTest() {
   // await new Promise((resolve) => setTimeout(resolve, 10000));
 
   // Get the handler stream and send some numbers
-  const pushNumbersHandlerStream = charm.key("pushNumbersHandler");
-  const pushObjectsHandlerStream = charm.key("pushObjectsHandler");
+  const pushNumbersHandlerStream = charm.key(
+    "pushNumbersHandler",
+  ) as unknown as Stream<{ value: number }>;
+  const pushObjectsHandlerStream = charm.key(
+    "pushObjectsHandler",
+  ) as unknown as Stream<{ value: { count: number } }>;
 
   const expectedNumbers = [];
   const expectedObjects = [];

@@ -1,7 +1,8 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
+  isAnyCell,
   isCell,
   isStream,
   type MemorySpace,
@@ -207,34 +208,42 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: Cell<any> | Stream<any>,
-  base?: Cell | NormalizedLink,
+  value: AnyCell<unknown> | Cell<unknown> | Stream<unknown>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
+
+  let baseLink: NormalizedLink | undefined;
+  if (base) {
+    if (isCell(base) || isStream(base)) {
+      baseLink = base.getAsNormalizedFullLink();
+    } else {
+      baseLink = base as NormalizedLink;
+    }
+  }
 
   // Handle new sigil format
   if (isSigilLink(value)) {
@@ -243,11 +252,11 @@ export function parseLink(
     // Resolve relative references
     let id = link.id;
     const path = link.path || [];
-    const resolvedSpace = link.space || base?.space;
+    const resolvedSpace = link.space || baseLink?.space;
 
     // If no id provided, use base cell's document
-    if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+    if (!id && baseLink?.id) {
+      id = baseLink.id;
     }
 
     return {
@@ -266,7 +275,7 @@ export function parseLink(
     return {
       id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
-      ...(base?.space && { space: base.space }),
+      ...(baseLink?.space && { space: baseLink.space }),
       type: "application/json",
     };
   }
@@ -275,7 +284,7 @@ export function parseLink(
     return {
       id: toURI(value["/"]),
       path: [],
-      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
+      ...(baseLink?.space && { space: baseLink.space }), // Space must come from context for JSON links
       type: "application/json",
     };
   }
@@ -293,8 +302,8 @@ export function parseLink(
     }
 
     // If no cell provided, use base cell's document
-    if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+    if (!id && baseLink?.id) {
+      id = baseLink.id;
     }
 
     return {
@@ -302,7 +311,7 @@ export function parseLink(
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
-      ...(base?.space && { space: base.space }),
+      ...(baseLink?.space && { space: baseLink.space }),
       type: "application/json",
       ...(alias.schema && { schema: alias.schema }),
       ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
