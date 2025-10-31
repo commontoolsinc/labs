@@ -70,8 +70,10 @@ export default recipe({
                         required: ["id", "price"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<div>
-            Item: {__ctHelpers.derive(element.price, _v1 => formatPrice(_v1 * (1 + TAX_RATE)))}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
+            Item: {__ctHelpers.derive({ item: {
+                    price: item.price
+                } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
           </div>)), {})}
       </div>),
     };

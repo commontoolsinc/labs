@@ -56,8 +56,8 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: {} }) => (<div>
-                {index}: {element}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index: index, params: {} }) => (<div>
+                {index}: {value}
               </div>)), {})}
           </div>
         </div>),

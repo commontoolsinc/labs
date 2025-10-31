@@ -107,30 +107,43 @@ export default recipe({
         [UI]: (<div>
         <h3>Chained String Methods</h3>
         {/* Simple chain */}
-        <p>Trimmed lower: {__ctHelpers.derive(state.text, _v1 => _v1.trim().toLowerCase())}</p>
+        <p>Trimmed lower: {__ctHelpers.derive({ state: {
+                text: state.text
+            } }, ({ state }) => state.text.trim().toLowerCase())}</p>
 
         {/* Chain with reactive argument */}
         <p>
           Contains search:{" "}
-          {__ctHelpers.derive({ state_text: state.text, state_searchTerm: state.searchTerm }, ({ state_text: _v1, state_searchTerm: _v2 }) => _v1.toLowerCase().includes(_v2.toLowerCase()))}
+          {__ctHelpers.derive({ state: {
+                text: state.text,
+                searchTerm: state.searchTerm
+            } }, ({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()))}
         </p>
 
         {/* Longer chain */}
         <p>
           Processed:{" "}
-          {__ctHelpers.derive(state.text, _v1 => _v1.trim().toLowerCase().replace("old", "new").toUpperCase())}
+          {__ctHelpers.derive({ state: {
+                text: state.text
+            } }, ({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase())}
         </p>
 
         <h3>Array Method Chains</h3>
         {/* Filter then length */}
         <p>
           Count above threshold:{" "}
-          {__ctHelpers.derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter((x) => x > _v2).length)}
+          {__ctHelpers.derive({ state: {
+                items: state.items,
+                threshold: state.threshold
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}
         </p>
 
         {/* Filter then map */}
         <ul>
-          {__ctHelpers.derive({ state_items: state.items, state_threshold: state.threshold }, ({ state_items: _v1, state_threshold: _v2 }) => _v1.filter((x) => x > _v2)).mapWithPattern(__ctHelpers.recipe({
+          {__ctHelpers.derive({ state: {
+                items: state.items,
+                threshold: state.threshold
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
@@ -141,39 +154,68 @@ export default recipe({
                 params: {
                     type: "object",
                     properties: {
-                        factor: {
-                            type: "number",
-                            asOpaque: true
+                        state: {
+                            type: "object",
+                            properties: {
+                                factor: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["factor"]
                         }
                     },
-                    required: ["factor"]
+                    required: ["state"]
                 }
             },
             required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { factor } }) => (<li>Value: {__ctHelpers.derive({ element, factor }, ({ element: element, factor: factor }) => element * factor)}</li>)), { factor: state.factor })}
+        } as const satisfies __ctHelpers.JSONSchema, ({ element: x, params: { state } }) => (<li>Value: {__ctHelpers.derive({
+            x: x,
+            state: {
+                factor: state.factor
+            }
+        }, ({ x, state }) => x * state.factor)}</li>)), {
+            state: {
+                factor: state.factor
+            }
+        })}
         </ul>
 
         {/* Multiple filters */}
         <p>
           Double filter count:{" "}
-          {__ctHelpers.derive({ state_items: state.items, state_start: state.start, state_end: state.end }, ({ state_items: _v1, state_start: _v2, state_end: _v3 }) => _v1.filter((x) => x > _v2).filter((x) => x < _v3).length)}
+          {__ctHelpers.derive({ state: {
+                items: state.items,
+                start: state.start,
+                end: state.end
+            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
         {/* Slice with reactive indices */}
         <p>
-          Sliced items: {__ctHelpers.derive({ state_items: state.items, state_start: state.start, state_end: state.end }, ({ state_items: _v1, state_start: _v2, state_end: _v3 }) => _v1.slice(_v2, _v3).join(", "))}
+          Sliced items: {__ctHelpers.derive({ state: {
+                items: state.items,
+                start: state.start,
+                end: state.end
+            } }, ({ state }) => state.items.slice(state.start, state.end).join(", "))}
         </p>
 
         {/* String methods with reactive args */}
         <p>
           Starts with:{" "}
-          {__ctHelpers.derive({ state_names: state.names, state_prefix: state.prefix }, ({ state_names: _v1, state_prefix: _v2 }) => _v1.filter((n) => n.startsWith(_v2)).join(", "))}
+          {__ctHelpers.derive({ state: {
+                names: state.names,
+                prefix: state.prefix
+            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}
         <p>
-          First match: {__ctHelpers.derive({ state_names: state.names, state_searchTerm: state.searchTerm }, ({ state_names: _v1, state_searchTerm: _v2 }) => _v1.find((n) => n.includes(_v2)))}
+          First match: {__ctHelpers.derive({ state: {
+                names: state.names,
+                searchTerm: state.searchTerm
+            } }, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)))}
         </p>
 
         <h3>Complex Method Combinations</h3>
@@ -192,36 +234,52 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<li>{__ctHelpers.derive(element, element => element.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<li>{__ctHelpers.derive(name, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
         </ul>
 
         {/* Reduce with reactive accumulator */}
         <p>
-          Total with discount: {__ctHelpers.derive({ state_prices: state.prices, state_discount: state.discount }, ({ state_prices: _v1, state_discount: _v2 }) => _v1.reduce((sum, price) => sum + price * (1 - _v2), 0))}
+          Total with discount: {__ctHelpers.derive({ state: {
+                prices: state.prices,
+                discount: state.discount
+            } }, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
         </p>
 
         {/* Method result used in computation */}
         <p>
           Average * factor:{" "}
-          {__ctHelpers.derive({ state_items: state.items, state_items_length: state.items.length, state_factor: state.factor }, ({ state_items: _v1, state_items_length: _v2, state_factor: _v3 }) => (_v1.reduce((a, b) => a + b, 0) / _v2) * _v3)}
+          {__ctHelpers.derive({ state: {
+                items: state.items,
+                factor: state.factor
+            } }, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
+            state.factor)}
         </p>
 
         <h3>Methods on Computed Values</h3>
         {/* Method on binary expression result */}
         <p>
-          Formatted price: {__ctHelpers.derive({ state_prices: state.prices, state_discount: state.discount }, ({ state_prices: _v1, state_discount: _v2 }) => (_v1[0] * (1 - _v2)).toFixed(2))}
+          Formatted price: {__ctHelpers.derive({ state: {
+                prices: state.prices,
+                discount: state.discount
+            } }, ({ state }) => (state.prices[0] * (1 - state.discount)).toFixed(2))}
         </p>
 
         {/* Method on conditional result */}
         <p>
           Conditional trim:{" "}
-          {__ctHelpers.derive({ state_text: state.text, state_text_length: state.text.length, state_prefix: state.prefix }, ({ state_text: _v1, state_text_length: _v2, state_prefix: _v3 }) => (_v2 > 10 ? _v1 : _v3).trim())}
+          {__ctHelpers.derive({ state: {
+                text: state.text,
+                prefix: state.prefix
+            } }, ({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim())}
         </p>
 
         {/* Method chain on computed value */}
         <p>
           Complex:{" "}
-          {__ctHelpers.derive({ state_text: state.text, state_prefix: state.prefix }, ({ state_text: _v1, state_prefix: _v2 }) => (_v1 + " " + _v2).trim().toLowerCase().split(" ")
+          {__ctHelpers.derive({ state: {
+                text: state.text,
+                prefix: state.prefix
+            } }, ({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
             .join("-"))}
         </p>
 
@@ -229,7 +287,10 @@ export default recipe({
         {/* Filter with multiple conditions */}
         <p>
           Active adults:{" "}
-          {__ctHelpers.derive({ state_users: state.users, state_minAge: state.minAge }, ({ state_users: _v1, state_minAge: _v2 }) => _v1.filter((u) => u.age >= _v2 && u.active).length)}
+          {__ctHelpers.derive({ state: {
+                users: state.users,
+                minAge: state.minAge
+            } }, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
         </p>
 
         {/* Map with conditional logic */}
@@ -259,29 +320,47 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => (<li>{__ctHelpers.ifElse(element.active, __ctHelpers.derive(element.name, _v1 => _v1.toUpperCase()), __ctHelpers.derive(element.name, _v1 => _v1.toLowerCase()))}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse(u.active, __ctHelpers.derive({ u: {
+                    name: u.name
+                } }, ({ u }) => u.name.toUpperCase()), __ctHelpers.derive({ u: {
+                    name: u.name
+                } }, ({ u }) => u.name.toLowerCase()))}</li>)), {})}
         </ul>
 
         {/* Some/every with reactive predicates */}
         <p>
           Has adults:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state_users: state.users, state_minAge: state.minAge }, ({ state_users: _v1, state_minAge: _v2 }) => _v1.some((u) => u.age >= _v2)), "Yes", "No")}
+          {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+                users: state.users,
+                minAge: state.minAge
+            } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
         </p>
-        <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive(state.users, _v1 => _v1.every((u) => u.active)), "Yes", "No")}</p>
+        <p>All active: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+                users: state.users
+            } }, ({ state }) => state.users.every((u) => u.active)), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
         {/* Method result in arithmetic */}
         <p>
-          Length sum: {__ctHelpers.derive({ state_text: state.text, state_prefix: state.prefix }, ({ state_text: _v1, state_prefix: _v2 }) => _v1.trim().length + _v2.trim().length)}
+          Length sum: {__ctHelpers.derive({ state: {
+                text: state.text,
+                prefix: state.prefix
+            } }, ({ state }) => state.text.trim().length + state.prefix.trim().length)}
         </p>
 
         {/* Method result in comparison */}
         <p>
-          Is long: {__ctHelpers.ifElse(__ctHelpers.derive({ state_text: state.text, state_threshold: state.threshold }, ({ state_text: _v1, state_threshold: _v2 }) => _v1.trim().length > _v2), "Yes", "No")}
+          Is long: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+                text: state.text,
+                threshold: state.threshold
+            } }, ({ state }) => state.text.trim().length > state.threshold), "Yes", "No")}
         </p>
 
         {/* Multiple method results combined */}
-        <p>Joined: {__ctHelpers.derive({ state_words: state.words, state_separator: state.separator }, ({ state_words: _v1, state_separator: _v2 }) => _v1.join(_v2).toUpperCase())}</p>
+        <p>Joined: {__ctHelpers.derive({ state: {
+                words: state.words,
+                separator: state.separator
+            } }, ({ state }) => state.words.join(state.separator).toUpperCase())}</p>
       </div>),
     };
 });

@@ -31,25 +31,57 @@ export default recipe({
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
-        <h1>{__ctHelpers.derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => _v1 + ": " + _v2 + " " + _v3)}</h1>
-        <p>{__ctHelpers.derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => _v1 + _v2)}</p>
-        <p>{__ctHelpers.derive(state.firstName, _v1 => "Hello, " + _v1 + "!")}</p>
+        <h1>{__ctHelpers.derive({ state: {
+                title: state.title,
+                firstName: state.firstName,
+                lastName: state.lastName
+            } }, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName)}</h1>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName,
+                lastName: state.lastName
+            } }, ({ state }) => state.firstName + state.lastName)}</p>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName
+            } }, ({ state }) => "Hello, " + state.firstName + "!")}</p>
 
         <h3>Template Literals</h3>
-        <p>{__ctHelpers.derive(state.firstName, _v1 => `Welcome, ${_v1}!`)}</p>
-        <p>{__ctHelpers.derive({ state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_firstName: _v1, state_lastName: _v2 }) => `Full name: ${_v1} ${_v2}`)}</p>
-        <p>{__ctHelpers.derive({ state_title: state.title, state_firstName: state.firstName, state_lastName: state.lastName }, ({ state_title: _v1, state_firstName: _v2, state_lastName: _v3 }) => `${_v1}: ${_v2} ${_v3}`)}</p>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName
+            } }, ({ state }) => `Welcome, ${state.firstName}!`)}</p>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName,
+                lastName: state.lastName
+            } }, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`)}</p>
+        <p>{__ctHelpers.derive({ state: {
+                title: state.title,
+                firstName: state.firstName,
+                lastName: state.lastName
+            } }, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`)}</p>
 
         <h3>String Methods</h3>
-        <p>Uppercase: {__ctHelpers.derive(state.firstName, _v1 => _v1.toUpperCase())}</p>
-        <p>Lowercase: {__ctHelpers.derive(state.title, _v1 => _v1.toLowerCase())}</p>
+        <p>Uppercase: {__ctHelpers.derive({ state: {
+                firstName: state.firstName
+            } }, ({ state }) => state.firstName.toUpperCase())}</p>
+        <p>Lowercase: {__ctHelpers.derive({ state: {
+                title: state.title
+            } }, ({ state }) => state.title.toLowerCase())}</p>
         <p>Length: {state.message.length}</p>
-        <p>Substring: {__ctHelpers.derive(state.message, _v1 => _v1.substring(0, 5))}</p>
+        <p>Substring: {__ctHelpers.derive({ state: {
+                message: state.message
+            } }, ({ state }) => state.message.substring(0, 5))}</p>
 
         <h3>Mixed String and Number</h3>
-        <p>{__ctHelpers.derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => _v1 + " has " + _v2 + " items")}</p>
-        <p>{__ctHelpers.derive({ state_firstName: state.firstName, state_count: state.count }, ({ state_firstName: _v1, state_count: _v2 }) => `${_v1} has ${_v2} items`)}</p>
-        <p>Count as string: {__ctHelpers.derive(state.count, _v1 => "Count: " + _v1)}</p>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName,
+                count: state.count
+            } }, ({ state }) => state.firstName + " has " + state.count + " items")}</p>
+        <p>{__ctHelpers.derive({ state: {
+                firstName: state.firstName,
+                count: state.count
+            } }, ({ state }) => `${state.firstName} has ${state.count} items`)}</p>
+        <p>Count as string: {__ctHelpers.derive({ state: {
+                count: state.count
+            } }, ({ state }) => "Count: " + state.count)}</p>
       </div>),
     };
 });

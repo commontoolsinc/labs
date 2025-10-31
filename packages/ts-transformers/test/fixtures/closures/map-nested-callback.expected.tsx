@@ -74,12 +74,18 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            prefix: {
-                                type: "string",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    prefix: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["prefix"]
                             }
                         },
-                        required: ["prefix"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -115,10 +121,10 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { prefix } }) => (<div>
-            {prefix}: {element.name}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
+            {state.prefix}: {item.name}
             <ul>
-              {element.tags.mapWithPattern(__ctHelpers.recipe({
+              {item.tags.mapWithPattern(__ctHelpers.recipe({
                     $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
@@ -128,12 +134,18 @@ export default recipe({
                         params: {
                             type: "object",
                             properties: {
-                                name: {
-                                    type: "string",
-                                    asOpaque: true
+                                item: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["name"]
                                 }
                             },
-                            required: ["name"]
+                            required: ["item"]
                         }
                     },
                     required: ["element", "params"],
@@ -151,9 +163,17 @@ export default recipe({
                             required: ["id", "name"]
                         }
                     }
-                } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { name } }) => (<li>{name} - {element.name}</li>)), { name: element.name })}
+                } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, params: { item } }) => (<li>{item.name} - {tag.name}</li>)), {
+                    item: {
+                        name: item.name
+                    }
+                })}
             </ul>
-          </div>)), { prefix: state.prefix })}
+          </div>)), {
+                state: {
+                    prefix: state.prefix
+                }
+            })}
       </div>),
     };
 });

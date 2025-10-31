@@ -52,26 +52,26 @@ describe("OpaqueRef map callbacks", () => {
     );
     assertStringIncludes(
       output,
-      "({ element, index, params: { defaultName } }) =>",
+      "({ element: charm, index: index, params: { state } }) =>",
     );
     assertStringIncludes(
       output,
-      "{ defaultName: state.defaultName }",
+      "state: {\n                    defaultName: state.defaultName\n                }",
     );
     // Index parameter still gets derive wrapping for the arithmetic operation
     assertStringIncludes(
       output,
-      "__ctHelpers.derive(index, index => index + 1)",
+      "__ctHelpers.derive(index, ({ index }) => index + 1)",
     );
     // element[NAME] uses NAME from module scope (import), defaultName from params
     assertStringIncludes(
       output,
-      "element[NAME] || defaultName",
+      "({ charm, state }) => charm[NAME] || state.defaultName",
     );
-    // ifElse still gets derive for the negation
+    // ifElse still gets derive for the negation and preserves callback body
     assertStringIncludes(
       output,
-      "ifElse(__ctHelpers.derive(state.charms.length, _v1 => !_v1)",
+      "({ state }) => !state.charms.length",
     );
   });
 });

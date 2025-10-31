@@ -45,16 +45,33 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    discount: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["discount"]
                             }
                         },
-                        required: ["discount"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount } }) => (<span>{__ctHelpers.derive({ element_price: element.price, discount }, ({ element_price: _v1, discount: discount }) => _v1 * discount)}</span>)), { discount: state.discount })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<span>{__ctHelpers.derive({
+                item: {
+                    price: item.price
+                },
+                state: {
+                    discount: state.discount
+                }
+            }, ({ item, state }) => item.price * state.discount)}</span>)), {
+                state: {
+                    discount: state.discount
+                }
+            })}
       </div>),
     };
 });

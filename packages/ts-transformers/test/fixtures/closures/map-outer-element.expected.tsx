@@ -1,11 +1,8 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
-let keyCounter = 0;
-function nextKey() {
-    return `value-${keyCounter++}`;
-}
 interface State {
-    items: Array<Record<string, number>>;
+    items: number[];
+    highlight: string;
 }
 export default recipe({
     type: "object",
@@ -13,16 +10,16 @@ export default recipe({
         items: {
             type: "array",
             items: {
-                type: "object",
-                properties: {},
-                additionalProperties: {
-                    type: "number"
-                }
+                type: "number"
             }
+        },
+        highlight: {
+            type: "string"
         }
     },
-    required: ["items"]
+    required: ["items", "highlight"]
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
+    const element = state.highlight;
     return {
         [UI]: (<div>
         {state.items.mapWithPattern(__ctHelpers.recipe({
@@ -30,19 +27,23 @@ export default recipe({
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: {
-                            type: "number"
-                        }
+                        type: "number"
                     },
                     params: {
                         type: "object",
-                        properties: {}
+                        properties: {
+                            element: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["element"]
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: { [nextKey()]: amount }, params: {} }) => (<span>{amount}</span>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: __ct_element, params: { element } }) => (<span>{element}</span>)), {
+                element: element
+            })}
       </div>),
     };
 });

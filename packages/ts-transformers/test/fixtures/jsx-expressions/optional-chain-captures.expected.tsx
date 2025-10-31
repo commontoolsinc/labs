@@ -1,17 +1,29 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
-const dynamicKey = "value" as const;
 interface Item {
-    value: number;
-    other: number;
+    maybe?: {
+        value: number;
+    };
 }
 interface State {
+    maybe?: {
+        value: number;
+    };
     items: Item[];
 }
 export default recipe({
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
+        maybe: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        },
         items: {
             type: "array",
             items: {
@@ -24,19 +36,22 @@ export default recipe({
         Item: {
             type: "object",
             properties: {
-                value: {
-                    type: "number"
-                },
-                other: {
-                    type: "number"
+                maybe: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
                 }
-            },
-            required: ["value", "other"]
+            }
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
+        <span>{state.maybe?.value}</span>
         {state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
@@ -54,17 +69,23 @@ export default recipe({
                     Item: {
                         type: "object",
                         properties: {
-                            value: {
-                                type: "number"
-                            },
-                            other: {
-                                type: "number"
+                            maybe: {
+                                type: "object",
+                                properties: {
+                                    value: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["value"]
                             }
-                        },
-                        required: ["value", "other"]
+                        }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: { [dynamicKey]: val }, params: {} }) => (<span>{val}</span>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<span>{__ctHelpers.derive({ item: {
+                    maybe: {
+                        value: item.maybe?.value
+                    }
+                } }, ({ item }) => item.maybe?.value ?? 0)}</span>)), {})}
       </div>),
     };
 });

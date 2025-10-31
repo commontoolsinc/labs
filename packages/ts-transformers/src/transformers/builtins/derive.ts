@@ -1,6 +1,15 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
 import { getExpressionText } from "../../ast/mod.ts";
+import {
+  buildHierarchicalParamsValue,
+  groupCapturesByRoot,
+  parseCaptureExpression,
+} from "../../utils/capture-tree.ts";
+import {
+  getUniqueIdentifier,
+  isSafeIdentifierText,
+} from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -19,11 +28,7 @@ function replaceOpaqueRefsWithParams(
   return visit(expression) as ts.Expression;
 }
 
-function getSimpleName(ref: ts.Expression): string | undefined {
-  return ts.isIdentifier(ref) ? ref.text : undefined;
-}
-
-interface DeriveEntry {
+interface FallbackEntry {
   readonly ref: ts.Expression;
   readonly paramName: string;
   readonly propertyName: string;
@@ -35,74 +40,128 @@ export interface DeriveCallOptions {
   readonly ctHelpers: CTHelpers;
 }
 
-function createPropertyName(
-  ref: ts.Expression,
-  index: number,
-): string {
-  if (ts.isIdentifier(ref)) {
-    return ref.text;
-  }
-  if (ts.isPropertyAccessExpression(ref)) {
-    // Use getExpressionText to handle both regular and synthetic nodes
-    return getExpressionText(ref).replace(/\./g, "_");
-  }
-  return `ref${index + 1}`;
-}
-
 function planDeriveEntries(
   refs: readonly ts.Expression[],
 ): {
-  readonly entries: readonly DeriveEntry[];
+  readonly captureTree: ReturnType<typeof groupCapturesByRoot>;
+  readonly fallbackEntries: readonly FallbackEntry[];
   readonly refToParamName: Map<ts.Expression, string>;
 } {
-  const entries: DeriveEntry[] = [];
-  const refToParamName = new Map<ts.Expression, string>();
-  const seen = new Map<string, DeriveEntry>();
+  const structured: ts.Expression[] = [];
+  const fallback: ts.Expression[] = [];
 
   refs.forEach((ref) => {
-    // Use getExpressionText to handle both regular and synthetic nodes
-    const key = getExpressionText(ref);
-    let entry = seen.get(key);
-    if (!entry) {
-      const paramName = getSimpleName(ref) ?? `_v${entries.length + 1}`;
-      entry = {
-        ref,
-        paramName,
-        propertyName: createPropertyName(ref, entries.length),
-      };
-      seen.set(key, entry);
-      entries.push(entry);
+    if (parseCaptureExpression(ref)) {
+      structured.push(ref);
+    } else {
+      fallback.push(ref);
     }
-    refToParamName.set(ref, entry.paramName);
   });
 
-  return { entries, refToParamName };
+  const captureTree = groupCapturesByRoot(structured);
+  const fallbackEntries: FallbackEntry[] = [];
+  const refToParamName = new Map<ts.Expression, string>();
+
+  const usedPropertyNames = new Set<string>();
+  const usedParamNames = new Set<string>();
+
+  fallback.forEach((ref, index) => {
+    const baseName = getExpressionText(ref).replace(/\./g, "_");
+    const propertyName = getUniqueIdentifier(baseName, usedPropertyNames, {
+      fallback: `ref${index + 1}`,
+      trimLeadingUnderscores: true,
+    });
+
+    const paramName = ts.isIdentifier(ref)
+      ? getUniqueIdentifier(ref.text, usedParamNames)
+      : getUniqueIdentifier(`_v${index + 1}`, usedParamNames, {
+        fallback: `_v${index + 1}`,
+      });
+
+    fallbackEntries.push({ ref, propertyName, paramName });
+    refToParamName.set(ref, paramName);
+  });
+
+  return { captureTree, fallbackEntries, refToParamName };
 }
 
-function createParameterForEntries(
+function createPropertyName(
   factory: ts.NodeFactory,
-  entries: readonly DeriveEntry[],
+  name: string,
+): ts.PropertyName {
+  return isSafeIdentifierText(name)
+    ? factory.createIdentifier(name)
+    : factory.createStringLiteral(name);
+}
+
+function createParameterForPlan(
+  factory: ts.NodeFactory,
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
+  refToParamName: Map<ts.Expression, string>,
 ): ts.ParameterDeclaration {
-  if (entries.length === 1) {
-    const entry = entries[0]!;
+  const bindings: ts.BindingElement[] = [];
+  const usedNames = new Set<string>();
+
+  const register = (candidate: string): ts.Identifier => {
+    if (isSafeIdentifierText(candidate) && !usedNames.has(candidate)) {
+      usedNames.add(candidate);
+      return factory.createIdentifier(candidate);
+    }
+    const unique = getUniqueIdentifier(candidate, usedNames, {
+      fallback: candidate.length > 0 ? candidate : "ref",
+    });
+    return factory.createIdentifier(unique);
+  };
+
+  for (const [rootName] of captureTree) {
+    const bindingIdentifier = register(rootName);
+    const propertyName = isSafeIdentifierText(rootName)
+      ? undefined
+      : createPropertyName(factory, rootName);
+    bindings.push(
+      factory.createBindingElement(
+        undefined,
+        propertyName,
+        bindingIdentifier,
+        undefined,
+      ),
+    );
+  }
+
+  for (const entry of fallbackEntries) {
+    const bindingIdentifier = register(entry.paramName);
+    const currentName = refToParamName.get(entry.ref);
+    if (currentName !== bindingIdentifier.text) {
+      refToParamName.set(entry.ref, bindingIdentifier.text);
+    }
+    bindings.push(
+      factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(entry.propertyName),
+        bindingIdentifier,
+        undefined,
+      ),
+    );
+  }
+
+  const shouldInlineSoleBinding = bindings.length === 1 &&
+    captureTree.size === 0 &&
+    fallbackEntries.length === 1 &&
+    !bindings[0]!.propertyName &&
+    !bindings[0]!.dotDotDotToken &&
+    !bindings[0]!.initializer;
+
+  if (shouldInlineSoleBinding) {
     return factory.createParameterDeclaration(
       undefined,
       undefined,
-      factory.createIdentifier(entry.paramName),
+      bindings[0]!.name,
       undefined,
       undefined,
       undefined,
     );
   }
-
-  const bindings = entries.map((entry) =>
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier(entry.propertyName),
-      factory.createIdentifier(entry.paramName),
-      undefined,
-    )
-  );
 
   return factory.createParameterDeclaration(
     undefined,
@@ -116,23 +175,48 @@ function createParameterForEntries(
 
 function createDeriveArgs(
   factory: ts.NodeFactory,
-  entries: readonly DeriveEntry[],
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
 ): readonly ts.Expression[] {
-  if (entries.length === 1) {
-    return [entries[0]!.ref];
+  const properties: ts.ObjectLiteralElementLike[] = [];
+
+  for (const [rootName, node] of captureTree) {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(factory, rootName),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
   }
 
-  const properties = entries.map((entry) => {
-    if (ts.isIdentifier(entry.ref)) {
-      return factory.createShorthandPropertyAssignment(entry.ref, undefined);
+  for (const entry of fallbackEntries) {
+    if (ts.isIdentifier(entry.ref) && entry.propertyName === entry.ref.text) {
+      properties.push(
+        factory.createShorthandPropertyAssignment(entry.ref, undefined),
+      );
+    } else {
+      properties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(entry.propertyName),
+          entry.ref,
+        ),
+      );
     }
-    return factory.createPropertyAssignment(
-      factory.createIdentifier(entry.propertyName),
-      entry.ref,
-    );
-  });
+  }
 
-  return [factory.createObjectLiteralExpression(properties, false)];
+  if (properties.length === 1 && fallbackEntries.length === 0) {
+    const first = captureTree.values().next();
+    if (!first.done) {
+      const node = first.value;
+      if (node.expression && node.properties.size === 0) {
+        return [node.expression];
+      }
+    }
+  }
+
+  return [
+    factory.createObjectLiteralExpression(properties, properties.length > 1),
+  ];
 }
 
 export function createDeriveCall(
@@ -143,8 +227,19 @@ export function createDeriveCall(
   if (refs.length === 0) return undefined;
 
   const { factory, tsContext, ctHelpers } = options;
-  const { entries, refToParamName } = planDeriveEntries(refs);
-  if (entries.length === 0) return undefined;
+  const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
+    refs,
+  );
+  if (captureTree.size === 0 && fallbackEntries.length === 0) {
+    return undefined;
+  }
+
+  const parameter = createParameterForPlan(
+    factory,
+    captureTree,
+    fallbackEntries,
+    refToParamName,
+  );
 
   const lambdaBody = replaceOpaqueRefsWithParams(
     expression,
@@ -156,7 +251,7 @@ export function createDeriveCall(
   const arrowFunction = factory.createArrowFunction(
     undefined,
     undefined,
-    [createParameterForEntries(factory, entries)],
+    [parameter],
     undefined,
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     lambdaBody,
@@ -164,7 +259,7 @@ export function createDeriveCall(
 
   const deriveExpr = ctHelpers.getHelperExpr("derive");
   const deriveArgs = [
-    ...createDeriveArgs(factory, entries),
+    ...createDeriveArgs(factory, captureTree, fallbackEntries),
     arrowFunction,
   ];
 

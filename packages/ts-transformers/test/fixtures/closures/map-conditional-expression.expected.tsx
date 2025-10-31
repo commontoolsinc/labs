@@ -55,16 +55,22 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            threshold: {
-                                type: "number",
-                                asOpaque: true
-                            },
-                            discount: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    threshold: {
+                                        type: "number",
+                                        asOpaque: true
+                                    },
+                                    discount: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["threshold", "discount"]
                             }
                         },
-                        required: ["threshold", "discount"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -82,9 +88,28 @@ export default recipe({
                         required: ["id", "price"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { threshold, discount } }) => (<div>
-            Price: ${__ctHelpers.ifElse(__ctHelpers.derive({ element_price: element.price, threshold }, ({ element_price: _v1, threshold: threshold }) => _v1 > threshold), __ctHelpers.derive({ element_price: element.price, discount }, ({ element_price: _v1, discount: discount }) => _v1 * (1 - discount)), element.price)}
-          </div>)), { threshold: state.threshold, discount: state.discount })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
+            Price: ${__ctHelpers.ifElse(__ctHelpers.derive({
+                item: {
+                    price: item.price
+                },
+                state: {
+                    threshold: state.threshold
+                }
+            }, ({ item, state }) => item.price > state.threshold), __ctHelpers.derive({
+                item: {
+                    price: item.price
+                },
+                state: {
+                    discount: state.discount
+                }
+            }, ({ item, state }) => item.price * (1 - state.discount)), item.price)}
+          </div>)), {
+                state: {
+                    threshold: state.threshold,
+                    discount: state.discount
+                }
+            })}
       </div>),
     };
 });

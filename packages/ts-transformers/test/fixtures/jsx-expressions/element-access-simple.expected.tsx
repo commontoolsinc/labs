@@ -41,13 +41,22 @@ export default recipe({
         [UI]: (<div>
         <h3>Dynamic Element Access</h3>
         {/* Basic dynamic index */}
-        <p>Item: {__ctHelpers.derive({ state_items: state.items, state_index: state.index }, ({ state_items: _v1, state_index: _v2 }) => _v1[_v2])}</p>
+        <p>Item: {__ctHelpers.derive({ state: {
+                items: state.items,
+                index: state.index
+            } }, ({ state }) => state.items[state.index])}</p>
 
         {/* Computed index */}
-        <p>Last: {__ctHelpers.derive({ state_items: state.items, state_items_length: state.items.length }, ({ state_items: _v1, state_items_length: _v2 }) => _v1[_v2 - 1])}</p>
+        <p>Last: {__ctHelpers.derive({ state: {
+                items: state.items
+            } }, ({ state }) => state.items[state.items.length - 1])}</p>
 
         {/* Double indexing */}
-        <p>Matrix: {__ctHelpers.derive({ state_matrix: state.matrix, state_row: state.row, state_col: state.col }, ({ state_matrix: _v1, state_row: _v2, state_col: _v3 }) => _v1[_v2][_v3])}</p>
+        <p>Matrix: {__ctHelpers.derive({ state: {
+                matrix: state.matrix,
+                row: state.row,
+                col: state.col
+            } }, ({ state }) => state.matrix[state.row][state.col])}</p>
       </div>),
     };
 });

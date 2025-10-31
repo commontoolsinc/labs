@@ -54,12 +54,18 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            offset: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    offset: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["offset"]
                             }
                         },
-                        required: ["offset"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -77,9 +83,18 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, index, params: { offset } }) => (<div>
-            Item #{__ctHelpers.derive({ index, offset }, ({ index: index, offset: offset }) => index + offset)}: {element.name}
-          </div>)), { offset: state.offset })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: { state } }) => (<div>
+            Item #{__ctHelpers.derive({
+                index: index,
+                state: {
+                    offset: state.offset
+                }
+            }, ({ index, state }) => index + state.offset)}: {item.name}
+          </div>)), {
+                state: {
+                    offset: state.offset
+                }
+            })}
       </div>),
     };
 });

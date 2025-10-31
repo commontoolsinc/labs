@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { getExpressionText, type NormalizedDataFlow } from "../../ast/mod.ts";
+import { getUniqueIdentifier } from "../../utils/identifiers.ts";
 
 export interface BindingPlanEntry {
   readonly dataFlow: NormalizedDataFlow;
@@ -27,36 +28,6 @@ function deriveBaseName(
   return `ref${index + 1}`;
 }
 
-interface UniqueNameOptions {
-  readonly trimLeadingUnderscores?: boolean;
-}
-
-function createUniqueIdentifier(
-  candidate: string,
-  fallback: string,
-  used: Set<string>,
-  options: UniqueNameOptions = {},
-): string {
-  let base = candidate.replace(/[^A-Za-z0-9_]/g, "_");
-  if (options.trimLeadingUnderscores) {
-    base = base.replace(/^_+/, "");
-  }
-  if (base.length === 0) {
-    base = fallback;
-  }
-  if (!/^[A-Za-z_]/.test(base.charAt(0))) {
-    base = fallback;
-  }
-
-  let name = base;
-  let suffix = 1;
-  while (used.has(name)) {
-    name = `${base}_${suffix++}`;
-  }
-  used.add(name);
-  return name;
-}
-
 export function createBindingPlan(
   dataFlows: readonly NormalizedDataFlow[],
 ): BindingPlan {
@@ -67,24 +38,17 @@ export function createBindingPlan(
   dataFlows.forEach((dataFlow, index) => {
     const base = deriveBaseName(dataFlow.expression, index);
     const fallback = `ref${index + 1}`;
-    const propertyName = createUniqueIdentifier(
-      base,
+    const propertyName = getUniqueIdentifier(base, usedPropertyNames, {
       fallback,
-      usedPropertyNames,
-      { trimLeadingUnderscores: true },
-    );
+      trimLeadingUnderscores: true,
+    });
 
-    const paramName = ts.isIdentifier(dataFlow.expression)
-      ? createUniqueIdentifier(
-        dataFlow.expression.text,
-        `_v${index + 1}`,
-        usedParamNames,
-      )
-      : createUniqueIdentifier(
-        `_v${index + 1}`,
-        `_v${index + 1}`,
-        usedParamNames,
-      );
+    const paramCandidate = ts.isIdentifier(dataFlow.expression)
+      ? dataFlow.expression.text
+      : `_v${index + 1}`;
+    const paramName = getUniqueIdentifier(paramCandidate, usedParamNames, {
+      fallback: `_v${index + 1}`,
+    });
 
     entries.push({ dataFlow, propertyName, paramName });
   });

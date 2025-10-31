@@ -45,7 +45,10 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {__ctHelpers.derive(state.items, _v1 => _v1.filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
+        {__ctHelpers.derive({ state: {
+                items: state.items
+            } }, ({ state }) => state.items
+            .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
@@ -56,12 +59,18 @@ export default recipe({
                 params: {
                     type: "object",
                     properties: {
-                        taxRate: {
-                            type: "number",
-                            asOpaque: true
+                        state: {
+                            type: "object",
+                            properties: {
+                                taxRate: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["taxRate"]
                         }
                     },
-                    required: ["taxRate"]
+                    required: ["state"]
                 }
             },
             required: ["element", "params"],
@@ -82,9 +91,20 @@ export default recipe({
                     required: ["id", "price", "active"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { taxRate } }) => (<div>
-              Total: {__ctHelpers.derive({ element_price: element.price, taxRate }, ({ element_price: _v1, taxRate: taxRate }) => _v1 * (1 + taxRate))}
-            </div>)), { taxRate: state.taxRate })}
+        } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
+              Total: {__ctHelpers.derive({
+            item: {
+                price: item.price
+            },
+            state: {
+                taxRate: state.taxRate
+            }
+        }, ({ item, state }) => item.price * (1 + state.taxRate))}
+            </div>)), {
+            state: {
+                taxRate: state.taxRate
+            }
+        })}
       </div>),
     };
 });

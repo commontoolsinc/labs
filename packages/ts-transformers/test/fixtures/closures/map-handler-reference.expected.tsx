@@ -72,13 +72,19 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            count: {
-                                type: "number",
-                                asCell: true,
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    count: {
+                                        type: "number",
+                                        asCell: true,
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["count"]
                             }
                         },
-                        required: ["count"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -96,9 +102,13 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { count } }) => (<ct-button onClick={handleClick({ count: count })}>
-            {element.name}
-          </ct-button>)), { count: state.count })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<ct-button onClick={handleClick({ count: state.count })}>
+            {item.name}
+          </ct-button>)), {
+                state: {
+                    count: state.count
+                }
+            })}
       </div>),
     };
 });

@@ -5,7 +5,7 @@ export default recipe("Optional Chain Predicate", () => {
     return {
         [NAME]: "Optional chain predicate",
         [UI]: (<div>
-        {__ctHelpers.derive(items, items => !items?.length && <span>No items</span>)}
+        {__ctHelpers.derive(items, ({ items }) => !items?.length && <span>No items</span>)}
       </div>),
     };
 });

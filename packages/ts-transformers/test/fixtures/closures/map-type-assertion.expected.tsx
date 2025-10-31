@@ -33,12 +33,18 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            prefix: {
-                                type: "string",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    prefix: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["prefix"]
                             }
                         },
-                        required: ["prefix"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],
@@ -56,9 +62,13 @@ export default recipe({
                         required: ["id", "name"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { prefix } }) => (<div>
-            {prefix}: {element.name}
-          </div>)), { prefix: state.prefix })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
+            {state.prefix}: {item.name}
+          </div>)), {
+                state: {
+                    prefix: state.prefix
+                }
+            })}
       </div>),
     };
 });

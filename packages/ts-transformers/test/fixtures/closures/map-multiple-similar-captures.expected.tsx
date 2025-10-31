@@ -65,22 +65,61 @@ export default recipe({
                     params: {
                         type: "object",
                         properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            },
-                            discount_2: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    checkout: {
+                                        type: "object",
+                                        properties: {
+                                            discount: {
+                                                type: "number",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["discount"]
+                                    },
+                                    upsell: {
+                                        type: "object",
+                                        properties: {
+                                            discount: {
+                                                type: "number",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["discount"]
+                                    }
+                                },
+                                required: ["checkout", "upsell"]
                             }
                         },
-                        required: ["discount", "discount_2"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element, params: { discount, discount_2 } }) => (<span>
-            {__ctHelpers.derive({ element_price: element.price, discount, discount_2 }, ({ element_price: _v1, discount: discount, discount_2: discount_2 }) => _v1 * discount * discount_2)}
-          </span>)), { discount: state.checkout.discount, discount_2: state.upsell.discount })}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<span>
+            {__ctHelpers.derive({
+                item: {
+                    price: item.price
+                },
+                state: {
+                    checkout: {
+                        discount: state.checkout.discount
+                    },
+                    upsell: {
+                        discount: state.upsell.discount
+                    }
+                }
+            }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
+          </span>)), {
+                state: {
+                    checkout: {
+                        discount: state.checkout.discount
+                    },
+                    upsell: {
+                        discount: state.upsell.discount
+                    }
+                }
+            })}
       </div>),
     };
 });

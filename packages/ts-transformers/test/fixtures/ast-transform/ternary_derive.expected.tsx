@@ -16,7 +16,11 @@ export default recipe({
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
-        {__ctHelpers.ifElse(__ctHelpers.derive(state.value, _v1 => _v1 + 1), __ctHelpers.derive(state.value, _v1 => _v1 + 2), "undefined")}
+        {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+                value: state.value
+            } }, ({ state }) => state.value + 1), __ctHelpers.derive({ state: {
+                value: state.value
+            } }, ({ state }) => state.value + 2), "undefined")}
       </div>),
     };
 });
