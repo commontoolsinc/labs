@@ -1,7 +1,13 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { isStream, Runtime, RuntimeProgram, UI } from "@commontools/runner";
+import {
+  isStream,
+  Runtime,
+  RuntimeProgram,
+  type Stream,
+  UI,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
@@ -490,7 +496,9 @@ export async function callCharmHandler<T = any>(
     },
     required: [handlerName],
   });
-  const handlerStream = cell.key(handlerName);
+
+  // Manual cast because typescript can't infer this automatically
+  const handlerStream = cell.key(handlerName) as unknown as Stream<T>;
 
   // The handlerStream should be the actual stream object
   if (!isStream<T>(handlerStream)) {

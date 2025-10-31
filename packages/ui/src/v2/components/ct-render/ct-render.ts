@@ -3,7 +3,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
-import { UI } from "@commontools/api";
+import { UI, type VNode } from "@commontools/api";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -172,7 +172,7 @@ export class CTRender extends BaseElement {
     }
 
     this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, uiCell as Cell);
+    this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
   }
 
   private _isSubPath(cell: Cell<unknown>): boolean {

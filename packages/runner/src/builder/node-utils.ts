@@ -2,7 +2,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
   canBeOpaqueRef,
-  isOpaqueRef,
+  isOpaqueCell,
   type JSONSchema,
   makeOpaqueRef,
   type NodeRef,
@@ -15,7 +15,7 @@ import { traverseValue } from "./traverse-utils.ts";
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-    if (isOpaqueRef(value)) {
+    if (isOpaqueCell(value)) {
       // Return shadow ref it this is a parent opaque ref. Note: No need to
       // connect to the cell. The connection is there to traverse the graph to
       // find all other nodes, but this points to the parent graph instead.
@@ -55,7 +55,7 @@ export function applyInputIfcToOutput<T, R>(
   const collectedClassifications = new Set<string>();
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
-    if (isOpaqueRef(item)) {
+    if (isOpaqueCell(item)) {
       const { schema: inputSchema, rootSchema } = (item as OpaqueRef<T>)
         .export();
       if (inputSchema !== undefined) {
@@ -80,7 +80,7 @@ function attachCfcToOutputs<T, R>(
   cfc: ContextualFlowControl,
   lubClassification: string,
 ) {
-  if (isOpaqueRef(outputs)) {
+  if (isOpaqueCell(outputs)) {
     const exported = (outputs as OpaqueRef<T>).export();
     const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those

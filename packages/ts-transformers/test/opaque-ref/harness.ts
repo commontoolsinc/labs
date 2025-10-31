@@ -19,13 +19,19 @@ export function analyzeExpression(
 ): AnalysisHarnessResult {
   const fileName = "/analysis.ts";
   const programSource = `
+declare const CELL_BRAND: unique symbol;
+
+type BrandedCell<T, Brand extends string> = {
+  readonly [CELL_BRAND]: Brand;
+};
+
 interface OpaqueRefMethods<T> {
   map<S>(fn: (...args: unknown[]) => S): OpaqueRef<S[]>;
 }
 
-type OpaqueRef<T> = {
-  readonly __opaque: T;
-} & OpaqueRefMethods<T>;
+type OpaqueRef<T> =
+  & BrandedCell<T, "opaque">
+  & OpaqueRefMethods<T>;
 
 declare const state: {
   readonly count: OpaqueRef<number>;

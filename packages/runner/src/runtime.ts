@@ -5,6 +5,7 @@ import {
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
 import type {
+  AnyCell,
   JSONSchema,
   Module,
   NodeFactory,
@@ -145,12 +146,12 @@ export interface IRuntime {
   ): Cell<T>;
 
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
@@ -520,17 +521,17 @@ export class Runtime implements IRuntime {
     );
   }
   getCellFromLink<T>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
