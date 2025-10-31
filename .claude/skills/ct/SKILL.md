@@ -27,41 +27,32 @@ Use this skill for:
 
 ```bash
 # Top-level commands
-./dist/ct --help
+deno task ct --help
 
 # Charm subcommands
-./dist/ct charm --help
+deno task ct charm --help
 
 # Specific command details
-./dist/ct charm get --help
-./dist/ct charm link --help
-./dist/ct dev --help
+deno task ct charm get --help
+deno task ct charm link --help
+deno task ct dev --help
 ```
 
 **Why this matters:** The tool's `--help` output is the authoritative source of truth. As new features are added or flags change, `--help` stays current automatically.
 
-## Running CT: Binary vs Source
+## Running CT
 
-The `ct` command can be run in two ways:
+The `ct` command is run via:
 
-**1. As a compiled binary (recommended for production):**
-```bash
-./dist/ct [command]
-```
-
-Verify the binary exists with `ls -la ./dist/ct`. If missing, build it:
-```bash
-deno task build-binaries --cli-only
-```
-
-**2. From source (for active development):**
 ```bash
 deno task ct [command]
 ```
 
-Use this when actively developing the ct tool itself.
+This is the recommended approach for all users. If you use `ct` frequently, you can create a shell alias:
 
-**Default approach:** Try `./dist/ct` first; if the binary doesn't exist, use `deno task ct`.
+```bash
+alias ct="deno task ct"
+```
 
 ## Prerequisites and Setup
 
@@ -74,19 +65,19 @@ ls -la claude.key
 
 If missing, create one:
 ```bash
-./dist/ct id new > claude.key
+deno task ct id new > claude.key
 ```
 
 To get the DID (Decentralized Identifier):
 ```bash
-./dist/ct id did claude.key
+deno task ct id did claude.key
 ```
 
 ### Recipe Development Setup
 
 When working in a recipes repository, initialize TypeScript support:
 ```bash
-./dist/ct init
+deno task ct init
 ```
 
 This creates/updates `tsconfig.json` with proper type definitions.
@@ -110,15 +101,15 @@ Use `ct dev` for rapid iteration during recipe development:
 
 ```bash
 # Type check and execute
-./dist/ct dev ./recipe.tsx
+deno task ct dev ./recipe.tsx
 
 # Type check only (no execution)
-./dist/ct dev ./recipe.tsx --no-run
+deno task ct dev ./recipe.tsx --no-run
 ```
 
 **Discover more options:**
 ```bash
-./dist/ct dev --help
+deno task ct dev --help
 ```
 
 ### 2. Deploying and Managing Charms
@@ -131,7 +122,7 @@ Use `ct dev` for rapid iteration during recipe development:
 
 **Discover commands:**
 ```bash
-./dist/ct charm --help
+deno task ct charm --help
 ```
 
 ### 3. Reading and Writing Charm Data
@@ -163,13 +154,13 @@ Linking creates reactive data flow between charms:
 
 **Example pattern:**
 ```bash
-./dist/ct charm link -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space \
+deno task ct charm link -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space \
   sourceCharmID/emails targetCharmID/emailData
 ```
 
 **Discover linking options:**
 ```bash
-./dist/ct charm link --help
+deno task ct charm link --help
 ```
 
 ### 5. Visualizing Space Architecture
@@ -178,10 +169,10 @@ Use `ct charm map` to understand charm relationships:
 
 ```bash
 # ASCII map
-./dist/ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space
+deno task ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space
 
 # Graphviz DOT format (for visualization tools)
-./dist/ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space --format dot
+deno task ct charm map -i claude.key -a https://toolshed.saga-castor.ts.net/ -s space --format dot
 ```
 
 ## Common Patterns and Gotchas
@@ -202,13 +193,13 @@ All values passed to `set` and `call` must be valid JSON:
 
 ```bash
 # Strings (note the nested quotes)
-echo '"hello world"' | ./dist/ct charm set ... title
+echo '"hello world"' | deno task ct charm set ... title
 
 # Numbers
-echo '42' | ./dist/ct charm set ... count
+echo '42' | deno task ct charm set ... count
 
 # Objects
-echo '{"name": "John"}' | ./dist/ct charm set ... user
+echo '{"name": "John"}' | deno task ct charm set ... user
 ```
 
 ### Error Handling
@@ -220,7 +211,7 @@ echo '{"name": "John"}' | ./dist/ct charm set ... user
 - JSON parse error → Check JSON formatting (proper quotes, no trailing commas)
 
 **Debugging steps:**
-1. For recipe errors: Run `./dist/ct dev [recipe] --no-run` to check syntax
+1. For recipe errors: Run `deno task ct dev [recipe] --no-run` to check syntax
 2. For connection issues: Verify Tailnet connection for `*.ts.net` URLs
 3. For data issues: Use `ct charm inspect` to examine charm state
 4. For linking issues: Use `ct charm map` to visualize connections

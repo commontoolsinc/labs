@@ -184,7 +184,7 @@ Identity management using Ed25519 cryptographic keys.
 
 ```bash
 # Create new identity
-./dist/ct id new > identity.key
+deno task ct id new > identity.key
 ```
 
 ## Common Development Tasks
