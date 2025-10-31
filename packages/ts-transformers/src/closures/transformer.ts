@@ -1,7 +1,11 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
+import {
+  createDataFlowAnalyzer,
+  isEventHandlerJsxAttribute,
+  visitEachChildWithJsx,
+} from "../ast/mod.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -11,6 +15,8 @@ import {
   createBindingElementsFromNames,
   createParameterFromBindings,
   createPropertyName,
+  getUniqueIdentifier,
+  isSafeIdentifierText,
   reserveIdentifier,
 } from "../utils/identifiers.ts";
 import {
@@ -411,6 +417,7 @@ function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
+
 function typeNodeForExpression(
   expr: ts.Expression,
   context: TransformationContext,
@@ -795,38 +802,241 @@ function shouldTransformMap(
   return true;
 }
 
-/**
- * Create a visitor function that transforms OpaqueRef map calls.
- * This visitor can be reused for both top-level and nested transformations.
- */
-function createMapTransformVisitor(
+function createClosureTransformVisitor(
   context: TransformationContext,
 ): ts.Visitor {
   const { checker } = context;
 
   const visit: ts.Visitor = (node) => {
-    // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
+    if (ts.isJsxAttribute(node) && isEventHandlerJsxAttribute(node.name)) {
+      const transformed = transformHandlerJsxAttribute(node, context, visit);
+      if (transformed) {
+        return transformed;
+      }
+    }
+
     if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
       const callback = node.arguments[0];
 
-      // Check if the callback is an arrow function or function expression
       if (
         callback &&
         (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
       ) {
-        // Check if this map will end up inside a derive (where array is unwrapped)
-        // If so, skip transformation and keep it as plain .map
         if (shouldTransformMap(node, context)) {
           return transformMapCallback(node, callback, context, visit);
         }
       }
     }
 
-    // Continue visiting children (handles JSX correctly)
     return visitEachChildWithJsx(node, visit, context.tsContext);
   };
 
   return visit;
+}
+
+function transformHandlerJsxAttribute(
+  attribute: ts.JsxAttribute,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.JsxAttribute | undefined {
+  const initializer = attribute.initializer;
+  if (!initializer || !ts.isJsxExpression(initializer)) {
+    return undefined;
+  }
+
+  const expression = initializer.expression;
+  if (!expression) {
+    return undefined;
+  }
+
+  const callback = unwrapArrowFunction(expression);
+  if (!callback) {
+    return undefined;
+  }
+
+  const transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  const captureExpressions = collectCaptures(callback, context.checker);
+  const captureTree = groupCapturesByRoot(captureExpressions);
+
+  const handlerCallback = createHandlerCallback(
+    callback,
+    transformedBody,
+    captureTree,
+    context,
+  );
+
+  const { factory } = context;
+  const handlerExpr = context.ctHelpers.getHelperExpr("handler");
+  const handlerCall = factory.createCallExpression(
+    handlerExpr,
+    undefined,
+    [handlerCallback],
+  );
+
+  const paramProperties: ts.PropertyAssignment[] = [];
+  for (const [rootName, rootNode] of captureTree) {
+    paramProperties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(rootNode, rootName, factory),
+      ),
+    );
+  }
+
+  const paramsObject = factory.createObjectLiteralExpression(
+    paramProperties,
+    paramProperties.length > 0,
+  );
+
+  const finalCall = factory.createCallExpression(
+    handlerCall,
+    undefined,
+    [paramsObject],
+  );
+
+  const newInitializer = factory.createJsxExpression(
+    initializer.dotDotDotToken,
+    finalCall,
+  );
+
+  return factory.createJsxAttribute(attribute.name, newInitializer);
+}
+
+function createHandlerCallback(
+  callback: ts.ArrowFunction,
+  transformedBody: ts.ConciseBody,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.ArrowFunction {
+  const { factory } = context;
+  const usedBindingNames = new Set<string>();
+  const rootNames = new Set<string>();
+  for (const [rootName] of captureTree) {
+    rootNames.add(rootName);
+  }
+
+  const eventParam = callback.parameters[0];
+  const stateParam = callback.parameters[1];
+  const extraParams = callback.parameters.slice(2);
+
+  const normaliseParameter = (
+    original: ts.ParameterDeclaration,
+    name: ts.BindingName,
+  ): ts.ParameterDeclaration =>
+    factory.createParameterDeclaration(
+      original.modifiers,
+      original.dotDotDotToken,
+      name,
+      original.questionToken,
+      original.type,
+      original.initializer,
+    );
+
+  const eventParameter = eventParam
+    ? normaliseParameter(
+      eventParam,
+      normalizeBindingName(eventParam.name, factory, usedBindingNames),
+    )
+    : (() => {
+      const baseName = "__ct_handler_event";
+      let candidate = baseName;
+      let index = 1;
+      while (rootNames.has(candidate)) {
+        candidate = `${baseName}_${index++}`;
+      }
+      return factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier(
+          getUniqueIdentifier(candidate, usedBindingNames, {
+            fallback: baseName,
+          }),
+        ),
+        undefined,
+        undefined,
+        undefined,
+      );
+    })();
+
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    if (isSafeIdentifierText(name) && !usedBindingNames.has(name)) {
+      usedBindingNames.add(name);
+      return factory.createIdentifier(name);
+    }
+    const fallback = name.length > 0 ? name : "ref";
+    const unique = getUniqueIdentifier(fallback, usedBindingNames, {
+      fallback: "ref",
+    });
+    return factory.createIdentifier(unique);
+  };
+
+  const paramsBindings = createBindingElementsFromNames(
+    captureTree.keys(),
+    factory,
+    createBindingIdentifier,
+  );
+
+  const paramsBindingPattern = factory.createObjectBindingPattern(paramsBindings);
+
+  let paramsBindingName: ts.BindingName;
+  if (stateParam) {
+    paramsBindingName = normalizeBindingName(
+      stateParam.name,
+      factory,
+      usedBindingNames,
+    );
+  } else if (captureTree.size > 0) {
+    paramsBindingName = paramsBindingPattern;
+  } else {
+    paramsBindingName = factory.createIdentifier(
+      getUniqueIdentifier("__ct_handler_params", usedBindingNames, {
+        fallback: "__ct_handler_params",
+      }),
+    );
+  }
+
+  const paramsParameter = stateParam
+    ? normaliseParameter(stateParam, paramsBindingName)
+    : factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      paramsBindingName,
+      undefined,
+      undefined,
+      undefined,
+    );
+
+  const additionalParameters = extraParams.map((param) =>
+    normaliseParameter(
+      param,
+      normalizeBindingName(param.name, factory, usedBindingNames),
+    )
+  );
+
+  return factory.createArrowFunction(
+    callback.modifiers,
+    callback.typeParameters,
+    [eventParameter, paramsParameter, ...additionalParameters],
+    callback.type,
+    callback.equalsGreaterThanToken,
+    transformedBody,
+  );
+}
+
+function unwrapArrowFunction(
+  expression: ts.Expression,
+): ts.ArrowFunction | undefined {
+  if (ts.isArrowFunction(expression)) {
+    return expression;
+  }
+  if (ts.isParenthesizedExpression(expression)) {
+    return unwrapArrowFunction(expression.expression);
+  }
+  return undefined;
 }
 
 /**
@@ -1047,8 +1257,7 @@ function transformMapCallback(
 function transformClosures(context: TransformationContext): ts.SourceFile {
   const { sourceFile } = context;
 
-  // Create a unified visitor that handles both top-level and nested map transformations
-  const visitor = createMapTransformVisitor(context);
+  const visitor = createClosureTransformVisitor(context);
 
   return ts.visitNode(sourceFile, visitor) as ts.SourceFile;
 }
