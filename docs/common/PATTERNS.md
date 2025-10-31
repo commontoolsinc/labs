@@ -662,6 +662,52 @@ const addItem = handler<
 
 **Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array. You can make the elements cells as well, e.g. to access `.equals`, `.set`, `.update`, etc. directly
 
+#### 5. Storing Pattern Instances Directly in Handlers (Stack Overflow)
+
+```typescript
+// ❌ WRONG - Causes stack overflow
+const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
+  (_, { chatsList }) => {
+    const chat = Chat({ title: "New Chat", messages: [] });
+
+    // ❌ This will cause: RangeError: Maximum call stack size exceeded
+    chatsList.push({
+      [ID]: randomId,
+      local_id: randomId,
+      charm: chat
+    });
+  }
+);
+
+// ✅ CORRECT - Use lift() to wrap the push operation
+const storeChat = lift(
+  toSchema<{ charm: any; chatsList: Cell<Entry[]>; isInitialized: Cell<boolean> }>(),
+  undefined,
+  ({ charm, chatsList, isInitialized }) => {
+    if (!isInitialized.get()) {
+      chatsList.push({ [ID]: randomId, local_id: randomId, charm });
+      isInitialized.set(true);
+    }
+  }
+);
+
+const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
+  (_, { chatsList }) => {
+    const isInitialized = cell(false);
+    const chat = Chat({ title: "New Chat", messages: [] });
+
+    // ✅ Handler returns the lift call instead of pushing directly
+    return storeChat({ charm: chat, chatsList, isInitialized });
+  }
+);
+```
+
+**When you'll encounter this:** Creating "charm lists" or "pattern collections" - like a list of chat instances, a list of notes, or any UI that lets users create multiple instances of a pattern.
+
+**Why this is a pitfall:** The stack overflow error is cryptic and doesn't indicate the solution. The pattern instance storage workflow requires coordination between handlers (which create instances) and lift functions (which store them).
+
+**Reference:** See `packages/patterns/chatbot-list-view.tsx` for the canonical implementation, specifically the `storeCharm` lift and `createChatRecipe` handler. Full details in `HANDLERS.md` under "Storing Pattern Instances in Cell Arrays".
+
 ## Testing Patterns and Development Workflow
 
 ### Quick Development Workflow
