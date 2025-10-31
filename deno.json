@@ -40,7 +40,7 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@commontools/html",
     "types": [
-      "./packages/static/assets/types/jsx.d.ts"
+      "./packages/html/src/jsx.d.ts"
     ],
     "lib": [
       "deno.ns",
