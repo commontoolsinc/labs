@@ -1,5 +1,6 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
 import { toOpaqueRef } from "../back-to-cell.ts";
+import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
   ByRefFunction,
@@ -158,11 +159,7 @@ export type NodeRef = {
   frame: Frame | undefined;
 };
 
-// This is a schema, together with its rootSchema for resolving $ref entries
-export type SchemaContext = {
-  schema: JSONSchema;
-  rootSchema: JSONSchema;
-};
+export type { SchemaContext };
 
 export type StreamValue = {
   $stream: true;
