@@ -1,8 +1,17 @@
 import type { Reference } from "merkle-reference";
-import { JSONValue, SchemaContext } from "@commontools/runner";
-import { SchemaPathSelector } from "@commontools/runner/traverse";
+import type { JSONSchema, JSONValue } from "@commontools/api";
 
-export type { JSONValue, Reference, SchemaContext, SchemaPathSelector };
+export type SchemaContext = {
+  schema: JSONSchema;
+  rootSchema: JSONSchema;
+};
+
+export type SchemaPathSelector = {
+  path: readonly string[];
+  schemaContext?: Readonly<SchemaContext>;
+};
+
+export type { JSONValue, Reference };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;

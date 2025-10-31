@@ -11,12 +11,11 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
 import type {
-  JSONObject,
-  JSONSchema,
-  JSONValue,
   SchemaContext,
-} from "./builder/types.ts";
+  SchemaPathSelector,
+} from "@commontools/memory/interface";
 import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
@@ -25,12 +24,7 @@ import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-
-// Both path and schemaContext are relative to the fact.is.value
-export type SchemaPathSelector = {
-  path: readonly string[];
-  schemaContext?: Readonly<SchemaContext>;
-};
+export type { SchemaPathSelector };
 
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
