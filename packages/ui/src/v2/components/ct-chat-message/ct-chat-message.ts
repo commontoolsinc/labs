@@ -259,21 +259,33 @@ export class CTChatMessage extends BaseElement {
       }
 
       /* Adjust colors for user messages */
-      :host([role="user"]) .message-content code,
-      :host([role="user"]) .message-content pre {
-        background-color: var(
+      :host([role="user"]) .message-content code {
+        background-color: rgba(255, 255, 255, 0.2);
+        color: var(
           --ct-theme-color-accent-foreground,
           var(--ct-color-white, #ffffff)
         );
-        opacity: 0.2;
+      }
+
+      :host([role="user"]) .message-content pre {
+        background-color: rgba(255, 255, 255, 0.2);
+        border: none;
+      }
+
+      :host([role="user"]) .message-content pre code {
+        background-color: transparent;
+        color: var(
+          --ct-theme-color-accent-foreground,
+          var(--ct-color-white, #ffffff)
+        );
       }
 
       :host([role="user"]) .message-content blockquote {
-        border-left-color: var(
+        border-left-color: rgba(255, 255, 255, 0.6);
+        color: var(
           --ct-theme-color-accent-foreground,
           var(--ct-color-white, #ffffff)
         );
-        opacity: 0.4;
       }
 
       /* Message actions */
