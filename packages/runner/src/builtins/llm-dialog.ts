@@ -832,7 +832,7 @@ async function invokeToolCall(
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  const resultValue = await promise;
+  let resultValue = await promise;
   cancel();
 
   if (pattern) {
@@ -842,7 +842,10 @@ async function invokeToolCall(
     await runtime.idle(); // maybe pointless
   }
 
-  return { type: "json", value: resultValue ?? "OK" }; // if there was no return value, just tell the LLM it worked
+  // Prevent links being returned
+  resultValue = JSON.parse(JSON.stringify(resultValue ?? "OK"));
+
+  return { type: "json", value: resultValue };
 }
 
 /**

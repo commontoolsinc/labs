@@ -24,3 +24,4 @@ local-dev-toolshed.log
 local-dev-shell.log
 tools/ralph/logs/
 tools/ralph/smoketest/
+.worktrees

@@ -5,12 +5,15 @@ import {
   Default,
   derive,
   handler,
+  ifElse,
+  llm,
   NAME,
   navigateTo,
   Opaque,
   OpaqueRef,
   patternTool,
   recipe,
+  str,
   UI,
   wish,
 } from "commontools";
@@ -27,6 +30,7 @@ type Output = {
   /** The content of the note */
   content: Default<string, "">;
   grep: OpaqueRef<{ query: string }>;
+  translate: OpaqueRef<{ language: string }>;
   editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
@@ -160,6 +164,31 @@ const Note = recipe<Input, Output>(
         ({ query, content }: { query: string; content: string }) => {
           return derive({ query, content }, ({ query, content }) => {
             return content.split("\n").filter((c) => c.includes(query));
+          });
+        },
+        { content },
+      ),
+      translate: patternTool(
+        (
+          { language, content }: {
+            language: string;
+            content: string;
+          },
+        ) => {
+          const result = llm({
+            system: str`Translate the content to ${language}.`,
+            messages: derive(content, (c) => [
+              {
+                role: "user",
+                content: c,
+              },
+            ]),
+          });
+
+          return derive(result, ({ pending, result }) => {
+            if (pending) return undefined;
+            if (!result) return "Error occured";
+            return result;
           });
         },
         { content },
