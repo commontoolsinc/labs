@@ -717,6 +717,71 @@ logic.
 
 21. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
 
+22. **Create Patterns On-Demand for Conditional Composition**: When composing patterns that share parent cell references and are conditionally instantiated, create them on-demand in handlers rather than during recipe initialization:
+
+    ```typescript
+    // ❌ WRONG - Creating shared-cell patterns during recipe init
+    export default recipe("Launcher", ({ items }) => {
+      const currentView = cell("none");
+
+      // These patterns share the 'items' cell but are created upfront
+      const listView = ShoppingList({ items });
+      const gridView = GridView({ items });
+
+      // Later conditionally shown based on user selection...
+    });
+    ```
+
+    ```typescript
+    // ✅ CORRECT - Create patterns on-demand in handlers
+    const selectList = handler<
+      unknown,
+      { items: any; currentView: Cell<any> }
+    >((_event, { items, currentView }) => {
+      // Create pattern when user selects it
+      const view = ShoppingList({ items });
+      currentView.set(view);
+    });
+
+    const selectGrid = handler<
+      unknown,
+      { items: any; currentView: Cell<any> }
+    >((_event, { items, currentView }) => {
+      const view = GridView({ items });
+      currentView.set(view);
+    });
+
+    export default recipe("Launcher", ({ items }) => {
+      const currentView = cell(null);
+
+      return {
+        [UI]: (
+          <div>
+            <ct-button onClick={selectList({ items, currentView })}>
+              List View
+            </ct-button>
+            <ct-button onClick={selectGrid({ items, currentView })}>
+              Grid View
+            </ct-button>
+            <div>{currentView}</div>
+          </div>
+        ),
+      };
+    });
+    ```
+
+    **Why this matters**: Creating patterns that share parent cells during recipe initialization can cause "Shadow ref alias with parent cell not found in current frame" errors when those patterns are conditionally instantiated. The framework's cell tracking system works best when patterns are created on-demand in response to user events.
+
+    **When this applies**:
+    - Child patterns share cell references with parent
+    - Patterns are created conditionally based on user selection
+    - You see "Shadow ref alias" errors
+
+    **When upfront creation is fine**:
+    - All patterns are always rendered (even if hidden with CSS/ifElse)
+    - Patterns don't share parent cell references
+    - No conditional instantiation
+
 ## Type Best Practices
 
 When defining types in the Recipe Framework, follow these guidelines for best

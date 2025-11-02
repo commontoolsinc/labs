@@ -363,6 +363,87 @@ export default recipe<ComposedInput, ComposedInput>(
 | Reusable components within a recipe | Pattern Composition (Level 4) |
 | Separate deployments that communicate | Linked Charms (Level 3) |
 
+### Pattern Composition: Upfront vs On-Demand Creation
+
+When composing patterns that share cell references, you have two approaches:
+
+#### ✅ Upfront Creation (All patterns rendered together)
+
+```typescript
+export default recipe("Multi-View", ({ items }) => {
+  // Create all patterns upfront
+  const listView = ShoppingList({ items });
+  const gridView = GridView({ items });
+
+  return {
+    [NAME]: "Multi-View",
+    [UI]: (
+      <div>
+        {/* Both patterns always rendered */}
+        <div>{listView}</div>
+        <div>{gridView}</div>
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+**Use when**: All child patterns are displayed simultaneously or conditionally rendered with `ifElse()`.
+
+#### ✅ On-Demand Creation (Patterns created when needed)
+
+```typescript
+const selectView = handler<
+  unknown,
+  { currentView: Cell<any>; items: any; viewType: string }
+>((_event, { currentView, items, viewType }) => {
+  // Create pattern on-demand in handler
+  const view = viewType === "list"
+    ? ShoppingList({ items })
+    : GridView({ items });
+
+  currentView.set(view);
+});
+
+export default recipe("View Selector", ({ items }) => {
+  const currentView = cell<any>(null);
+
+  return {
+    [NAME]: "View Selector",
+    [UI]: (
+      <div>
+        <ct-button onClick={selectView({ currentView, items, viewType: "list" })}>
+          List View
+        </ct-button>
+        <ct-button onClick={selectView({ currentView, items, viewType: "grid" })}>
+          Grid View
+        </ct-button>
+
+        {ifElse(
+          derive(currentView, (v) => v !== null),
+          <div>{currentView}</div>,
+          <div />
+        )}
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+**Use when**: Child patterns are created based on user selection or other runtime conditions.
+
+#### Why This Matters
+
+Creating patterns that share parent cells during recipe initialization can cause cell tracking issues when those patterns are conditionally instantiated. The framework's cell system tracks references during pattern creation - creating patterns on-demand in handlers ensures proper reference tracking.
+
+**Common Error**: If you see "Shadow ref alias with parent cell not found in current frame", you're likely creating shared-cell child patterns during recipe init when they should be created on-demand.
+
+**Rule of thumb**:
+- Multiple views always visible → Create upfront
+- User selects which view → Create on-demand in handler
+
 ## Common Pattern: Search/Filter with Inline Logic
 
 Filtering a list without creating intermediate variables.
