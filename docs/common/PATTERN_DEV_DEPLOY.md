@@ -23,7 +23,7 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>("My Pattern", ({ items }) => {
+export default recipe<Input, Input>(({ items }) => {
   return {
     [NAME]: "My Pattern",
     [UI]: (
@@ -79,17 +79,20 @@ const addItem = handler<
 #### Common Error Categories
 
 **Type Errors** (see `HANDLERS.md` for details):
+
 - Missing `OpaqueRef<T>` annotation in `.map()`
 - Wrong style syntax (object vs string, see `COMPONENTS.md`)
 - Using `Cell<OpaqueRef<T>[]>` instead of `Cell<T[]>` in handlers
 - Forgetting `Cell<>` wrapper in handler state types
 
 **Runtime Errors** (see `RECIPES.md` for details):
+
 - DOM access (use cells instead)
 - Conditionals in JSX (use `ifElse()`)
 - Calling `llm()` from handlers (only works in the pattern body)
 
 **Data Not Updating** (see `COMPONENTS.md` for details):
+
 - Forgot `$` prefix for bidirectional binding
 - Handler event name mismatch
 - Cell not passed correctly to handler
@@ -109,7 +112,7 @@ const addItem = handler<
 
 | Error Message | Check |
 |---------------|-------|
-| "Property X does not exist on type 'OpaqueRef<unknown>'" | Missing `OpaqueRef<T>` in `.map()` - See `HANDLERS.md` |
+| "Property X does not exist on type '`OpaqueRef<unknown>'`" | Missing `OpaqueRef<T>` in `.map()` - See `HANDLERS.md` |
 | "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element - See `COMPONENTS.md` |
 | Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `HANDLERS.md` |
 | Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
@@ -119,7 +122,8 @@ const addItem = handler<
 When building complex patterns across multiple files:
 
 **Structure:**
-```
+
+```sh
 patterns/feature/
   main.tsx       # Entry point
   schemas.tsx    # Shared types
@@ -127,11 +131,13 @@ patterns/feature/
 ```
 
 **Best Practices:**
+
 - Use relative imports: `import { Schema } from "./schemas.tsx"`
 - Export shared schemas for reuse
 - ct bundles all dependencies automatically on deployment
 
 **Common Pitfall:**
+
 - Schema mismatches between linked charms
 - Solution: Export shared schemas from a common file
 
@@ -140,6 +146,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 ### Development Tips
 
 **DO:**
+
 - Start simple, add features incrementally
 - Use bidirectional binding when possible
 - Reference `packages/patterns/` for examples
@@ -147,6 +154,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 - Read relevant doc files before asking questions
 
 **DON'T:**
+
 - Test syntax before deploying (unless deployment fails)
 - Add multiple features before testing
 - Use handlers for simple value updates
@@ -154,6 +162,7 @@ See `PATTERNS.md` Level 3-4 for linking and composition patterns.
 - Duplicate content from `docs/common/` - reference it instead
 
 ## Testing
+
 After developing the charm, if you have Playwright MCP, you must test the charm with it unless the user asks you not to.
 
 ### Navigate to the Charm URL
@@ -161,7 +170,8 @@ After developing the charm, if you have Playwright MCP, you must test the charm 
 ```javascript
 await page.goto("http://localhost:8000/<SPACE_NAME>/<CHARM_ID>");
 ```
-Note: Server may be https://toolshed.saga-castor.ts.net instead.
+
+Note: Server may be `https://toolshed.saga-castor.ts.net` instead.
 
 ### Register/Login (First Time Only)
 
@@ -203,6 +213,7 @@ cd /path/to/patterns && deno task ct init
 Run `deno task ct --help` and `deno task ct charm --help` to discover available commands.
 
 This tool is used to:
+
 - Deploy a pattern as a new charm
 - Read/write charm data directly
 - Invoke charm handlers for complex operations
@@ -265,6 +276,7 @@ deno task ct charm getsrc -i claude.key -a https://toolshed.saga-castor.ts.net -
 ### Workflow Resources
 
 Practical ct command workflows for:
+
 - Setting up development environment
 - Development cycle (deploy, iterate, debug)
 - Common tasks (modify, link, visualize)
