@@ -1,15 +1,16 @@
 /// <cts-enable />
 import {
-  Cell,
+  type BuiltInLLMMessage,
+  type Cell,
   cell,
-  Default,
+  type Default,
   derive,
   handler,
   llm,
   NAME,
   navigateTo,
-  Opaque,
-  OpaqueRef,
+  type Opaque,
+  type OpaqueRef,
   patternTool,
   recipe,
   str,
@@ -176,12 +177,13 @@ const Note = recipe<Input, Output>(
         ) => {
           const result = llm({
             system: str`Translate the content to ${language}.`,
-            messages: derive(content, (c) => [
-              {
-                role: "user",
-                content: c,
-              },
-            ]),
+            messages: derive(content, (c) =>
+              [
+                {
+                  role: "user",
+                  content: c,
+                },
+              ] satisfies BuiltInLLMMessage[]),
           });
 
           return derive(result, ({ pending, result }) => {

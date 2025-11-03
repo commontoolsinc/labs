@@ -1,16 +1,7 @@
 // Upstream DOM types use "{}" intentionally --
 // disable lint for this type
 // deno-lint-ignore-file ban-types
-import type {
-  Cell,
-  Opaque,
-  OpaqueRef,
-  OpaqueRefMethods,
-  Props,
-  RenderNode,
-  Stream,
-  VNode,
-} from "commontools";
+import type { Cell, CellLike, Props, RenderNode, VNode } from "commontools";
 
 // DOM-ish types for the CT runtime.
 // The DOM is not directly available within the runtime, but the JSX
@@ -2788,19 +2779,6 @@ declare namespace CTDOM {
       */
   }
 }
-
-// Helper type that allows any combination of OpaqueRef, Cell, and Stream wrappers
-// Supports arbitrary nesting like OpaqueRef<OpaqueRef<Cell<T>>>
-type InnerCellLike<T> =
-  | OpaqueRefMethods<T>
-  | Opaque<T>
-  | OpaqueRef<T>
-  | Cell<T>
-  | Stream<T>;
-type CellLike<T> =
-  | InnerCellLike<T>
-  | InnerCellLike<InnerCellLike<T>>
-  | InnerCellLike<T[]>;
 
 interface CTHTMLElement extends CTDOM.HTMLElement {}
 // Extend this to add attributes to only the CT elements.
