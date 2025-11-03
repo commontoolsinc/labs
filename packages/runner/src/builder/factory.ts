@@ -6,6 +6,7 @@ import type {
   Cell,
   CreateCellFunction,
   JSONSchema,
+  ToSchemaFunction,
 } from "./types.ts";
 import {
   AuthSchema,
@@ -40,7 +41,7 @@ import type { IRuntime } from "../runtime.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
-const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
+const toSchema: ToSchemaFunction = (_options?) => {
   throw new Error(
     "toSchema() should be transformed at compile time. " +
       "Make sure the TypeScript transformer is configured correctly.",

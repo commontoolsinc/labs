@@ -933,6 +933,13 @@ export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
+// No-op alternative to `as const as JSONSchema`
+export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
+
+// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
+// The actual implementation is done by the TypeScript transformer
+export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+
 // Recipe environment types
 export interface RecipeEnvironment {
   readonly apiUrl: URL;
@@ -965,6 +972,8 @@ export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
+export declare const schema: SchemaFunction;
+export declare const toSchema: ToSchemaFunction;
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
@@ -975,14 +984,6 @@ export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
-
-export const schema = <T extends JSONSchema>(schema: T) => schema;
-
-// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
-// The actual implementation is done by the TypeScript transformer
-export const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
-  return {} as JSONSchema;
-};
 
 // Helper type to transform Cell<T> to Opaque<T> in handler inputs
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>

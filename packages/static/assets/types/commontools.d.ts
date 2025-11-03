@@ -6,9 +6,9 @@
  */
 export declare const ID: unique symbol;
 export declare const ID_FIELD: unique symbol;
-export declare const TYPE = "$TYPE";
-export declare const NAME = "$NAME";
-export declare const UI = "$UI";
+export declare const TYPE: "$TYPE";
+export declare const NAME: "$NAME";
+export declare const UI: "$UI";
 /**
  * Brand symbol for identifying different cell types at compile-time.
  * Each cell variant has a unique combination of capability flags.
@@ -566,6 +566,8 @@ export type Default<T, V extends T = T> = T;
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
+export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
+export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 export interface RecipeEnvironment {
     readonly apiUrl: URL;
 }
@@ -593,6 +595,8 @@ export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
+export declare const schema: SchemaFunction;
+export declare const toSchema: ToSchemaFunction;
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
  *
@@ -602,8 +606,6 @@ export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T extends object ? ({
     -readonly [P in keyof T]: Mutable<T[P]>;
 }) : T;
-export declare const schema: <T extends JSONSchema>(schema: T) => T;
-export declare const toSchema: <T>(_options?: Partial<JSONSchema>) => JSONSchema;
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
     [K in keyof T]: StripCell<T[K]>;
 } : T;

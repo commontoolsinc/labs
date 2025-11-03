@@ -33,13 +33,19 @@ import type {
   RecipeFunction,
   RenderFunction,
   Schema,
+  schema as schemaFunction,
   StreamDataFunction,
   StreamFunction,
   StrFunction,
   WishFunction,
 } from "@commontools/api";
-import { h, schema, toSchema } from "@commontools/api";
+import { h, toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
+import {
+  type IExtendedStorageTransaction,
+  type MemorySpace,
+} from "../storage/interface.ts";
+import { type RuntimeProgram } from "../harness/types.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -53,8 +59,10 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
+export const schema: typeof schemaFunction = (schema) => schema;
+
 export { AuthSchema } from "./schema-lib.ts";
-export { h, type Schema, schema, toSchema } from "@commontools/api";
+export { h, type Schema } from "@commontools/api";
 export type {
   AnyCell,
   Cell,
@@ -84,14 +92,10 @@ export type {
   Stream,
   StripCell,
   toJSON,
+  ToSchemaFunction,
   UnwrapCell,
   VNode,
 } from "@commontools/api";
-import {
-  type IExtendedStorageTransaction,
-  type MemorySpace,
-} from "../storage/interface.ts";
-import { type RuntimeProgram } from "../harness/types.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
