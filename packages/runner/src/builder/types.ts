@@ -24,8 +24,8 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
-  OpaqueRefMethods,
   PatternToolFunction,
   Recipe,
   RecipeFunction,
@@ -49,23 +49,27 @@ import {
 import { AuthSchema } from "./schema-lib.ts";
 export { AuthSchema } from "./schema-lib.ts";
 export {
+  h,
   ID,
   ID_FIELD,
-  type IDFields,
   NAME,
   type Schema,
   schema,
-  type SchemaWithoutCell,
   toSchema,
   TYPE,
   UI,
 } from "@commontools/api";
-export { h } from "@commontools/api";
 export type {
+  AnyCell,
   Cell,
   CreateCellFunction,
   Handler,
   HandlerFactory,
+  IDerivable,
+  IDFields,
+  IKeyableOpaque,
+  IOpaquable,
+  IOpaqueCell,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,
@@ -74,14 +78,17 @@ export type {
   ModuleFactory,
   NodeFactory,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
   Props,
   Recipe,
   RecipeFactory,
   RenderNode,
+  SchemaWithoutCell,
   Stream,
   StripCell,
   toJSON,
+  UnwrapCell,
   VNode,
 } from "@commontools/api";
 import {
@@ -93,23 +100,14 @@ import { type RuntimeProgram } from "../harness/types.ts";
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
 // Augment the public interface with the internal OpaqueRefMethods interface.
-// Deliberately repeating the original interface to catch any inconsistencies:
-// This here then reflects the entire interface the internal implementation
-// implements.
+// This adds runtime-specific methods beyond what the public API defines.
 declare module "@commontools/api" {
-  interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
-    set(value: Opaque<T> | T): void;
-    key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-    setDefault(value: Opaque<T> | T): void;
-    setPreExisting(ref: unknown): void;
-    setName(name: string): void;
-    setSchema(schema: JSONSchema): void;
-    connect(node: NodeRef): void;
+  interface IOpaquable<T> {
+    // Export method for introspection
     export(): {
-      cell: OpaqueRef<any>;
+      cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
-      value?: Opaque<T>;
+      value?: Opaque<T> | T;
       defaultValue?: Opaque<T>;
       nodes: Set<NodeRef>;
       external?: unknown;
@@ -118,22 +116,17 @@ declare module "@commontools/api" {
       rootSchema?: JSONSchema;
       frame: Frame;
     };
+
+    connect(node: NodeRef): void;
+
+    // Unsafe methods for internal use
     unsafe_bindToRecipeAndPath(
       recipe: Recipe,
       path: readonly PropertyKey[],
     ): void;
-    unsafe_getExternal(): OpaqueRef<T>;
-    map<S>(
-      fn: (
-        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-        index: OpaqueRef<number>,
-        array: OpaqueRef<T>,
-      ) => Opaque<S>,
-    ): Opaque<S[]>;
-    mapWithPattern<S>(
-      op: Recipe,
-      params: Record<string, any>,
-    ): Opaque<S[]>;
+    unsafe_getExternal(): OpaqueCell<T>;
+
+    // Additional utility methods
     toJSON(): unknown;
     [Symbol.iterator](): Iterator<T>;
     [Symbol.toPrimitive](hint: string): T;
@@ -141,19 +134,18 @@ declare module "@commontools/api" {
   }
 }
 
-export type { OpaqueRefMethods };
-
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueRef<T = any>(
+export function isOpaqueCell<T = any>(
   value: unknown,
-): value is OpaqueRefMethods<T> {
+): value is OpaqueCell<T> {
   return !!value &&
-    typeof (value as OpaqueRef<T>)[isOpaqueRefMarker] === "boolean";
+    typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
+      "boolean";
 }
 
 export type NodeRef = {
-  module: Module | Recipe | OpaqueRef<Module | Recipe>;
+  module: Module | Recipe | OpaqueCell<Module | Recipe>;
   inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
@@ -248,7 +240,7 @@ export function isShadowRef(value: unknown): value is ShadowRef {
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueRef((value as ShadowRef).shadowOf) ||
+    (isOpaqueCell((value as ShadowRef).shadowOf) ||
       isShadowRef((value as ShadowRef).shadowOf))
   );
 }

@@ -1,27 +1,25 @@
 # Implementation plan
 
-- [ ] Disable ShadowRef/unsafe_ and see what breaks, ideally remove it
+- [x] Disable ShadowRef/unsafe_ and see what breaks, ideally remove it (will
+  merge later as it'll break a few patterns)
 - [ ] Update Cell API types to already unify them
-  - [ ] Create an `AnyCell<>` type with a symbol based brand, with the value be
-    `Record<string, boolean>`
-  - [ ] Factor out parts of the cell interfaces along reading, writing, .send
+  - [x] Create an `BrandedCell<>` type with a symbol based brand, with the value
+    be `string`
+  - [x] Factor out parts of the cell interfaces along reading, writing, .send
     (for stream-like) and derives (which is currently just .map)
-  - [ ] Define `OpaqueCell<>`, `Cell<>` and `Stream<>` by using these factored
-    out parts, combined with the brand set to `{ opaque: true, read: false,
-    write: false, stream: false }` for `OpaqueRef`, `{ opaque: false, read:
-    true, write: true, stream: true }` for `Cell`, and `{ opaque: false, read:
-    false, write: false, stream: true }` for `Stream`.
-  - [ ] Add `ComparableCell<>` that is all `false` above.
-  - [ ] Add `ReadonlyCell` and `WriteonlyCell`.
-  - [ ] Make `OpaqueRef` a variant of `OpaqueCell` with the current proxy
+  - [x] Define `OpaqueCell<>`, `Cell<>` and `Stream<>` by using these factored
+    out parts.
+  - [x] Add `ComparableCell<>`.
+  - [x] Add `ReadonlyCell` and `WriteonlyCell`.
+  - [x] Make `OpaqueRef` a variant of `OpaqueCell` with the current proxy
     behavior, i.e. each key is an `OpaqueRef` again. That's just for now, until
     the AST does a .key transformation under the hood.
-  - [ ] Update `CellLike` to be based on `AnyCell` but allow nesting.
+  - [x] Update `CellLike` to be based on `BrandedCell` but allow nesting.
   - [ ] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
   - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
     - [ ] "Accept any T where any sub part of T can be wrapped in one or more
-      `AnyCell`" (for inputs to node factories)
-    - [ ] "Strip any `AnyCell` from T and then wrap it in OpaqueRef<>" (for
+      `BrandedCell`" (for inputs to node factories)
+    - [ ] "Strip any `BrandedCell` from T and then wrap it in OpaqueRef<>" (for
       outputs of node factories, where T is the output of the inner function)
     - [ ] Make passing the output of the second into the first work. Tricky
       because we're doing almost opposite expansions on the type.

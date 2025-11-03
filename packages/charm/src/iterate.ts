@@ -210,7 +210,7 @@ export const generateNewRecipeVersion = async (
     newCharm.withTx(tx).getSourceCell(charmSourceCellSchema)?.key("lineage")
       .push(
         {
-          charm: parent,
+          charm: parent as Cell<{ [x: string]: unknown }>,
           relation: "iterate",
           timestamp: Date.now(),
         },

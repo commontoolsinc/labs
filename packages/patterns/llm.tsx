@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
+  BuiltInLLMMessage,
   Cell,
   cell,
   Default,
@@ -39,7 +40,10 @@ export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
   const llmResponse = llm({
     system:
       "You are a helpful assistant. Answer questions clearly and concisely.",
-    messages: derive(question, (q) => q ? [{ role: "user", content: q }] : []),
+    messages: derive<string, BuiltInLLMMessage[]>(
+      question,
+      (q) => q ? [{ role: "user", content: q }] : [],
+    ),
   });
 
   return {

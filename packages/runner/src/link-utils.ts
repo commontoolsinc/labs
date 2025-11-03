@@ -1,7 +1,8 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
+  isAnyCell,
   isCell,
   isStream,
   type MemorySpace,
@@ -207,28 +208,27 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: Cell<any> | Stream<any>,
-  base?: Cell | NormalizedLink,
+  value: AnyCell<unknown> | Cell<unknown> | Stream<unknown>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
@@ -247,7 +247,7 @@ export function parseLink(
 
     // If no id provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
@@ -294,7 +294,7 @@ export function parseLink(
 
     // If no cell provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {

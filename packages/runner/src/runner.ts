@@ -4,7 +4,7 @@ import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/html";
 import {
   isModule,
-  isOpaqueRef,
+  isOpaqueCell,
   isRecipe,
   isShadowRef,
   isStreamValue,
@@ -779,7 +779,7 @@ export class Runner implements IRunner {
     }
 
     if (
-      !isRecord(value) || isOpaqueRef(value) || isShadowRef(value) ||
+      !isRecord(value) || isOpaqueCell(value) || isShadowRef(value) ||
       isCell(value)
     ) {
       return;
@@ -1270,7 +1270,7 @@ function getSpellLink(recipeId: string): SigilLink {
 }
 
 function containsOpaqueRef(value: unknown): boolean {
-  if (isOpaqueRef(value)) return true;
+  if (isOpaqueCell(value)) return true;
   if (isLink(value)) return false;
   if (isRecord(value)) {
     return Object.values(value).some(containsOpaqueRef);

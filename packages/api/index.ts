@@ -16,49 +16,202 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
-// Cell type with only public methods
-export interface Cell<T = any> {
-  // Public methods available in spell code and system
+// ============================================================================
+// Cell Brand System
+// ============================================================================
+
+/**
+ * Brand symbol for identifying different cell types at compile-time.
+ * Each cell variant has a unique combination of capability flags.
+ */
+export declare const CELL_BRAND: unique symbol;
+
+/**
+ * Minimal cell type with just the brand, no methods.
+ * Used for type-level operations like unwrapping nested cells without
+ * creating circular dependencies.
+ */
+export type BrandedCell<T, Brand extends string = string> = {
+  [CELL_BRAND]: Brand;
+};
+
+// ============================================================================
+// Cell Capability Interfaces
+// ============================================================================
+
+// To constrain methods that only exists on objects
+type IsThisObject =
+  | IsThisArray
+  | BrandedCell<JSONObject>
+  | BrandedCell<Record<string, unknown>>;
+
+type IsThisArray =
+  | BrandedCell<JSONArray>
+  | BrandedCell<Array<unknown>>
+  | BrandedCell<Array<any>>
+  | BrandedCell<unknown>
+  | BrandedCell<any>;
+
+/*
+ * IAnyCell is an interface that is used by all calls and to which the runner
+ * attaches the internal methods..
+ */
+// deno-lint-ignore no-empty-interface
+export interface IAnyCell<T> {
+}
+
+/**
+ * Readable cells can retrieve their current value.
+ */
+export interface IReadable<T> {
   get(): Readonly<T>;
-  set(value: T): void;
-  send(value: T): void; // alias for set
-  update(values: Partial<T>): void;
-  push(...value: T extends (infer U)[] ? U[] : never): void;
-  equals(other: Cell<any>): boolean;
-  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  resolveAsCell(): Cell<T>;
 }
 
-// Cell type with only public methods
-export interface Stream<T> {
-  send(event: T): void;
+/**
+ * Writable cells can update their value.
+ */
+export interface IWritable<T> {
+  set(value: T | AnyCellWrapping<T>): void;
+  update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
+    this: IsThisObject,
+    values: V extends object ? AnyCellWrapping<V> : never,
+  ): void;
+  push(
+    this: IsThisArray,
+    ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
+  ): void;
 }
 
-export type OpaqueRef<T> =
-  & OpaqueRefMethods<T>
-  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
-    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
-    : T);
+/**
+ * Streamable cells can send events.
+ */
+export interface IStreamable<T> {
+  send(event: AnyCellWrapping<T>): void;
+}
 
-// Any OpaqueRef is also an Opaque, but can also have static values.
-// Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
-// when data gets passed into what developers see (either recipe inputs or
-// module outputs).
-export type Opaque<T> =
-  | OpaqueRef<T>
-  | (T extends Array<infer U> ? Array<Opaque<U>>
-    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
-    : T);
+// Lightweight HKT, so we can pass cell types to IKeyable<>.
+interface HKT {
+  _A: unknown;
+  type: unknown;
+}
+type Apply<F extends HKT, A> = (F & { _A: A })["type"];
 
-// OpaqueRefMethods type with only public methods
-export interface OpaqueRefMethods<T> {
-  get(): T;
-  set(value: Opaque<T> | T): void;
-  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-  setDefault(value: Opaque<T> | T): void;
-  setName(name: string): void;
-  setSchema(schema: JSONSchema): void;
+/**
+ * A key-addressable, **covariant** view over a structured value `T`.
+ *
+ * `IKeyableCell` exposes a single method, {@link IKeyableCell.key}, which selects a
+ * property from the (possibly branded) value `T` and returns it wrapped in a
+ * user-provided type constructor `Wrap` (default: `Cell<…>`). The interface is
+ * declared `out T` (covariant) and is designed so that calling `key` preserves
+ * both type inference and variance soundness.
+ *
+ * @template T
+ * The underlying (possibly branded) value type. `T` is treated **covariantly**:
+ * `IKeyableCell<Sub>` is assignable to `IKeyableCell<Super>` when `Sub` is
+ * assignable to `Super`.
+ *
+ * @template Wrap extends HKT
+ * A lightweight higher-kinded “wrapper” that determines the return container for
+ * selected fields. For example, `AsCell` wraps as `Cell<A>`, while other wrappers
+ * can project to `ReadonlyCell<A>`, `Stream<A>`, etc. Defaults to `AsCell`.
+ *
+ * @template Any
+ * The “fallback” return type used when the provided key does not match a known
+ * key (or is widened to `any`). This should usually be `Apply<Wrap, any>`.
+ *
+ * @remarks
+ * ### Variance & soundness
+ * The `key` signature is crafted to remain **covariant in `T`**. Internally,
+ * it guards the instantiation `K = any` with `unknown extends K ? … : …`, so
+ * the return type becomes `Any` (independent of `T`) in that case. For real keys
+ * (`K extends keyof UnwrapCell<T>`), the return type is precise and fully inferred.
+ *
+ * ### Branded / nested cells
+ * If a selected property is itself a branded cell (e.g., `BrandedCell<U>`),
+ * the return value is a wrapped branded cell, i.e. `Wrap<BrandedCell<U>>`.
+ *
+ * ### Key inference
+ * Passing a string/number/symbol that is a literal and a member of
+ * `keyof UnwrapCell<T>` yields precise field types; non-literal or unknown keys
+ * fall back to `Any` (e.g., `Cell<any>`).
+ *
+ * @example
+ * // Basic usage with the default wrapper (Cell)
+ * declare const userCell: IKeyableCell<{ id: string; profile: { name: string } }>;
+ * const idCell = userCell.key("id");         // Cell<string>
+ * const profileCell = userCell.key("profile"); // Cell<{ name: string }>
+ *
+ * // Unknown key falls back to Any (default: Cell<any>)
+ * const whatever = userCell.key(Symbol());   // Cell<any>
+ *
+ * @example
+ * // Using a custom wrapper, e.g., ReadonlyCell<A>
+ * interface AsReadonlyCell extends HKT { type: ReadonlyCell<this["_A"]> }
+ * type ReadonlyUserCell = IKeyableCell<{ id: string }, AsReadonlyCell, Apply<AsReadonlyCell, any>>;
+ * declare const ro: ReadonlyUserCell;
+ * const idRO = ro.key("id"); // ReadonlyCell<string>
+ *
+ * @example
+ * // Covariance works:
+ * declare const sub: IKeyableCell<{ a: string }>;
+ * const superCell: IKeyableCell<unknown> = sub; // OK (out T)
+ */
+export interface IKeyable<out T, Wrap extends HKT> {
+  key<K extends PropertyKey>(
+    this: IsThisObject,
+    valueKey: K,
+  ): KeyResultType<T, K, Wrap>;
+}
+
+export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
+  ? Apply<Wrap, any> // variance guard for K = any
+  : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
+  : T extends BrandedCell<any, any> // wrapping a cell? delegate to it's .key
+    ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
+  : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
+
+/**
+ * Cells that support key() for property access - OpaqueCell variant.
+ * OpaqueCell is "sticky" and always returns OpaqueCell<>.
+ *
+ * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
+ */
+export interface IKeyableOpaque<T> {
+  key<K extends PropertyKey>(
+    this: IsThisObject,
+    valueKey: K,
+  ): unknown extends K ? OpaqueRef<any>
+    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueRef<any>
+        : UnwrapCell<T>[K] extends never ? OpaqueRef<any>
+        : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueRef<U>
+        : OpaqueRef<UnwrapCell<T>[K]>)
+    : OpaqueRef<any>;
+}
+
+/**
+ * Cells that can be resolved back to a Cell.
+ * Only available on full Cell<T>, not on OpaqueCell or Stream.
+ */
+export interface IResolvable<T, C extends BrandedCell<T>> {
+  resolveAsCell(): C;
+}
+
+/**
+ * Comparable cells have equals() method.
+ * Available on comparable and readable cells.
+ */
+export interface IEquatable {
+  equals(other: AnyCell<any> | object): boolean;
+}
+
+/**
+ * Cells that allow deriving new cells from existing cells. Currently just
+ * .map(), but this will eventually include all Array, String and Number
+ * methods.
+ */
+export interface IDerivable<T> {
   map<S>(
+    this: IsThisObject,
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
@@ -66,10 +219,219 @@ export interface OpaqueRefMethods<T> {
     ) => Opaque<S>,
   ): OpaqueRef<S[]>;
   mapWithPattern<S>(
+    this: IsThisObject,
     op: Recipe,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
 }
+
+export interface IOpaquable<T> {
+  /** deprecated */
+  get(): T;
+  /** deprecated */
+  set(newValue: Opaque<Partial<T>>): void;
+  /** deprecated */
+  setDefault(value: Opaque<T> | T): void;
+  /** deprecated */
+  setPreExisting(ref: any): void;
+  /** deprecated */
+  setName(name: string): void;
+  /** deprecated */
+  setSchema(schema: JSONSchema): void;
+}
+
+// ============================================================================
+// Cell Type Definitions
+// ============================================================================
+
+/**
+ * Base type for all cell variants that has methods. Internal API augments this
+ * interface with internal only API. Uses a second symbol brand to distinguish
+ * from core cell brand without any methods.
+ */
+export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
+}
+
+/**
+ * Opaque cell reference - only supports keying and derivation, not direct I/O.
+ * Has .key(), .map(), .mapWithPattern()
+ * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
+ */
+export interface IOpaqueCell<T>
+  extends IKeyableOpaque<T>, IDerivable<T>, IOpaquable<T> {}
+
+export interface OpaqueCell<T>
+  extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
+
+/**
+ * Full cell with read, write capabilities.
+ * Has .get(), .set(), .update(), .push(), .equals(), .key(), .resolveAsCell()
+ *
+ * Note: This is an interface (not a type) to allow module augmentation by the runtime.
+ */
+export interface AsCell extends HKT {
+  type: Cell<this["_A"]>;
+}
+
+export interface ICell<T>
+  extends
+    IAnyCell<T>,
+    IReadable<T>,
+    IWritable<T>,
+    IStreamable<T>,
+    IEquatable,
+    IKeyable<T, AsCell>,
+    IResolvable<T, Cell<T>> {}
+
+export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
+
+/**
+ * Stream-only cell - can only send events, not read or write.
+ * Has .send() only
+ * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()
+ *
+ * Note: This is an interface (not a type) to allow module augmentation by the runtime.
+ */
+export interface Stream<T>
+  extends BrandedCell<T, "stream">, IAnyCell<T>, IStreamable<T> {}
+
+/**
+ * Comparable-only cell - just for equality checks and keying.
+ * Has .equals(), .key()
+ * Does NOT have .resolveAsCell()/.get()/.set()/.send()
+ */
+interface AsComparableCell extends HKT {
+  type: ComparableCell<this["_A"]>;
+}
+
+export interface ComparableCell<T>
+  extends
+    BrandedCell<T, "comparable">,
+    IAnyCell<T>,
+    IEquatable,
+    IKeyable<T, AsComparableCell> {}
+
+/**
+ * Read-only cell variant.
+ * Has .get(), .equals(), .key()
+ * Does NOT have .resolveAsCell()/.set()/.send()
+ */
+interface AsReadonlyCell extends HKT {
+  type: ReadonlyCell<this["_A"]>;
+}
+
+export interface ReadonlyCell<T>
+  extends
+    BrandedCell<T, "readonly">,
+    IAnyCell<T>,
+    IReadable<T>,
+    IEquatable,
+    IKeyable<T, AsReadonlyCell> {}
+
+/**
+ * Write-only cell variant.
+ * Has .set(), .update(), .push(), .key()
+ * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
+ */
+interface AsWriteonlyCell extends HKT {
+  type: WriteonlyCell<this["_A"]>;
+}
+
+export interface WriteonlyCell<T>
+  extends
+    BrandedCell<T, "writeonly">,
+    IAnyCell<T>,
+    IWritable<T>,
+    IKeyable<T, AsWriteonlyCell> {}
+
+// ============================================================================
+// OpaqueRef - Proxy-based variant of OpaqueCell
+// ============================================================================
+
+/**
+ * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
+ * Each key access returns another OpaqueRef, allowing chained property access.
+ * This is temporary until AST transformation handles .key() automatically.
+ */
+export type OpaqueRef<T> =
+  & OpaqueCell<T>
+  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
+    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+    : T);
+
+// ============================================================================
+// CellLike and Opaque - Utility types for accepting cells
+// ============================================================================
+
+/**
+ * CellLike is a cell (AnyCell) whose nested values are Opaque.
+ * The top level must be AnyCell, but nested values can be plain or wrapped.
+ *
+ * Note: This is primarily used for type constraints that require a cell.
+ */
+export type CellLike<T> = BrandedCell<MaybeCellWrapped<T>>;
+type MaybeCellWrapped<T> =
+  | T
+  | BrandedCell<T>
+  | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>>
+    : T extends object ? { [K in keyof T]: MaybeCellWrapped<T[K]> }
+    : never);
+
+/**
+ * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
+ * Used in APIs that accept inputs from developers - can be static values
+ * or wrapped in cells (OpaqueRef, Cell, etc).
+ *
+ * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
+ * for backward compatibility since it has the recursive proxy behavior that
+ * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ */
+export type Opaque<T> =
+  | T
+  | OpaqueRef<T>
+  | (T extends Array<infer U> ? Array<Opaque<U>>
+    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
+    : T);
+
+/**
+ * Recursively unwraps BrandedCell types at any nesting level.
+ * UnwrapCell<BrandedCell<BrandedCell<string>>> = string
+ * UnwrapCell<BrandedCell<{ a: BrandedCell<number> }>> = { a: BrandedCell<number> }
+ *
+ * Special cases:
+ * - UnwrapCell<any> = any
+ * - UnwrapCell<unknown> = unknown (preserves unknown)
+ */
+export type UnwrapCell<T> =
+  // Preserve any
+  0 extends (1 & T) ? T
+    // Unwrap BrandedCell
+    : T extends BrandedCell<infer S> ? UnwrapCell<S>
+    // Otherwise return as-is
+    : T;
+
+/**
+ * AnyCellWrapping is used for write operations (.set(), .push(), .update()). It
+ * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
+ * and allow any part of T that is currently wrapped in AnyCell<> to be used
+ * unwrapped. This is designed for use with cell method parameters, allowing
+ * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
+ * allows controlling id generation and can only be passed to write operations.
+ */
+export type AnyCellWrapping<T> =
+  // Handle existing BrandedCell<> types, allowing unwrapping
+  T extends BrandedCell<infer U>
+    ? AnyCellWrapping<U> | BrandedCell<AnyCellWrapping<U>>
+    // Handle arrays
+    : T extends Array<infer U>
+      ? Array<AnyCellWrapping<U>> | BrandedCell<Array<AnyCellWrapping<U>>>
+    // Handle objects (excluding null)
+    : T extends object ?
+        | { [K in keyof T]: AnyCellWrapping<T[K]> }
+          & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
+        | BrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
+    // Handle primitives
+    : T | BrandedCell<T>;
 
 // Factory types
 
@@ -522,7 +884,7 @@ export type FetchDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type StreamDataFunction = <T>(
   params: Opaque<{
@@ -530,7 +892,7 @@ export type StreamDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Opaque<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
@@ -707,151 +1069,113 @@ type MergeSchemas<
       : never;
   };
 
-/**
- * Merge ref site schema with resolved target, then process with Schema<>.
- * Implements JSON Schema spec: ref site siblings override target.
- */
-type MergeRefSiteWithTarget<
+type MergeRefSiteWithTargetGeneric<
   RefSite extends JSONSchema,
   Target extends JSONSchema,
   Root extends JSONSchema,
   Depth extends DepthLevel,
+  WrapCells extends boolean,
 > = RefSite extends { $ref: string }
   ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
-    infer Merged extends JSONSchema ? Schema<Merged, Root, Depth>
+    infer Merged extends JSONSchema
+    ? SchemaInner<Merged, Root, Depth, WrapCells>
   : never
   : never;
 
-/**
- * Merge ref site schema with resolved target, then process with SchemaWithoutCell<>.
- * Same as MergeRefSiteWithTarget but doesn't wrap in Cell/Stream.
- */
-type MergeRefSiteWithTargetWithoutCell<
-  RefSite extends JSONSchema,
-  Target extends JSONSchema,
+type SchemaAnyOf<
+  Schemas extends readonly JSONSchema[],
   Root extends JSONSchema,
   Depth extends DepthLevel,
-> = RefSite extends { $ref: string }
-  ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
-    infer Merged extends JSONSchema ? SchemaWithoutCell<Merged, Root, Depth>
-  : never
-  : never;
+  WrapCells extends boolean,
+> = {
+  [I in keyof Schemas]: Schemas[I] extends JSONSchema
+    ? SchemaInner<Schemas[I], Root, DecrementDepth<Depth>, WrapCells>
+    : never;
+}[number];
 
-/**
- * Convert a JSON Schema to its TypeScript type equivalent.
- *
- * Supports:
- * - Primitive types (string, number, boolean, null)
- * - Objects with properties (required/optional)
- * - Arrays with items
- * - anyOf unions
- * - $ref resolution (including JSON Pointers)
- * - asCell/asStream reactive wrappers
- * - default values (makes properties required)
- *
- * $ref Support:
- * - "#" (self-reference to root schema)
- * - "#/$defs/Name" (JSON Pointer to definition)
- * - "#/properties/field" (JSON Pointer to any schema location)
- * - External refs (http://...) return type `any`
- *
- * Default Precedence:
- * When both ref site and target have `default`, ref site takes precedence
- * per JSON Schema 2020-12 specification.
- *
- * Limitations:
- * - JSON Pointer escaping (~0, ~1) not supported at type level
- * - Depth limited to 9 levels to prevent infinite recursion
- * - Complex allOf/oneOf logic may not match runtime exactly
- *
- * @template T - The JSON Schema to convert
- * @template Root - Root schema for $ref resolution
- * @template Depth - Recursion depth limit (0-9)
- */
+type SchemaArrayItems<
+  Items,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+  WrapCells extends boolean,
+> = Items extends JSONSchema
+  ? Array<SchemaInner<Items, Root, DecrementDepth<Depth>, WrapCells>>
+  : unknown[];
+
+type SchemaCore<
+  T extends JSONSchema,
+  Root extends JSONSchema,
+  Depth extends DepthLevel,
+  WrapCells extends boolean,
+> = T extends { $ref: "#" } ? SchemaInner<
+    Omit<Root, "asCell" | "asStream">,
+    Root,
+    DecrementDepth<Depth>,
+    WrapCells
+  >
+  : T extends { $ref: infer RefStr extends string }
+    ? MergeRefSiteWithTargetGeneric<
+      T,
+      ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
+      Root,
+      DecrementDepth<Depth>,
+      WrapCells
+    >
+  : T extends { enum: infer E extends readonly any[] } ? E[number]
+  : T extends { anyOf: infer U extends readonly JSONSchema[] }
+    ? SchemaAnyOf<U, Root, Depth, WrapCells>
+  : T extends { type: "string" } ? string
+  : T extends { type: "number" | "integer" } ? number
+  : T extends { type: "boolean" } ? boolean
+  : T extends { type: "null" } ? null
+  : T extends { type: "array" }
+    ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
+    : unknown[]
+  : T extends { type: "object" }
+    ? T extends { properties: infer P }
+      ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
+          P,
+          T extends { required: readonly string[] } ? T["required"] : [],
+          Root,
+          Depth,
+          T extends { additionalProperties: infer AP extends JSONSchema } ? AP
+            : false,
+          GetDefaultKeys<T>,
+          WrapCells
+        >
+      : Record<string, unknown>
+    : T extends { additionalProperties: infer AP }
+      ? AP extends false ? Record<string | number | symbol, never>
+      : AP extends true ? Record<string | number | symbol, unknown>
+      : AP extends JSONSchema ? Record<
+          string | number | symbol,
+          SchemaInner<AP, Root, DecrementDepth<Depth>, WrapCells>
+        >
+      : Record<string | number | symbol, unknown>
+    : Record<string, unknown>
+  : any;
+
+type SchemaInner<
+  T extends JSONSchema,
+  Root extends JSONSchema = T,
+  Depth extends DepthLevel = 9,
+  WrapCells extends boolean = true,
+> = Depth extends 0 ? unknown
+  : T extends { asCell: true }
+    ? WrapCells extends true
+      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
+  : T extends { asStream: true }
+    ? WrapCells extends true
+      ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>
+    : SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>
+  : SchemaCore<T, Root, Depth, WrapCells>;
+
 export type Schema<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> =
-  // If we're out of depth, short-circuit
-  Depth extends 0 ? unknown
-    // Handle asCell attribute - wrap the result in Cell<T>
-    : T extends { asCell: true } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>>
-    // Handle asStream attribute - wrap the result in Stream<T>
-    : T extends { asStream: true }
-      ? Stream<Schema<Omit<T, "asStream">, Root, Depth>>
-    // Handle $ref: "#" (self-reference) specially to preserve recursion
-    : T extends { $ref: "#" }
-      ? Schema<Omit<Root, "asCell" | "asStream">, Root, DecrementDepth<Depth>>
-    // Handle $ref - resolve and merge with ref site schema
-    : T extends { $ref: infer RefStr extends string } ? MergeRefSiteWithTarget<
-        T,
-        ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle enum values
-    : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema ?
-    //         | Schema<F, Root, DecrementDepth<Depth>>
-    //         | Schema<{ oneOf: R }, Root, Depth>
-    //       : never
-    //     : never
-    // Handle anyOf
-    : T extends { anyOf: infer U extends readonly JSONSchema[] }
-      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-        ? F extends JSONSchema ?
-            | Schema<F, Root, DecrementDepth<Depth>>
-            | Schema<{ anyOf: R }, Root, Depth>
-        : never
-      : never
-    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema
-    //       ? Schema<F, Root, Depth> & Schema<{ allOf: R }, Root, Depth>
-    //     : never
-    //   : Record<string | number | symbol, never>
-    // Handle different primitive types
-    : T extends { type: "string" } ? string
-    : T extends { type: "number" | "integer" } ? number
-    : T extends { type: "boolean" } ? boolean
-    : T extends { type: "null" } ? null
-    // Handle array type
-    : T extends { type: "array" }
-      ? T extends { items: infer I }
-        ? I extends JSONSchema ? Array<Schema<I, Root, DecrementDepth<Depth>>>
-        : unknown[]
-      : unknown[] // No items specified, allow any items
-    // Handle object type
-    : T extends { type: "object" }
-      ? T extends { properties: infer P }
-        ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
-            P,
-            T extends { required: readonly string[] } ? T["required"] : [],
-            Root,
-            Depth,
-            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
-              : false,
-            GetDefaultKeys<T>
-          >
-        : Record<string, unknown>
-        // Object without properties - check additionalProperties
-      : T extends { additionalProperties: infer AP }
-        ? AP extends false ? Record<string | number | symbol, never> // Empty object
-        : AP extends true ? Record<string | number | symbol, unknown>
-        : AP extends JSONSchema ? Record<
-            string | number | symbol,
-            Schema<AP, Root, DecrementDepth<Depth>>
-          >
-        : Record<string | number | symbol, unknown>
-        // Default for object with no properties and no additionalProperties specified
-      : Record<string, unknown>
-    // Default case
-    : any;
+> = SchemaInner<T, Root, Depth, true>;
 
 // Get keys from the default object
 type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
@@ -867,32 +1191,33 @@ type ObjectFromProperties<
   Depth extends DepthLevel,
   AP extends JSONSchema = false,
   DK extends string = never,
+  WrapCells extends boolean = true,
 > =
-  // Required properties (either explicitly required or has a default value)
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? K : never
         : never
-    ]: Schema<P[K], Root, DecrementDepth<Depth>>;
+    ]: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
   }
-  // Optional properties (not required and no default)
   & {
     [
       K in keyof P as K extends string ? K extends R[number] | DK ? never : K
         : never
-    ]?: Schema<P[K], Root, DecrementDepth<Depth>>;
+    ]?: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
   }
-  // Additional properties
   & (
-    AP extends false
-      // Additional properties off => no-op instead of empty record
-      ? Record<never, never>
+    AP extends false ? Record<never, never>
       : AP extends true ? { [key: string]: unknown }
-      : AP extends JSONSchema
-        ? { [key: string]: Schema<AP, Root, DecrementDepth<Depth>> }
+      : AP extends JSONSchema ? {
+          [key: string]: SchemaInner<
+            AP,
+            Root,
+            DecrementDepth<Depth>,
+            WrapCells
+          >;
+        }
       : Record<string | number | symbol, never>
-  )
-  & IDFields;
+  );
 
 // Restrict Depth to these numeric literal types
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
@@ -914,139 +1239,11 @@ type Decrement = {
 // Helper function to safely get decremented depth
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 
-// Same as above, but ignoring asCell, so we never get cells. This is used for
-// calls of lifted functions and handlers, since they can pass either cells or
-// values.
-
 export type SchemaWithoutCell<
   T extends JSONSchema,
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
-> =
-  // If we're out of depth, short-circuit
-  Depth extends 0 ? unknown
-    // Handle asCell attribute - but DON'T wrap in Cell, just use the inner type
-    : T extends { asCell: true }
-      ? SchemaWithoutCell<Omit<T, "asCell">, Root, Depth>
-    // Handle asStream attribute - but DON'T wrap in Stream, just use the inner type
-    : T extends { asStream: true }
-      ? SchemaWithoutCell<Omit<T, "asStream">, Root, Depth>
-    // Handle $ref: "#" (self-reference) specially to preserve recursion
-    : T extends { $ref: "#" } ? SchemaWithoutCell<
-        Omit<Root, "asCell" | "asStream">,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle $ref - resolve and merge with ref site schema
-    : T extends { $ref: infer RefStr extends string }
-      ? MergeRefSiteWithTargetWithoutCell<
-        T,
-        ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
-        Root,
-        DecrementDepth<Depth>
-      >
-    // Handle enum values
-    : T extends { enum: infer E extends readonly any[] } ? E[number]
-    // Handle oneOf (not yet supported in schema.ts, so commenting out)
-    // : T extends { oneOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema ?
-    //         | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
-    //         | SchemaWithoutCell<{ oneOf: R }, Root, Depth>
-    //       : never
-    //     : never
-    // Handle anyOf
-    : T extends { anyOf: infer U extends readonly JSONSchema[] }
-      ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-        ? F extends JSONSchema ?
-            | SchemaWithoutCell<F, Root, DecrementDepth<Depth>>
-            | SchemaWithoutCell<{ anyOf: R }, Root, Depth>
-        : never
-      : never
-    // Handle allOf (merge all types) (not yet supported in schema.ts, so commenting out)
-    // : T extends { allOf: infer U extends readonly JSONSchema[] }
-    //   ? U extends readonly [infer F, ...infer R extends JSONSchema[]]
-    //     ? F extends JSONSchema
-    //       ?
-    //         & SchemaWithoutCell<F, Root, Depth>
-    //         & MergeAllOfWithoutCell<{ allOf: R }, Root, Depth>
-    //     : never
-    //   : Record<string | number | symbol, never>
-    // Handle different primitive types
-    : T extends { type: "string" } ? string
-    : T extends { type: "number" | "integer" } ? number
-    : T extends { type: "boolean" } ? boolean
-    : T extends { type: "null" } ? null
-    // Handle array type
-    : T extends { type: "array" }
-      ? T extends { items: infer I }
-        ? I extends JSONSchema
-          ? SchemaWithoutCell<I, Root, DecrementDepth<Depth>>[]
-        : unknown[]
-      : unknown[] // No items specified, allow any items
-    // Handle object type
-    : T extends { type: "object" }
-      ? T extends { properties: infer P }
-        ? P extends Record<string, JSONSchema>
-          ? ObjectFromPropertiesWithoutCell<
-            P,
-            T extends { required: readonly string[] } ? T["required"] : [],
-            Root,
-            Depth,
-            T extends { additionalProperties: infer AP extends JSONSchema } ? AP
-              : false,
-            GetDefaultKeys<T>
-          >
-        : Record<string, unknown>
-        // Object without properties - check additionalProperties
-      : T extends { additionalProperties: infer AP }
-        ? AP extends false ? Record<string | number | symbol, never> // Empty object
-        : AP extends true ? Record<string | number | symbol, unknown>
-        : AP extends JSONSchema ? Record<
-            string | number | symbol,
-            SchemaWithoutCell<AP, Root, DecrementDepth<Depth>>
-          >
-        : Record<string | number | symbol, unknown>
-        // Default for object with no properties and no additionalProperties specified
-      : Record<string, unknown>
-    // Default case
-    : any;
-
-type ObjectFromPropertiesWithoutCell<
-  P extends Record<string, JSONSchema>,
-  R extends readonly string[] | never,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  AP extends JSONSchema = false,
-  DK extends string = never,
-> =
-  // Required properties (either explicitly required or has a default value)
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? K : never
-        : never
-    ]: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
-  }
-  // Optional properties (not required and no default)
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? never : K
-        : never
-    ]?: SchemaWithoutCell<P[K], Root, DecrementDepth<Depth>>;
-  }
-  // Additional properties
-  & (
-    AP extends false
-      // Additional properties off => no-op instead of empty record
-      ? Record<never, never>
-      : AP extends true
-      // Additional properties on => unknown
-        ? { [key: string]: unknown }
-      : AP extends JSONSchema
-      // Additional properties is another schema => map them
-        ? { [key: string]: SchemaWithoutCell<AP, Root, DecrementDepth<Depth>> }
-      : Record<string | number | symbol, never>
-  );
+> = SchemaInner<T, Root, Depth, false>;
 
 /**
  * Fragment element name used for JSX fragments.

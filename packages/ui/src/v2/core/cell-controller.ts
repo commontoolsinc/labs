@@ -390,7 +390,8 @@ export class ArrayCellController<T> extends CellController<T[]> {
         // Must wrap in transaction like other Cell operations
         const cell = this.getCell()!;
         const tx = cell.runtime.edit();
-        cell.withTx(tx).key(index).set(newItem);
+        const itemCell = cell.key(index);
+        itemCell.withTx(tx).set(newItem);
         tx.commit();
       } else {
         // Fallback for plain arrays

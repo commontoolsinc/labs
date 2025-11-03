@@ -1978,6 +1978,7 @@ describe("asCell with schema", () => {
     const arrayCell = c.key("items");
     expect(arrayCell.get()).toBeNull();
 
+    // @ts-ignore - types correctly disallowed pushing to non-array
     expect(() => arrayCell.push(1)).toThrow();
   });
 
@@ -2160,6 +2161,7 @@ describe("asCell with schema", () => {
     c.set({ value: "not an array" });
     const cell = c.key("value");
 
+    // @ts-ignore - types correctly disallowed pushing to non-array
     expect(() => cell.push(42)).toThrow();
   });
 
