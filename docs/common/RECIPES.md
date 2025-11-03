@@ -15,8 +15,7 @@ function. It takes a function parameter:
 
 - Types: define Input and Output relationships for composition with other recipes
   - Properties such as `[UI]` and `[NAME]` do not have to be explicitly included in the output type
-- Parameters: a descriptive name and a function that receives the inputs and
-  returns outputs
+- Parameters: a function that receives the inputs and returns outputs
 
 ### Types and Runtime Safety
 
