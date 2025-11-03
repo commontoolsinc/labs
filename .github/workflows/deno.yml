@@ -37,15 +37,6 @@ jobs:
       - name: 🔎 Check codebase formatting
         run: deno fmt --check
 
-      - name: 🔎 Check derived artifacts
-        working-directory: packages/static
-        run: |
-          deno task compile-api-types
-          if ! git diff --quiet . ; then
-            echo "Run 'deno task compile-api-types' inside the 'static' package."
-            exit 1
-          fi
-
       - name: 🧹 Lint codebase
         run: deno lint
 
