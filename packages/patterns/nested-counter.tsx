@@ -6,7 +6,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-export const Counter = recipe<RecipeState>("Counter", (state) => {
+export const Counter = recipe((state: RecipeState) => {
   return {
     // str is used so we can directly interpolate the OpaqueRef<number> into the string
     [NAME]: str`Simple counter: ${state.value}`,
@@ -36,7 +36,7 @@ export const Counter = recipe<RecipeState>("Counter", (state) => {
 This demonstrates a pattern of passing a Cell to a sub-recipe and keeping the value in sync between all locations.
 It also demonstrates that any recipe can be invoked using JSX syntax.
 */
-export default recipe<RecipeState>("Counter", (state) => {
+export default recipe((state: RecipeState) => {
   // A recipe can be 'invoked' directly
   const counter = Counter({ value: state.value });
 

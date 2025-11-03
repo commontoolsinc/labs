@@ -135,7 +135,6 @@ export function opaqueRef<T>(
         return mapFactory({
           list: proxy,
           op: recipe(
-            "mapping function",
             ({ element, index, array }: Opaque<any>) =>
               fn(element, index, array),
           ),

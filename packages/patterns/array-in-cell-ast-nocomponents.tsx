@@ -26,7 +26,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe<InputSchema>("Simple List", ({ title, items }) => {
+export default recipe(({ title, items }: InputSchema) => {
   return {
     [NAME]: title,
     [UI]: (

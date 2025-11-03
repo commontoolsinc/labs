@@ -39,7 +39,7 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export const Counter = recipe<RecipeState>("Counter", (state) => {
+export const Counter = recipe((state: RecipeState) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (

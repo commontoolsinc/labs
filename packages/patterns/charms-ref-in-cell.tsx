@@ -29,7 +29,7 @@ interface AddCharmState {
 const AddCharmSchema = toSchema<AddCharmState>();
 
 // Simple charm that will be instantiated multiple times
-const SimpleRecipe = recipe<{ id: string }>("Simple Recipe", ({ id }) => ({
+const SimpleRecipe = recipe(({ id }: { id: string }) => ({
   [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));

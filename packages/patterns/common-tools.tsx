@@ -179,7 +179,7 @@ type ToolsInput = {
   list: ListItem[];
 };
 
-export default recipe<ToolsInput>("Tools", ({ list }) => {
+export default recipe(({ list }: ToolsInput) => {
   const tools: Record<string, BuiltInLLMTool> = {
     search_web: {
       pattern: searchWeb,

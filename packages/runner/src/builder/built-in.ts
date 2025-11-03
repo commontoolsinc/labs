@@ -201,7 +201,7 @@ export const patternTool = (<
 ): OpaqueRef<Omit<T, keyof E>> => {
   const pattern = isRecipe(fnOrRecipe)
     ? fnOrRecipe
-    : recipe<T>("tool", fnOrRecipe);
+    : recipe(fnOrRecipe);
 
   return {
     pattern,
