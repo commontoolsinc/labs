@@ -396,7 +396,7 @@ export default recipe(
       // The framework will handle empty content cases reactively
       const extractionResult = llm({
         system: systemPrompt,
-        messages: [userPrompt],
+        messages: [{ role: "user", content: userPrompt }],
         model: "google:gemini-2.5-flash",
         mode: "json",
       });
