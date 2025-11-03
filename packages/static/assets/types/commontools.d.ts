@@ -247,10 +247,10 @@ export type OpaqueRef<T> = OpaqueCell<T> & (T extends Array<infer U> ? Array<Opa
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = BrandedCell<InnerCellLike<T>>;
-type InnerCellLike<T> = BrandedCell<T> | T extends Array<infer U> ? Array<U | InnerCellLike<U>> : T extends object ? {
-    [K in keyof T]: T[K] | InnerCellLike<T[K]>;
-} : T;
+export type CellLike<T> = BrandedCell<MaybeCellWrapped<T>>;
+type MaybeCellWrapped<T> = T | BrandedCell<T> | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>> : T extends object ? {
+    [K in keyof T]: MaybeCellWrapped<T[K]>;
+} : never);
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
  * Used in APIs that accept inputs from developers - can be static values
