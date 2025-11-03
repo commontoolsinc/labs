@@ -496,6 +496,7 @@ export abstract class BaseObjectTraverser<
           space,
           schemaTracker,
           DefaultSchemaSelector,
+          this.traverseCells,
         );
         if (newDoc.value === undefined) {
           return null;
@@ -562,6 +563,8 @@ export abstract class BaseObjectTraverser<
  * @param space: the memory space used for resolving pointers
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
+ * @param includeSource: if true, we will include linked source as well as
+ *   spell and $TYPE recursively
  *
  * @returns a tuple containing an IAttestation object with the target doc,
  * docRoot, path, and value and also containing the updated selector that
@@ -576,6 +579,7 @@ export function getAtPath(
   space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
+  includeSource?: boolean,
 ): [IAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
@@ -589,6 +593,7 @@ export function getAtPath(
       space,
       schemaTracker,
       selector,
+      includeSource,
     );
     remaining = [];
   }
@@ -631,6 +636,7 @@ export function getAtPath(
         space,
         schemaTracker,
         selector,
+        includeSource,
       );
       remaining = [];
     }
@@ -655,6 +661,8 @@ function notFound(address: BaseMemoryAddress): IAttestation {
  * @param space: the space where this pointer was encountered
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector: SchemaPathSelector used to query the target doc
+ * @param includeSource: if true, we will include linked source as well as
+ *   spell and $TYPE recursively
  *
  * @returns an IAttestation object with the target doc, docRoot, path, and value.
  */
@@ -667,6 +675,7 @@ function followPointer(
   space: MemorySpace,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
+  includeSource?: boolean,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
   console.log("Called FP", doc.value);
@@ -726,7 +735,7 @@ function followPointer(
       schemaTracker.add(`${target.id}/${target.type}`, selector);
     }
     // Load the sources/recipes recursively unless we're a retracted fact.
-    if (valueEntry.value !== undefined) {
+    if (valueEntry.value !== undefined && includeSource) {
       loadSource(
         tx,
         valueEntry,
@@ -761,6 +770,7 @@ function followPointer(
     space,
     schemaTracker,
     selector,
+    includeSource,
   );
 }
 
@@ -1187,6 +1197,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         this.space,
         this.schemaTracker,
         selector,
+        this.traverseCells,
       );
       if (nextDoc.value === undefined) {
         return undefined;
@@ -1510,6 +1521,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       this.space,
       this.schemaTracker,
       selector,
+      this.traverseCells,
     );
     if (newDoc.value === undefined) {
       return null;
