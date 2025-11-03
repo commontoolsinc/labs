@@ -6,7 +6,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-export const Counter = recipe((state: RecipeState) => {
+export const Counter = recipe<RecipeState>((state) => {
   return {
     // str is used so we can directly interpolate the OpaqueRef<number> into the string
     [NAME]: str`Simple counter: ${state.value}`,

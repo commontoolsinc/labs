@@ -730,6 +730,10 @@ export type RecipeFunction = {
     fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
   ): RecipeFactory<T, R>;
 
+  <T>(
+    fn: (input: OpaqueRef<Required<T>>) => any,
+  ): RecipeFactory<T, ReturnType<typeof fn>>;
+
   <S extends JSONSchema>(
     argumentSchema: S,
     fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
