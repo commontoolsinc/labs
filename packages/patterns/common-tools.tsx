@@ -25,7 +25,7 @@ type CalculatorRequest = {
 export const calculator = recipe<
   CalculatorRequest,
   string | { error: string }
->("Calculator", ({ expression, base }) => {
+>(({ expression, base }) => {
   return derive({ expression, base }, ({ expression, base }) => {
     const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, "");
     let sanitizedBase = Number(base);
@@ -114,7 +114,7 @@ type SearchWebResult = {
 export const searchWeb = recipe<
   SearchQuery,
   SearchWebResult | { error: string }
->("Search Web", ({ query }) => {
+>(({ query }) => {
   const { result, error } = fetchData<SearchWebResult>({
     url: "/api/agent-tools/web-search",
     mode: "json",
@@ -155,7 +155,7 @@ type ReadWebResult = {
 export const readWebpage = recipe<
   ReadWebRequest,
   ReadWebResult | { error: string }
->("Read Webpage", ({ url }) => {
+>(({ url }) => {
   const { result, error } = fetchData<ReadWebResult>({
     url: "/api/agent-tools/web-read",
     mode: "json",
@@ -179,7 +179,7 @@ type ToolsInput = {
   list: ListItem[];
 };
 
-export default recipe(({ list }: ToolsInput) => {
+export default recipe<ToolsInput>(({ list }) => {
   const tools: Record<string, BuiltInLLMTool> = {
     search_web: {
       pattern: searchWeb,

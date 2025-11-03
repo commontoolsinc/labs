@@ -36,7 +36,7 @@ export const Counter = recipe<RecipeState>((state) => {
 This demonstrates a pattern of passing a Cell to a sub-recipe and keeping the value in sync between all locations.
 It also demonstrates that any recipe can be invoked using JSX syntax.
 */
-export default recipe((state: RecipeState) => {
+export default recipe<RecipeState>((state) => {
   // A recipe can be 'invoked' directly
   const counter = Counter({ value: state.value });
 

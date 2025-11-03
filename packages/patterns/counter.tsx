@@ -12,7 +12,7 @@ interface RecipeOutput {
   decrement: Stream<void>;
 }
 
-export default recipe((state: RecipeState) => {
+export default recipe<RecipeState, RecipeOutput>((state) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
