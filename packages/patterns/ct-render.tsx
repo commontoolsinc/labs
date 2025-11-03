@@ -33,7 +33,7 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export const Counter = recipe<RecipeState>("Counter", (state) => {
+export const Counter = recipe<RecipeState>((state) => {
   return {
     // str is used so we can directly interpolate the OpaqueRef<number> into the string
     [NAME]: str`Simple counter: ${state.value}`,
@@ -59,7 +59,7 @@ export const Counter = recipe<RecipeState>("Counter", (state) => {
   };
 });
 
-export default recipe<RecipeState>("Counter", (state) => {
+export default recipe((state: RecipeState) => {
   const counter = Counter({ value: state.value });
 
   return {

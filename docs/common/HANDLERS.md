@@ -99,6 +99,7 @@ const updateTitle = handler<
 ## Common TypeScript Issues & Fixes
 
 ### Handler Function Parameters
+
 - **First parameter**: Event data (from UI interactions)
 - **Second parameter**: State data (destructured from state schema)
 - **Parameter naming**: Use descriptive names or `_` prefix for unused parameters
@@ -273,7 +274,7 @@ const removeItem = handler<
   }
 });
 
-export default recipe<Input, Input>("Shopping List", ({ items }) => {
+export default recipe<Input, Input>(({ items }) => {
   // items here is OpaqueRef<ShoppingItem[]>
 
   return {
@@ -307,7 +308,7 @@ export default recipe<Input, Input>("Shopping List", ({ items }) => {
 
 **Rule of thumb:** In handler type signatures, use `Cell<T[]>` for array parameters. The Cell wraps the entire array, not individual elements.
 
-#### Event Parameter Patterns
+### Event Parameter Patterns
 
 You can handle the event parameter in different ways depending on your needs:
 
@@ -343,6 +344,7 @@ const simpleIncrement = handler<Record<string, never>, { count: Cell<number> }>(
 ## Handler Invocation Patterns
 
 ### State Passing
+
 When invoking handlers in UI, pass an object that matches your state schema:
 
 ```typescript
@@ -357,6 +359,7 @@ onClick={myHandler({ items: itemsArray, currentPage: currentPageString })}
 ```
 
 ### Event vs Props Confusion
+
 - **Event type**: Describes data coming FROM the UI event
 - **State type**: Describes data the handler needs to ACCESS
 - **Invocation object**: Must match the state type, NOT the event type
@@ -364,11 +367,13 @@ onClick={myHandler({ items: itemsArray, currentPage: currentPageString })}
 ## Debugging Handler Issues
 
 ### Type Mismatches
+
 1. Check that handler invocation object matches state type
 2. Verify event type matches actual UI event structure
 3. Ensure destructuring in handler function matches types
 
 ### Runtime Issues
+
 1. Use `console.log` in handler functions to debug
 2. Check that state objects have expected properties
 3. Verify UI events are firing correctly
@@ -384,6 +389,7 @@ onClick={myHandler({ items: itemsArray, currentPage: currentPageString })}
 ## Examples by Use Case
 
 ### Counter/Simple State
+
 ```typescript
 const increment = handler<Record<string, never>, { count: Cell<number> }>(
   (_, { count }) => count.set(count.get() + 1)
@@ -391,6 +397,7 @@ const increment = handler<Record<string, never>, { count: Cell<number> }>(
 ```
 
 ### Form/Input Updates
+
 ```typescript
 const updateField = handler<
   { detail: { value: string } }, 
@@ -401,6 +408,7 @@ const updateField = handler<
 ```
 
 ### List/Array Operations
+
 ```typescript
 const addItem = handler<
   { message: string }, 
@@ -412,6 +420,7 @@ const addItem = handler<
 ```
 
 ### Complex State Updates
+
 ```typescript
 const updatePageContent = handler<
   { detail: { value: string } }, 
@@ -426,6 +435,7 @@ const updatePageContent = handler<
 ## Advanced Patterns
 
 ### Handler Composition
+
 ```typescript
 // Base handlers for reuse
 const createTimestamp = () => Date.now();
@@ -491,6 +501,7 @@ const handleFormSubmit = handler<
 ## Common Pitfalls
 
 ### 1. Type Mismatch
+
 ```typescript
 // ❌ Wrong: State type doesn't match invocation
 const handler = handler<Record<string, never>, { count: number }>(
@@ -502,6 +513,7 @@ onClick={handler({ value: 5 })} // Should be { count: 5 }
 ```
 
 ### 2. Event Type Over-specification
+
 ```typescript
 // ❌ Wrong: Over-complicated event type for simple clicks
 const handler = handler<{
@@ -518,6 +530,7 @@ const handler = handler<Record<string, never>, any>(
 ```
 
 ### 3. Mutation vs Immutability
+
 ```typescript
 // ❌ Wrong: Direct assignment to non-cell state
 (_, { title }) => {
@@ -538,6 +551,7 @@ const handler = handler<Record<string, never>, any>(
 ## Debugging Handlers
 
 ### Console-based Debugging
+
 ```typescript
 // In recipes, use console logging for debugging
 const addItem = handler<

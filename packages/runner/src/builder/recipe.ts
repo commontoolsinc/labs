@@ -38,6 +38,10 @@ import { sanitizeSchemaForLinks } from "../link-utils.ts";
 
 /** Declare a recipe
  *
+ * @param fn A function that creates the recipe graph
+ *
+ * or
+ *
  * @param description A human-readable description of the recipe
  * @param fn A function that creates the recipe graph
  *
@@ -83,16 +87,27 @@ export function recipe<T, R>(
   resultSchema: JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
+// Function-only overload - must come after schema-based overloads
 export function recipe<T, R>(
-  argumentSchema: string | JSONSchema,
-  resultSchema:
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+): RecipeFactory<T, R>;
+export function recipe<T, R>(
+  argumentSchema:
+    | string
     | JSONSchema
-    | undefined
+    | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
+  resultSchema?:
+    | JSONSchema
     | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
   fn?: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
-  // Cover the overload that just provides input schema
-  if (typeof resultSchema === "function") {
+  // Cover the overload that just provides a function
+  if (typeof argumentSchema === "function") {
+    fn = argumentSchema;
+    argumentSchema = undefined as any;
+    resultSchema = undefined;
+  } // Cover the overload that just provides input schema
+  else if (typeof resultSchema === "function") {
     fn = resultSchema;
     resultSchema = undefined;
   }
@@ -114,8 +129,8 @@ export function recipe<T, R>(
   applyInputIfcToOutput(inputs, outputs);
 
   const result = factoryFromRecipe<T, R>(
-    argumentSchema,
-    resultSchema,
+    argumentSchema as string | JSONSchema | undefined,
+    resultSchema as JSONSchema | undefined,
     inputs,
     outputs,
   );
@@ -125,7 +140,7 @@ export function recipe<T, R>(
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  argumentSchema: string | JSONSchema,
+  argumentSchema: string | JSONSchema | undefined,
   resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
@@ -140,7 +155,7 @@ export function recipeFromFrame<T, R>(
 }
 
 function factoryFromRecipe<T, R>(
-  argumentSchemaArg: string | JSONSchema,
+  argumentSchemaArg: string | JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
   inputs: OpaqueRef<Required<T>>,
   outputs: Opaque<R>,
@@ -298,10 +313,16 @@ function factoryFromRecipe<T, R>(
 
   let argumentSchema: JSONSchema;
 
-  if (typeof argumentSchemaArg === "string") {
-    // Create a writable schema
+  if (
+    typeof argumentSchemaArg === "string" || argumentSchemaArg === undefined
+  ) {
+    // Create a writable schema from defaults
     const writableSchema: JSONSchemaMutable = createJsonSchema(defaults, true);
-    writableSchema.description = argumentSchemaArg;
+
+    // Set description only if provided
+    if (typeof argumentSchemaArg === "string") {
+      writableSchema.description = argumentSchemaArg;
+    }
 
     delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
     if (

@@ -55,7 +55,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe("Simple LinkedList", ({ title }: InputSchema) => {
+export default recipe<InputSchema>(({ title }) => {
   const items_list = cell<LinkedList>({ value: "1" });
 
   // Create a derived value for the linked list string representation

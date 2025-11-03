@@ -10,13 +10,12 @@ where recipes are autonomous modules that can import, process, and export data.
 
 ### Recipe
 
-A recipe is the fundamental building block, defined using the `recipe<InputType, OutputType>('My Recipe', (input) => {})`
-function. It takes two types and two parameters:
+A recipe is the fundamental building block, defined using the `recipe<InputType>((input) => {})`
+function. It takes a function parameter:
 
 - Types: define Input and Output relationships for composition with other recipes
   - Properties such as `[UI]` and `[NAME]` do not have to be explicitly included in the output type
-- Parameters: a descriptive name and a function that receives the inputs and returns
-  outputs
+- Parameters: a function that receives the inputs and returns outputs
 
 ### Types and Runtime Safety
 
@@ -183,12 +182,14 @@ Several utility functions are available:
   Available paths:
 
   - **`"/"`**: Access the root space cell and its properties
+
     ```typescript
     const spaceConfig = wish("/config");
     const nestedData = wish("/nested/deep/data");
     ```
 
   - **`"#default"`**: Shortcut for `/defaultPattern` - access your default pattern
+
     ```typescript
     const defaultTitle = wish("#default/title");
     const defaultArg = wish("#default/argument/greeting");
@@ -196,29 +197,34 @@ Several utility functions are available:
 
   - **`"#mentionable"`**: Access mentionable items from the backlinks index
     (maps to `/defaultPattern/backlinksIndex/mentionable`)
+
     ```typescript
     const mentionable = wish("#mentionable");
     const firstMention = wish("#mentionable/0/name");
     ```
 
   - **`"#recent"`**: Access recently used charms (maps to `/recentCharms`)
+
     ```typescript
     const recentCharms = wish("#recent");
     const latestCharm = wish("#recent/0/name");
     ```
 
   - **`"#allCharms"`**: Access all charms in the system
+
     ```typescript
     const allCharms = wish("#allCharms");
     const firstCharm = wish("#allCharms/0/title");
     ```
 
   - **`"#now"`**: Get the current timestamp (no additional path segments allowed)
+
     ```typescript
     const timestamp = wish("#now");
     ```
 
   You can also provide a default value as the second argument:
+
   ```typescript
   const items = wish("/myItems", []); // Returns [] if /myItems doesn't exist
   ```
@@ -410,7 +416,7 @@ logic.
      }, {} as Record<string, Item[]>);
    });
 
-   export default recipe("my-recipe", ({ items, name }) => {
+   export default recipe(({ items, name }) => {
      const grouped = groupByCategory(items);
      return {
        [UI]: <ct-button onClick={addItem({ items, name })}>Add</ct-button>,
@@ -419,7 +425,7 @@ logic.
    });
 
    // ❌ INCORRECT - Inside recipe function
-   export default recipe("my-recipe", ({ items, name }) => {
+   export default recipe(({ items, name }) => {
      const addItem = handler((_event, { items, name }) => { /* ... */ });
      const grouped = lift((items) => { /* ... */ })(items);
      // This creates new function instances on each evaluation
@@ -668,33 +674,33 @@ logic.
     **Recommendation:** In most cases, direct property access or single-parameter lifts are clearer than multi-parameter curried functions.
 
 15. **Reference Data Instead of Copying**: When transforming data, reference the
-   original objects rather than copying all their properties. This maintains
-   reactivity and creates cleaner code:
+    original objects rather than copying all their properties. This maintains
+    reactivity and creates cleaner code:
 
-   ```typescript
-   // DO THIS: Reference the original data
-   const processedItems = items.map((item) => ({
-     originalItem: item, // Direct reference
-     processed: processItem(item),
-   }));
+    ```typescript
+    // DO THIS: Reference the original data
+    const processedItems = items.map((item) => ({
+      originalItem: item, // Direct reference
+      processed: processItem(item),
+    }));
 
-   // NOT THIS: Spread/copy all properties
-   const processedItems = items.map((item) => ({
-     id: item.id, // Copying each field
-     name: item.name, // breaks the reactive
-     date: item.date, // connection to the
-     // ... more fields   // original data
-     processed: processItem(item),
-   }));
-   ```
+    // NOT THIS: Spread/copy all properties
+    const processedItems = items.map((item) => ({
+      id: item.id, // Copying each field
+      name: item.name, // breaks the reactive
+      date: item.date, // connection to the
+      // ... more fields   // original data
+      processed: processItem(item),
+    }));
+    ```
 
 16. **Use Reactive String Templates**: Use the `str` template literal to create
-   reactive strings that update when their inputs change:
+    reactive strings that update when their inputs change:
 
-   ```typescript
-   const message =
-     str`Hello ${user.name}, you have ${notifications.count} notifications`;
-   ```
+    ```typescript
+    const message =
+      str`Hello ${user.name}, you have ${notification.count} notifications`;
+    ```
 
 17. **Keep Logic Inside Recipes**: Place as much logic as possible inside recipe
    functions or the `map` function. This creates a cleaner reactive system where
@@ -862,6 +868,7 @@ interface Item {
 ✅ **Use simple interfaces without [ID] for:**
 
 - **Basic lists and CRUD operations**
+
   ```typescript
   interface ShoppingItem {
     title: string;
@@ -951,6 +958,7 @@ const removeItem = handler<
 ```
 
 This works perfectly without [ID] because:
+
 - Items are added to the end
 - Removal uses item references with `.equals()`
 - No cross-network references needed
@@ -986,6 +994,7 @@ const addBacklink = handler<
 ## Rule of Thumb
 
 **Start without `[ID]`. Only add it if:**
+
 1. You're generating new items within a `lift` function that have to be
    references elsewhere.
 

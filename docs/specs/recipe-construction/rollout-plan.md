@@ -89,7 +89,7 @@
 - [ ] Have `Cell.set` return itself, so `Cell.for(..).set(..)` works
 - [ ] `cell.assign(otherCell)` applies `cell`'s link to `otherCell` if it
   doesn't have one yet. Useful to make self-referential loops.
-- [ ] In AST transformation add `.for(variableName, true)` for `const var = `
+- [ ] In AST transformation add `.for(variableName, true)` for `const var =`
   cases
 - [ ] Update JSON Schema to support new way to describe cells
 
@@ -101,7 +101,7 @@
 - [ ] Add `.remove` and `.removeAll` which removes the element matching the
   parameter from the list.
 - [ ] Add overload to `.key` that accepts an array of keys
-- [ ] Make name parameter in recipe optional
+- [x] Make name parameter in recipe optional
 
 ## Planned Future Work
 

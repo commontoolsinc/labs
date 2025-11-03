@@ -6,7 +6,7 @@ A styled button component matching the regular `button` API. Pass a handler to t
 type InputSchema = { count: Cell<number> };
 type OutputSchema = { count: Cell<number> };
 
-const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ count }) => {
+const MyRecipe = recipe<InputSchema, OutputSchema>(({ count }) => {
   const handleClick = handler<unknown, { count: Cell<number> }>((_event, { count }) => {
     count.set(count.get() + 1);
   });
@@ -22,7 +22,7 @@ Notice how handlers are bound to the cell from the input schema _in_ the VDOM de
 
 (For even more detail, see `HANDLERS.md`)
 
-# Bidirectional Binding with $ Prefix
+## Bidirectional Binding with $ Prefix
 
 Many CommonTools components support **bidirectional binding** through the `$` prefix. This powerful feature automatically updates cells when users interact with components, eliminating the need for explicit onChange handlers in most cases.
 
@@ -96,6 +96,7 @@ const toggle = handler<{detail: {checked: boolean}}, {item: Cell<Item>}>(
 ```
 
 The bidirectional binding version is:
+
 - **Simpler**: No handler definition needed
 - **Less code**: One line instead of five
 - **More maintainable**: Less surface area for bugs
@@ -123,7 +124,7 @@ const toggle = handler(
 one-directional binding.
 
 Note that the actual name for the `onChange` handler may be different depending
-on the component being used. For example, <ct-checkbox> uses `onct-change`.
+on the component being used. For example, `<ct-checkbox>` uses `onct-change`.
 Consult the component for details.
 
 ### Validation Example
@@ -152,7 +153,7 @@ const validatedValue = derive(rawInput, (value) => {
 
 This approach separates concerns: bidirectional binding handles the UI sync, while derive handles validation logic.
 
-# Styling: String vs Object Syntax
+## Styling: String vs Object Syntax
 
 Different element types accept different style syntax in CommonTools JSX. This is a common source of TypeScript errors.
 
@@ -242,7 +243,7 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 <common-hstack style="padding: 1rem;">
 ```
 
-# ct-input
+## ct-input
 
 The `ct-input` component demonstrates bidirectional binding perfectly:
 
@@ -250,7 +251,7 @@ The `ct-input` component demonstrates bidirectional binding perfectly:
 type InputSchema = { value: Cell<string> };
 type OutputSchema = { value: Cell<string> };
 
-const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ value }) => {
+const MyRecipe = recipe(({ value }: InputSchema) => {
   // Option 1: Bidirectional binding (simplest)
   const simpleInput = <ct-input $value={value} />;
 
@@ -275,7 +276,7 @@ const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ value }) => {
 
 Both inputs update the cell, but the second one logs changes. Use the simple bidirectional binding unless you need the extra logic.
 
-# ct-select
+## ct-select
 
 The `ct-select` component creates a dropdown selector. **Important:** It uses an `items` attribute with an array of `{ label, value }` objects, **not** HTML `<option>` elements.
 
@@ -284,7 +285,7 @@ type CategoryInput = {
   category: Default<string, "Other">;
 };
 
-const MyRecipe = recipe<CategoryInput, CategoryInput>("MyRecipe", ({ category }) => {
+const MyRecipe = recipe(({ category }: CategoryInput) => {
   return {
     [UI]: (
       <ct-select
@@ -363,7 +364,7 @@ The `value` property doesn't have to be a string - it can be any type:
 
 Like other components, `ct-select` supports bidirectional binding with the `$value` prefix, automatically updating the cell when the user selects an option.
 
-# ct-list
+## ct-list
 
 The `ct-list` component provides a convenient way to display and manage lists, but it has **specific schema requirements**.
 
@@ -380,7 +381,7 @@ interface CtListItem {
 
 type ListSchema = { items: Cell<CtListItem[]> };
 
-const MyRecipe = recipe<ListSchema, ListSchema>("MyRecipe", ({ items }) => {
+const MyRecipe = recipe(({ items }: ListSchema) => {
   return {
     [UI]: <div>
       <ct-list $items={items} editable={false} />
@@ -418,16 +419,18 @@ interface ShoppingItem {
 ## Trade-offs
 
 **Use ct-list when:**
+
 - Your items only need `title` and optionally `done`
 - You want a quick, pre-styled list component
 - You don't need custom rendering
 
 **Use manual rendering when:**
+
 - You have custom fields
 - You need custom styling or layout
 - You need fine-grained control over interactions
 
-# ct-message-input
+## ct-message-input
 
 This component bundles an input and a button to 'send a message' or 'add an item to a list' which is a common pattern. You don't need to worry about the value until submission time.
 
@@ -449,7 +452,7 @@ const addItem = handler<
 />
 ````
 
-# ct-outliner
+## ct-outliner
 
 `ct-outliner` is conceptually similar to `ct-list` except it works on a tree data structure. Below is a demonstration of the minimal use, see `page.tsx` for a more complete example.
 
@@ -510,7 +513,7 @@ export default recipe<PageInput, PageResult>(
 );
 ```
 
-# ct-render
+## ct-render
 
 The `ct-render` component displays pattern instances within another pattern. Use this for **pattern composition** - combining multiple patterns together in a single recipe.
 
@@ -571,7 +574,7 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>("Multi-View", ({ items }) => {
+export default recipe(({ items }: Input) => {
   // Both patterns receive the same items cell
   const listView = ListView({ items });
   const gridView = GridView({ items });
@@ -596,6 +599,7 @@ export default recipe<Input, Input>("Multi-View", ({ items }) => {
 ```
 
 **What happens:**
+
 - Both patterns receive the same `items` cell reference
 - Changes in ListView automatically appear in GridView
 - Changes in GridView automatically appear in ListView
@@ -619,6 +623,7 @@ const counter = Counter({ value: state.value });
 ```
 
 **When to use each:**
+
 - **Direct interpolation** (`{counter}`): Simple cases, most concise
 - **JSX component syntax** (`<Counter />`): When you want it to look like a component
 - **ct-render** (`<ct-render $cell={counter} />`): When the pattern wasn't instantiated from within this pattern but was passed in or was stored in a list.

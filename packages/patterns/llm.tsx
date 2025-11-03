@@ -32,7 +32,7 @@ const askQuestion = handler<
   }
 });
 
-export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
+export default recipe<LLMTestInput>(({ title }) => {
   // It is possible to make inline cells like this, but always consider whether it should just be part of the argument cell.
   // These cells are effectively 'hidden state' from other recipes
   const question = cell<string>("");
