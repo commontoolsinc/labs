@@ -5,16 +5,16 @@
  * Workspace code should import these types via `@commontools/builder`.
  */
 
-export const ID: unique symbol = Symbol("ID, unique to the context");
-export const ID_FIELD: unique symbol = Symbol(
-  "ID_FIELD, name of sibling that contains id",
-);
+// Runtime constants - defined by @commontools/runner/src/builder/types.ts
+// These are ambient declarations since the actual values are provided by the runtime environment
+export declare const ID: unique symbol;
+export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.
-export const TYPE = "$TYPE";
-export const NAME = "$NAME";
-export const UI = "$UI";
+export declare const TYPE: "$TYPE";
+export declare const NAME: "$NAME";
+export declare const UI: "$UI";
 
 // ============================================================================
 // Cell Brand System

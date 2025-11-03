@@ -1,5 +1,5 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { h, UI, VNode } from "@commontools/api";
+import { h, UI, VNode } from "@commontools/runner";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { serializableEvent } from "../src/render.ts";

@@ -14,6 +14,8 @@ import type {
   GenerateObjectFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
+  ID as IDSymbol,
+  ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   JSONSchema,
   JSONSchemaObj,
@@ -36,29 +38,23 @@ import type {
   StrFunction,
   WishFunction,
 } from "@commontools/api";
-import {
-  h,
-  ID,
-  ID_FIELD,
-  NAME,
-  schema,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
+import { h, schema, toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
+
+// Define runtime constants here - actual runtime values
+export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
+export const ID_FIELD: typeof IDFieldSymbol = Symbol(
+  "ID_FIELD, name of sibling that contains id",
+) as any;
+
+// Should be Symbol("UI") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
+
 export { AuthSchema } from "./schema-lib.ts";
-export {
-  h,
-  ID,
-  ID_FIELD,
-  NAME,
-  type Schema,
-  schema,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
+export { h, type Schema, schema, toSchema } from "@commontools/api";
 export type {
   AnyCell,
   Cell,
