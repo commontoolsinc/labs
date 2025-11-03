@@ -5,7 +5,7 @@ import {
   type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
-  Opaque,
+  type OpaqueRef,
   Runtime,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -98,7 +98,7 @@ describe("recipes with HTML", () => {
           h(
             "ul",
             null,
-            items.map((item: Opaque<Item>, i: Opaque<number>) =>
+            items.map((item, i: number) =>
               h("li", { key: i.toString() }, item.title)
             ) as VNode[],
           ),
@@ -213,12 +213,12 @@ describe("recipes with HTML", () => {
         [UI]: h(
           "div",
           null,
-          data.map((row: Opaque<Record<string, unknown>>) =>
+          data.map((row: Record<string, unknown>) =>
             h(
               "ul",
               null,
-              entries(row).map((input: Opaque<[string, unknown]>) =>
-                h("li", null, [input[0] as string, ": ", str`${input[1]}`])
+              entries(row).map((input: OpaqueRef<[string, unknown]>) =>
+                h("li", null, [input[0], ": ", str`${input[1]}`])
               ) as VNode[],
             )
           ) as VNode[],

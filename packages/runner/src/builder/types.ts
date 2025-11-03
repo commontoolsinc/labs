@@ -65,6 +65,7 @@ export const schema: typeof schemaFunction = (schema) => schema;
 export { AuthSchema } from "./schema-lib.ts";
 export type {
   AnyCell,
+  AnyCellWrapping,
   Cell,
   CreateCellFunction,
   Handler,

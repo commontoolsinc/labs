@@ -15,9 +15,9 @@
     behavior, i.e. each key is an `OpaqueRef` again. That's just for now, until
     the AST does a .key transformation under the hood.
   - [x] Update `CellLike` to be based on `BrandedCell` but allow nesting.
-  - [ ] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
+  - [x] `Opaque<T>` accepts `T` or any `CellLike<T>` at any nesting level
   - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
-    - [ ] "Accept any T where any sub part of T can be wrapped in one or more
+    - [x] "Accept any T where any sub part of T can be wrapped in one or more
       `BrandedCell`" (for inputs to node factories)
     - [ ] "Strip any `BrandedCell` from T and then wrap it in OpaqueRef<>" (for
       outputs of node factories, where T is the output of the inner function)
