@@ -7,7 +7,9 @@
     "./core/imports": "./src/core/imports.ts"
   },
   "imports": {
-    "typescript": "npm:typescript"
+    "typescript": "npm:typescript",
+    "@commontools/cell-brand": "../utils/src/typescript/cell-brand.ts",
+    "@commontools/utils": "../utils/src/index.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-env test/**/*.test.ts",

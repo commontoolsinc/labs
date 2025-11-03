@@ -1,4 +1,9 @@
 import ts from "typescript";
+import {
+  getCellBrand,
+  isCellBrand,
+  type CellBrand,
+} from "@commontools/cell-brand";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -40,7 +45,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
-    const wrapperInfo = this.getWrapperTypeInfo(type);
+    const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
     return wrapperInfo !== undefined;
   }
 
@@ -89,7 +94,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Handle Cell/Stream/OpaqueRef via node (direct or alias)
     if (resolvedWrapper && resolvedWrapper.kind !== "Default") {
       // Use the ACTUAL type from the usage site (which has concrete type arguments)
-      const wrapperInfo = this.getWrapperTypeInfo(type);
+      const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
       if (wrapperInfo) {
         // For choosing which node to pass to formatWrapperType:
         // - If original node has type arguments: use it (has concrete types from usage site)
@@ -131,7 +136,10 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Fallback: try to get wrapper type information from type structure
     // (for cases where we don't have a typeNode)
-    const wrapperInfo = this.getWrapperTypeInfo(type);
+          const wrapperInfo = this.getWrapperTypeInfo(
+            type,
+            context.typeChecker,
+          );
     if (wrapperInfo) {
       return this.formatWrapperType(
         wrapperInfo.typeRef,
@@ -256,7 +264,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Check if this type itself is the target wrapper
-    const wrapperInfo = this.getWrapperTypeInfo(type);
+    const wrapperInfo = this.getWrapperTypeInfo(type, checker);
     if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
       return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
     }
@@ -363,67 +371,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     return { baseType: baseMember };
   }
 
-  /**
-   * Check if a type has a CELL_BRAND property (is a cell type)
-   */
-  private isCellType(type: ts.Type): boolean {
-    return type.getProperty("CELL_BRAND") !== undefined;
-  }
-
-  /**
-   * Get the CELL_BRAND string value from a type, if it has one.
-   * Returns the brand string ("opaque", "cell", "stream", etc.) or undefined.
-   */
-  private getCellBrand(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): string | undefined {
-    const brandSymbol = type.getProperty("CELL_BRAND");
-    if (brandSymbol && brandSymbol.valueDeclaration) {
-      const brandType = checker.getTypeOfSymbolAtLocation(
-        brandSymbol,
-        brandSymbol.valueDeclaration,
-      );
-      if (brandType.flags & ts.TypeFlags.StringLiteral) {
-        return (brandType as ts.StringLiteralType).value;
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Check if a type is an OpaqueRef type by checking the CELL_BRAND property.
-   * All cell types (OpaqueCell, Cell, Stream) are intersections with CELL_BRAND,
-   * but only OpaqueCell has brand "opaque".
-   */
   private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
-    // Try CELL_BRAND first - most reliable method
-    const brand = this.getCellBrand(type, checker);
-    if (brand === "opaque") {
-      return true;
-    }
-
-    // Fallback: check by constituent interface names for backward compatibility
-    if (type.flags & ts.TypeFlags.Intersection) {
-      const intersectionType = type as ts.IntersectionType;
-      for (const constituent of intersectionType.types) {
-        if (constituent.flags & ts.TypeFlags.Object) {
-          const objectType = constituent as ts.ObjectType;
-          if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-            const typeRef = objectType as ts.TypeReference;
-            const name = typeRef.target?.symbol?.name;
-            // Check for OpaqueRef-specific interface names (old and new)
-            if (
-              name === "OpaqueRefMethods" || name === "OpaqueCell" ||
-              name === "IOpaqueCell"
-            ) {
-              return true;
-            }
-          }
-        }
-      }
-    }
-    return false;
+    return isCellBrand(type, checker, "opaque");
   }
 
   /**
@@ -466,50 +415,62 @@ export class CommonToolsFormatter implements TypeFormatter {
    * Handles both direct references and intersection types (e.g., OpaqueRef<"literal">)
    * Returns the wrapper kind and the TypeReference needed for formatting
    */
-  private getWrapperTypeInfo(
+  private brandToWrapperKind(brand: CellBrand): WrapperKind | undefined {
+    switch (brand) {
+      case "opaque":
+        return "OpaqueRef";
+      case "stream":
+        return "Stream";
+      case "cell":
+      case "comparable":
+      case "readonly":
+      case "writeonly":
+        return "Cell";
+      default:
+        return undefined;
+    }
+  }
+
+  private extractWrapperTypeReference(
     type: ts.Type,
-  ): { kind: WrapperKind; typeRef: ts.TypeReference } | undefined {
-    // Check direct object type reference
+    checker: ts.TypeChecker,
+  ): ts.TypeReference | undefined {
     if (type.flags & ts.TypeFlags.Object) {
       const objectType = type as ts.ObjectType;
       if (objectType.objectFlags & ts.ObjectFlags.Reference) {
         const typeRef = objectType as ts.TypeReference;
-        const name = typeRef.target?.symbol?.name;
-        if (
-          name === "Cell" || name === "Stream" || name === "OpaqueRef" ||
-          name === "OpaqueCell"
-        ) {
-          // OpaqueCell should be treated as OpaqueRef
-          const kind = name === "OpaqueCell" ? "OpaqueRef" : name;
-          return { kind, typeRef };
+        const typeArgs = typeRef.typeArguments;
+        if (typeArgs && typeArgs.length > 0) {
+          return typeRef;
         }
       }
     }
 
-    // OpaqueRef/OpaqueCell with literal type arguments becomes an intersection
-    // e.g., OpaqueRef<"initial"> expands to: OpaqueCell<"initial"> & IOpaqueCell<"initial">
-    // We need to detect these internal types to handle this case
     if (type.flags & ts.TypeFlags.Intersection) {
       const intersectionType = type as ts.IntersectionType;
       for (const constituent of intersectionType.types) {
-        if (constituent.flags & ts.TypeFlags.Object) {
-          const objectType = constituent as ts.ObjectType;
-          if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-            const typeRef = objectType as ts.TypeReference;
-            const name = typeRef.target?.symbol?.name;
-            // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell) internal types
-            if (
-              name === "OpaqueRefMethods" || name === "OpaqueCell" ||
-              name === "IOpaqueCell"
-            ) {
-              return { kind: "OpaqueRef", typeRef };
-            }
-          }
-        }
+        const ref = this.extractWrapperTypeReference(constituent, checker);
+        if (ref) return ref;
       }
     }
 
     return undefined;
+  }
+
+  private getWrapperTypeInfo(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): { kind: WrapperKind; typeRef: ts.TypeReference } | undefined {
+    const brand = getCellBrand(type, checker);
+    if (!brand) return undefined;
+
+    const kind = this.brandToWrapperKind(brand);
+    if (!kind) return undefined;
+
+    const typeRef = this.extractWrapperTypeReference(type, checker);
+    if (!typeRef) return undefined;
+
+    return { kind, typeRef };
   }
 
   private getTypeRefIdentifierName(

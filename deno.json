@@ -116,6 +116,7 @@
     "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "turndown": "npm:turndown@^7.1.2",
-    "zod": "npm:zod@^3.24.1"
+    "zod": "npm:zod@^3.24.1",
+    "@commontools/cell-brand": "./packages/utils/src/typescript/cell-brand.ts"
   }
 }

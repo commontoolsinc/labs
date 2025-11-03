@@ -1923,6 +1923,11 @@
           "npm:marked@4"
         ]
       },
+      "packages/utils": {
+        "dependencies": [
+          "npm:typescript@*"
+        ]
+      },
       "packages/vendor-astral": {
         "dependencies": [
           "jsr:@deno-library/progress@^1.5.1",
