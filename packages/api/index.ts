@@ -388,7 +388,17 @@ type MaybeCellWrapped<T> =
  */
 export type Opaque<T> =
   | T
+  // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
+  // to work if we just say BrandedCell<T>
   | OpaqueRef<T>
+  | AnyCell<T>
+  | BrandedCell<T>
+  | OpaqueCell<T>
+  | Cell<T>
+  | Stream<T>
+  | ComparableCell<T>
+  | ReadonlyCell<T>
+  | WriteonlyCell<T>
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
@@ -1273,14 +1283,16 @@ export type Props = {
 
 /** A child in a view can be one of a few things */
 export type RenderNode =
+  | InnerRenderNode
+  | BrandedCell<InnerRenderNode>
+  | Array<RenderNode>;
+
+type InnerRenderNode =
   | VNode
   | string
   | number
   | boolean
-  | Cell<RenderNode>
-  | undefined
-  | Opaque<any>
-  | RenderNode[];
+  | undefined;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

@@ -5,6 +5,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { handler, lift } from "../src/builder/module.ts";
 import { str } from "../src/builder/built-in.ts";
 import {
+  type AnyCellWrapping,
   type Frame,
   type JSONSchema,
   type OpaqueRef,
@@ -760,7 +761,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Type aliases to verify the schema inference
     type ExpectedInput = {
-      name: string;
+      name: Cell<string>;
       count?: number;
       options?: {
         enabled: boolean;
@@ -801,11 +802,11 @@ describe("Schema-to-TS Type Conversion", () => {
     type InferredInput = Parameters<typeof processRecipe>[0];
     type InferredOutput = ReturnType<typeof processRecipe>;
 
-    expectType<ExpectedInput, Schema<typeof inputSchema>>();
+    expectType<AnyCellWrapping<ExpectedInput>, Schema<typeof inputSchema>>();
     expectType<ExpectedOutput, Schema<typeof outputSchema>>();
 
     // Verify that the recipe function parameter matches our expected input type
-    expectType<ExpectedInput, InferredInput>();
+    expectType<InferredInput, ExpectedInput>();
 
     // The expected output is the output schema wrapped in a single OpaqueRef.
     type DeepOpaqueOutput = OpaqueRef<Schema<typeof outputSchema>>;
