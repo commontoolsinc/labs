@@ -620,11 +620,11 @@ export default recipe(
               <div>
                 <label>
                   Calendars
-                  <common-button
+                  <ct-button
                     onClick={getCalendars({ auth, calendars })}
                   >
                     Fetch Calendar List
-                  </common-button>
+                  </ct-button>
                 </label>
                 <table>
                   <thead>
@@ -659,7 +659,7 @@ export default recipe(
                   })}
                 />
               </div>
-              <common-button
+              <ct-button
                 onClick={calendarUpdater({
                   events,
                   auth,
@@ -667,12 +667,12 @@ export default recipe(
                 })}
               >
                 Fetch Events
-              </common-button>
-              <common-button
+              </ct-button>
+              <ct-button
                 onClick={clearEvents({ events })}
               >
                 Clear Events
-              </common-button>
+              </ct-button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth

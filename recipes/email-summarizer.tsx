@@ -292,7 +292,7 @@ export default recipe(
       // Call LLM to generate summary
       const summaryResult = llm({
         system: systemPrompt,
-        messages: [userPrompt],
+        messages: [{ role: "user", content: userPrompt }],
       });
 
       // Return a simple object that references the original email
@@ -348,9 +348,9 @@ export default recipe(
               </div>
 
               <div>
-                <common-checkbox
+                <ct-checkbox
                   checked={settings.includeTags}
-                  oncommon-checked={includeTagsHandler}
+                  onct-change={includeTagsHandler}
                 />
                 <label>Include Tags</label>
               </div>

@@ -3,18 +3,18 @@
 // deno-lint-ignore-file ban-types
 import type { Cell, CellLike, Props, RenderNode, VNode } from "commontools";
 
+/**
+ * Used to represent DOM API's where users can either pass
+ * true or false as a boolean or as its equivalent strings.
+ */
+type Booleanish = boolean | "true" | "false";
+
 // DOM-ish types for the CT runtime.
 // The DOM is not directly available within the runtime, but the JSX
 // produced must be typed. This defines DOM types like React or Preact,
 // with a subset of supported features, and cannot rely on globals
 // existing like `HTMLElement` from TypeScript's `dom` lib.
 declare namespace CTDOM {
-  /**
-   * Used to represent DOM API's where users can either pass
-   * true or false as a boolean or as its equivalent strings.
-   */
-  type Booleanish = boolean | "true" | "false";
-
   /**
    * @see {@link https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/crossorigin MDN}
    */
@@ -1764,6 +1764,7 @@ declare namespace CTDOM {
   export interface HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T> {
     // CT extensions
     "onClick"?: CellLike<HandlerEvent<unknown>>;
+    "onChange"?: CellLike<HandlerEvent<unknown>>;
     "children"?: RenderNode | undefined;
     // Allow React-isms
     "key"?: number;
@@ -1794,7 +1795,7 @@ declare namespace CTDOM {
       | "search"
       | "send"
       | undefined;
-    hidden?: boolean | undefined;
+    hidden?: Booleanish; // CT addition to be compatible with our component usage of `hidden`
     id?: string | undefined;
     lang?: string | undefined;
     nonce?: string | undefined;
@@ -2854,6 +2855,7 @@ interface CTHeadingElement extends CTHTMLElement {}
 interface CTCollapsibleElement extends CTHTMLElement {}
 interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
+interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
@@ -2881,6 +2883,28 @@ interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CTFragmentElement extends CTHTMLElement {}
 interface CTUpdaterElement extends CTHTMLElement {}
 interface CTGoogleOAuthElement extends CTHTMLElement {}
+interface CTCanvasElement extends CTHTMLElement {}
+interface CTDraggableElement extends CTHTMLElement {}
+interface CTPlaidLinkElement extends CTHTMLElement {}
+
+interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
+  "key"?: number;
+  "x"?: CellLike<HandlerEvent<any>>;
+  "y"?: CellLike<HandlerEvent<any>>;
+  "hidden"?: Booleanish;
+  "onpositionchange"?: CellLike<HandlerEvent<any>>;
+}
+
+interface CTCanvasAttributes<T> extends CTHTMLAttributes<T> {
+  "width"?: string | number;
+  "height"?: string | number;
+  "onct-canvas-click"?: CellLike<HandlerEvent<any>>;
+}
+
+interface CTPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "$auth"?: any;
+  "products"?: string[];
+}
 
 interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
@@ -2990,9 +3014,11 @@ interface CTMessageInputAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "name"?: string;
+  "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
   "onmessagesend"?: CellLike<HandlerEvent<{ message: string }>>;
+  "inline"?: Booleanish;
 }
 
 interface CTScrollAttributes<T> extends CTHTMLAttributes<T> {
@@ -3025,9 +3051,11 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
     | "secondary"
     | "ghost"
     | "link"
+    | "danger"
     | "pill";
   "size"?: "default" | "sm" | "lg" | "icon";
   "disabled"?: boolean;
+  "outline"?: boolean;
   "type"?: "button" | "submit" | "reset";
 }
 
@@ -3099,7 +3127,7 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "validationPattern"?: string;
   "showValidation"?: boolean;
   "timingStrategy"?: string;
-  "timingDelay"?: number;
+  "timingDelay"?: number | string;
   "onct-change"?: any;
   "onct-focus"?: any;
   "onct-blur"?: any;
@@ -3122,7 +3150,7 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "indeterminate"?: boolean;
   "name"?: string;
   "value"?: string;
-  "onct-change"?: any;
+  "onct-change"?: CellLike<HandlerEvent<any>>;
 }
 
 interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
@@ -3166,11 +3194,17 @@ interface CTCollapsibleAttributes<T> extends CTHTMLAttributes<T> {
 interface CTThemeAttributes<T> extends CTHTMLAttributes<T> {
   theme?: CTThemeInput;
 }
+interface CTCodeEditorLegacyAttributes<T> extends CTHTMLAttributes<T> {
+  "source"?: string;
+  "language"?: `text/${string}`;
+  "onChange"?: any;
+  "errors"?: any[];
+}
 
 interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "$value"?: CellLike<string>;
   "value"?: string;
-  "language"?: string;
+  "language"?: `text/${string}`;
   "disabled"?: boolean;
   "readonly"?: boolean;
   "placeholder"?: string;
@@ -3776,6 +3810,30 @@ declare global {
       "common-google-oauth": CTDOM.DetailedHTMLProps<
         CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
         CTGoogleOAuthElement
+      >;
+      "ct-canvas": CTDOM.DetailedHTMLProps<
+        CTCanvasAttributes<CTCanvasElement>,
+        CTCanvasElement
+      >;
+      "ct-draggable": CTDOM.DetailedHTMLProps<
+        CTDraggableAttributes<CTDraggableElement>,
+        CTDraggableElement
+      >;
+      "ct-alert": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CTHTMLElement>,
+        CTHTMLElement
+      >;
+      "os-container": CTDOM.DetailedHTMLProps<
+        CTHTMLAttributes<CTHTMLElement>,
+        CTHTMLElement
+      >;
+      "common-code-editor": CTDOM.DetailedHTMLProps<
+        CTCodeEditorLegacyAttributes<CTCodeEditorLegacyElement>,
+        CTCodeEditorLegacyElement
+      >;
+      "common-plaid-link": CTDOM.DetailedHTMLProps<
+        CTPlaidLinkAttributes<CTPlaidLinkElement>,
+        CTPlaidLinkElement
       >;
       // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<

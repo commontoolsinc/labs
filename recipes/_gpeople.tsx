@@ -1290,16 +1290,16 @@ export default recipe(
                   })}
                 />
               </div>
-              <common-button
+              <ct-button
                 onClick={peopleUpdater({ contacts, auth, settings })}
               >
                 Fetch Contacts
-              </common-button>
-              <common-button
+              </ct-button>
+              <ct-button
                 onClick={clearContacts({ contacts })}
               >
                 Clear Contacts
-              </common-button>
+              </ct-button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth

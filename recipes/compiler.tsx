@@ -64,11 +64,11 @@ export default recipe<Input>(
           {ifElse(
             error,
             <b>fix the errors</b>,
-            <common-button
+            <ct-button
               onClick={visit({ code })}
             >
               Navigate To Charm
-            </common-button>,
+            </ct-button>,
           )}
         </div>
       ),
