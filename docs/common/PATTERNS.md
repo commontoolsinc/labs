@@ -789,6 +789,48 @@ const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
 
 **Reference:** See `packages/patterns/chatbot-list-view.tsx` for the canonical implementation, specifically the `storeCharm` lift and `createChatRecipe` handler. Full details in `HANDLERS.md` under "Storing Pattern Instances in Cell Arrays".
 
+#### 6. Not Including All Cells in Derive Dependencies
+
+```typescript
+// ❌ WRONG - items is used in callback but not in dependencies
+{derive(itemCount, (count) =>
+  count === 0 ? (
+    <div>No items yet</div>
+  ) : (
+    <div>
+      {items.map((item) => <div>{item.title}</div>)}
+    </div>
+  )
+)}
+// Error: Shadow ref alias with parent cell not found in current frame
+
+// ✅ CORRECT - Include all cells referenced in the callback
+{derive([itemCount, items] as const, ([count, itemsList]: [number, Item[]]) =>
+  count === 0 ? (
+    <div>No items yet</div>
+  ) : (
+    <div>
+      {itemsList.map((item) => <div>{item.title}</div>)}
+    </div>
+  )
+)}
+
+// ✅ ALTERNATIVE - Use direct ternary if you don't need derive's reactivity
+{itemCount === 0 ? (
+  <div>No items yet</div>
+) : (
+  <div>
+    {items.map((item) => <div>{item.title}</div>)}
+  </div>
+)}
+```
+
+**Why this is a pitfall:** When a derive callback closes over cells (references them from the outer scope), those cells must be included in the dependency array. Otherwise, you'll get cryptic "Shadow ref" errors.
+
+**Rule:** If your derive callback uses any cells, include them all in the dependency array: `derive([cell1, cell2, ...], ([val1, val2, ...]) => ...)`.
+
+**Note:** Values inside derive callbacks are read-only. If you need bidirectional binding (like `$checked`), use cells directly outside the derive instead.
+
 ## Testing Patterns and Development Workflow
 
 ### Quick Development Workflow

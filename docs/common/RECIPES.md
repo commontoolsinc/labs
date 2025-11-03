@@ -432,11 +432,11 @@ logic.
    });
    ```
 
-7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays with bidirectional binding, you **must** add the `OpaqueRef<T>` type annotation to make it type-check correctly:
+7. **Type Array Map Parameters When Needed**: When mapping over cell arrays, TypeScript usually infers types correctly, but you may need to add type annotations in some cases:
 
    ```typescript
-   // ✅ CORRECT - Type as OpaqueRef for bidirectional binding
-   {items.map((item: OpaqueRef<ShoppingItem>) => (
+   // ✅ USUALLY WORKS - Type inference handles most cases
+   {items.map((item) => (
      <div>
        <ct-checkbox $checked={item.done}>
          <span>{item.title}</span>
@@ -445,13 +445,22 @@ logic.
      </div>
    ))}
 
-   // ❌ INCORRECT - Missing type leads to type errors with $-props
-   {items.map((item) => (
-     <ct-checkbox $checked={item.done} /> // Type error!
+   // ✅ ADD TYPE IF NEEDED - For complex scenarios or type errors
+   {items.map((item: OpaqueRef<ShoppingItem>) => (
+     <ct-checkbox $checked={item.done}>
+       <span>{item.title}</span>
+     </ct-checkbox>
    ))}
    ```
 
-   **Why is this needed?** When you use `.map()` on a Cell array, TypeScript cannot always infer the correct type for bidirectional binding properties. The `OpaqueRef<T>` annotation tells TypeScript that each item is a cell-like reference that supports property access and bidirectional binding.
+   **When to add types:**
+   - If you see TypeScript errors with bidirectional binding (`$-props`)
+   - When working with complex nested structures
+   - When TypeScript cannot infer the correct type
+
+   **When to skip types:**
+   - Most simple cases work fine without explicit types
+   - The framework usually handles type inference correctly
 
 8. **Understand When Conditionals Work in JSX**: Ternary operators work fine in JSX **attributes**, but you need `ifElse()` for conditional **rendering** and **data transformations**:
 
@@ -534,6 +543,43 @@ logic.
    **When to use lift:** When you need a reusable transformation function that you'll call with different inputs.
 
    **When to use derive:** When you're computing a single value from specific cells.
+
+   **⚠️ Include All Closed-Over Cells in Derive Dependencies**: When your derive callback references cells, you must include them in the dependency array:
+
+   ```typescript
+   // ❌ INCORRECT - items is closed over but not in dependencies
+   {derive(itemCount, (count) =>
+     count === 0 ? (
+       <div>No items yet</div>
+     ) : (
+       <div>
+         {items.map((item) => <div>{item.title}</div>)}
+       </div>
+     )
+   )}
+
+   // ✅ CORRECT - Include all cells used in the callback
+   {derive([itemCount, items] as const, ([count, itemsList]: [number, Item[]]) =>
+     count === 0 ? (
+       <div>No items yet</div>
+     ) : (
+       <div>
+         {itemsList.map((item) => <div>{item.title}</div>)}
+       </div>
+     )
+   )}
+
+   // Alternative: Use ternary directly if you don't need reactivity
+   {itemCount === 0 ? (
+     <div>No items yet</div>
+   ) : (
+     <div>
+       {items.map((item) => <div>{item.title}</div>)}
+     </div>
+   )}
+   ```
+
+   **Note**: Items inside derive callbacks are read-only. For bidirectional binding (like `$checked`), use the cells directly outside the derive, or structure your code to avoid needing mutable access inside the callback.
 
 10. **Access Properties Directly on Derived Objects**: You can access properties on derived objects without additional helpers:
 
