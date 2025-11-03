@@ -29,6 +29,9 @@ export default recipe({
                     element: {
                         type: "number"
                     },
+                    index: {
+                        type: "number"
+                    },
                     params: {
                         type: "object",
                         properties: {
@@ -41,7 +44,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: __ct_element, params: { element } }) => (<span>{element}</span>)), {
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: __ct_element, index: index, params: { element } }) => (<span key={index}>{element}</span>)), {
                 element: element
             })}
       </div>),

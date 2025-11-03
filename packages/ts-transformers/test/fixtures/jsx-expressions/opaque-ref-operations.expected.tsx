@@ -6,9 +6,9 @@ export default recipe("OpaqueRefOperations", (_state) => {
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        <p>Next: {__ctHelpers.derive(count, ({ count }) => count + 1)}</p>
-        <p>Double: {__ctHelpers.derive(count, ({ count }) => count * 2)}</p>
-        <p>Total: {__ctHelpers.derive(price, ({ price }) => price * 1.1)}</p>
+        <p>Next: {__ctHelpers.derive(count, (count) => count + 1)}</p>
+        <p>Double: {__ctHelpers.derive(count, (count) => count * 2)}</p>
+        <p>Total: {__ctHelpers.derive(price, (price) => price * 1.1)}</p>
       </div>),
     };
 });

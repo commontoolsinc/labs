@@ -204,16 +204,6 @@ function createDeriveArgs(
     }
   }
 
-  if (properties.length === 1 && fallbackEntries.length === 0) {
-    const first = captureTree.values().next();
-    if (!first.done) {
-      const node = first.value;
-      if (node.expression && node.properties.size === 0) {
-        return [node.expression];
-      }
-    }
-  }
-
   return [
     factory.createObjectLiteralExpression(properties, properties.length > 1),
   ];

@@ -13,13 +13,20 @@ export interface UniqueIdentifierOptions extends SanitizeIdentifierOptions {
 
 export function isSafeIdentifierText(name: string): boolean {
   if (name.length === 0) return false;
-  const first = name.codePointAt(0)!;
-  if (!ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)) {
+  const codePoints = Array.from(name);
+  const first = codePoints[0]?.codePointAt(0);
+  if (
+    first === undefined ||
+    !ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+  ) {
     return false;
   }
-  for (let i = 1; i < name.length; i++) {
-    const code = name.codePointAt(i)!;
-    if (!ts.isIdentifierPart(code, ts.ScriptTarget.ESNext)) {
+  for (const codePoint of codePoints.slice(1)) {
+    const code = codePoint.codePointAt(0);
+    if (
+      code === undefined ||
+      !ts.isIdentifierPart(code, ts.ScriptTarget.ESNext)
+    ) {
       return false;
     }
   }
@@ -53,7 +60,11 @@ export function sanitizeIdentifierCandidate(
       return DEFAULT_FALLBACK;
     }
 
-    if (!ts.isIdentifierStart(text.charCodeAt(0), ts.ScriptTarget.ESNext)) {
+    const first = text.codePointAt(0);
+    if (
+      first === undefined ||
+      !ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+    ) {
       text = `${DEFAULT_FALLBACK}${text}`;
     }
 
@@ -79,7 +90,11 @@ export function sanitizeIdentifierCandidate(
 
   const ensureIdentifierStart = (text: string): string => {
     if (text.length === 0) return fallback;
-    if (ts.isIdentifierStart(text.charCodeAt(0), ts.ScriptTarget.ESNext)) {
+    const first = text.codePointAt(0);
+    if (
+      first !== undefined &&
+      ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+    ) {
       return text;
     }
     return `${fallback}${text}`;
