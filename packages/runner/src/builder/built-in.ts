@@ -199,9 +199,7 @@ export const patternTool = (<
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
 ): OpaqueRef<Omit<T, keyof E>> => {
-  const pattern = isRecipe(fnOrRecipe)
-    ? fnOrRecipe
-    : recipe(fnOrRecipe);
+  const pattern = isRecipe(fnOrRecipe) ? fnOrRecipe : recipe(fnOrRecipe);
 
   return {
     pattern,

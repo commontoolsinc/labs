@@ -204,7 +204,10 @@ export class SchemaInjectionTransformer extends Transformer {
         if (argsArray.length === 1) {
           // Single argument - must be the function
           recipeFunction = argsArray[0];
-        } else if (argsArray.length === 2 && argsArray[0] && ts.isStringLiteral(argsArray[0])) {
+        } else if (
+          argsArray.length === 2 && argsArray[0] &&
+          ts.isStringLiteral(argsArray[0])
+        ) {
           // Two arguments with first being a string - second is the function
           recipeFunction = argsArray[1];
         }
@@ -220,7 +223,10 @@ export class SchemaInjectionTransformer extends Transformer {
 
             // Only transform if there's an explicit type annotation
             if (inputParam?.type) {
-              const toSchemaInput = createToSchemaCall(context, inputParam.type);
+              const toSchemaInput = createToSchemaCall(
+                context,
+                inputParam.type,
+              );
 
               const updated = factory.createCallExpression(
                 node.expression,

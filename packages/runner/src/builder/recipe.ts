@@ -313,7 +313,9 @@ function factoryFromRecipe<T, R>(
 
   let argumentSchema: JSONSchema;
 
-  if (typeof argumentSchemaArg === "string" || argumentSchemaArg === undefined) {
+  if (
+    typeof argumentSchemaArg === "string" || argumentSchemaArg === undefined
+  ) {
     // Create a writable schema from defaults
     const writableSchema: JSONSchemaMutable = createJsonSchema(defaults, true);
 
