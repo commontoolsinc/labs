@@ -493,3 +493,45 @@ describe("recipe with mixed ifc properties", () => {
   // in such a way that it does not end up classified. For now, I've decided
   // not to do this, since I'm not confident enough that code can't get out.
 });
+
+describe("recipe with function-only syntax (no schema)", () => {
+  it("creates a recipe with just a function", () => {
+    const doubleRecipe = recipe((input: { x: any }) => {
+      const double = lift<number>((x) => x * 2);
+      return { double: double(input.x) };
+    });
+    expect(isRecipe(doubleRecipe)).toBe(true);
+  });
+
+  it("infers schema from default values", () => {
+    const doubleRecipe = recipe((input: { x: any }) => {
+      input.x.setDefault(42);
+      const double = lift<number>((x) => x * 2);
+      return { double: double(input.x) };
+    });
+
+    expect(isRecipe(doubleRecipe)).toBe(true);
+    expect(doubleRecipe.argumentSchema).toMatchObject({
+      type: "object",
+      properties: {
+        x: { type: "integer", default: 42 },
+      },
+    });
+    // Should not have a description field
+    expect(doubleRecipe.argumentSchema).not.toHaveProperty("description");
+  });
+
+  it("creates nodes correctly with function-only syntax", () => {
+    const doubleRecipe = recipe((input: { x: any }) => {
+      input.x.setDefault(1);
+      const double = lift<number>((x) => x * 2);
+      return { double: double(double(input.x)) };
+    });
+
+    const { nodes } = doubleRecipe;
+    expect(nodes.length).toBe(2);
+    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
+      "javascript",
+    );
+  });
+});
