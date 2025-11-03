@@ -49,7 +49,7 @@ export function sanitizeIdentifierCandidate(
 ): string {
   const fallbackValue = options.fallback ?? DEFAULT_FALLBACK;
 
-  const normaliseFallback = (value: string): string => {
+  const normalizeFallback = (value: string): string => {
     let text = value;
     if (options.trimLeadingUnderscores) {
       text = text.replace(/^_+/, "");
@@ -75,7 +75,7 @@ export function sanitizeIdentifierCandidate(
     return text;
   };
 
-  const fallback = normaliseFallback(fallbackValue);
+  const fallback = normalizeFallback(fallbackValue);
 
   let candidate = raw;
   if (options.trimLeadingUnderscores) {

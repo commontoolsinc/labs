@@ -923,7 +923,7 @@ function createHandlerCallback(
   const stateParam = callback.parameters[1];
   const extraParams = callback.parameters.slice(2);
 
-  const normaliseParameter = (
+  const normalizeParameter = (
     original: ts.ParameterDeclaration,
     name: ts.BindingName,
   ): ts.ParameterDeclaration =>
@@ -937,7 +937,7 @@ function createHandlerCallback(
     );
 
   const eventParameter = eventParam
-    ? normaliseParameter(
+    ? normalizeParameter(
       eventParam,
       normalizeBindingName(eventParam.name, factory, usedBindingNames),
     )
@@ -1000,7 +1000,7 @@ function createHandlerCallback(
   }
 
   const paramsParameter = stateParam
-    ? normaliseParameter(stateParam, paramsBindingName)
+    ? normalizeParameter(stateParam, paramsBindingName)
     : factory.createParameterDeclaration(
       undefined,
       undefined,
@@ -1011,7 +1011,7 @@ function createHandlerCallback(
     );
 
   const additionalParameters = extraParams.map((param) =>
-    normaliseParameter(
+    normalizeParameter(
       param,
       normalizeBindingName(param.name, factory, usedBindingNames),
     )
