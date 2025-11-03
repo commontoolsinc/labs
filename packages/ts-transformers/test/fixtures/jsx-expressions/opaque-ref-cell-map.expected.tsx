@@ -100,12 +100,12 @@ export default recipe("Charms Launcher", () => {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(__ctHelpers.derive(typedCellRef, (typedCellRef) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        {ifElse(__ctHelpers.derive({ typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.map((charm: any, index: number) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__ctHelpers.derive(index, (index) => index + 1)}
+                  Go to Charm {__ctHelpers.derive({ index: index }, ({ index }) => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive(index, (index) => index + 1)}: {__ctHelpers.derive(charm, (charm) => charm[NAME] || "Unnamed")}</span>
+                <span>Charm {__ctHelpers.derive({ index: index }, ({ index }) => index + 1)}: {__ctHelpers.derive({ charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
               </li>))}
           </ul>)}
 

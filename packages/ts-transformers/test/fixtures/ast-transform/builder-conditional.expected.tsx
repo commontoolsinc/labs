@@ -21,7 +21,7 @@ export default recipe({
     return {
         [NAME]: state.label,
         [UI]: (<section>
-        {__ctHelpers.ifElse(__ctHelpers.derive(state, (state) => state && state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
+        {__ctHelpers.ifElse(__ctHelpers.derive({ state: state }, ({ state }) => state && state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };
 });
