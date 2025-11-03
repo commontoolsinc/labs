@@ -268,6 +268,9 @@ function loadFactsForDoc(
         address: fact.address,
         value: (fact.value as Immutable<JSONObject>),
       };
+      if (fact.address.path.length > 0) {
+        throw new Error("Invalid fact.address.path (must be empty)");
+      }
       const [newDoc, newSelector] = getAtPath(
         tx,
         factValue,

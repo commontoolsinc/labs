@@ -358,39 +358,48 @@ export interface IObjectCreator<T> {
   // functions or actualy create the cell.
   createObject(
     link: NormalizedFullLink,
-    value: T[] | Record<string, T> | T,
+    value: T[] | Record<string, T> | T | undefined,
   ): T;
 }
 
-class StandardObjectCreator<T> implements IObjectCreator<T> {
+class StandardObjectCreator implements IObjectCreator<JSONValue> {
   addOptionalProperty(
     obj: Record<string, unknown>,
     key: string,
-    value: T,
+    value: JSONValue,
   ) {
     obj[key] = value;
   }
   applyDefault(
     _link: NormalizedFullLink,
-    defaultValue: T,
-  ): T {
+    defaultValue: JSONValue,
+  ): JSONValue {
     return defaultValue;
   }
   createObject(
     _link: NormalizedFullLink,
-    value: T[] | Record<string, T> | T,
-  ): T {
-    return value as T;
+    value: JSONValue[] | Record<string, JSONValue> | JSONValue | undefined,
+  ): JSONValue {
+    return value === undefined ? null : value;
   }
 }
 
+/**
+ * Convert an IMemoryAddress to a NormalizedFullLink.
+ *
+ * The address must start with "value", or we won't be able to generate this link.
+ */
 function getNormalizedLink(
   address: IMemoryAddress,
   space: MemorySpace,
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined,
 ): NormalizedFullLink {
-  return { ...address, path: address.path.slice(1), space, schema, rootSchema };
+  if (address.path.length === 0 || address.path[0] !== "value") {
+    throw new Error("Unable to create link to non-value address");
+  }
+  const { id, path, type } = address;
+  return { id, type, path: path.slice(1), space, schema, rootSchema };
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -401,10 +410,11 @@ export abstract class BaseObjectTraverser<
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
-    public objectCreator: IObjectCreator<V> = new StandardObjectCreator<V>(),
-    public recurseCells = true,
+    public objectCreator: IObjectCreator<JSONValue> =
+      new StandardObjectCreator(),
+    protected traverseCells = true,
   ) {}
-  abstract traverse(doc: IAttestation): V | undefined;
+  abstract traverse(doc: IAttestation): V | JSONValue | undefined;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -426,20 +436,20 @@ export abstract class BaseObjectTraverser<
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
     defaultValue?: JSONValue,
-  ): V {
+  ): JSONValue {
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return null
       return defaultValue != undefined
         ? this.objectCreator.applyDefault(
           { ...doc.address, space },
-          defaultValue as V,
+          defaultValue,
         )!
-        : null as V;
+        : null;
     } else if (isPrimitive(doc.value)) {
-      return doc.value as V;
+      return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: V[] = [];
+      const newValue: JSONValue[] = [];
       using t = tracker.include(doc.value, SchemaAll, newValue, doc);
       if (t === null) {
         return tracker.getExisting(doc.value, SchemaAll);
@@ -459,7 +469,7 @@ export abstract class BaseObjectTraverser<
           schemaTracker,
           isObject(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
-            ? defaultValue[index] as JSONValue
+            ? defaultValue[index]
             : undefined,
         )!
       );
@@ -475,6 +485,8 @@ export abstract class BaseObjectTraverser<
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
+        // FIXME: A cell link with a schema needs to go back into traverseSchema behavior
+        console.log("Encountered cell link in traverseDAG", doc.value);
         const [newDoc, _] = getAtPath(
           this.tx,
           doc,
@@ -486,7 +498,7 @@ export abstract class BaseObjectTraverser<
           DefaultSchemaSelector,
         );
         if (newDoc.value === undefined) {
-          return null as V;
+          return null;
         }
         return this.traverseDAG(
           newDoc,
@@ -515,7 +527,7 @@ export abstract class BaseObjectTraverser<
             tracker,
             schemaTracker,
             isObject(defaultValue) && !Array.isArray(defaultValue)
-              ? (defaultValue as JSONObject)[k] as JSONValue
+              ? (defaultValue as JSONObject)[k]
               : undefined,
           )!,
         ]);
@@ -533,7 +545,7 @@ export abstract class BaseObjectTraverser<
       }
     } else {
       logger.error(() => ["Encountered unexpected object: ", doc.value]);
-      return null as V;
+      return null;
     }
   }
 }
@@ -657,6 +669,7 @@ function followPointer(
   selector?: SchemaPathSelector,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
+  console.log("Called FP", doc.value);
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceAddress = (link.id !== undefined)
@@ -677,6 +690,23 @@ function followPointer(
       selector,
       targetPath,
       cfc,
+    );
+    const linkSchemaContext = link.schema !== undefined
+      ? { schema: link.schema, rootSchema: link.rootSchema ?? link.schema }
+      : undefined;
+    console.log("selector.schemaContext", selector.schemaContext);
+    // When traversing links, we combine the schema
+    selector.schemaContext = combineSchemaContext(
+      selector.schemaContext,
+      linkSchemaContext,
+    );
+    console.log(
+      "selector.schemaContext",
+      selector.schemaContext,
+      "linkSchemaContext",
+      linkSchemaContext,
+      "doc.value",
+      doc.value,
     );
   }
   using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
@@ -784,6 +814,195 @@ export function loadSource(
     schemaTracker.add(`${address.id}/${address.type}`, MinimalSchemaSelector);
   }
   loadSource(tx, entry, space, cycleCheck, schemaTracker);
+}
+
+// With unified traversal code, we don't need to worry about the server
+// sending a different set of files than the client needs, so we could
+// tweak this policy, but we do want to be able to restrict what we have
+// to send to the client, and what the client needs to watch.
+// We could do this by forking our state, then doing an allOf with each
+// schema. That works well for standards, but I'd have to figure out how
+// to combine the resulting objects into one.
+// NOTE: I forgot about https://github.com/commontoolsinc/labs/pull/1868,
+// which is a more sophisticated approach.
+function combineSchemaContext(
+  parentSchemaContext: SchemaContext | undefined,
+  linkSchemaContext: SchemaContext | undefined,
+): SchemaContext | undefined {
+  if (parentSchemaContext === undefined) {
+    return linkSchemaContext;
+  } else if (linkSchemaContext === undefined) {
+    return parentSchemaContext;
+  } else if (ContextualFlowControl.isTrueSchema(parentSchemaContext.schema)) {
+    return linkSchemaContext;
+  } else if (ContextualFlowControl.isTrueSchema(linkSchemaContext.schema)) {
+    return parentSchemaContext;
+  }
+  const schema = combineSchema(
+    parentSchemaContext.schema,
+    linkSchemaContext.schema,
+  );
+  return { schema: schema, rootSchema: schema };
+}
+
+// Merge any schema flags like asCell or asStream from flagSchema into schema.
+function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
+  if (isObject(flagSchema)) {
+    // we want to preserve asCell and asStream
+    const { asCell, asStream } = flagSchema;
+    if (asCell || asStream) {
+      if (isObject(schema)) {
+        return {
+          ...schema,
+          ...(schema.asCell ? { asCell: schema.asCell } : {}),
+          ...(schema.asStream ? { asStream: schema.asStream } : {}),
+        };
+      } else if (schema === true) {
+        return {
+          ...(asCell ? { asCell } : {}),
+          ...(asStream ? { asStream } : {}),
+        };
+      }
+    }
+  }
+  return schema;
+}
+
+/**
+ * Generate a schema that represents the pseudo-intersection of two other
+ * scheams.
+ *
+ * This lets us combine the schema that we entered this doc with a schema
+ * encounterd within a link in the doc.
+ *
+ * We could handle this with an allOf (implemented with state snapshots),
+ * and be JSONSchema compliant, but that leaves an unclear strategy for
+ * merging the resulting objects.
+ *
+ * There's a lot of things you can express with JSONSchema that aren't
+ * going to be properly handled here, but make a best effort.
+ *
+ * We don't handle $refs in the schema, so it's quite possible to end up with
+ * $ref links that can't be resolved.
+ *
+ * @param parentSchema
+ * @param linkSchema
+ * @returns
+ */
+export function combineSchema(
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): JSONSchema {
+  if (ContextualFlowControl.isTrueSchema(parentSchema)) {
+    return mergeSchemaFlags(parentSchema, linkSchema);
+  } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
+    return mergeSchemaFlags(linkSchema, parentSchema);
+  } else if (
+    (isObject(linkSchema) && linkSchema.type === "object") &&
+    (isObject(parentSchema) && parentSchema.type === "object")
+  ) {
+    // When combining these object types, if they both have properties,
+    // we only want to include any properties that they both have.
+    // If only one has properties, we will use that set
+    // If neither have properties, since that enables all, we will leave
+    // that alone.
+    // Our additionalProperties default is based on whether we we have defined
+    // properties
+    // If one schema has a property defined, and another schema has an
+    // additionalProperties that covers that, we use the defined property
+    // and don't pick up flags like asCell from additionalProperties.
+    const parentAdditionalProperties = parentSchema.additionalProperties ??
+      (parentSchema.properties === undefined);
+    const linkAdditionalProperties = linkSchema.additionalProperties ??
+      (linkSchema.properties === undefined);
+    if (
+      parentSchema.properties === undefined &&
+      ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
+    ) {
+      if (linkSchema.additionalProperties !== undefined) {
+        return {
+          ...linkSchema,
+          additionalProperties: mergeSchemaFlags(
+            parentAdditionalProperties,
+            linkSchema.additionalProperties,
+          ),
+        };
+      }
+      return linkSchema;
+    } else if (
+      linkSchema.properties === undefined &&
+      ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
+    ) {
+      if (parentSchema.additionalProperties !== undefined) {
+        return {
+          ...parentSchema,
+          additionalProperties: mergeSchemaFlags(
+            linkAdditionalProperties,
+            parentSchema.additionalProperties,
+          ),
+        };
+      }
+      return parentSchema;
+    }
+    // Both objects have properties
+    const mergedSchemaProperties: Record<string, JSONSchema> = {};
+    if (linkSchema.properties !== undefined) {
+      for (const [key, value] of Object.entries(linkSchema.properties)) {
+        if (
+          parentSchema.properties !== undefined &&
+          parentSchema.properties[key] !== undefined
+        ) {
+          mergedSchemaProperties[key] = combineSchema(
+            parentSchema.properties[key],
+            value,
+          );
+        } else {
+          mergedSchemaProperties[key] = combineSchema(
+            parentAdditionalProperties,
+            value,
+          );
+        }
+      }
+    }
+    if (parentSchema.properties !== undefined) {
+      for (const [key, value] of Object.entries(parentSchema.properties)) {
+        if (
+          linkSchema.properties !== undefined &&
+          linkSchema.properties[key] !== undefined
+        ) {
+          continue; // already handled
+        } else {
+          mergedSchemaProperties[key] = combineSchema(
+            value,
+            linkAdditionalProperties,
+          );
+        }
+      }
+    }
+    const { type: _pType, properties: _pProps, ...parentRest } = parentSchema;
+    const { type: _lType, properties: _lProps, ...linkRest } = linkSchema;
+    return {
+      type: "object",
+      properties: mergedSchemaProperties,
+      ...parentRest,
+      ...linkRest,
+    };
+  } else if (
+    (isObject(linkSchema) && linkSchema.type === "array") &&
+    (isObject(parentSchema) && parentSchema.type === "array")
+  ) {
+    if (parentSchema.items === undefined) {
+      return linkSchema;
+    } else if (linkSchema.items === undefined) {
+      return parentSchema;
+    }
+    const mergedSchemaItems = combineSchema(
+      parentSchema.items,
+      linkSchema.items,
+    );
+    return { type: "array", items: mergedSchemaItems };
+  }
+  return linkSchema;
 }
 
 // Load the linked recipe from the doc ()
@@ -912,8 +1131,8 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
-export class SchemaObjectTraverser<T extends JSONValue>
-  extends BaseObjectTraverser<T> {
+export class SchemaObjectTraverser<V extends JSONValue>
+  extends BaseObjectTraverser<V> {
   constructor(
     tx: IExtendedStorageTransaction,
     private selector: SchemaPathSelector,
@@ -926,13 +1145,15 @@ export class SchemaObjectTraverser<T extends JSONValue>
       string,
       SchemaPathSelector
     >(deepEqual),
+    objectCreator?: IObjectCreator<V>,
+    traverseCells?: boolean,
   ) {
-    super(tx);
+    super(tx, undefined, objectCreator, traverseCells);
   }
 
   override traverse(
     doc: IAttestation,
-  ): T | undefined {
+  ): V | JSONValue | undefined {
     const key = `${doc.address.id}/${doc.address.type}`;
     this.schemaTracker.add(key, this.selector);
     return this.traverseWithSelector(doc, this.selector);
@@ -945,7 +1166,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
   traverseWithSelector(
     doc: IAttestation,
     selector: SchemaPathSelector,
-  ): T | undefined {
+  ): V | JSONValue | undefined {
     const docPath = doc.address.path;
     if (deepEqual(docPath, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!);
@@ -1014,8 +1235,15 @@ export class SchemaObjectTraverser<T extends JSONValue>
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
-  ): T | undefined {
+  ): V | JSONValue | undefined {
     // Handle any top-level $ref in the schema
+    const debugLink = getNormalizedLink(
+      doc.address,
+      this.space,
+      schemaContext.schema,
+      schemaContext.rootSchema,
+    );
+    console.log("Resolving schema context", debugLink);
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
       return undefined;
@@ -1030,6 +1258,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
         : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
+      console.log("Switching to traverseDAG for", debugLink);
       return this.traverseDAG(
         doc,
         this.space,
@@ -1094,6 +1323,24 @@ export class SchemaObjectTraverser<T extends JSONValue>
       return undefined;
     } else if (isObject(doc.value)) {
       if (isAnyCellLink(doc.value)) {
+        console.log(
+          "Encountered cell link in traverseWithSchemaContext",
+          doc.value,
+        );
+        // TODO: When traversing in the validateAndTransform code, we don't
+        // want to walk into the child cells -- just create the link.
+        // FIXME: temporarily disabled, since it's causing test failures
+        // if (!this.traverseCells) {
+        //   return this.objectCreator.createObject(
+        //     getNormalizedLink(
+        //       doc.address,
+        //       this.space,
+        //       schemaObj,
+        //       schemaContext.rootSchema,
+        //     ),
+        //     undefined,
+        //   );
+        // }
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -1156,8 +1403,8 @@ export class SchemaObjectTraverser<T extends JSONValue>
   private traverseArrayWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): T[] | undefined {
-    const arrayObj: T[] = [];
+  ): (V | JSONValue)[] | undefined {
+    const arrayObj: (V | JSONValue)[] = [];
     const schema = schemaContext.schema;
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
@@ -1194,8 +1441,8 @@ export class SchemaObjectTraverser<T extends JSONValue>
   private traverseObjectWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
-  ): Record<string, T> | undefined {
-    const filteredObj: Record<string, T> = {};
+  ): Record<string, JSONValue | V> | undefined {
+    const filteredObj: Record<string, JSONValue | V> = {};
     const schema = schemaContext.schema;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       const schemaProperties = isObject(schema)
@@ -1249,7 +1496,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
   private traversePointerWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
-  ): T | undefined {
+  ): JSONValue | V | undefined {
     const selector = {
       path: doc.address.path,
       schemaContext: schemaContext,
@@ -1265,7 +1512,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
       selector,
     );
     if (newDoc.value === undefined) {
-      return null as T; // FIXME: need to fix cast
+      return null;
     }
     // The call to getAtPath above will track entry into the pointer,
     // but we may have a pointer cycle of docs, and we've finished resolving
@@ -1273,8 +1520,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
     // doc we were called with (not the one we resolved, which may be a pointer).
     using t = this.tracker.include(doc.value!, schemaContext, null, doc);
     if (t === null) {
-      // FIXME: need to fix cast
-      return null as T;
+      return null;
     }
     return this.traverseWithSelector(newDoc, newSelector!);
   }
@@ -1283,7 +1529,7 @@ export class SchemaObjectTraverser<T extends JSONValue>
     doc: IAttestation,
     schemaObj: JSONSchemaObj,
     rootSchema: JSONSchema,
-  ): T {
+  ): JSONValue | V | undefined {
     if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
       return this.objectCreator.createObject(
         getNormalizedLink(
@@ -1292,10 +1538,10 @@ export class SchemaObjectTraverser<T extends JSONValue>
           schemaObj,
           rootSchema,
         ),
-        doc.value as T,
+        doc.value,
       );
     } else {
-      return doc.value as T;
+      return doc.value;
     }
   }
 
@@ -1310,14 +1556,17 @@ export class SchemaObjectTraverser<T extends JSONValue>
     return false;
   }
 
-  private applyDefault(doc: IAttestation, schema: JSONSchema): T {
+  private applyDefault(doc: IAttestation, schema: JSONSchema): JSONValue {
     if (isObject(schema) && schema.default !== undefined) {
-      return this.objectCreator.applyDefault(
-        { ...doc.address, space: this.space },
-        schema.default as T,
+      const link = getNormalizedLink(
+        doc.address,
+        this.space,
+        schema,
+        schema,
       );
+      return this.objectCreator.applyDefault(link, schema.default);
     }
-    return null as T;
+    return null;
   }
 }
 

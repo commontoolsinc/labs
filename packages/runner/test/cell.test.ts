@@ -2928,6 +2928,61 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(toOpaqueRef in result).toBe(true);
     });
 
+    it("defaults for missing properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Bob" },
+          address: {
+            type: "object",
+            properties: {
+              street: { type: "string", default: "234 Street" },
+              city: { type: "string", default: "Citysville" },
+            },
+            default: {
+              street: "123 Street",
+              city: "Townsville",
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<
+        { name?: string; address?: { street?: string; city?: string } }
+      >(
+        space,
+        "hook-schema-default",
+        schema,
+        tx,
+      );
+      c.set({});
+
+      let result = c.get();
+      expect(result.name).toBe("Bob");
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Street",
+        city: "Townsville",
+      });
+
+      c.set({ name: "Ted" });
+      result = c.get();
+      expect(result.name).toBe("Ted");
+      // address missing, so we get the default for the address property
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Street",
+        city: "Townsville",
+      });
+
+      c.set({ name: "Ted", address: { street: "123 Avenue" } });
+      result = c.get();
+      expect(result.name).toBe("Ted");
+      // address present, but city missing, so we get the default for city
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Avenue",
+        city: "Citysville",
+      });
+    });
+
     it("should not double-wrap asCell properties", () => {
       const schema = {
         type: "object",

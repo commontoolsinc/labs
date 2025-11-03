@@ -4,7 +4,7 @@ import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { createCell, isCell, isStream } from "./cell.ts";
+import { Cellify, createCell, isCell, isStream } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -16,6 +16,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 import {
+  combineSchema,
   IObjectCreator,
   OptJSONValue,
   SchemaObjectTraverser,
@@ -365,6 +366,7 @@ export function validateAndTransformNew(
     schema: resolvedSchema,
     rootSchema,
   };
+  console.log("VATNew link", link, schema);
 
   if (resolvedSchema === undefined) {
     const rv = createQueryResultProxy(runtime, tx, link);
@@ -375,21 +377,31 @@ export function validateAndTransformNew(
 
   const objectCreator = new TransformObjectCreator(runtime, tx!);
   // Link paths don't include value, but doc address should
-  const address = { ...link, path: ["value", ...link.path] };
+  const { id, type, path } = link;
+  const address = { id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(link) };
+  const combinedSchema = combineSchema(schema!, resolvedSchema);
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
   const selector = {
     path: doc.address.path,
-    schemaContext: { schema: schema!, rootSchema: rootSchema! },
+    schemaContext: { schema: combinedSchema, rootSchema: rootSchema! },
   };
-  const traverser = new SchemaObjectTraverser<any>(tx!, selector, link.space);
-  traverser.objectCreator = objectCreator;
-  traverser.recurseCells = false;
+  // TODO: these constructor parameters are complex enough that we should
+  // use an options struct
+  const traverser = new SchemaObjectTraverser<any>(
+    tx!,
+    selector,
+    link.space,
+    undefined,
+    undefined,
+    objectCreator,
+    false,
+  );
   const result = traverser.traverse(doc);
   return result;
 }
 
-class TransformObjectCreator implements IObjectCreator<unknown> {
+class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
   constructor(
     private runtime: IRuntime,
     private tx: IExtendedStorageTransaction,
@@ -414,10 +426,10 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
   }
   // This is an early pass to see if we should just create a proxy or cell
   // If not, we will actually resolve our links to get to our values.
-  createObject<T>(
+  createObject(
     link: NormalizedFullLink,
-    value: T[] | Record<string, T> | T,
-  ): T | undefined {
+    value: Cellify<JSONValue>,
+  ): Cellify<JSONValue> {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -433,11 +445,12 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
         // TODO: deal with anyOf/oneOf with asCell/asStream
         // TODO:: Figure out if we should purge asCell/asStream from restSchema children
         //console.log("create cell link", link);
+        console.log("Calling create cell with schema:", restSchema);
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
           this.tx,
-        ) as T;
+        ) as Cellify<JSONValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
@@ -445,6 +458,41 @@ class TransformObjectCreator implements IObjectCreator<unknown> {
         return createQueryResultProxy(this.runtime, this.tx, link);
       }
     }
+    if (isObject(link.schema)) {
+      // If we're undefined, check for a default and apply that
+      if (link.schema.default !== undefined && value === undefined) {
+        // processDefaultValue already annotates with back to cell
+        return processDefaultValue(
+          this.runtime,
+          this.tx,
+          link,
+          link.schema.default,
+        );
+      }
+      // If we're an object, we may be missing some properties that have a
+      // default.
+      if (isObject(value) && link.schema.properties !== undefined) {
+        const propertyEntries = Object.entries(link.schema.properties) as [
+          string,
+          JSONSchema,
+        ][];
+        for (const [propName, propSchema] of propertyEntries) {
+          if (isObject(propSchema) && propSchema.default !== undefined) {
+            const valueObj = value as Record<string, any>;
+            if (valueObj[propName] === undefined) {
+              valueObj[propName] = processDefaultValue(this.runtime, this.tx, {
+                ...link,
+                path: [...link.path, propName],
+                schema: propSchema,
+              }, propSchema.default);
+            }
+          }
+        }
+      }
+      // TODO: What if we're an array? Is it possible to have undefined
+      // elements in our array?
+    }
+    console.log("AWBTCS", link);
     return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
   }
 }
@@ -464,7 +512,7 @@ export function validateAndTransform(
   link: NormalizedFullLink,
   seen: Array<[string, any]> = [],
 ): any {
-  //console.log("Calling VAT with", link);
+  console.log("Calling VAT with", link);
   const rv = validateAndTransformNew(runtime, tx, link, seen);
   //const rv = validateAndTransformOrig(runtime, tx, link, seen);
   //console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
@@ -809,6 +857,7 @@ export function validateAndTransformOrig(
           (isRecord(value) ||
             (isObject(childSchema) && childSchema.default !== undefined))
         ) {
+          console.log("VATOrig: childSchema", childSchema, link);
           result[key] = validateAndTransform(
             runtime,
             tx,
