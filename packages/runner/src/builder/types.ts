@@ -14,6 +14,9 @@ import type {
   GenerateObjectFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
+  HFunction,
+  ID as IDSymbol,
+  ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   JSONSchema,
   JSONSchemaObj,
@@ -31,34 +34,35 @@ import type {
   RecipeFunction,
   RenderFunction,
   Schema,
+  schema as schemaFunction,
   StreamDataFunction,
   StreamFunction,
   StrFunction,
   WishFunction,
 } from "@commontools/api";
-import {
-  h,
-  ID,
-  ID_FIELD,
-  NAME,
-  schema,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
+import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
+import {
+  type IExtendedStorageTransaction,
+  type MemorySpace,
+} from "../storage/interface.ts";
+import { type RuntimeProgram } from "../harness/types.ts";
+
+// Define runtime constants here - actual runtime values
+export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
+export const ID_FIELD: typeof IDFieldSymbol = Symbol(
+  "ID_FIELD, name of sibling that contains id",
+) as any;
+
+// Should be Symbol("UI") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
+
+export const schema: typeof schemaFunction = (schema) => schema;
+
 export { AuthSchema } from "./schema-lib.ts";
-export {
-  h,
-  ID,
-  ID_FIELD,
-  NAME,
-  type Schema,
-  schema,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
 export type {
   AnyCell,
   Cell,
@@ -84,18 +88,15 @@ export type {
   Recipe,
   RecipeFactory,
   RenderNode,
+  Schema,
   SchemaWithoutCell,
   Stream,
   StripCell,
   toJSON,
+  ToSchemaFunction,
   UnwrapCell,
   VNode,
 } from "@commontools/api";
-import {
-  type IExtendedStorageTransaction,
-  type MemorySpace,
-} from "../storage/interface.ts";
-import { type RuntimeProgram } from "../harness/types.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
@@ -310,7 +311,7 @@ export interface BuilderFunctionsAndConstants {
   AuthSchema: typeof AuthSchema;
 
   // Render utils
-  h: typeof h;
+  h: HFunction;
 }
 
 // Runtime interface needed by createCell

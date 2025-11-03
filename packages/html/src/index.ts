@@ -8,3 +8,4 @@ export {
 } from "./render.ts";
 export { debug, setDebug } from "./logger.ts";
 export { isVNode, type VNode } from "./jsx.ts";
+export { h } from "./h.ts";

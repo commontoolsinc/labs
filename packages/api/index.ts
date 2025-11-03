@@ -5,16 +5,16 @@
  * Workspace code should import these types via `@commontools/builder`.
  */
 
-export const ID: unique symbol = Symbol("ID, unique to the context");
-export const ID_FIELD: unique symbol = Symbol(
-  "ID_FIELD, name of sibling that contains id",
-);
+// Runtime constants - defined by @commontools/runner/src/builder/types.ts
+// These are ambient declarations since the actual values are provided by the runtime environment
+export declare const ID: unique symbol;
+export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.
-export const TYPE = "$TYPE";
-export const NAME = "$NAME";
-export const UI = "$UI";
+export declare const TYPE: "$TYPE";
+export declare const NAME: "$NAME";
+export declare const UI: "$UI";
 
 // ============================================================================
 // Cell Brand System
@@ -933,6 +933,22 @@ export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
+export type HFunction = {
+  (
+    name: string | ((...args: any[]) => VNode),
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): VNode;
+  fragment({ children }: { children: RenderNode[] }): VNode;
+};
+
+// No-op alternative to `as const as JSONSchema`
+export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
+
+// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
+// The actual implementation is done by the TypeScript transformer
+export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
+
 // Recipe environment types
 export interface RecipeEnvironment {
   readonly apiUrl: URL;
@@ -965,6 +981,8 @@ export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
+export declare const schema: SchemaFunction;
+export declare const toSchema: ToSchemaFunction;
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
@@ -975,14 +993,6 @@ export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
-
-export const schema = <T extends JSONSchema>(schema: T) => schema;
-
-// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
-// The actual implementation is done by the TypeScript transformer
-export const toSchema = <T>(_options?: Partial<JSONSchema>): JSONSchema => {
-  return {} as JSONSchema;
-};
 
 // Helper type to transform Cell<T> to Opaque<T> in handler inputs
 export type StripCell<T> = T extends Cell<infer U> ? StripCell<U>
@@ -1244,42 +1254,6 @@ export type SchemaWithoutCell<
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
 > = SchemaInner<T, Root, Depth, false>;
-
-/**
- * Fragment element name used for JSX fragments.
- */
-const FRAGMENT_ELEMENT = "common-fragment";
-
-/**
- * JSX factory function for creating virtual DOM nodes.
- * @param name - The element name or component function
- * @param props - Element properties
- * @param children - Child elements
- * @returns A virtual DOM node
- */
-export const h = Object.assign(function h(
-  name: string | ((...args: any[]) => VNode),
-  props: { [key: string]: any } | null,
-  ...children: RenderNode[]
-): VNode {
-  if (typeof name === "function") {
-    return name({
-      ...(props ?? {}),
-      children: children.flat(),
-    });
-  } else {
-    return {
-      type: "vnode",
-      name,
-      props: props ?? {},
-      children: children.flat(),
-    };
-  }
-}, {
-  fragment({ children }: { children: RenderNode[] }) {
-    return h(FRAGMENT_ELEMENT, null, ...children);
-  },
-});
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

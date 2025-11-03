@@ -11,7 +11,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { Identity } from "@commontools/identity";
-import { h } from "@commontools/api";
+import { h } from "@commontools/html";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

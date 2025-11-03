@@ -79,7 +79,6 @@ export {
   AuthSchema,
   type Cell as BuilderCell,
   type Frame,
-  h,
   type HandlerFactory,
   ID,
   ID_FIELD,

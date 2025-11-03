@@ -1,9 +1,10 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { h, UI, VNode } from "@commontools/api";
+import { UI, VNode } from "@commontools/runner";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { serializableEvent } from "../src/render.ts";
 import { MockDoc } from "../src/mock-doc.ts";
+import { h } from "../src/h.ts";
 
 let mock: MockDoc;
 
