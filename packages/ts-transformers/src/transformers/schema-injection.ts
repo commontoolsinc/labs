@@ -170,9 +170,10 @@ export class SchemaInjectionTransformer extends Transformer {
       const callKind = detectCallKind(node, checker);
 
       if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
+        const factory = transformation.factory;
         const typeArgs = node.typeArguments;
+
         if (typeArgs && typeArgs.length >= 1) {
-          const factory = transformation.factory;
           const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
             typeArg,
           ) => createToSchemaCall(context, typeArg));
@@ -193,6 +194,43 @@ export class SchemaInjectionTransformer extends Transformer {
           );
 
           return ts.visitEachChild(updated, visit, transformation);
+        }
+
+        // Handle single-parameter recipe() calls without type arguments
+        // Only transform if the function parameter has a type annotation
+        const argsArray = Array.from(node.arguments);
+        let recipeFunction: ts.Expression | undefined;
+
+        if (argsArray.length === 1) {
+          // Single argument - must be the function
+          recipeFunction = argsArray[0];
+        } else if (argsArray.length === 2 && argsArray[0] && ts.isStringLiteral(argsArray[0])) {
+          // Two arguments with first being a string - second is the function
+          recipeFunction = argsArray[1];
+        }
+
+        if (
+          recipeFunction &&
+          (ts.isFunctionExpression(recipeFunction) ||
+            ts.isArrowFunction(recipeFunction))
+        ) {
+          const recipeFn = recipeFunction;
+          if (recipeFn.parameters.length >= 1) {
+            const inputParam = recipeFn.parameters[0];
+
+            // Only transform if there's an explicit type annotation
+            if (inputParam?.type) {
+              const toSchemaInput = createToSchemaCall(context, inputParam.type);
+
+              const updated = factory.createCallExpression(
+                node.expression,
+                undefined,
+                [toSchemaInput, recipeFn],
+              );
+
+              return ts.visitEachChild(updated, visit, transformation);
+            }
+          }
         }
       }
 
