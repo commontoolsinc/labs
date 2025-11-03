@@ -566,6 +566,14 @@ export type Default<T, V extends T = T> = T;
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
+export type HFunction = {
+    (name: string | ((...args: any[]) => VNode), props: {
+        [key: string]: any;
+    } | null, ...children: RenderNode[]): VNode;
+    fragment({ children }: {
+        children: RenderNode[];
+    }): VNode;
+};
 export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 export interface RecipeEnvironment {
@@ -719,20 +727,6 @@ type Decrement = {
 };
 type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
 export type SchemaWithoutCell<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = SchemaInner<T, Root, Depth, false>;
-/**
- * JSX factory function for creating virtual DOM nodes.
- * @param name - The element name or component function
- * @param props - Element properties
- * @param children - Child elements
- * @returns A virtual DOM node
- */
-export declare const h: ((name: string | ((...args: any[]) => VNode), props: {
-    [key: string]: any;
-} | null, ...children: RenderNode[]) => VNode) & {
-    fragment({ children }: {
-        children: RenderNode[];
-    }): VNode;
-};
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache
  * variable (dynamic).

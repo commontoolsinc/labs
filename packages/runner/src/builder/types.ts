@@ -14,6 +14,7 @@ import type {
   GenerateObjectFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
+  HFunction,
   ID as IDSymbol,
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
@@ -39,7 +40,7 @@ import type {
   StrFunction,
   WishFunction,
 } from "@commontools/api";
-import { h, toSchema } from "@commontools/api";
+import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
@@ -62,7 +63,6 @@ export const UI = "$UI";
 export const schema: typeof schemaFunction = (schema) => schema;
 
 export { AuthSchema } from "./schema-lib.ts";
-export { h, type Schema } from "@commontools/api";
 export type {
   AnyCell,
   Cell,
@@ -88,6 +88,7 @@ export type {
   Recipe,
   RecipeFactory,
   RenderNode,
+  Schema,
   SchemaWithoutCell,
   Stream,
   StripCell,
@@ -310,7 +311,7 @@ export interface BuilderFunctionsAndConstants {
   AuthSchema: typeof AuthSchema;
 
   // Render utils
-  h: typeof h;
+  h: HFunction;
 }
 
 // Runtime interface needed by createCell

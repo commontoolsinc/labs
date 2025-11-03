@@ -7,7 +7,7 @@
  * @module jsx-runtime
  */
 
-import { h } from "@commontools/api";
+import { h } from "./h.ts";
 import type { RenderNode, VNode } from "@commontools/api";
 
 /**

@@ -933,6 +933,15 @@ export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
+export type HFunction = {
+  (
+    name: string | ((...args: any[]) => VNode),
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): VNode;
+  fragment({ children }: { children: RenderNode[] }): VNode;
+};
+
 // No-op alternative to `as const as JSONSchema`
 export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 
@@ -1245,42 +1254,6 @@ export type SchemaWithoutCell<
   Root extends JSONSchema = T,
   Depth extends DepthLevel = 9,
 > = SchemaInner<T, Root, Depth, false>;
-
-/**
- * Fragment element name used for JSX fragments.
- */
-const FRAGMENT_ELEMENT = "common-fragment";
-
-/**
- * JSX factory function for creating virtual DOM nodes.
- * @param name - The element name or component function
- * @param props - Element properties
- * @param children - Child elements
- * @returns A virtual DOM node
- */
-export const h = Object.assign(function h(
-  name: string | ((...args: any[]) => VNode),
-  props: { [key: string]: any } | null,
-  ...children: RenderNode[]
-): VNode {
-  if (typeof name === "function") {
-    return name({
-      ...(props ?? {}),
-      children: children.flat(),
-    });
-  } else {
-    return {
-      type: "vnode",
-      name,
-      props: props ?? {},
-      children: children.flat(),
-    };
-  }
-}, {
-  fragment({ children }: { children: RenderNode[] }) {
-    return h(FRAGMENT_ELEMENT, null, ...children);
-  },
-});
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

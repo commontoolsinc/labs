@@ -10,7 +10,6 @@ import type {
 } from "./types.ts";
 import {
   AuthSchema,
-  h,
   ID,
   ID_FIELD,
   isRecipe,
@@ -19,6 +18,7 @@ import {
   TYPE,
   UI,
 } from "./types.ts";
+import { h } from "@commontools/html";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
