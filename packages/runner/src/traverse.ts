@@ -703,20 +703,20 @@ function followPointer(
     const linkSchemaContext = link.schema !== undefined
       ? { schema: link.schema, rootSchema: link.rootSchema ?? link.schema }
       : undefined;
-    console.log("selector.schemaContext", selector.schemaContext);
+    //console.log("selector.schemaContext", selector.schemaContext);
     // When traversing links, we combine the schema
     selector.schemaContext = combineSchemaContext(
       selector.schemaContext,
       linkSchemaContext,
     );
-    console.log(
-      "selector.schemaContext",
-      selector.schemaContext,
-      "linkSchemaContext",
-      linkSchemaContext,
-      "doc.value",
-      doc.value,
-    );
+    // console.log(
+    //   "selector.schemaContext",
+    //   selector.schemaContext,
+    //   "linkSchemaContext",
+    //   linkSchemaContext,
+    //   "doc.value",
+    //   doc.value,
+    // );
   }
   using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
   if (t === null) {
@@ -1254,7 +1254,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       schemaContext.schema,
       schemaContext.rootSchema,
     );
-    console.log("Resolving schema context", debugLink);
+    console.log("Calling TWSC with", debugLink);
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
       return undefined;
@@ -1334,24 +1334,36 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return undefined;
     } else if (isObject(doc.value)) {
       if (isAnyCellLink(doc.value)) {
+        // We need to combine the information in the link's value with the
+        // information we have from the doc we're traversing.
+        const baseLink = getNormalizedLink(
+          doc.address,
+          this.space,
+          schemaObj,
+          schemaContext.rootSchema,
+        );
+        const normalizedLink = parseLink(doc.value, baseLink);
+        normalizedLink.schema = normalizedLink.schema !== undefined
+          ? combineSchema(schemaObj, normalizedLink.schema)
+          : schemaObj;
+        normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
+          ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
+          : schemaContext.rootSchema;
         console.log(
           "Encountered cell link in traverseWithSchemaContext",
           doc.value,
+          normalizedLink,
         );
-        // TODO: When traversing in the validateAndTransform code, we don't
-        // want to walk into the child cells -- just create the link.
-        // FIXME: temporarily disabled, since it's causing test failures
-        // if (!this.traverseCells) {
-        //   return this.objectCreator.createObject(
-        //     getNormalizedLink(
-        //       doc.address,
-        //       this.space,
-        //       schemaObj,
-        //       schemaContext.rootSchema,
-        //     ),
-        //     undefined,
-        //   );
-        // }
+        // For the runtime, where we don't traverse cells, we just want
+        // to create a cell object and don't walk into the object.
+        // For the memory system, where we do traverse cells, we will
+        // still walk into these objects regardless of the schema flag,
+        // since we still need to get the connected objects.
+        if (
+          !this.traverseCells && SchemaObjectTraverser.asCellOrStream(schemaObj)
+        ) {
+          return this.objectCreator.createObject(normalizedLink, undefined);
+        }
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
