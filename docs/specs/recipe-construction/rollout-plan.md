@@ -42,7 +42,7 @@
     isn't there, e.g. because we need to create a link to the cell (when passed
     into `anotherCell.set()` for example). We want to encourage .for use in
     ambiguous cases.
-- [ ] Add space and event to Frame
+- [x] Add space and event to Frame
 - [ ] First merge of OpaqueRef and RegularCell
   - [ ] Add methods that allow linking to node invocations
     - [ ] `setPreExisting` can be deprecated (used in toOpaqueRef which itself

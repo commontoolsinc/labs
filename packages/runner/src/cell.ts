@@ -278,7 +278,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       } else {
         // Fail by default
         throw new Error(
-          "Cannot set cause: cell already has a cause or link. Pass true as second parameter to allow this as a suggestion.",
+          "Cannot set cause: cell already has a cause or link.",
         );
       }
     }
@@ -301,14 +301,22 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * @throws Error if not in a handler context and no cause was provided
    */
   private ensureLink(): void {
-    // If we already have a full link (id and space), nothing to do
-    if (this._causeContainer.id && this._link.space) {
+    // If we already have a full link (id and space) in the container, just copy
+    // it over to our link.
+    if (this._causeContainer.id && this._causeContainer.space) {
+      this._link = {
+        ...this._link,
+        id: this._causeContainer.id,
+        space: this._causeContainer.space,
+      };
       return;
     }
 
-    // Check if we're in a handler context
+    // Otherwise, let's attempt to derive the id:
+
     const frame = getTopFrame();
 
+    // We must be in a frame context to derive the id.
     if (!frame) {
       throw new Error(
         "Cannot create cell link: no frame context.\n" +
@@ -329,9 +337,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       );
     }
 
+    // Used passed in cause (via .for()), for events fall back to per-frame
+    // counter.
     const cause = this._causeContainer.cause ??
-      (frame.event ? { count: frame.generatedIdCounter++ } : undefined);
-    // TODO(seefeld): Implement no-cause-but-in-handler case
+      (frame.inHandler ? { count: frame.generatedIdCounter++ } : undefined);
+
     if (!cause) {
       throw new Error(
         "Cannot create cell link: not in a handler context and no cause was provided.\n" +
@@ -342,8 +352,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       );
     }
 
-    // Create an entity ID from the cause
-    // Include frame.cause in the source for determinism
+    // Create an entity ID from the cause, including the frame's
     const id = toURI(createRef({ frame: cause }, cause));
 
     // Populate the id in the shared causeContainer
@@ -351,10 +360,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     this._causeContainer.id = id;
     this._causeContainer.space = space;
 
-    // Update this cell's link with the space if it doesn't have one
-    if (!this._link.space) {
-      this._link = { ...this._link, id, space };
-    }
+    // Update this cell's link
+    this._link = { ...this._link, id, space };
   }
 
   get space(): MemorySpace {
