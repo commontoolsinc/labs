@@ -894,9 +894,6 @@ describe("Proxy", () => {
     const streamCell = c.key("stream");
 
     expect(streamCell).toHaveProperty("send");
-    expect(streamCell).not.toHaveProperty("get");
-    expect(streamCell).not.toHaveProperty("set");
-    expect(streamCell).not.toHaveProperty("key");
 
     let lastEventSeen: any = null;
     let eventCount = 0;

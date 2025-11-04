@@ -120,7 +120,7 @@ export function createQueryResultProxy<T>(
 
       if (typeof prop === "symbol") {
         if (prop === toCell) {
-          return () => createCell(runtime, link, tx, true);
+          return () => createCell(runtime, link, tx);
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(link);
         } else if (prop === Symbol.iterator && Array.isArray(target)) {
