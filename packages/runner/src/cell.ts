@@ -32,6 +32,7 @@ import {
   validateAndTransform,
 } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
+import { createRef } from "./create-ref.ts";
 import {
   type LegacyJSONCellLink,
   LINK_V1_TAG,
@@ -45,6 +46,7 @@ import {
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   type NormalizedFullLink,
+  type NormalizedLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -84,6 +86,13 @@ declare module "@commontools/api" {
    * on Cell in the runner runtime.
    */
   interface IAnyCell<out T> {
+    /**
+     * Set a cause for this cell. Used to create a link when the cell doesn't have one yet.
+     * @param cause - The cause to associate with this cell
+     * @param options - Optional configuration
+     * @returns This cell for method chaining
+     */
+    for(cause: unknown, options?: { force?: boolean }): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -164,125 +173,148 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 export function createCell<T>(
   runtime: IRuntime,
-  link: NormalizedFullLink,
+  link: NormalizedFullLink | undefined,
   tx?: IExtendedStorageTransaction,
-  noResolve = false,
   synced = false,
 ): Cell<T> {
-  let { schema, rootSchema } = link;
-
-  // Resolve the path to check whether it's a stream.
-  const readTx = runtime.readTx(tx);
-  const resolvedLink = noResolve ? link : resolveLink(readTx, link);
-  const value = readTx.readValueOrThrow(resolvedLink, {
-    meta: ignoreReadForScheduling,
-  });
-
-  // Use schema from alias if provided and no explicit schema was set
-  if (!schema && resolvedLink.schema) {
-    schema = resolvedLink.schema;
-    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
-  }
-
-  if (isStreamValue(value)) {
-    return new StreamCell(
-      runtime,
-      { ...resolvedLink, schema, rootSchema },
-      tx,
-    ) as unknown as Cell<T>;
-  } else {
-    return new RegularCell(
-      runtime,
-      { ...link, schema, rootSchema },
-      tx,
-      synced,
-    ) as unknown as Cell<T>;
-  }
+  return new CellImpl(
+    runtime,
+    link,
+    tx,
+    synced,
+  ) as unknown as Cell<T>; // Cast to set brand
 }
 
-class StreamCell<T> implements IStreamable<T> {
+/**
+ * CellImpl - Unified cell implementation that handles both regular cells and
+ * streams.
+ */
+export class CellImpl<T> implements ICell<T>, IStreamable<T> {
+  private readOnlyReason: string | undefined;
+
+  // Stream-specific fields
   private listeners = new Set<
     (event: AnyCellWrapping<T>) => Cancel | undefined
   >();
   private cleanup: Cancel | undefined;
 
-  constructor(
-    public readonly runtime: IRuntime,
-    private readonly link: NormalizedFullLink,
-    private readonly tx?: IExtendedStorageTransaction,
-  ) {}
-
-  get schema(): JSONSchema | undefined {
-    return this.link.schema;
-  }
-
-  get rootSchema(): JSONSchema | undefined {
-    return this.link.rootSchema;
-  }
-
-  send(
-    event: AnyCellWrapping<T>,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
-  ): void {
-    event = convertCellsToLinks(event) as AnyCellWrapping<T>;
-
-    // Use runtime from doc if available
-    this.runtime.scheduler.queueEvent(this.link, event, undefined, onCommit);
-
-    this.cleanup?.();
-    const [cancel, addCancel] = useCancelGroup();
-    this.cleanup = cancel;
-
-    this.listeners.forEach((callback) => addCancel(callback(event)));
-  }
-
-  sink(callback: (event: AnyCellWrapping<T>) => Cancel | undefined): Cancel {
-    this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
-  }
-
-  // sync: No-op for streams, but maybe eventually it might mean wait for all
-  // events to have been processed
-  sync(): Stream<T> {
-    return this as unknown as Stream<T>;
-  }
-
-  getRaw(options?: IReadOptions): Immutable<T> | undefined {
-    // readValueOrThrow requires JSONValue, while we require T
-    return this.runtime.readTx(this.tx).readValueOrThrow(
-      this.link,
-      options,
-    ) as Immutable<T> | undefined;
-  }
-
-  getAsNormalizedFullLink(): NormalizedFullLink {
-    return this.link;
-  }
-
-  getAsLink(
-    options?: {
-      base?: Cell<any>;
-      baseSpace?: MemorySpace;
-      includeSchema?: boolean;
-    },
-  ): SigilLink {
-    return createSigilLinkFromParsedLink(this.link, options);
-  }
-
-  withTx(_tx?: IExtendedStorageTransaction): Stream<T> {
-    return this as unknown as Stream<T>; // No-op for streams
-  }
-}
-
-export class RegularCell<T> implements ICell<T> {
-  private readOnlyReason: string | undefined;
+  // Use NormalizedLink which may not have id/space yet
+  private _link: NormalizedLink;
+  private _cause: unknown | undefined;
 
   constructor(
     public readonly runtime: IRuntime,
-    private readonly link: NormalizedFullLink,
+    link: NormalizedLink = { path: [] },
     public readonly tx: IExtendedStorageTransaction | undefined,
     private synced: boolean = false,
-  ) {}
+    cause?: unknown,
+  ) {
+    // Always have at least a path
+    this._link = link;
+    this._cause = cause;
+  }
+
+  /**
+   * Get the full link for this cell, ensuring it has id and space.
+   * This will attempt to create a full link if one doesn't exist and we're in a valid context.
+   */
+  private get link(): NormalizedFullLink {
+    // Check if we have a full link (with id and space)
+    if (!this._link.id || !this._link.space) {
+      // Try to ensure we have a full link
+      this.ensureLink();
+
+      // If still no full link after ensureLink, throw
+      if (!this._link.id || !this._link.space) {
+        throw new Error(
+          "Cell link could not be created. Use .for() to set a cause before accessing the cell.",
+        );
+      }
+    }
+    return this._link as NormalizedFullLink;
+  }
+
+  /**
+   * Check if this cell has a full link (with id and space)
+   */
+  private hasFullLink(): boolean {
+    return this._link.id !== undefined && this._link.space !== undefined;
+  }
+
+  /**
+   * Set a cause for this cell. This is used to create a link when the cell doesn't have one yet.
+   * @param cause - The cause to associate with this cell
+   * @param options - Optional configuration
+   * @param options.force - If true, will create an extension if cause already exists. If false (default), ignores the call if link already exists.
+   * @returns This cell for method chaining
+   */
+  for(cause: unknown, options?: { force?: boolean }): Cell<T> {
+    const force = options?.force ?? false;
+
+    // If full link already exists and force is false, ignore this call
+    if (this.hasFullLink() && !force) {
+      return this as unknown as Cell<T>;
+    }
+
+    // Store the cause
+    this._cause = cause;
+
+    // TODO(seefeld): Implement link creation from cause
+    // For now, we'll defer link creation until it's actually needed
+    // This will be implemented in the "force creation of cause" step
+
+    return this as unknown as Cell<T>;
+  }
+
+  /**
+   * Force creation of a full link for this cell from the stored cause.
+   * This method populates id and space if they don't exist, using information from:
+   * - The stored cause (from .for())
+   * - The current handler context
+   * - Derived information from the graph (for deriving nodes)
+   *
+   * @throws Error if not in a handler context and no cause was provided
+   */
+  private ensureLink(): void {
+    // If we already have a full link (id and space), nothing to do
+    if (this._link.id && this._link.space) {
+      return;
+    }
+
+    // Check if we're in a handler context
+    const frame = getTopFrame();
+
+    // TODO(seefeld): Implement no-cause-but-in-handler case
+    if (!frame?.cause || !this._cause) {
+      throw new Error(
+        "Cannot create cell link: not in a handler context and no cause was provided.\n" +
+          "This typically happens when:\n" +
+          "  - A cell is passed to another cell's .set() method without a link\n" +
+          "  - A cell is used outside of a handler context\n" +
+          "Solution: Use .for(cause) to set a cause before using the cell in ambiguous cases.",
+      );
+    }
+
+    // We need a space to create a link
+    // TODO(seefeld): Get space from frame
+    if (!this._link.space) {
+      throw new Error(
+        "Cannot create cell link: space is required.\n" +
+          "When creating cells without links, you must provide a space in the link.\n" +
+          "Use runtime.getCell() or provide a link with a space when constructing the cell.",
+      );
+    }
+
+    // Create an entity ID from the cause
+    const entityId = createRef({ frame: frame!.cause }, this._cause);
+
+    // Populate the id and type fields (keeping existing path, schema, etc.)
+    this._link = {
+      ...this._link,
+      id: toURI(entityId),
+      type: this._link.type ?? "application/json",
+    };
+  }
 
   get space(): MemorySpace {
     return this.link.space;
@@ -293,11 +325,49 @@ export class RegularCell<T> implements ICell<T> {
   }
 
   get schema(): JSONSchema | undefined {
-    return this.link.schema;
+    if (!this._link) return undefined;
+
+    if (this.link.schema) return this.link.schema;
+
+    // If no schema is defined, resolve link and get schema from there (which is
+    // what .get() would do).
+    const resolvedLink = resolveLink(
+      this.runtime.readTx(this.tx),
+      this.link,
+      "writeRedirect",
+    );
+    return resolvedLink.schema;
   }
 
   get rootSchema(): JSONSchema | undefined {
-    return this.link.rootSchema;
+    if (!this._link) return undefined;
+
+    if (this.link.rootSchema) return this.link.rootSchema;
+
+    // If no root schema is defined, resolve link and get root schema from there
+    // (which is what .get() would do).
+    const resolvedLink = resolveLink(
+      this.runtime.readTx(this.tx),
+      this.link,
+      "writeRedirect",
+    );
+    return resolvedLink.rootSchema;
+  }
+
+  /**
+   * Check if this cell contains a stream value
+   */
+  private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
+    const tx = this.runtime.readTx(this.tx);
+
+    if (!resolvedToValueLink) {
+      resolvedToValueLink = resolveLink(tx, this.link);
+    }
+
+    const value = tx.readValueOrThrow(resolvedToValueLink, {
+      meta: ignoreReadForScheduling,
+    });
+    return isStreamValue(value);
   }
 
   get(): Readonly<T> {
@@ -309,6 +379,33 @@ export class RegularCell<T> implements ICell<T> {
     newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
+    const resolvedToValueLink = resolveLink(
+      this.runtime.readTx(this.tx),
+      this.link,
+    );
+
+    // Check if we're dealing with a stream
+    if (this.isStream(resolvedToValueLink)) {
+      // Stream behavior
+      const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+
+      // Trigger on fully resolved link
+      this.runtime.scheduler.queueEvent(
+        resolvedToValueLink,
+        event,
+        undefined,
+        onCommit,
+      );
+
+      this.cleanup?.();
+      const [cancel, addCancel] = useCancelGroup();
+      this.cleanup = cancel;
+
+      this.listeners.forEach((callback) => addCancel(callback(event)));
+      return;
+    }
+
+    // Regular cell behavior
     if (!this.tx) throw new Error("Transaction required for set");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -334,10 +431,10 @@ export class RegularCell<T> implements ICell<T> {
   }
 
   send(
-    newValue: AnyCellWrapping<T> | T,
+    event: AnyCellWrapping<T>,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
-    this.set(newValue, onCommit);
+    this.set(event, onCommit);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -448,21 +545,28 @@ export class RegularCell<T> implements ICell<T> {
   key<K extends PropertyKey>(
     valueKey: K,
   ): KeyResultType<T, K, AsCell> {
-    const childSchema = this.runtime.cfc.getSchemaAtPath(
-      this.schema,
-      [valueKey.toString()],
-      this.rootSchema,
-    );
-    return createCell(
+    // Get child schema if we have one
+    const childSchema = this._link.schema
+      ? this.runtime.cfc.getSchemaAtPath(
+        this._link.schema,
+        [valueKey.toString()],
+        this._link.rootSchema,
+      )
+      : undefined;
+
+    // Build up the path even without a full link
+    const childLink: NormalizedLink = {
+      ...this._link,
+      path: [...this._link.path, valueKey.toString()] as string[],
+      ...(childSchema && { schema: childSchema }),
+    };
+
+    return new CellImpl(
       this.runtime,
-      {
-        ...this.link,
-        path: [...this.path, valueKey.toString()] as string[],
-        schema: childSchema,
-      },
+      childLink,
       this.tx,
-      false,
       this.synced,
+      this._cause, // Inherit cause
     ) as unknown as KeyResultType<T, K, AsCell>;
   }
 
@@ -473,16 +577,17 @@ export class RegularCell<T> implements ICell<T> {
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
-    return new RegularCell(
+    return new CellImpl(
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
-      false, // Reset synced flag, since schmema is changing
+      false, // Reset synced flag, since schema is changing
     ) as unknown as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return new RegularCell(
+    // For streams, this is a no-op, but we still create a new instance
+    return new CellImpl(
       this.runtime,
       this.link,
       newTx,
@@ -491,19 +596,34 @@ export class RegularCell<T> implements ICell<T> {
   }
 
   sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-    return subscribeToReferencedDocs(callback, this.runtime, this.link);
+    // Check if this is a stream
+    if (this.isStream()) {
+      // Stream behavior: add listener
+      this.listeners.add(
+        callback as (event: AnyCellWrapping<T>) => Cancel | undefined,
+      );
+      return () =>
+        this.listeners.delete(
+          callback as (event: AnyCellWrapping<T>) => Cancel | undefined,
+        );
+    } else {
+      // Regular cell behavior: subscribe to changes
+      if (!this.synced) this.sync(); // No await, just kicking this off
+      return subscribeToReferencedDocs(callback, this.runtime, this.link);
+    }
   }
 
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
-    if (this.link.id.startsWith("data:")) return this as unknown as Cell<T>;
+    if (this.link.id.startsWith("data:")) {
+      return this as unknown as Cell<T>;
+    }
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
   }
 
   resolveAsCell(): Cell<T> {
     const link = resolveLink(this.runtime.readTx(this.tx), this.link);
-    return createCell(this.runtime, link, this.tx, true, this.synced);
+    return createCell(this.runtime, link, this.tx, this.synced);
   }
 
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -831,7 +951,7 @@ export function convertCellsToLinks(
 
   if (isQueryResultForDereferencing(value)) {
     value = getCellOrThrow(value).getAsLink();
-  } else if (isCell(value) || isStream(value)) {
+  } else if (isCell(value)) {
     value = value.getAsLink();
   } else if (isRecord(value) || typeof value === "function") {
     // Only add here, otherwise they are literals or already cells:
@@ -873,7 +993,7 @@ export function convertCellsToLinks(
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return value instanceof RegularCell;
+  return value instanceof CellImpl;
 }
 
 /**
@@ -883,7 +1003,7 @@ export function isCell(value: any): value is Cell<any> {
  * @returns {boolean}
  */
 export function isAnyCell(value: any): value is AnyCell<any> {
-  return value instanceof RegularCell || value instanceof StreamCell;
+  return value instanceof CellImpl;
 }
 
 /**
@@ -892,7 +1012,7 @@ export function isAnyCell(value: any): value is AnyCell<any> {
  * @returns True if the value is a Stream
  */
 export function isStream<T = any>(value: any): value is Stream<T> {
-  return value instanceof StreamCell;
+  return (value instanceof CellImpl && (value as any).isStream?.());
 }
 
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T

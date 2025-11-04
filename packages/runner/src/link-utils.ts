@@ -147,7 +147,6 @@ export function isLink(
     isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
-    isStream(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
@@ -234,7 +233,7 @@ export function parseLink(
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
+  if (isCell(value)) return value.getAsNormalizedFullLink();
 
   // Handle new sigil format
   if (isSigilLink(value)) {

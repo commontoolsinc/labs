@@ -2278,9 +2278,6 @@ describe("Schema Support", () => {
 
       expect(value.name).toBe("Test Doc");
       expect(isStream(value.events)).toBe(true);
-
-      // Verify it's a stream, i.e. no get functio
-      expect((value as any).events.get).toBe(undefined);
     });
 
     it("should handle nested streams in objects", () => {

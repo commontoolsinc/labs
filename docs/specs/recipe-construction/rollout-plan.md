@@ -24,13 +24,17 @@
     - [ ] Make passing the output of the second into the first work. Tricky
       because we're doing almost opposite expansions on the type.
 - [ ] Add ability to create a cell without a link yet.
-  - [ ] Change constructor for RegularCell to make link optional
-  - [ ] Add .for method to set a cause (within current context)
+  - [x] Merge StreamCell into RegularCell and rename RegularCell to CellImpl
+    - [x] Primarily this means changing `.set` to first read the resolved value
+      to see whether we have a stream and then use the stream behavior instead
+      of regular set.
+  - [x] Change constructor for RegularCell to make link optional
+  - [x] Add .for method to set a cause (within current context)
     - [ ] second parameter to make it optional/flexible:
       - [ ] ignores the .for if link already exists
       - [ ] adds extension if cause already exists (see tracker below)
   - [ ] Make .key work even if there is no cause yet.
-  - [ ] Add some method to force creation of cause, which errors if in
+  - [x] Add some method to force creation of cause, which errors if in
     non-handler context and no other information was given (as e.g. deriving
     nodes, which do have ids, after asking for them -- this walks the graph up
     until it hits the passed in cells)
