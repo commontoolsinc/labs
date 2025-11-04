@@ -86,13 +86,7 @@ declare module "@commontools/api" {
    * on Cell in the runner runtime.
    */
   interface IAnyCell<out T> {
-    /**
-     * Set a cause for this cell. Used to create a link when the cell doesn't have one yet.
-     * @param cause - The cause to associate with this cell
-     * @param options - Optional configuration
-     * @returns This cell for method chaining
-     */
-    for(cause: unknown, options?: { force?: boolean }): Cell<T>;
+    for(cause: unknown, allowIfSet?: boolean): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -272,22 +266,25 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * This affects all sibling cells (created via .key(), .asSchema(), .withTx()) since they
    * share the same container.
    * @param cause - The cause to associate with this cell
-   * @param options - Optional configuration
-   * @param options.force - If true, will create an extension if link already exists. If false (default), ignores the call if link already exists.
+   * @param allowIfSet - If true, treat as suggestion and silently ignore if cause already set. If false (default), throw error if cause already set.
    * @returns This cell for method chaining
    */
-  for(cause: unknown, options?: { force?: boolean }): Cell<T> {
-    const force = options?.force ?? false;
-
-    // If cause or id already exists and force is false, silently ignore
-    if ((this._causeContainer.id || this._causeContainer.cause) && !force) {
-      return this as unknown as Cell<T>;
+  for(cause: unknown, allowIfSet?: boolean): Cell<T> {
+    // If cause or id already exists, either fail or silently ignore based on allowIfSet
+    if (this._causeContainer.id || this._causeContainer.cause) {
+      if (allowIfSet) {
+        // Treat as suggestion - silently ignore
+        return this as unknown as Cell<T>;
+      } else {
+        // Fail by default
+        throw new Error(
+          "Cannot set cause: cell already has a cause or link. Pass true as second parameter to allow this as a suggestion.",
+        );
+      }
     }
 
     // Store the cause in the shared container - all siblings will see this
     this._causeContainer.cause = cause;
-
-    // TODO(seefeld): Implement extension creation when force is true and link exists
 
     return this as unknown as Cell<T>;
   }
