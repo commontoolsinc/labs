@@ -136,10 +136,10 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Fallback: try to get wrapper type information from type structure
     // (for cases where we don't have a typeNode)
-          const wrapperInfo = this.getWrapperTypeInfo(
-            type,
-            context.typeChecker,
-          );
+    const wrapperInfo = this.getWrapperTypeInfo(
+      type,
+      context.typeChecker,
+    );
     if (wrapperInfo) {
       return this.formatWrapperType(
         wrapperInfo.typeRef,
@@ -382,32 +382,14 @@ export class CommonToolsFormatter implements TypeFormatter {
     type: ts.Type,
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
-    if (!(type.flags & ts.TypeFlags.Intersection)) {
+    const wrapperInfo = this.getWrapperTypeInfo(type, checker);
+    if (!wrapperInfo || wrapperInfo.kind !== "OpaqueRef") {
       return undefined;
     }
 
-    const intersectionType = type as ts.IntersectionType;
-    for (const constituent of intersectionType.types) {
-      if (constituent.flags & ts.TypeFlags.Object) {
-        const objectType = constituent as ts.ObjectType;
-        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-          const typeRef = objectType as ts.TypeReference;
-          const name = typeRef.target?.symbol?.name;
-          // Check for both old (OpaqueRefMethods) and new (OpaqueCell, IOpaqueCell, BrandedCell) names
-          if (
-            name === "OpaqueRefMethods" || name === "OpaqueCell" ||
-            name === "IOpaqueCell" || name === "BrandedCell"
-          ) {
-            // Found wrapper type with type argument, extract T
-            const typeArgs = checker.getTypeArguments(typeRef);
-            if (typeArgs && typeArgs.length > 0) {
-              return typeArgs[0];
-            }
-          }
-        }
-      }
-    }
-    return undefined;
+    const typeArgs = wrapperInfo.typeRef.typeArguments ??
+      checker.getTypeArguments(wrapperInfo.typeRef);
+    return typeArgs && typeArgs.length > 0 ? typeArgs[0] : undefined;
   }
 
   /**
