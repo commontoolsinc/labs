@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { isCell, CellImpl } from "./cell.ts";
+import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
