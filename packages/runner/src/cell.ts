@@ -173,16 +173,31 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 export function createCell<T>(
   runtime: IRuntime,
-  link: NormalizedFullLink | undefined,
+  link?: NormalizedFullLink,
   tx?: IExtendedStorageTransaction,
   synced = false,
 ): Cell<T> {
   return new CellImpl(
     runtime,
-    link,
     tx,
+    link, // Pass the link directly (or undefined)
     synced,
+    undefined, // No shared causeContainer
   ) as unknown as Cell<T>; // Cast to set brand
+}
+
+/**
+ * Shared container for entity ID and cause information across sibling cells.
+ * When cells are created via .asSchema(), .withTx(), they share the same
+ * logical identity (same entity id) but may have different paths or schemas.
+ * The container stores only the entity reference parts that need to be synchronized.
+ */
+interface CauseContainer {
+  // Entity reference - shared across all siblings
+  id: URI | undefined;
+  space: MemorySpace | undefined;
+  // Cause for creating the entity ID
+  cause: unknown | undefined;
 }
 
 /**
@@ -198,20 +213,29 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   >();
   private cleanup: Cancel | undefined;
 
-  // Use NormalizedLink which may not have id/space yet
+  // Each cell has its own link (space, path, schema)
   private _link: NormalizedLink;
-  private _cause: unknown | undefined;
+
+  // Shared container for entity ID and cause - siblings share the same instance
+  private _causeContainer: CauseContainer;
 
   constructor(
     public readonly runtime: IRuntime,
-    link: NormalizedLink = { path: [] },
     public readonly tx: IExtendedStorageTransaction | undefined,
+    link?: NormalizedLink,
     private synced: boolean = false,
-    cause?: unknown,
+    causeContainer?: CauseContainer,
   ) {
-    // Always have at least a path
-    this._link = link;
-    this._cause = cause;
+    // Store this cell's own link
+    this._link = link ?? { path: [] };
+
+    // Use provided container or create one
+    // If link has an id, extract it to the container
+    this._causeContainer = causeContainer ?? {
+      id: this._link.id,
+      space: this._link.space,
+      cause: undefined,
+    };
   }
 
   /**
@@ -219,18 +243,20 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * This will attempt to create a full link if one doesn't exist and we're in a valid context.
    */
   private get link(): NormalizedFullLink {
-    // Check if we have a full link (with id and space)
-    if (!this._link.id || !this._link.space) {
+    // Check if we have a full entity ID and space
+    if (!this.hasFullLink()) {
       // Try to ensure we have a full link
       this.ensureLink();
 
       // If still no full link after ensureLink, throw
-      if (!this._link.id || !this._link.space) {
+      if (!this.hasFullLink()) {
         throw new Error(
           "Cell link could not be created. Use .for() to set a cause before accessing the cell.",
         );
       }
     }
+
+    // Combine causeContainer id with link's space/path/schema
     return this._link as NormalizedFullLink;
   }
 
@@ -243,49 +269,73 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   /**
    * Set a cause for this cell. This is used to create a link when the cell doesn't have one yet.
+   * This affects all sibling cells (created via .key(), .asSchema(), .withTx()) since they
+   * share the same container.
    * @param cause - The cause to associate with this cell
    * @param options - Optional configuration
-   * @param options.force - If true, will create an extension if cause already exists. If false (default), ignores the call if link already exists.
+   * @param options.force - If true, will create an extension if link already exists. If false (default), ignores the call if link already exists.
    * @returns This cell for method chaining
    */
   for(cause: unknown, options?: { force?: boolean }): Cell<T> {
     const force = options?.force ?? false;
 
-    // If full link already exists and force is false, ignore this call
-    if (this.hasFullLink() && !force) {
+    // If cause or id already exists and force is false, silently ignore
+    if ((this._causeContainer.id || this._causeContainer.cause) && !force) {
       return this as unknown as Cell<T>;
     }
 
-    // Store the cause
-    this._cause = cause;
+    // Store the cause in the shared container - all siblings will see this
+    this._causeContainer.cause = cause;
 
-    // TODO(seefeld): Implement link creation from cause
-    // For now, we'll defer link creation until it's actually needed
-    // This will be implemented in the "force creation of cause" step
+    // TODO(seefeld): Implement extension creation when force is true and link exists
 
     return this as unknown as Cell<T>;
   }
 
   /**
    * Force creation of a full link for this cell from the stored cause.
-   * This method populates id and space if they don't exist, using information from:
+   * This method populates id if it doesn't exist, using information from:
    * - The stored cause (from .for())
    * - The current handler context
    * - Derived information from the graph (for deriving nodes)
+   *
+   * Updates the shared causeContainer, so all siblings will see the new id.
    *
    * @throws Error if not in a handler context and no cause was provided
    */
   private ensureLink(): void {
     // If we already have a full link (id and space), nothing to do
-    if (this._link.id && this._link.space) {
+    if (this._causeContainer.id && this._link.space) {
       return;
     }
 
     // Check if we're in a handler context
     const frame = getTopFrame();
 
+    if (!frame) {
+      throw new Error(
+        "Cannot create cell link: no frame context.\n" +
+          "This typically happens when:\n" +
+          "  - A cell is passed to another cell's .set() method without a link\n" +
+          "  - A cell is used outside of a handler or lift context\n",
+      );
+    }
+
+    const space = this._link.space ?? this._causeContainer.space ??
+      frame?.space;
+
+    // We need a space to create a link
+    if (!space) {
+      throw new Error(
+        "Cannot create cell link: space is required.\n" +
+          "When creating cells without links, you must provide a space in the frame.\n",
+      );
+    }
+
+    const cause = this._causeContainer.cause ??
+      (frame.event ? { count: frame.generatedIdCounter++ } : undefined);
     // TODO(seefeld): Implement no-cause-but-in-handler case
-    if (!frame?.cause || !this._cause) {
+    if (!cause) {
       throw new Error(
         "Cannot create cell link: not in a handler context and no cause was provided.\n" +
           "This typically happens when:\n" +
@@ -295,29 +345,24 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       );
     }
 
-    // We need a space to create a link
-    // TODO(seefeld): Get space from frame
-    if (!this._link.space) {
-      throw new Error(
-        "Cannot create cell link: space is required.\n" +
-          "When creating cells without links, you must provide a space in the link.\n" +
-          "Use runtime.getCell() or provide a link with a space when constructing the cell.",
-      );
-    }
-
     // Create an entity ID from the cause
-    const entityId = createRef({ frame: frame!.cause }, this._cause);
+    // Include frame.cause in the source for determinism
+    const id = toURI(createRef({ frame: cause }, cause));
 
-    // Populate the id and type fields (keeping existing path, schema, etc.)
-    this._link = {
-      ...this._link,
-      id: toURI(entityId),
-      type: this._link.type ?? "application/json",
-    };
+    // Populate the id in the shared causeContainer
+    // All siblings will see this update
+    this._causeContainer.id = id;
+    this._causeContainer.space = space;
+
+    // Update this cell's link with the space if it doesn't have one
+    if (!this._link.space) {
+      this._link = { ...this._link, id, space };
+    }
   }
 
   get space(): MemorySpace {
-    return this.link.space;
+    return this._link.space ?? this._causeContainer.space ??
+      getTopFrame()?.space!;
   }
 
   get path(): readonly PropertyKey[] {
@@ -325,33 +370,37 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get schema(): JSONSchema | undefined {
-    if (!this._link) return undefined;
-
-    if (this.link.schema) return this.link.schema;
+    if (this._link.schema) return this._link.schema;
 
     // If no schema is defined, resolve link and get schema from there (which is
     // what .get() would do).
-    const resolvedLink = resolveLink(
-      this.runtime.readTx(this.tx),
-      this.link,
-      "writeRedirect",
-    );
-    return resolvedLink.schema;
+    if (this.hasFullLink()) {
+      const resolvedLink = resolveLink(
+        this.runtime.readTx(this.tx),
+        this.link,
+        "writeRedirect",
+      );
+      return resolvedLink.schema;
+    }
+
+    return undefined;
   }
 
   get rootSchema(): JSONSchema | undefined {
-    if (!this._link) return undefined;
-
-    if (this.link.rootSchema) return this.link.rootSchema;
+    if (this._link.rootSchema) return this._link.rootSchema;
 
     // If no root schema is defined, resolve link and get root schema from there
     // (which is what .get() would do).
-    const resolvedLink = resolveLink(
-      this.runtime.readTx(this.tx),
-      this.link,
-      "writeRedirect",
-    );
-    return resolvedLink.rootSchema;
+    if (this.hasFullLink()) {
+      const resolvedLink = resolveLink(
+        this.runtime.readTx(this.tx),
+        this.link,
+        "writeRedirect",
+      );
+      return resolvedLink.rootSchema;
+    }
+
+    return undefined;
   }
 
   /**
@@ -554,19 +603,20 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       )
       : undefined;
 
-    // Build up the path even without a full link
+    // Create a child link with extended path
     const childLink: NormalizedLink = {
       ...this._link,
       path: [...this._link.path, valueKey.toString()] as string[],
-      ...(childSchema && { schema: childSchema }),
+      schema: childSchema,
+      rootSchema: childSchema ? this._link.rootSchema : undefined,
     };
 
     return new CellImpl(
       this.runtime,
-      childLink,
       this.tx,
+      childLink,
       this.synced,
-      this._cause, // Inherit cause
+      this._causeContainer,
     ) as unknown as KeyResultType<T, K, AsCell>;
   }
 
@@ -577,21 +627,32 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
+    // asSchema creates a sibling with same identity but different schema
+    // Create a new link with modified schema
+    const siblingLink: NormalizedLink = {
+      ...this._link,
+      schema: schema,
+      rootSchema: schema,
+    };
+
     return new CellImpl(
       this.runtime,
-      { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
+      siblingLink,
       false, // Reset synced flag, since schema is changing
+      this._causeContainer, // Share the causeContainer with siblings
     ) as unknown as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    // For streams, this is a no-op, but we still create a new instance
+    // withTx creates a sibling with same identity but different transaction
+    // Share the causeContainer so .for() calls propagate
     return new CellImpl(
       this.runtime,
-      this.link,
       newTx,
+      this._link, // Use the same link
       this.synced,
+      this._causeContainer, // Share the causeContainer with siblings
     ) as unknown as Cell<T>;
   }
 

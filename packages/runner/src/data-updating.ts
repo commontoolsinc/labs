@@ -118,7 +118,7 @@ export function normalizeAndDiff(
     diffLogger.debug(() =>
       `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`
     );
-    newValue = new CellImpl(runtime, seen.get(newValue)!, tx);
+    newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM

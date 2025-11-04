@@ -5,7 +5,6 @@ import {
   convertCellsToLinks,
   effect,
   isCell,
-  isStream,
   type JSONSchema,
   UI,
   useCancelGroup,
