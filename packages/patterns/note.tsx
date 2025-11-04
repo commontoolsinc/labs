@@ -178,7 +178,7 @@ const Note = recipe<Input, Output>(
         ) => {
           const result = generateText({
             system: str`Translate the content to ${language}.`,
-            prompt: content,
+            prompt: str`<to_translate>${content}</to_translate>`,
           });
 
           return derive(result, ({ pending, result }) => {
