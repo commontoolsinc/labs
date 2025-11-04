@@ -179,7 +179,7 @@ function factoryFromRecipe<T, R>(
         }
         if (isShadowRef(value)) {
           throw new Error("Shadow refs no longer supported");
-        } else if (isOpaqueRef(value)) {
+        } else if (isOpaqueCell(value)) {
           cells.add(value);
           value.export().nodes.forEach((node: NodeRef) => {
             if (!nodes.has(node)) {
