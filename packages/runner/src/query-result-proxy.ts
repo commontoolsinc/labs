@@ -369,6 +369,10 @@ export function makeOpaqueRef(
   const id = `${link.space}:${link.id}:${link.path.join(":")}`;
   if (map.has(id)) return map.get(id)!;
 
+  // Since cells are now also OpaqueRefs, create a Cell directly
+  // We need a runtime to create a cell, but we don't have access to it here
+  // For now, create an OpaqueRef the old way for compatibility
+  // TODO: This should be refactored to use cells directly once runtime is available
   const ref = opaqueRef();
   ref.setPreExisting({
     $alias: { cell: { "/": fromURI(link.id) }, path: link.path },

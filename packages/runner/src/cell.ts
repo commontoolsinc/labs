@@ -1,15 +1,21 @@
 import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { MemorySpace } from "@commontools/memory/interface";
-import { getTopFrame } from "./builder/recipe.ts";
+import { getTopFrame, recipe } from "./builder/recipe.ts";
+import { createNodeFactory } from "./builder/module.ts";
 import {
   type AnyCell,
   type Cell,
+  type Frame,
   ID,
   ID_FIELD,
   type IDFields,
   isStreamValue,
   type JSONSchema,
+  type NodeFactory,
+  type NodeRef,
+  type Opaque,
   type OpaqueRef,
+  type Recipe,
   type Schema,
   type Stream,
   TYPE,
@@ -19,7 +25,6 @@ import {
   createQueryResultProxy,
   getCellOrThrow,
   isQueryResultForDereferencing,
-  makeOpaqueRef,
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -54,6 +59,12 @@ import type {
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+
+// Shared map factory instance for all cells
+let mapFactory: NodeFactory<any, any> | undefined;
+
+// WeakMap to store connected nodes for each cell instance
+const cellNodes = new WeakMap<CellImpl<any>, Set<NodeRef>>();
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -138,7 +149,31 @@ declare module "@commontools/api" {
     setSourceCell(sourceCell: Cell<any>): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
-    toJSON(): LegacyJSONCellLink;
+    setPreExisting(ref: any): void;
+    setDefault(value: Opaque<any>): void;
+    setSchema(newSchema: JSONSchema): void;
+    connect(node: NodeRef): void;
+    export(): {
+      cell: Cell<any>;
+      path: readonly PropertyKey[];
+      link?: NormalizedFullLink;
+      schema?: JSONSchema;
+      rootSchema?: JSONSchema;
+      nodes: Set<NodeRef>;
+      frame: Frame;
+    };
+    map<S>(
+      fn: (
+        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+        index: OpaqueRef<number>,
+        array: OpaqueRef<T>,
+      ) => Opaque<S>,
+    ): OpaqueRef<S[]>;
+    mapWithPattern<S>(
+      op: Recipe,
+      params: Record<string, any>,
+    ): OpaqueRef<S[]>;
+    toJSON(): LegacyJSONCellLink | null;
     runtime: IRuntime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
@@ -838,7 +873,137 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return !!this.readOnlyReason;
   }
 
-  toJSON(): LegacyJSONCellLink {
+  /**
+   * @deprecated Use schema defaults instead. This method is provided for compatibility
+   * during the OpaqueRef/Cell merge but will be removed in the future.
+   */
+  setPreExisting(ref: any): void {
+    // This was used in toOpaqueRef which can go away
+    // For now, do nothing as this is deprecated
+    console.warn("setPreExisting is deprecated and will be removed");
+  }
+
+  /**
+   * @deprecated Use schema defaults instead. This method is provided for compatibility
+   * during the OpaqueRef/Cell merge but will be removed in the future.
+   */
+  setDefault(value: Opaque<any>): void {
+    // Defaults should be handled via schema
+    console.warn("setDefault is deprecated and will be removed");
+  }
+
+  /**
+   * Set the schema for this cell. Only works if the cause isn't set yet.
+   * Prefer using .asSchema() instead.
+   */
+  setSchema(newSchema: JSONSchema): void {
+    if (this._causeContainer.cause || this._causeContainer.id) {
+      throw new Error(
+        "Cannot setSchema: cell already has a cause or link. Use .asSchema() instead.",
+      );
+    }
+    // Since we don't have a cause yet, we can modify the link's schema
+    this._link = { ...this._link, schema: newSchema, rootSchema: newSchema };
+  }
+
+  /**
+   * Connect this cell to a node reference.
+   * This stores the node in a set of connected nodes, which is used during recipe construction.
+   * @param node - The node to connect to
+   */
+  connect(node: NodeRef): void {
+    // For cells created during recipe construction, we need to track which nodes
+    // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
+    // we'll store this in a WeakMap keyed by the cell instance.
+    if (!cellNodes.has(this)) {
+      cellNodes.set(this, new Set());
+    }
+    cellNodes.get(this)!.add(node);
+  }
+
+  /**
+   * Export cell metadata for introspection, similar to OpaqueRef's export method.
+   * If the cell has a link, it's included as 'external'.
+   */
+  export(): {
+    cell: Cell<any>;
+    path: readonly PropertyKey[];
+    link?: NormalizedFullLink;
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    nodes: Set<NodeRef>;
+    frame: Frame;
+  } {
+    const frame = getTopFrame();
+    return {
+      cell: this as unknown as Cell<any>,
+      path: this.path,
+      link: this.hasFullLink() ? this.link : undefined,
+      schema: this.schema,
+      rootSchema: this.rootSchema,
+      nodes: cellNodes.get(this) || new Set(),
+      frame: frame!,
+    };
+  }
+
+  /**
+   * Map over an array cell, creating a new derived array.
+   * Similar to Array.prototype.map but works with OpaqueRefs.
+   */
+  map<S>(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S>,
+  ): OpaqueRef<S[]> {
+    // Create the factory if it doesn't exist
+    if (!mapFactory) {
+      mapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "map",
+      });
+    }
+
+    // Use the cell directly as an OpaqueRef (since cells are now also OpaqueRefs)
+    return mapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: recipe(
+        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+      ),
+    });
+  }
+
+  /**
+   * Map over an array cell using a pattern/recipe.
+   * Similar to map but accepts a pre-defined recipe instead of a function.
+   */
+  mapWithPattern<S>(
+    op: Recipe,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]> {
+    // Create the factory if it doesn't exist
+    if (!mapFactory) {
+      mapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "map",
+      });
+    }
+
+    return mapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: op,
+      params: params,
+    });
+  }
+
+  toJSON(): LegacyJSONCellLink | null {
+    // Return null when no link exists (cell hasn't been created yet)
+    if (!this.hasFullLink()) {
+      return null;
+    }
+
+    // Otherwise return current Cell toJSON behavior
     // Keep old format for backward compatibility
     return {
       cell: {
@@ -874,7 +1039,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   [toOpaqueRef](): OpaqueRef<any> {
-    return makeOpaqueRef(this.link);
+    // Since all cells are now also OpaqueRefs, just return this cell
+    return this as unknown as OpaqueRef<any>;
   }
 }
 

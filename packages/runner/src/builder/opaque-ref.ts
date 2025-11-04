@@ -47,11 +47,14 @@ export function opaqueRef<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
+  const frame = getTopFrame()!;
+
+  // Create a shared store for this OpaqueRef tree
   const store = {
     value,
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
-    frame: getTopFrame()!,
+    frame: frame,
     name: undefined as string | undefined,
     schema: schema,
   };
@@ -65,6 +68,8 @@ export function opaqueRef<T>(
     nestedSchema: JSONSchema | undefined,
     rootSchema: JSONSchema | undefined,
   ): OpaqueRef<any> {
+    // Create the methods object that implements IOpaqueCell
+    // These methods are shared by both OpaqueRef and Cell, ensuring compatibility
     const methods: IOpaqueCell<T> = {
       get: () => unsafe_materialize(unsafe_binding, path) as T,
       set: (newValue: Opaque<any>) => {
@@ -162,7 +167,7 @@ export function opaqueRef<T>(
           params: params,
         });
       },
-      toJSON: () => null, // TODO(seefeld): Merge with Cell and cover doc-less case
+      toJSON: () => null, // Return null for OpaqueRef without links (matches Cell behavior)
       /**
        * We assume the cell is an array and will provide an infinite iterator.
        * The primary use-case is destructuring a tuple (`[a, b] = ...`). We
