@@ -2891,8 +2891,8 @@ interface CTPlaidLinkElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
-  "x"?: CellLike<CTEvent<any>>;
-  "y"?: CellLike<CTEvent<any>>;
+  "x"?: EventHandler<any>;
+  "y"?: EventHandler<any>;
   "hidden"?: Booleanish;
   "onpositionchange"?: EventHandler<any>;
 }
