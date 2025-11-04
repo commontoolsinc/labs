@@ -33,7 +33,7 @@
     - [x] second parameter to make it optional/flexible:
       - [x] ignores the .for if link already exists
       - [ ] adds extension if cause already exists (see tracker below)
-  - [ ] Make .key work even if there is no cause yet.
+  - [x] Make .key work even if there is no cause yet.
   - [x] Add some method to force creation of cause, which errors if in
     non-handler context and no other information was given (as e.g. deriving
     nodes, which do have ids, after asking for them -- this walks the graph up
