@@ -19,7 +19,30 @@ export default recipe({
     required: ["nested"]
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, ({ currentTarget }, { state: { nested } }) => {
+        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+            type: "object",
+            properties: {
+                currentTarget: true
+            },
+            required: ["currentTarget"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        nested: {
+                            type: "string",
+                            asCell: true,
+                            asOpaque: true
+                        }
+                    },
+                    required: ["nested"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, ({ currentTarget }, { state: { nested } }) => {
             currentTarget.setAttribute("data-nested", nested.get());
             console.log(state.nested === nested);
         })({

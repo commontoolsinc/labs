@@ -261,6 +261,24 @@ export class SchemaInjectionTransformer extends Transformer {
           const toSchemaEvent = createToSchemaCall(context, eventType);
           const toSchemaState = createToSchemaCall(context, stateType);
 
+          // Register Types in TypeRegistry (if they exist from ClosureTransformer)
+          // This allows SchemaGeneratorTransformer to find the Types for synthetic TypeNodes
+          // If no Type was registered by ClosureTransformer, don't try to create one -
+          // the synthetic TypeNode will be handled by generateSchemaFromSyntheticTypeNode
+          if (typeRegistry) {
+            const eventTypeFromRegistry = typeRegistry.get(eventType);
+            const stateTypeFromRegistry = typeRegistry.get(stateType);
+
+            // Only register if we have a Type from ClosureTransformer
+            if (eventTypeFromRegistry) {
+              typeRegistry.set(toSchemaEvent, eventTypeFromRegistry);
+            }
+
+            if (stateTypeFromRegistry) {
+              typeRegistry.set(toSchemaState, stateTypeFromRegistry);
+            }
+          }
+
           const updated = factory.createCallExpression(
             node.expression,
             undefined,

@@ -175,3 +175,42 @@ export function typeToSchemaTypeNode(
   const result = typeToTypeNode(type, checker, location);
   return result;
 }
+
+/**
+ * If a parameter has an explicit type annotation that's not Any,
+ * return it and register in TypeRegistry.
+ * This is useful for transformers that need to preserve explicit types.
+ */
+export function tryExplicitParameterType(
+  param: ts.ParameterDeclaration | undefined,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): { typeNode: ts.TypeNode; type: ts.Type } | null {
+  if (!param?.type) return null;
+
+  const annotationType = checker.getTypeFromTypeNode(param.type);
+
+  if (annotationType.flags & ts.TypeFlags.Any) return null;
+
+  if (typeRegistry) {
+    typeRegistry.set(param.type, annotationType);
+  }
+
+  return { typeNode: param.type, type: annotationType };
+}
+
+/**
+ * Create a TypeNode and register it with a Type in TypeRegistry.
+ * Handles the common pattern of synthetic TypeNode creation.
+ * This ensures that later transformer stages can retrieve the Type from synthetic nodes.
+ */
+export function registerTypeForNode(
+  typeNode: ts.TypeNode,
+  type: ts.Type,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  if (typeRegistry) {
+    typeRegistry.set(typeNode, type);
+  }
+  return typeNode;
+}

@@ -228,3 +228,46 @@ export function visitEachChildWithJsx(
   // For all other nodes, use the default behavior
   return ts.visitEachChild(node, visitor, context);
 }
+
+/**
+ * Check if a property access expression is being invoked as a method call.
+ *
+ * @example
+ * ```typescript
+ * // Returns true:
+ * obj.method()  // node is obj.method
+ *
+ * // Returns false:
+ * const x = obj.method  // node is obj.method (not being called)
+ * ```
+ */
+export function isMethodCall(node: ts.PropertyAccessExpression): boolean {
+  return !!(
+    node.parent &&
+    ts.isCallExpression(node.parent) &&
+    node.parent.expression === node
+  );
+}
+
+/**
+ * When a property access is a method call, get the object being called on.
+ * This is useful for closures that should capture the object, not the method.
+ *
+ * @example
+ * ```typescript
+ * state.counter.set()  // Returns PropertyAccessExpression for state.counter
+ * obj.method()         // Returns undefined (obj is not a PropertyAccessExpression)
+ * obj.prop             // Returns undefined (not a method call)
+ * ```
+ *
+ * @returns The object PropertyAccessExpression if this is a method call on a property chain,
+ *          undefined otherwise
+ */
+export function getMethodCallTarget(
+  node: ts.PropertyAccessExpression,
+): ts.PropertyAccessExpression | undefined {
+  if (!isMethodCall(node)) return undefined;
+
+  const obj = node.expression;
+  return ts.isPropertyAccessExpression(obj) ? obj : undefined;
+}

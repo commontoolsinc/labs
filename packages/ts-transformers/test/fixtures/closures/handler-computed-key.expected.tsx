@@ -24,7 +24,22 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     const recordMap = state.records;
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()].set(counter))({
+        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            properties: {
+                recordMap: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: {
+                        type: "number",
+                        asCell: true
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["recordMap"]
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()].set(counter))({
             recordMap: recordMap
         })}>
         Step

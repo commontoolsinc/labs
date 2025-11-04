@@ -32,16 +32,40 @@ export default recipe({
     required: ["metrics"]
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (event, { state }) => state.user?.clicks.set(event.detail + state.metrics.get()))({
+        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                clicks: {
+                                    type: "number",
+                                    asCell: true,
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["clicks"]
+                        },
+                        metrics: {
+                            type: "number",
+                            asCell: true,
+                            asOpaque: true
+                        }
+                    },
+                    required: ["user", "metrics"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, (event, { state }) => state.user?.clicks.set(event.detail + state.metrics.get()))({
             state: {
                 user: {
-                    clicks: {
-                        set: state.user?.clicks?.set
-                    }
+                    clicks: state.user?.clicks
                 },
-                metrics: {
-                    get: state.metrics.get
-                }
+                metrics: state.metrics
             }
         })}>
         Track

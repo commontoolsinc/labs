@@ -28,7 +28,32 @@ export default recipe({
     required: ["items", "multiplier"]
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
+        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    value: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["value"]
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
             const scaled = state.items.mapWithPattern(__ctHelpers.recipe({
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
@@ -68,9 +93,7 @@ export default recipe({
             console.log(scaled);
         })({
             state: {
-                items: {
-                    map: state.items.map
-                }
+                items: state.items
             }
         })}>
         Compute
