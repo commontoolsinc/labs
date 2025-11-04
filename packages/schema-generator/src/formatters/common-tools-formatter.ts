@@ -30,12 +30,12 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Check via typeNode for Default (erased at type-level) and all wrapper aliases
+    // Check via typeNode for Default (erased at type-level)
     const wrapperViaNode = detectWrapperViaNode(
       context.typeNode,
       context.typeChecker,
     );
-    if (wrapperViaNode) {
+    if (wrapperViaNode === "Default") {
       return true;
     }
 
@@ -91,62 +91,44 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Handle Cell/Stream/OpaqueRef via node (direct or alias)
-    if (resolvedWrapper && resolvedWrapper.kind !== "Default") {
-      // Use the ACTUAL type from the usage site (which has concrete type arguments)
-      const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
-      if (wrapperInfo) {
-        // For choosing which node to pass to formatWrapperType:
-        // - If original node has type arguments: use it (has concrete types from usage site)
-        // - If original node is just identifier (alias): use resolved node
-        //   formatWrapperType will check if node has type args before extracting inner types
-        const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
-          ? n // Original has type args, use it
-          : resolvedWrapper.node; // Original is just alias, use resolved (but won't extract inner types from it)
-
-        return this.formatWrapperType(
-          wrapperInfo.typeRef,
-          nodeToPass,
-          context,
-          wrapperInfo.kind,
-        );
-      } else {
-        // If we detected a wrapper via typeNode but the type structure is complex
-        // (e.g., wrapped in Opaque union), recursively unwrap to find the base wrapper type
-        const unwrappedType = this.recursivelyUnwrapOpaqueRef(
-          type,
-          resolvedWrapper.kind,
-          context.typeChecker,
-        );
-        if (unwrappedType) {
-          const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
-            ? n
-            : resolvedWrapper.node;
-
-          return this.formatWrapperType(
-            unwrappedType.typeRef,
-            nodeToPass,
-            context,
-            unwrappedType.kind,
-          );
-        }
-        // If we couldn't unwrap, fall through to regular handling
-      }
-    }
-
-    // Fallback: try to get wrapper type information from type structure
-    // (for cases where we don't have a typeNode)
-    const wrapperInfo = this.getWrapperTypeInfo(
-      type,
-      context.typeChecker,
-    );
+    const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
     if (wrapperInfo) {
+      const nodeToPass = this.selectWrapperTypeNode(
+        n,
+        resolvedWrapper,
+        wrapperInfo.kind,
+      );
       return this.formatWrapperType(
         wrapperInfo.typeRef,
-        n,
+        nodeToPass,
         context,
         wrapperInfo.kind,
       );
+    }
+
+    // If we detected a wrapper syntactically but the current type is wrapped in
+    // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
+    // brand information until we reach the underlying wrapper.
+    const wrapperKinds: WrapperKind[] = ["OpaqueRef", "Cell", "Stream"];
+    for (const kind of wrapperKinds) {
+      const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+        type,
+        kind,
+        context.typeChecker,
+      );
+      if (unwrappedType) {
+        const nodeToPass = this.selectWrapperTypeNode(
+          n,
+          resolvedWrapper,
+          unwrappedType.kind,
+        );
+        return this.formatWrapperType(
+          unwrappedType.typeRef,
+          nodeToPass,
+          context,
+          unwrappedType.kind,
+        );
+      }
     }
 
     const nodeName = this.getTypeRefIdentifierName(n);
@@ -453,6 +435,29 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (!typeRef) return undefined;
 
     return { kind, typeRef };
+  }
+
+  private selectWrapperTypeNode(
+    originalNode: ts.TypeNode | undefined,
+    resolvedWrapper:
+      | {
+        kind: "Default" | WrapperKind;
+        node: ts.TypeReferenceNode;
+      }
+      | undefined,
+    targetKind: WrapperKind,
+  ): ts.TypeReferenceNode | undefined {
+    if (resolvedWrapper?.kind === targetKind) {
+      return resolvedWrapper.node;
+    }
+    if (
+      originalNode &&
+      ts.isTypeReferenceNode(originalNode) &&
+      originalNode.typeArguments
+    ) {
+      return originalNode;
+    }
+    return undefined;
   }
 
   private getTypeRefIdentifierName(

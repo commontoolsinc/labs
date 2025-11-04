@@ -1,19 +1,13 @@
-declare const CELL_BRAND: unique symbol;
-
-interface BrandedCell<T, Brand extends string> {
-  readonly [CELL_BRAND]: Brand;
-}
-
-interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
-interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
-interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
-interface CustomStream<T> extends BrandedCell<T, "stream"> {}
-interface CustomOpaque<T> extends BrandedCell<T, "opaque"> {}
+interface MyComparableCell<T> extends BrandedCell<T, "comparable"> {}
+interface MyReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
+interface MyWriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+interface MyStream<T> extends BrandedCell<T, "stream"> {}
+interface MyOpaque<T> extends BrandedCell<T, "opaque"> {}
 
 interface SchemaRoot {
-  comparableValue: ComparableCell<number>;
-  readonlyValue: ReadonlyCell<string>;
-  writeonlyValue: WriteonlyCell<boolean>;
-  streamValue: CustomStream<number>;
-  opaqueValue: CustomOpaque<boolean>;
+  comparableValue: MyComparableCell<number>;
+  readonlyValue: MyReadonlyCell<string>;
+  writeonlyValue: MyWriteonlyCell<boolean>;
+  streamValue: MyStream<number>;
+  opaqueValue: MyOpaque<boolean>;
 }
