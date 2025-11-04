@@ -4,6 +4,7 @@ import {
   type Cell,
   cell,
   type Default,
+  generateText,
   derive,
   handler,
   llm,
@@ -175,15 +176,9 @@ const Note = recipe<Input, Output>(
             content: string;
           },
         ) => {
-          const result = llm({
+          const result = generateText({
             system: str`Translate the content to ${language}.`,
-            messages: derive(content, (c) =>
-              [
-                {
-                  role: "user",
-                  content: c,
-                },
-              ] satisfies BuiltInLLMMessage[]),
+            prompt: content,
           });
 
           return derive(result, ({ pending, result }) => {

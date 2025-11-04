@@ -15,6 +15,8 @@ import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
   BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+  BuiltInGenerateTextState,
   BuiltInLLMGenerateObjectState,
   BuiltInLLMParams,
   BuiltInLLMState,
@@ -49,6 +51,13 @@ export const generateObject = createNodeFactory({
 }) as <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
+
+export const generateText = createNodeFactory({
+  type: "ref",
+  implementation: "generateText",
+}) as (
+  params: Opaque<BuiltInGenerateTextParams>,
+) => OpaqueRef<BuiltInGenerateTextState>;
 
 export const fetchData = createNodeFactory({
   type: "ref",
