@@ -8,6 +8,14 @@ export type CellBrand =
   | "readonly"
   | "writeonly";
 
+export type CellWrapperKind = "Cell" | "Stream" | "OpaqueRef";
+
+export interface CellWrapperInfo {
+  brand: CellBrand;
+  kind: CellWrapperKind;
+  typeRef: ts.TypeReference;
+}
+
 function isCellBrandSymbol(symbol: ts.Symbol): boolean {
   const name = symbol.getName();
   if (name === "CELL_BRAND" || name.startsWith("__@CELL_BRAND")) {
@@ -145,4 +153,67 @@ export function getCellKind(
     default:
       return undefined;
   }
+}
+
+function brandToWrapperKind(brand: CellBrand): CellWrapperKind | undefined {
+  switch (brand) {
+    case "opaque":
+      return "OpaqueRef";
+    case "stream":
+      return "Stream";
+    case "cell":
+    case "comparable":
+    case "readonly":
+    case "writeonly":
+      return "Cell";
+    default:
+      return undefined;
+  }
+}
+
+function extractWrapperTypeReference(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Type>,
+): ts.TypeReference | undefined {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const typeRef = objectType as ts.TypeReference;
+      const typeArgs = typeRef.typeArguments ??
+        checker.getTypeArguments(typeRef);
+      if (typeArgs && typeArgs.length > 0) {
+        return typeRef;
+      }
+    }
+  }
+
+  if (type.flags & ts.TypeFlags.Intersection) {
+    const intersectionType = type as ts.IntersectionType;
+    for (const constituent of intersectionType.types) {
+      const ref = extractWrapperTypeReference(constituent, checker, seen);
+      if (ref) return ref;
+    }
+  }
+
+  return undefined;
+}
+
+export function getCellWrapperInfo(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): CellWrapperInfo | undefined {
+  const brand = getCellBrand(type, checker);
+  if (!brand) return undefined;
+
+  const kind = brandToWrapperKind(brand);
+  if (!kind) return undefined;
+
+  const typeRef = extractWrapperTypeReference(type, checker, new Set());
+  if (!typeRef) return undefined;
+
+  return { brand, kind, typeRef };
 }

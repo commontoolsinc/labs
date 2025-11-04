@@ -38,7 +38,9 @@ Deno.test("detects cell brand variants", () => {
   ];
 
   for (const [expr, expectedKind] of variants) {
-    const { checker, expression } = analyzeExpression(expr, { prelude: PRELUDE });
+    const { checker, expression } = analyzeExpression(expr, {
+      prelude: PRELUDE,
+    });
     const type = checker.getTypeAtLocation(expression);
     assert(isOpaqueRefType(type, checker), `${expr} should be treated as cell`);
     assertEquals(

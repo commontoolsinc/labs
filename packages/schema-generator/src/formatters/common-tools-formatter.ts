@@ -1,8 +1,9 @@
 import ts from "typescript";
 import {
+  type CellWrapperKind,
   getCellBrand,
+  getCellWrapperInfo,
   isCellBrand,
-  type CellBrand,
 } from "@commontools/cell-brand";
 import type {
   GenerationContext,
@@ -12,7 +13,7 @@ import type {
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { detectWrapperViaNode, resolveWrapperNode } from "../type-utils.ts";
 
-type WrapperKind = "Cell" | "Stream" | "OpaqueRef";
+type WrapperKind = CellWrapperKind;
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -45,7 +46,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
-    const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
     return wrapperInfo !== undefined;
   }
 
@@ -91,7 +92,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    const wrapperInfo = this.getWrapperTypeInfo(type, context.typeChecker);
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
     if (wrapperInfo) {
       const nodeToPass = this.selectWrapperTypeNode(
         n,
@@ -209,7 +210,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
-    if (wrapperKind === "Cell" && this.isStreamType(innerType)) {
+    if (
+      wrapperKind === "Cell" &&
+      this.isStreamType(innerType, context.typeChecker)
+    ) {
       throw new Error(
         "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
       );
@@ -246,7 +250,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Check if this type itself is the target wrapper
-    const wrapperInfo = this.getWrapperTypeInfo(type, checker);
+    const wrapperInfo = getCellWrapperInfo(type, checker);
     if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
       return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
     }
@@ -364,7 +368,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     type: ts.Type,
     checker: ts.TypeChecker,
   ): ts.Type | undefined {
-    const wrapperInfo = this.getWrapperTypeInfo(type, checker);
+    const wrapperInfo = getCellWrapperInfo(type, checker);
     if (!wrapperInfo || wrapperInfo.kind !== "OpaqueRef") {
       return undefined;
     }
@@ -372,69 +376,6 @@ export class CommonToolsFormatter implements TypeFormatter {
     const typeArgs = wrapperInfo.typeRef.typeArguments ??
       checker.getTypeArguments(wrapperInfo.typeRef);
     return typeArgs && typeArgs.length > 0 ? typeArgs[0] : undefined;
-  }
-
-  /**
-   * Get wrapper type information (Cell/Stream/OpaqueRef)
-   * Handles both direct references and intersection types (e.g., OpaqueRef<"literal">)
-   * Returns the wrapper kind and the TypeReference needed for formatting
-   */
-  private brandToWrapperKind(brand: CellBrand): WrapperKind | undefined {
-    switch (brand) {
-      case "opaque":
-        return "OpaqueRef";
-      case "stream":
-        return "Stream";
-      case "cell":
-      case "comparable":
-      case "readonly":
-      case "writeonly":
-        return "Cell";
-      default:
-        return undefined;
-    }
-  }
-
-  private extractWrapperTypeReference(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): ts.TypeReference | undefined {
-    if (type.flags & ts.TypeFlags.Object) {
-      const objectType = type as ts.ObjectType;
-      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-        const typeRef = objectType as ts.TypeReference;
-        const typeArgs = typeRef.typeArguments;
-        if (typeArgs && typeArgs.length > 0) {
-          return typeRef;
-        }
-      }
-    }
-
-    if (type.flags & ts.TypeFlags.Intersection) {
-      const intersectionType = type as ts.IntersectionType;
-      for (const constituent of intersectionType.types) {
-        const ref = this.extractWrapperTypeReference(constituent, checker);
-        if (ref) return ref;
-      }
-    }
-
-    return undefined;
-  }
-
-  private getWrapperTypeInfo(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ): { kind: WrapperKind; typeRef: ts.TypeReference } | undefined {
-    const brand = getCellBrand(type, checker);
-    if (!brand) return undefined;
-
-    const kind = this.brandToWrapperKind(brand);
-    if (!kind) return undefined;
-
-    const typeRef = this.extractWrapperTypeReference(type, checker);
-    if (!typeRef) return undefined;
-
-    return { kind, typeRef };
   }
 
   private selectWrapperTypeNode(
@@ -468,10 +409,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     return ts.isIdentifier(tn) ? tn.text : undefined;
   }
 
-  private isStreamType(type: ts.Type): boolean {
-    const objectType = type as ts.ObjectType;
-    return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
-      (type as ts.TypeReference).target?.symbol?.name === "Stream";
+  private isStreamType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return getCellBrand(type, checker) === "stream";
   }
 
   private formatDefaultType(
