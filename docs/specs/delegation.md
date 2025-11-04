@@ -9,9 +9,10 @@ Via latest [PRD](https://docs.google.com/document/d/1KixOc7L5LZ8IdJtO_9pNHohPg_L
 ```
 DID = "did:key:{string}"
 DOMAIN = "{string.}*{string}.{string}"
+CHARM_ID = "of:${HASH}"
 NAMESPACE = DID | DOMAIN
 SPACE = DID | string;
-CHARM = DID | string;
+CHARM = CHARM_ID | string;
 ADDR = "/{@NAMESPACE/}?SPACE/CHARM?"
 ```
 
