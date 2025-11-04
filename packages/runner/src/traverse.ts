@@ -1016,6 +1016,9 @@ export function combineSchema(
       linkSchema.items,
     );
     return { type: "array", items: mergedSchemaItems };
+  } else if (isObject(linkSchema) && isObject(parentSchema)) {
+    // this isn't great, but at least grab the flags from parent schema
+    return mergeSchemaFlags(parentSchema, linkSchema);
   }
   return linkSchema;
 }
