@@ -6,6 +6,7 @@ import { JSONSchemaObj } from "@commontools/api";
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   type Immutable,
+  isBoolean,
   isNumber,
   isObject,
   isRecord,
@@ -1177,6 +1178,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
   // The selector should have been re-rooted if needed to be relative to the
   // specified doc. This generally means that its path starts with value.
   // The selector must have a valid (defined) schemaContext
+  // Once we've gotten the path of our doc to match the path of our selector,
+  // we can call traverseWithSchemaContext instead.
   traverseWithSelector(
     doc: IAttestation,
     selector: SchemaPathSelector,
@@ -1306,6 +1309,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
         : undefined;
     } else if (isNumber(doc.value)) {
       return this.isValidType(schemaObj, "number")
+        ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
+        : undefined;
+    } else if (isBoolean(doc.value)) {
+      return this.isValidType(schemaObj, "boolean")
         ? this.traversePrimitive(doc, schemaObj, schemaContext.rootSchema)
         : undefined;
     } else if (Array.isArray(doc.value)) {
