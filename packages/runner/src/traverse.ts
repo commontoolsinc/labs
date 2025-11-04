@@ -858,20 +858,24 @@ function combineSchemaContext(
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   if (isObject(flagSchema)) {
-    // we want to preserve asCell and asStream
+    // we want to preserve asCell and asStream -- if true, these will override
+    // the value in the schema
     const { asCell, asStream } = flagSchema;
     if (asCell || asStream) {
+      const mergedFlags: { asCell?: boolean; asStream?: boolean } = {};
+      if (asCell || isObject(schema) && schema.asCell) {
+        mergedFlags.asCell = true;
+      }
+      if (asStream || isObject(schema) && schema.asStream) {
+        mergedFlags.asStream = true;
+      }
       if (isObject(schema)) {
         return {
           ...schema,
-          ...(schema.asCell ? { asCell: schema.asCell } : {}),
-          ...(schema.asStream ? { asStream: schema.asStream } : {}),
+          ...mergedFlags,
         };
       } else if (schema === true) {
-        return {
-          ...(asCell ? { asCell } : {}),
-          ...(asStream ? { asStream } : {}),
-        };
+        return mergedFlags;
       }
     }
   }
@@ -1334,36 +1338,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return undefined;
     } else if (isObject(doc.value)) {
       if (isAnyCellLink(doc.value)) {
-        // We need to combine the information in the link's value with the
-        // information we have from the doc we're traversing.
-        const baseLink = getNormalizedLink(
-          doc.address,
-          this.space,
-          schemaObj,
-          schemaContext.rootSchema,
-        );
-        const normalizedLink = parseLink(doc.value, baseLink);
-        normalizedLink.schema = normalizedLink.schema !== undefined
-          ? combineSchema(schemaObj, normalizedLink.schema)
-          : schemaObj;
-        normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
-          ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
-          : schemaContext.rootSchema;
-        console.log(
-          "Encountered cell link in traverseWithSchemaContext",
-          doc.value,
-          normalizedLink,
-        );
-        // For the runtime, where we don't traverse cells, we just want
-        // to create a cell object and don't walk into the object.
-        // For the memory system, where we do traverse cells, we will
-        // still walk into these objects regardless of the schema flag,
-        // since we still need to get the connected objects.
-        if (
-          !this.traverseCells && SchemaObjectTraverser.asCellOrStream(schemaObj)
-        ) {
-          return this.objectCreator.createObject(normalizedLink, undefined);
-        }
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -1520,6 +1494,39 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IAttestation,
     schemaContext: SchemaContext,
   ): JSONValue | V | undefined {
+    // We need to combine the information in the link's value with the
+    // information we have from the doc we're traversing.
+    const baseLink = getNormalizedLink(
+      doc.address,
+      this.space,
+      schemaContext.schema,
+      schemaContext.rootSchema,
+    );
+    const normalizedLink = parseLink(doc.value, baseLink) ?? baseLink;
+    normalizedLink.schema = normalizedLink.schema !== undefined
+      ? combineSchema(schemaContext.schema, normalizedLink.schema)
+      : schemaContext.schema;
+    normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
+      ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
+      : schemaContext.rootSchema;
+    console.log(
+      "Encountered cell link in traverseWithSchemaContext",
+      doc.value,
+      normalizedLink,
+      schemaContext,
+    );
+    // For the runtime, where we don't traverse cells, we just want
+    // to create a cell object and don't walk into the object.
+    // For the memory system, where we do traverse cells, we will
+    // still walk into these objects regardless of the schema flag,
+    // since we still need to get the connected objects.
+    if (
+      !this.traverseCells &&
+      SchemaObjectTraverser.asCellOrStream(normalizedLink.schema)
+    ) {
+      return this.objectCreator.createObject(normalizedLink, undefined);
+    }
+    // FIXME: we should use the schema from normalizedLink here too
     const selector = {
       path: doc.address.path,
       schemaContext: schemaContext,
