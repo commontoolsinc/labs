@@ -354,16 +354,12 @@ export interface WriteonlyCell<T>
  * This is temporary until AST transformation handles .key() automatically.
  *
  * Note: Symbol keys (like CELL_BRAND) are excluded from mapping to avoid
- * brand conflicts. Already-branded cells are preserved as-is rather than
- * being wrapped again to prevent cell-of-cell situations.
+ * brand conflicts when wrapping branded cells.
  */
 export type OpaqueRef<T> =
   & OpaqueCell<T>
   & (T extends Array<infer U> ? Array<OpaqueRef<U>>
-    : T extends object ? {
-        [K in keyof T as K extends symbol ? never : K]:
-          T[K] extends BrandedCell<any, any> ? T[K] : OpaqueRef<T[K]>
-      }
+    : T extends object ? { [K in keyof T as K extends symbol ? never : K]: OpaqueRef<T[K]> }
     : T);
 
 // ============================================================================

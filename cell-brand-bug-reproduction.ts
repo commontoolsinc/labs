@@ -15,7 +15,7 @@ interface State {
 }
 
 // Accessing properties on OpaqueRef<Cell<T>> fails type-checking
-function reproducesBug(state: OpaqueRef<State>) {
+function _reproducesBug(state: OpaqueRef<State>) {
   state.counter.set(state.counter.get() + 1);
   //            ^^^ Property 'set' does not exist on type 'never'
   //                                  ^^^ Property 'get' does not exist on type 'never'
