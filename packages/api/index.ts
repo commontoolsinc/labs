@@ -56,8 +56,14 @@ type IsThisArray =
  * IAnyCell is an interface that is used by all calls and to which the runner
  * attaches the internal methods..
  */
-// deno-lint-ignore no-empty-interface
 export interface IAnyCell<T> {
+  /**
+   * Set a cause for this cell. Used to create a link when the cell doesn't have
+   * one yet.
+   * @param cause - The cause to associate with this cell
+   * @returns This cell for method chaining
+   */
+  for(cause: unknown): Cell<T>;
 }
 
 /**

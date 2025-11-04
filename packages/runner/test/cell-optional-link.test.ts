@@ -45,7 +45,7 @@ describe("Cell with Optional Link", () => {
       expect(result).toBe(cell);
     });
 
-    it("should ignore .for() if link already exists", () => {
+    it("should throw error if link already exists (default behavior)", () => {
       const existingCell = runtime.getCell<number>(
         space,
         "test-cell-with-link",
@@ -55,28 +55,32 @@ describe("Cell with Optional Link", () => {
       existingCell.set(42);
 
       const cause = { type: "test-cause" };
-      const result = existingCell.for(cause);
 
-      // Should return the cell for chaining
-      expect(result).toBe(existingCell);
+      // Should throw by default
+      expect(() => existingCell.for(cause)).toThrow(
+        "Cannot set cause: cell already has a cause or link",
+      );
+
       // Cell should still work normally
       expect(existingCell.get()).toBe(42);
     });
 
-    it("should allow force option to override existing link behavior", () => {
+    it("should allow allowIfSet option to treat as suggestion", () => {
       const existingCell = runtime.getCell<number>(
         space,
-        "test-cell-force",
+        "test-cell-allow",
         undefined,
         tx,
       );
       existingCell.set(42);
 
       const cause = { type: "test-cause" };
-      const result = existingCell.for(cause, { force: true });
+      const result = existingCell.for(cause, true); // allowIfSet = true
 
-      // Should return the cell for chaining
+      // Should return the cell for chaining without throwing
       expect(result).toBe(existingCell);
+      // Cell should still work normally
+      expect(existingCell.get()).toBe(42);
     });
 
     it("should support method chaining", () => {
@@ -248,7 +252,7 @@ describe("Cell with Optional Link", () => {
       cell.set(42);
 
       // Should not affect the cell
-      cell.for({ type: "ignored-cause" });
+      cell.for({ type: "ignored-cause" }, true);
 
       expect(cell.get()).toBe(42);
     });
