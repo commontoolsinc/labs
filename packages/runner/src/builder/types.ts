@@ -261,7 +261,7 @@ export type Frame = {
   cause?: unknown;
   generatedIdCounter: number;
   space?: MemorySpace;
-  event?: unknown;
+  inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
 };

@@ -421,13 +421,17 @@ export function pushFrame(frame?: Frame): Frame {
 export function pushFrameFromCause(
   cause: any,
   unsafe_binding?: UnsafeBinding,
+  inHandler: boolean = false,
 ): Frame {
   const frame = {
     parent: getTopFrame(),
     cause,
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
+    // Extract space from unsafe_binding if available and set it on frame
+    ...(unsafe_binding?.space && { space: unsafe_binding.space }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
+    ...(inHandler && { inHandler }),
   };
   frames.push(frame);
   return frame;

@@ -969,13 +969,17 @@ export class Runner implements IRunner {
           tx,
         );
 
-        const frame = pushFrameFromCause(cause, {
-          recipe,
-          materialize: (path: readonly PropertyKey[]) =>
-            processCell.getAsQueryResult(path),
-          space: processCell.space,
-          tx,
-        });
+        const frame = pushFrameFromCause(
+          cause,
+          {
+            recipe,
+            materialize: (path: readonly PropertyKey[]) =>
+              processCell.getAsQueryResult(path),
+            space: processCell.space,
+            tx,
+          },
+          true, // Set the event on the frame
+        );
 
         const argument = module.argumentSchema
           ? inputsCell.asSchema(module.argumentSchema).get()

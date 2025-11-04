@@ -209,7 +209,7 @@ describe("Cell with Optional Link", () => {
       pushFrame({
         cause: { type: "handler-cause" },
         space,
-        event: "test-event",
+        inHandler: true,
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
