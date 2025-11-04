@@ -260,6 +260,8 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  space?: MemorySpace;
+  event?: unknown;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
 };

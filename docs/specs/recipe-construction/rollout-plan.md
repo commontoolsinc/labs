@@ -30,18 +30,19 @@
       of regular set.
   - [x] Change constructor for RegularCell to make link optional
   - [x] Add .for method to set a cause (within current context)
-    - [ ] second parameter to make it optional/flexible:
-      - [ ] ignores the .for if link already exists
+    - [x] second parameter to make it optional/flexible:
+      - [x] ignores the .for if link already exists
       - [ ] adds extension if cause already exists (see tracker below)
   - [ ] Make .key work even if there is no cause yet.
   - [x] Add some method to force creation of cause, which errors if in
     non-handler context and no other information was given (as e.g. deriving
     nodes, which do have ids, after asking for them -- this walks the graph up
     until it hits the passed in cells)
-  - [ ] For now though throw in non-handler context when needing a link and it
+  - [x] For now though throw in non-handler context when needing a link and it
     isn't there, e.g. because we need to create a link to the cell (when passed
     into `anotherCell.set()` for example). We want to encourage .for use in
     ambiguous cases.
+- [ ] Add space and event to Frame
 - [ ] First merge of OpaqueRef and RegularCell
   - [ ] Add methods that allow linking to node invocations
     - [ ] `setPreExisting` can be deprecated (used in toOpaqueRef which itself
