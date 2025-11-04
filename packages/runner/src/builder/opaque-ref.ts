@@ -18,22 +18,100 @@ import { ContextualFlowControl } from "../cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
+import { createCell, type Cell } from "../cell.ts";
+import type { IRuntime } from "../runtime.ts";
 
 let mapFactory: NodeFactory<any, any> | undefined;
 
-// A opaque ref factory that creates future cells with optional default values.
-//
-// It's a proxy object representing a future cell that will eventually be
-// created. It supports nested values and .set(), .get() and .setDefault()
-// methods.
-// - .set(value) sets the value of the proxy cell. This must be a bound data
-//   structure, and internally creates a data node.
-// - .get() just returns the cell itself, a proxy for the cell carrying the
-//   value.
-// - .setDefault(value) sets the default value of the cell.
-//
-// The proxy yields another proxy for each nested value, but still allows the
-// methods to be called. Setters just call .set() on the nested cell.
+/**
+ * Creates an opaqueRef factory bound to a runtime.
+ * This allows opaqueRef to create actual Cells underneath instead of proxies.
+ * @param runtime - The runtime to use for creating cells
+ * @returns A factory function for creating OpaqueRefs
+ */
+export function createOpaqueRefFactory(runtime: IRuntime) {
+  return function opaqueRef<T>(
+    value?: Opaque<T> | T,
+    schema?: JSONSchema,
+  ): OpaqueRef<T> {
+    const cfc = new ContextualFlowControl();
+
+    // Create a Cell without a link - it will be created on demand via .for()
+    const cell = createCell<T>(runtime, undefined, undefined, false);
+
+    // If schema provided, apply it
+    if (schema) {
+      cell.setSchema(schema);
+    }
+
+    // Set initial value if provided (cast to any to avoid type issues with Opaque)
+    if (value !== undefined) {
+      cell.set(value as any);
+    }
+
+    // Store OpaqueRef-specific data that Cell doesn't track
+    const opaqueStore = {
+      defaultValue: undefined as Opaque<any> | undefined,
+      name: undefined as string | undefined,
+    };
+
+    // Create a proxy wrapper that adds iterator and toPrimitive support
+    const proxy = new Proxy(cell, {
+      get(target, prop) {
+        if (prop === Symbol.iterator) {
+          // Iterator support for array destructuring
+          return function* () {
+            let index = 0;
+            while (index < 50) { // Limit to 50 items like original
+              const childSchema = cfc.getSchemaAtPath(schema, [
+                index.toString(),
+              ], schema);
+              const childCell = (target as any).key(index);
+              if (childSchema) {
+                childCell.setSchema(childSchema);
+              }
+              yield childCell;
+              index++;
+            }
+          };
+        } else if (prop === Symbol.toPrimitive) {
+          return () => {
+            throw new Error(
+              "Tried to directly access an opaque value. Use `derive` instead, passing this variable in as parameter to derive, not closing over it",
+            );
+          };
+        } else if (prop === isOpaqueRefMarker) {
+          return true;
+        } else if (prop === "setName") {
+          return (name: string) => {
+            opaqueStore.name = name;
+          };
+        } else if (prop === "setDefault") {
+          return (newValue: Opaque<any>) => {
+            opaqueStore.defaultValue = newValue;
+            // Also call Cell's setDefault (though it's deprecated)
+            cell.setDefault(newValue);
+          };
+        } else if (prop === "export") {
+          return () => {
+            const cellExport = (target as any).export();
+            return {
+              ...cellExport,
+              ...opaqueStore,
+            };
+          };
+        }
+        // Delegate everything else to the Cell
+        return (target as any)[prop];
+      },
+    });
+
+    return proxy as unknown as OpaqueRef<T>;
+  };
+}
+
+// Legacy opaqueRef for backward compatibility - creates proxies without Cell
+// This is used during recipe construction before we have a runtime
 export function opaqueRef<S extends JSONSchema>(
   value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S>,
   schema: S,
@@ -47,14 +125,11 @@ export function opaqueRef<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
-  const frame = getTopFrame()!;
-
-  // Create a shared store for this OpaqueRef tree
   const store = {
     value,
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
-    frame: frame,
+    frame: getTopFrame()!,
     name: undefined as string | undefined,
     schema: schema,
   };

@@ -19,7 +19,7 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { opaqueRef, stream } from "./opaque-ref.ts";
+import { createOpaqueRefFactory, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
@@ -98,6 +98,9 @@ export const createBuilder = (
       }
     }
   };
+
+  // Create the opaqueRef factory bound to this runtime
+  const opaqueRef = createOpaqueRefFactory(runtime);
 
   return {
     commontools: {
