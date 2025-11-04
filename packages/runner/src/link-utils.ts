@@ -4,7 +4,6 @@ import {
   type Cell,
   isAnyCell,
   isCell,
-  isStream,
   type MemorySpace,
   type Stream,
 } from "./cell.ts";

@@ -273,7 +273,7 @@ describe("Cell with Optional Link", () => {
       // Set it to a stream value
       streamCell.setRaw({ $stream: true });
 
-      let receivedEvents: any[] = [];
+      const receivedEvents: any[] = [];
       streamCell.sink((event: any) => {
         receivedEvents.push(event);
       });
