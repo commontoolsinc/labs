@@ -155,13 +155,15 @@ export function llm(
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
     previousCallHash = hash;
 
-    resultWithLog.set(undefined);
-    partialWithLog.set(undefined);
-
     if (!Array.isArray(messages) || messages.length === 0) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
+
+    resultWithLog.set(undefined);
+    partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
     const updatePartial = (text: string) => {
@@ -200,6 +202,9 @@ export function llm(
           result.withTx(tx).set(undefined);
           partial.withTx(tx).set(undefined);
         });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
@@ -271,6 +276,8 @@ export function generateText(
 
     // If no prompt is provided, don't make a request
     if (!prompt) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
@@ -337,6 +344,9 @@ export function generateText(
           result.withTx(tx).set(undefined);
           partial.withTx(tx).set(undefined);
         });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
@@ -411,6 +421,8 @@ export function generateObject<T extends Record<string, unknown>>(
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     if (!prompt || !schema) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
@@ -475,6 +487,9 @@ export function generateObject<T extends Record<string, unknown>>(
           result.withTx(tx).set(undefined);
           partial.withTx(tx).set(undefined);
         });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
