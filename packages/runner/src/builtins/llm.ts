@@ -9,6 +9,7 @@ import {
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
   BuiltInLLMParams,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
@@ -21,6 +22,54 @@ const client = new LLMClient();
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
+
+/**
+ * Helper function to initialize cells for LLM built-ins.
+ * Reduces code duplication across llm, generateText, and generateObject.
+ */
+function initializeCells<T>(
+  runtime: IRuntime,
+  parentCell: Cell<any>,
+  cause: any,
+  tx: IExtendedStorageTransaction,
+  builtinName: "llm" | "generateText" | "generateObject",
+): {
+  pending: Cell<boolean>;
+  result: Cell<T | undefined>;
+  partial: Cell<string | undefined>;
+  requestHash: Cell<string | undefined>;
+} {
+  const pending = runtime.getCell<boolean>(
+    parentCell.space,
+    { [builtinName]: { pending: cause } },
+    undefined,
+    tx,
+  );
+  pending.send(false);
+
+  const result = runtime.getCell<T | undefined>(
+    parentCell.space,
+    { [builtinName]: { result: cause } },
+    undefined,
+    tx,
+  );
+
+  const partial = runtime.getCell<string | undefined>(
+    parentCell.space,
+    { [builtinName]: { partial: cause } },
+    undefined,
+    tx,
+  );
+
+  const requestHash = runtime.getCell<string | undefined>(
+    parentCell.space,
+    { [builtinName]: { requestHash: cause } },
+    undefined,
+    tx,
+  );
+
+  return { pending, result, partial, requestHash };
+}
 
 /**
  * Generate data via an LLM.
@@ -59,40 +108,17 @@ export function llm(
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
-      pending = runtime.getCell(
-        parentCell.space,
-        { llm: { pending: cause } },
-        undefined,
+      const cells = initializeCells<LLMResponse["content"]>(
+        runtime,
+        parentCell,
+        cause,
         tx,
+        "llm",
       );
-      pending.send(false);
-
-      result = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { result: cause },
-        },
-        undefined,
-        tx,
-      );
-
-      partial = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { partial: cause },
-        },
-        undefined,
-        tx,
-      );
-
-      requestHash = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          llm: { requestHash: cause },
-        },
-        undefined,
-        tx,
-      );
+      pending = cells.pending;
+      result = cells.result;
+      partial = cells.partial;
+      requestHash = cells.requestHash;
 
       sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
@@ -129,13 +155,15 @@ export function llm(
     if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
     previousCallHash = hash;
 
-    resultWithLog.set(undefined);
-    partialWithLog.set(undefined);
-
     if (!Array.isArray(messages) || messages.length === 0) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
+
+    resultWithLog.set(undefined);
+    partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
     const updatePartial = (text: string) => {
@@ -174,6 +202,151 @@ export function llm(
           result.withTx(tx).set(undefined);
           partial.withTx(tx).set(undefined);
         });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
+
+        // TODO(seefeld): Not writing now, so we retry the request after failure.
+        // Replace this with more fine-grained retry logic.
+        // requestHash.setAtPath([], hash, log);
+      });
+  };
+}
+
+/**
+ * Generate text via an LLM.
+ *
+ * A simplified alternative to `llm` that takes a single prompt string and
+ * optional system message, returning plain text rather than a structured
+ * content array.
+ *
+ * Returns the complete result as `result` (string) and the incremental result
+ * as `partial` (string). `pending` is true while a request is pending.
+ *
+ * @param prompt - The user prompt/message to send to the LLM.
+ * @param system - Optional system message.
+ * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
+ * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
+ *
+ * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
+ *   As individual docs, representing `pending` state, final `result` and
+ *   incrementally updating `partial` result.
+ */
+export function generateText(
+  inputsCell: Cell<BuiltInGenerateTextParams>,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: any,
+  parentCell: Cell<any>,
+  runtime: IRuntime,
+): Action {
+  let currentRun = 0;
+  let previousCallHash: string | undefined = undefined;
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<string | undefined>;
+  let partial: Cell<string | undefined>;
+  let requestHash: Cell<string | undefined>;
+
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      const cells = initializeCells<string>(
+        runtime,
+        parentCell,
+        cause,
+        tx,
+        "generateText",
+      );
+      pending = cells.pending;
+      result = cells.result;
+      partial = cells.partial;
+      requestHash = cells.requestHash;
+
+      sendResult(tx, { pending, result, partial, requestHash });
+      cellsInitialized = true;
+    }
+    const thisRun = ++currentRun;
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const partialWithLog = partial.withTx(tx);
+    const requestHashWithLog = requestHash.withTx(tx);
+
+    const { system, prompt, model, maxTokens } =
+      inputsCell.getAsQueryResult([], tx) ?? {};
+
+    // If no prompt is provided, don't make a request
+    if (!prompt) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
+      pendingWithLog.set(false);
+      return;
+    }
+
+    // Convert simple prompt to messages array format for LLM client
+    const llmParams: LLMRequest = {
+      system: system ?? "",
+      messages: [{ role: "user", content: prompt }],
+      stop: "",
+      maxTokens: maxTokens ?? 4096,
+      stream: true,
+      model: model ?? DEFAULT_MODEL_NAME,
+      metadata: {
+        context: "charm",
+      },
+      cache: true,
+    };
+
+    const hash = refer(llmParams).toString();
+
+    // Return if the same request is being made again
+    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    previousCallHash = hash;
+
+    resultWithLog.set(undefined);
+    partialWithLog.set(undefined);
+    pendingWithLog.set(true);
+
+    const updatePartial = (text: string) => {
+      if (thisRun != currentRun) return;
+      const status = tx.status();
+      if (status.status !== "ready") return;
+
+      partialWithLog.set(text);
+    };
+
+    const resultPromise = client.sendRequest(llmParams, updatePartial);
+
+    resultPromise
+      .then(async (llmResult) => {
+        if (thisRun !== currentRun) return;
+
+        await runtime.idle();
+
+        // Extract text from the LLM response
+        const textResult = extractTextFromLLMResponse(llmResult);
+
+        await runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(textResult);
+          partial.withTx(tx).set(textResult);
+          requestHash.withTx(tx).set(hash);
+        });
+      })
+      .catch(async (error) => {
+        if (thisRun !== currentRun) return;
+
+        console.error("Error generating text", error);
+
+        await runtime.idle();
+
+        await runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(undefined);
+          partial.withTx(tx).set(undefined);
+        });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
@@ -223,40 +396,17 @@ export function generateObject<T extends Record<string, unknown>>(
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
-      pending = runtime.getCell<boolean>(
-        parentCell.space,
-        { generateObject: { pending: cause } },
-        undefined,
+      const cells = initializeCells<T>(
+        runtime,
+        parentCell,
+        cause,
         tx,
+        "generateObject",
       );
-      pending.send(false);
-
-      result = runtime.getCell<T | undefined>(
-        parentCell.space,
-        {
-          generateObject: { result: cause },
-        },
-        undefined,
-        tx,
-      );
-
-      partial = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          generateObject: { partial: cause },
-        },
-        undefined,
-        tx,
-      );
-
-      requestHash = runtime.getCell<string | undefined>(
-        parentCell.space,
-        {
-          generateObject: { requestHash: cause },
-        },
-        undefined,
-        tx,
-      );
+      pending = cells.pending;
+      result = cells.result;
+      partial = cells.partial;
+      requestHash = cells.requestHash;
 
       sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
@@ -271,6 +421,8 @@ export function generateObject<T extends Record<string, unknown>>(
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     if (!prompt || !schema) {
+      resultWithLog.set(undefined);
+      partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
@@ -335,6 +487,9 @@ export function generateObject<T extends Record<string, unknown>>(
           result.withTx(tx).set(undefined);
           partial.withTx(tx).set(undefined);
         });
+
+        // Reset previousCallHash to allow retry after error
+        previousCallHash = undefined;
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.

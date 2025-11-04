@@ -704,6 +704,20 @@ export interface BuiltInGenerateObjectParams {
   metadata?: Record<string, string | undefined | object>;
 }
 
+export interface BuiltInGenerateTextParams {
+  prompt: string;
+  system?: string;
+  model?: string;
+  maxTokens?: number;
+}
+
+export interface BuiltInGenerateTextState {
+  pending: boolean;
+  result?: string;
+  partial?: string;
+  requestHash?: string;
+}
+
 export interface BuiltInCompileAndRunParams<T> {
   files: Array<{ name: string; contents: string }>;
   main: string;
@@ -883,6 +897,10 @@ export type GenerateObjectFunction = <T = any>(
   params: Opaque<BuiltInGenerateObjectParams>,
 ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
+export type GenerateTextFunction = (
+  params: Opaque<BuiltInGenerateTextParams>,
+) => OpaqueRef<BuiltInGenerateTextState>;
+
 export type FetchOptions = {
   body?: JSONValue;
   headers?: Record<string, string>;
@@ -989,6 +1007,7 @@ export declare const ifElse: IfElseFunction;
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
+export declare const generateText: GenerateTextFunction;
 export declare const fetchData: FetchDataFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;

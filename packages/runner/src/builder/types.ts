@@ -12,6 +12,7 @@ import type {
   DeriveFunction,
   FetchDataFunction,
   GenerateObjectFunction,
+  GenerateTextFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
   HFunction,
@@ -282,6 +283,7 @@ export interface BuilderFunctionsAndConstants {
   llm: LLMFunction;
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
+  generateText: GenerateTextFunction;
   fetchData: FetchDataFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;

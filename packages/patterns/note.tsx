@@ -1,12 +1,11 @@
 /// <cts-enable />
 import {
-  type BuiltInLLMMessage,
   type Cell,
   cell,
   type Default,
   derive,
+  generateText,
   handler,
-  llm,
   NAME,
   navigateTo,
   type Opaque,
@@ -175,15 +174,9 @@ const Note = recipe<Input, Output>(
             content: string;
           },
         ) => {
-          const result = llm({
+          const result = generateText({
             system: str`Translate the content to ${language}.`,
-            messages: derive(content, (c) =>
-              [
-                {
-                  role: "user",
-                  content: c,
-                },
-              ] satisfies BuiltInLLMMessage[]),
+            prompt: str`<to_translate>${content}</to_translate>`,
           });
 
           return derive(result, ({ pending, result }) => {
