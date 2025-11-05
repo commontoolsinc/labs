@@ -165,7 +165,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack gap="4" padding="6">
-              <style>{`
+              <style>
+                {`
                 .pattern-link {
                   cursor: pointer;
                   color: inherit;
@@ -174,7 +175,8 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 .pattern-link:hover {
                   text-decoration: underline;
                 }
-              `}</style>
+              `}
+              </style>
               <h2>Patterns</h2>
 
               <ct-table full-width hover>
