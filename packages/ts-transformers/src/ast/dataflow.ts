@@ -4,6 +4,7 @@ import {
   getExpressionText,
   getMemberSymbol,
   isFunctionParameter,
+  isMethodCall,
 } from "./utils.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
@@ -428,11 +429,7 @@ export function createDataFlowAnalyzer(
 
               // Don't capture property accesses that are method calls.
               // For example, `element.trim` in `element.trim()` should not be captured.
-              if (
-                expression.parent &&
-                ts.isCallExpression(expression.parent) &&
-                expression.parent.expression === expression
-              ) {
+              if (isMethodCall(expression)) {
                 // This is a method call like element.trim() - don't capture it
                 return merged;
               }

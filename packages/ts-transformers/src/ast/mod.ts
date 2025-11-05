@@ -8,7 +8,9 @@ export {
 export {
   getExpressionText,
   getMemberSymbol,
+  getMethodCallTarget,
   isFunctionParameter,
+  isMethodCall,
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {

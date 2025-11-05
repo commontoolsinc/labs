@@ -1763,8 +1763,8 @@ declare namespace CTDOM {
 
   export interface HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T> {
     // CT extensions
-    "onClick"?: CellLike<HandlerEvent<unknown>>;
-    "onChange"?: CellLike<HandlerEvent<unknown>>;
+    "onClick"?: EventHandler<unknown>;
+    "onChange"?: EventHandler<unknown>;
     "children"?: RenderNode | undefined;
     // Allow React-isms
     "key"?: number;
@@ -2825,9 +2825,11 @@ interface CTThemeDef {
 
 type CTThemeInput = Partial<CTThemeDef> & Record<string, unknown>;
 
-type HandlerEvent<T> = {
+type CTEvent<T> = {
   detail: T;
 };
+
+type EventHandler<T> = CellLike<CTEvent<T>> | ((event?: CTEvent<T>) => void);
 
 // `Charm` is not a recipe type.
 type Charm = any;
@@ -2889,16 +2891,16 @@ interface CTPlaidLinkElement extends CTHTMLElement {}
 
 interface CTDraggableAttributes<T> extends CTHTMLAttributes<T> {
   "key"?: number;
-  "x"?: CellLike<HandlerEvent<any>>;
-  "y"?: CellLike<HandlerEvent<any>>;
+  "x"?: EventHandler<any>;
+  "y"?: EventHandler<any>;
   "hidden"?: Booleanish;
-  "onpositionchange"?: CellLike<HandlerEvent<any>>;
+  "onpositionchange"?: EventHandler<any>;
 }
 
 interface CTCanvasAttributes<T> extends CTHTMLAttributes<T> {
   "width"?: string | number;
   "height"?: string | number;
-  "onct-canvas-click"?: CellLike<HandlerEvent<any>>;
+  "onct-canvas-click"?: EventHandler<any>;
 }
 
 interface CTPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
@@ -2944,7 +2946,7 @@ interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTTagsAttributes<T> extends CTHTMLAttributes<T> {
   "tags"?: string[];
-  "onct-change"?: CellLike<HandlerEvent<any>>;
+  "onct-change"?: EventHandler<any>;
 }
 
 interface CTToolbarAttributes<T> extends CTHTMLAttributes<T> {
@@ -3017,7 +3019,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
-  "onmessagesend"?: CellLike<HandlerEvent<{ message: string }>>;
+  "onmessagesend"?: EventHandler<{ message: string }>;
   "inline"?: Booleanish;
 }
 
@@ -3031,7 +3033,7 @@ interface CTScrollAttributes<T> extends CTHTMLAttributes<T> {
 interface CTOutlinerAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<{ root: OutlinerNode }>;
   "$mentionable"?: CellLike<Charm[]>;
-  "oncharm-link-click"?: CellLike<HandlerEvent<{ charm: Cell<Charm> }>>;
+  "oncharm-link-click"?: EventHandler<{ charm: Cell<Charm> }>;
 }
 
 interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
@@ -3075,7 +3077,7 @@ interface CTListAttributes<T> extends CTHTMLAttributes<T> {
   /** setting this hides the 'add item' form built into the list */
   "readonly"?: boolean;
   "title"?: string;
-  "onct-remove-item"?: CellLike<HandlerEvent<{ item: CtListItem }>>;
+  "onct-remove-item"?: EventHandler<{ item: CtListItem }>;
 }
 
 interface CTListItemAttributes<T> extends CTHTMLAttributes<T> {
@@ -3150,17 +3152,15 @@ interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
   "indeterminate"?: boolean;
   "name"?: string;
   "value"?: string;
-  "onct-change"?: CellLike<HandlerEvent<any>>;
+  "onct-change"?: EventHandler<any>;
 }
 
 interface CTSelectAttributes<T> extends CTHTMLAttributes<T> {
   "$value": CellLike<any | any[]>;
   "items": { label: string; value: any }[];
   "multiple"?: boolean;
-  "onct-change"?: CellLike<
-    HandlerEvent<
-      { items: { label: string; value: any }[]; value: any | any[] }
-    >
+  "onct-change"?: EventHandler<
+    { items: { label: string; value: any }[]; value: any | any[] }
   >;
 }
 

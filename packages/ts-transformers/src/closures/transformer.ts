@@ -1,7 +1,23 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { createDataFlowAnalyzer, visitEachChildWithJsx } from "../ast/mod.ts";
+import {
+  createDataFlowAnalyzer,
+  getMethodCallTarget,
+  isEventHandlerJsxAttribute,
+  visitEachChildWithJsx,
+} from "../ast/mod.ts";
+import {
+  inferArrayElementType,
+  registerTypeForNode,
+  tryExplicitParameterType,
+} from "../ast/type-inference.ts";
+import {
+  isDeclaredWithinFunction,
+  isFunctionDeclaration,
+  isModuleScopedDeclaration,
+} from "../ast/scope-analysis.ts";
+import { buildTypeElementsFromCaptureTree } from "../ast/type-building.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -11,6 +27,8 @@ import {
   createBindingElementsFromNames,
   createParameterFromBindings,
   createPropertyName,
+  getUniqueIdentifier,
+  isSafeIdentifierText,
   reserveIdentifier,
 } from "../utils/identifiers.ts";
 import {
@@ -28,74 +46,6 @@ export class ClosureTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transformClosures(context);
   }
-}
-
-/**
- * Check if a declaration is at module scope (top-level of source file).
- */
-function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
-  // Walk up to find the parent
-  let parent = decl.parent;
-
-  // For variable declarations, need to go up through VariableDeclarationList
-  if (ts.isVariableDeclaration(decl)) {
-    // VariableDeclaration -> VariableDeclarationList -> VariableStatement -> SourceFile
-    parent = parent?.parent?.parent;
-  }
-  // For function declarations, parent is already SourceFile (if module-scoped)
-  // No need to reassign
-
-  return parent ? ts.isSourceFile(parent) : false;
-}
-
-/**
- * Check if a declaration represents a function (we can't serialize functions).
- */
-function isFunctionDeclaration(decl: ts.Declaration): boolean {
-  // Direct function declarations
-  if (ts.isFunctionDeclaration(decl)) {
-    return true;
-  }
-
-  // Arrow functions or function expressions assigned to variables
-  if (ts.isVariableDeclaration(decl) && decl.initializer) {
-    const init = decl.initializer;
-    if (
-      ts.isArrowFunction(init) ||
-      ts.isFunctionExpression(init) ||
-      ts.isCallExpression(init) // Includes handler(), lift(), etc.
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Check if a declaration is within a callback's scope using node identity.
- */
-function isDeclaredWithinCallback(
-  decl: ts.Declaration,
-  func: ts.FunctionLikeDeclaration,
-): boolean {
-  // Walk up the tree from the declaration
-  let current: ts.Node | undefined = decl;
-  while (current) {
-    // Found our callback function
-    if (current === func) {
-      return true;
-    }
-
-    // Stop at function boundaries (don't cross into nested functions)
-    if (current !== decl && ts.isFunctionLike(current)) {
-      return false;
-    }
-
-    current = current.parent;
-  }
-
-  return false;
 }
 
 /**
@@ -135,7 +85,7 @@ function shouldCapturePropertyAccess(
 
   // Check if ANY declaration is outside the callback
   const hasExternalDeclaration = declarations.some((decl) =>
-    !isDeclaredWithinCallback(decl, func)
+    !isDeclaredWithinFunction(decl, func)
   );
 
   if (hasExternalDeclaration) {
@@ -229,7 +179,7 @@ function shouldCaptureIdentifier(
 
   // Check if ALL real declarations are within the callback
   const allDeclaredInside = realDeclarations.every((decl) =>
-    isDeclaredWithinCallback(decl, func)
+    isDeclaredWithinFunction(decl, func)
   );
 
   if (allDeclaredInside) {
@@ -289,7 +239,12 @@ function collectCaptures(
 
     // For property access like state.discount, capture the whole expression
     if (ts.isPropertyAccessExpression(node)) {
-      const captured = shouldCapturePropertyAccess(node, func, checker);
+      // If this is a method call, try to capture the object instead of the method
+      // Example: state.counter.set() -> capture state.counter, not state.counter.set
+      const methodTarget = getMethodCallTarget(node);
+      const captureNode = methodTarget || node;
+
+      const captured = shouldCapturePropertyAccess(captureNode, func, checker);
       if (captured) {
         captures.add(captured);
         // Don't visit children of this property access
@@ -411,113 +366,44 @@ function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
-function typeNodeForExpression(
-  expr: ts.Expression,
-  context: TransformationContext,
-): ts.TypeNode {
-  const { factory, checker } = context;
-  const exprType = checker.getTypeAtLocation(expr);
-  const node = checker.typeToTypeNode(
-    exprType,
-    context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
-  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-  const typeRegistry = context.options.typeRegistry;
-  if (typeRegistry) {
-    typeRegistry.set(node, exprType);
-  }
-
-  return node;
-}
-
-function buildCaptureTypeProperties(
-  node: CaptureTreeNode,
-  context: TransformationContext,
-): ts.TypeElement[] {
-  const { factory } = context;
-  const properties: ts.TypeElement[] = [];
-
-  for (const [propName, childNode] of node.properties) {
-    let typeNode: ts.TypeNode;
-    if (childNode.properties.size > 0 && !childNode.expression) {
-      const nested = buildCaptureTypeProperties(childNode, context);
-      typeNode = factory.createTypeLiteralNode(nested);
-    } else if (childNode.expression) {
-      typeNode = typeNodeForExpression(childNode.expression, context);
-    } else {
-      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    }
-
-    properties.push(
-      factory.createPropertySignature(
-        undefined,
-        createPropertyName(propName, factory),
-        undefined,
-        typeNode,
-      ),
-    );
-  }
-
-  return properties;
-}
-
-function buildParamsTypeElements(
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.TypeElement[] {
-  const { factory } = context;
-  const properties: ts.TypeElement[] = [];
-
-  for (const [rootName, rootNode] of captureTree) {
-    let typeNode: ts.TypeNode;
-    if (rootNode.properties.size > 0 && !rootNode.expression) {
-      const nested = buildCaptureTypeProperties(rootNode, context);
-      typeNode = factory.createTypeLiteralNode(nested);
-    } else if (rootNode.expression) {
-      typeNode = typeNodeForExpression(rootNode.expression, context);
-    } else {
-      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    }
-
-    properties.push(
-      factory.createPropertySignature(
-        undefined,
-        createPropertyName(rootName, factory),
-        undefined,
-        typeNode,
-      ),
-    );
-  }
-
-  return properties;
-}
-
 function determineElementType(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
   context: TransformationContext,
 ): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { checker } = context;
+  const { checker, factory } = context;
   const typeRegistry = context.options.typeRegistry;
 
-  if (elemParam?.type) {
-    const annotationType = checker.getTypeFromTypeNode(elemParam.type);
-    if (!(annotationType.flags & ts.TypeFlags.Any)) {
-      const result = { typeNode: elemParam.type, type: annotationType };
-      if (typeRegistry && annotationType) {
-        typeRegistry.set(elemParam.type, annotationType);
-      }
-      return result;
-    }
+  // Try explicit annotation
+  const explicit = tryExplicitParameterType(elemParam, checker, typeRegistry);
+  if (explicit) return explicit;
+
+  // Try inference from map call
+  const inferred = inferElementType(mapCall, context);
+  if (inferred.type) {
+    return {
+      typeNode: registerTypeForNode(
+        inferred.typeNode,
+        inferred.type,
+        typeRegistry,
+      ),
+      type: inferred.type,
+    };
   }
 
-  const inferred = inferElementType(mapCall, context);
-  if (typeRegistry && inferred.type) {
-    typeRegistry.set(inferred.typeNode, inferred.type);
-  }
-  return inferred;
+  // Fallback: infer from the map call location itself
+  const type = checker.getTypeAtLocation(mapCall);
+  const typeNode = checker.typeToTypeNode(
+    type,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
+  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+  return {
+    typeNode: registerTypeForNode(typeNode, type, typeRegistry),
+    type,
+  };
 }
 
 /**
@@ -578,7 +464,7 @@ function buildCallbackParamTypeNode(
   }
 
   // 5. Build params object type with hierarchical captures
-  const paramsProperties = buildParamsTypeElements(
+  const paramsProperties = buildTypeElementsFromCaptureTree(
     captureTree,
     context,
   );
@@ -598,12 +484,14 @@ function buildCallbackParamTypeNode(
 
 /**
  * Infer the element type from an OpaqueRef<T[]> or Array<T> being mapped.
+ * This is a thin wrapper around inferArrayElementType that extracts the array expression
+ * from the map call.
  */
 function inferElementType(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { factory, checker } = context;
+  const { factory } = context;
 
   if (!ts.isPropertyAccessExpression(mapCall.expression)) {
     return {
@@ -612,121 +500,75 @@ function inferElementType(
   }
 
   const arrayExpr = mapCall.expression.expression;
-  const arrayType = checker.getTypeAtLocation(arrayExpr);
+  return inferArrayElementType(arrayExpr, context);
+}
 
-  // Handle OpaqueRef<T[]> which is an intersection type
-  let actualArrayType = arrayType;
-  if (arrayType.flags & ts.TypeFlags.Intersection) {
-    const intersectionType = arrayType as ts.IntersectionType;
-    // Look for the Reference type member (e.g., OpaqueRefMethods<T[]>)
-    for (const type of intersectionType.types) {
-      if (type.flags & ts.TypeFlags.Object) {
-        const objType = type as ts.ObjectType;
-        if (objType.objectFlags & ts.ObjectFlags.Reference) {
-          actualArrayType = type;
-          break;
-        }
-      }
-    }
-  }
+/**
+ * Build a TypeNode for the handler event parameter and register it in TypeRegistry.
+ * If the callback has an explicit event type annotation, use it.
+ * If there's no event parameter, use never (generates false schema).
+ * Otherwise, infer from the parameter location (could be enhanced to infer from JSX context).
+ */
+function buildHandlerEventTypeNode(
+  callback: ts.ArrowFunction,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+  const eventParam = callback.parameters[0];
 
-  // Handle Opaque<T[]> which is a union type (T[] | OpaqueRef<T[]>)
-  if (arrayType.flags & ts.TypeFlags.Union) {
-    const unionType = arrayType as ts.UnionType;
-    // Look for the OpaqueRef<T[]> member (intersection type)
-    for (const member of unionType.types) {
-      if (
-        member.flags & ts.TypeFlags.Intersection ||
-        isOpaqueRefType(member, checker)
-      ) {
-        actualArrayType = member;
-        break;
-      }
-    }
-  }
-
-  // Get type arguments from the reference type
-  let typeArgs: readonly ts.Type[] | undefined;
-
-  // First check if actualArrayType is an intersection (OpaqueRef case)
-  if (actualArrayType.flags & ts.TypeFlags.Intersection) {
-    const intersectionType = actualArrayType as ts.IntersectionType;
-    // Look for the Reference type member within the intersection
-    for (const member of intersectionType.types) {
-      if (member.flags & ts.TypeFlags.Object) {
-        const objType = member as ts.ObjectType;
-        if (objType.objectFlags & ts.ObjectFlags.Reference) {
-          typeArgs = checker.getTypeArguments(objType as ts.TypeReference);
-          break;
-        }
-      }
-    }
-  } else if (actualArrayType.flags & ts.TypeFlags.Object) {
-    // Plain object/reference type case
-    const objectType = actualArrayType as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
-    }
-  }
-
-  if (typeArgs && typeArgs.length > 0) {
-    const innerType = typeArgs[0];
-    if (innerType) {
-      // innerType is either T[] or T depending on the structure
-      let elementType: ts.Type;
-      if (checker.isArrayType(innerType)) {
-        // It's T[], extract T
-        const extracted = checker.getIndexTypeOfType(
-          innerType,
-          ts.IndexKind.Number,
-        );
-        if (extracted) {
-          elementType = extracted;
-        } else {
-          return {
-            typeNode: factory.createKeywordTypeNode(
-              ts.SyntaxKind.UnknownKeyword,
-            ),
-          };
-        }
-      } else {
-        // It's already T
-        elementType = innerType;
-      }
-
-      // Convert Type to TypeNode
-      const typeNode = checker.typeToTypeNode(
-        elementType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
-      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-      return { typeNode, type: elementType };
-    }
-  }
-
-  // Fallback for plain Array<T>
-  if (checker.isArrayType(arrayType)) {
-    const elementType = checker.getIndexTypeOfType(
-      arrayType,
-      ts.IndexKind.Number,
+  // If no event parameter exists, use never type (will generate false schema)
+  if (!eventParam) {
+    const neverTypeNode = factory.createKeywordTypeNode(
+      ts.SyntaxKind.NeverKeyword,
     );
-    if (elementType) {
-      const typeNode = checker.typeToTypeNode(
-        elementType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
-      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-      return { typeNode, type: elementType };
-    }
+    // Don't register a Type - the synthetic NeverKeyword TypeNode will be handled
+    // by generateSchemaFromSyntheticTypeNode in the schema generator
+    return neverTypeNode;
   }
 
-  return {
-    typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-  };
+  // Try explicit annotation
+  const explicit = tryExplicitParameterType(eventParam, checker, typeRegistry);
+  if (explicit) return explicit.typeNode;
+
+  // Infer from parameter location
+  const type = checker.getTypeAtLocation(eventParam);
+
+  // Try to convert Type to TypeNode
+  const typeNode = checker.typeToTypeNode(
+    type,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
+  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+  return registerTypeForNode(typeNode, type, typeRegistry);
+}
+
+/**
+ * Build a TypeNode for the handler state/params parameter and register it in TypeRegistry.
+ * Reuses the same capture tree utilities as map closures.
+ */
+function buildHandlerStateTypeNode(
+  captureTree: Map<string, CaptureTreeNode>,
+  callback: ts.ArrowFunction,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+  const typeRegistry = context.options.typeRegistry;
+  const stateParam = callback.parameters[1];
+
+  // Try explicit annotation
+  const explicit = tryExplicitParameterType(stateParam, checker, typeRegistry);
+  if (explicit) return explicit.typeNode;
+
+  // Fallback: build from captures (buildTypeElementsFromCaptureTree handles its own registration)
+  const paramsProperties = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
+  );
+  return factory.createTypeLiteralNode(paramsProperties);
 }
 
 /**
@@ -795,38 +637,252 @@ function shouldTransformMap(
   return true;
 }
 
-/**
- * Create a visitor function that transforms OpaqueRef map calls.
- * This visitor can be reused for both top-level and nested transformations.
- */
-function createMapTransformVisitor(
+function createClosureTransformVisitor(
   context: TransformationContext,
 ): ts.Visitor {
   const { checker } = context;
 
   const visit: ts.Visitor = (node) => {
-    // Check for OpaqueRef<T[]> or Cell<T[]> map calls with callbacks
+    if (ts.isJsxAttribute(node) && isEventHandlerJsxAttribute(node.name)) {
+      const transformed = transformHandlerJsxAttribute(node, context, visit);
+      if (transformed) {
+        return transformed;
+      }
+    }
+
     if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
       const callback = node.arguments[0];
 
-      // Check if the callback is an arrow function or function expression
       if (
         callback &&
         (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
       ) {
-        // Check if this map will end up inside a derive (where array is unwrapped)
-        // If so, skip transformation and keep it as plain .map
         if (shouldTransformMap(node, context)) {
           return transformMapCallback(node, callback, context, visit);
         }
       }
     }
 
-    // Continue visiting children (handles JSX correctly)
     return visitEachChildWithJsx(node, visit, context.tsContext);
   };
 
   return visit;
+}
+
+function transformHandlerJsxAttribute(
+  attribute: ts.JsxAttribute,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.JsxAttribute | undefined {
+  const initializer = attribute.initializer;
+  if (!initializer || !ts.isJsxExpression(initializer)) {
+    return undefined;
+  }
+
+  const expression = initializer.expression;
+  if (!expression) {
+    return undefined;
+  }
+
+  const callback = unwrapArrowFunction(expression);
+  if (!callback) {
+    return undefined;
+  }
+
+  const transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  const captureExpressions = collectCaptures(callback, context.checker);
+  const captureTree = groupCapturesByRoot(captureExpressions);
+
+  const handlerCallback = createHandlerCallback(
+    callback,
+    transformedBody,
+    captureTree,
+    context,
+  );
+
+  const { factory } = context;
+
+  // Build type information for handler params
+  const eventTypeNode = buildHandlerEventTypeNode(callback, context);
+  const stateTypeNode = buildHandlerStateTypeNode(
+    captureTree,
+    callback,
+    context,
+  );
+
+  const handlerExpr = context.ctHelpers.getHelperExpr("handler");
+  const handlerCall = factory.createCallExpression(
+    handlerExpr,
+    [eventTypeNode, stateTypeNode],
+    [handlerCallback],
+  );
+
+  const paramProperties: ts.PropertyAssignment[] = [];
+  for (const [rootName, rootNode] of captureTree) {
+    paramProperties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(rootNode, rootName, factory),
+      ),
+    );
+  }
+
+  const paramsObject = factory.createObjectLiteralExpression(
+    paramProperties,
+    paramProperties.length > 0,
+  );
+
+  const finalCall = factory.createCallExpression(
+    handlerCall,
+    undefined,
+    [paramsObject],
+  );
+
+  const newInitializer = factory.createJsxExpression(
+    initializer.dotDotDotToken,
+    finalCall,
+  );
+
+  return factory.createJsxAttribute(attribute.name, newInitializer);
+}
+
+function createHandlerCallback(
+  callback: ts.ArrowFunction,
+  transformedBody: ts.ConciseBody,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.ArrowFunction {
+  const { factory } = context;
+  const usedBindingNames = new Set<string>();
+  const rootNames = new Set<string>();
+  for (const [rootName] of captureTree) {
+    rootNames.add(rootName);
+  }
+
+  const eventParam = callback.parameters[0];
+  const stateParam = callback.parameters[1];
+  const extraParams = callback.parameters.slice(2);
+
+  const normalizeParameter = (
+    original: ts.ParameterDeclaration,
+    name: ts.BindingName,
+  ): ts.ParameterDeclaration =>
+    factory.createParameterDeclaration(
+      original.modifiers,
+      original.dotDotDotToken,
+      name,
+      original.questionToken,
+      original.type,
+      original.initializer,
+    );
+
+  const eventParameter = eventParam
+    ? normalizeParameter(
+      eventParam,
+      normalizeBindingName(eventParam.name, factory, usedBindingNames),
+    )
+    : (() => {
+      const baseName = "__ct_handler_event";
+      let candidate = baseName;
+      let index = 1;
+      while (rootNames.has(candidate)) {
+        candidate = `${baseName}_${index++}`;
+      }
+      return factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier(
+          getUniqueIdentifier(candidate, usedBindingNames, {
+            fallback: baseName,
+          }),
+        ),
+        undefined,
+        undefined,
+        undefined,
+      );
+    })();
+
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    if (isSafeIdentifierText(name) && !usedBindingNames.has(name)) {
+      usedBindingNames.add(name);
+      return factory.createIdentifier(name);
+    }
+    const fallback = name.length > 0 ? name : "ref";
+    const unique = getUniqueIdentifier(fallback, usedBindingNames, {
+      fallback: "ref",
+    });
+    return factory.createIdentifier(unique);
+  };
+
+  const paramsBindings = createBindingElementsFromNames(
+    captureTree.keys(),
+    factory,
+    createBindingIdentifier,
+  );
+
+  const paramsBindingPattern = factory.createObjectBindingPattern(
+    paramsBindings,
+  );
+
+  let paramsBindingName: ts.BindingName;
+  if (stateParam) {
+    paramsBindingName = normalizeBindingName(
+      stateParam.name,
+      factory,
+      usedBindingNames,
+    );
+  } else if (captureTree.size > 0) {
+    paramsBindingName = paramsBindingPattern;
+  } else {
+    paramsBindingName = factory.createIdentifier(
+      getUniqueIdentifier("__ct_handler_params", usedBindingNames, {
+        fallback: "__ct_handler_params",
+      }),
+    );
+  }
+
+  const paramsParameter = stateParam
+    ? normalizeParameter(stateParam, paramsBindingName)
+    : factory.createParameterDeclaration(
+      undefined,
+      undefined,
+      paramsBindingName,
+      undefined,
+      undefined,
+      undefined,
+    );
+
+  const additionalParameters = extraParams.map((param) =>
+    normalizeParameter(
+      param,
+      normalizeBindingName(param.name, factory, usedBindingNames),
+    )
+  );
+
+  return factory.createArrowFunction(
+    callback.modifiers,
+    callback.typeParameters,
+    [eventParameter, paramsParameter, ...additionalParameters],
+    callback.type,
+    callback.equalsGreaterThanToken,
+    transformedBody,
+  );
+}
+
+function unwrapArrowFunction(
+  expression: ts.Expression,
+): ts.ArrowFunction | undefined {
+  if (ts.isArrowFunction(expression)) {
+    return expression;
+  }
+  if (ts.isParenthesizedExpression(expression)) {
+    return unwrapArrowFunction(expression.expression);
+  }
+  return undefined;
 }
 
 /**
@@ -1047,8 +1103,7 @@ function transformMapCallback(
 function transformClosures(context: TransformationContext): ts.SourceFile {
   const { sourceFile } = context;
 
-  // Create a unified visitor that handles both top-level and nested map transformations
-  const visitor = createMapTransformVisitor(context);
+  const visitor = createClosureTransformVisitor(context);
 
   return ts.visitNode(sourceFile, visitor) as ts.SourceFile;
 }

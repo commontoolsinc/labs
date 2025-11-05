@@ -612,6 +612,9 @@ export class SchemaGenerator implements ISchemaGenerator {
         return { type: "boolean" };
       case ts.SyntaxKind.NullKeyword:
         return { type: "null" };
+      case ts.SyntaxKind.NeverKeyword:
+        // Reject all values (never type can never occur)
+        return false as SchemaDefinition;
       case ts.SyntaxKind.UndefinedKeyword:
       case ts.SyntaxKind.VoidKeyword:
       case ts.SyntaxKind.AnyKeyword:
