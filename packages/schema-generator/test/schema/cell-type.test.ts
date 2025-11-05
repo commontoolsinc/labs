@@ -6,7 +6,6 @@ import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 describe("Schema: Cell types", () => {
   it("handles Cell<string>", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(value: T): void; }
       interface X { name: Cell<string>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -21,7 +20,6 @@ describe("Schema: Cell types", () => {
 
   it("handles Cell<Array<{id:string}>>", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(value: T): void; }
       interface X { users: Cell<Array<{ id: string }>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -39,8 +37,6 @@ describe("Schema: Cell types", () => {
 
   it("handles Stream<Cell<number>>", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(value: T): void; }
-      interface Stream<T> { subscribe(cb: (v: T) => void): void; }
       interface X { value: Stream<Cell<number>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -56,8 +52,6 @@ describe("Schema: Cell types", () => {
 
   it("disallows Cell<Stream<T>> and suggests boxing", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(value: T): void; }
-      interface Stream<T> { subscribe(cb: (v: T) => void): void; }
       interface X { invalid: Cell<Stream<number>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");

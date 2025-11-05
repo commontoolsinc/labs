@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",
-    "./interface": "./src/interface.ts"
+    "./interface": "./src/interface.ts",
+    "./typescript/cell-brand": "./src/typescript/cell-brand.ts"
   },
   "imports": {
     "typescript": "npm:typescript",

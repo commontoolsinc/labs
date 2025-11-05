@@ -1,0 +1,38 @@
+{
+  "$defs": {
+    "MyCell": {
+      "asCell": true,
+      "type": "number"
+    },
+    "NullableCell": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/MyCell"
+        }
+      ]
+    },
+    "OptionalCell": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MyCell"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "maybeCell": {
+      "$ref": "#/$defs/OptionalCell"
+    },
+    "nullableCell": {
+      "$ref": "#/$defs/NullableCell"
+    }
+  },
+  "required": [
+    "maybeCell",
+    "nullableCell"
+  ],
+  "type": "object"
+}
