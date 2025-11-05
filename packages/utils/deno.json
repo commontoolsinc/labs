@@ -1,5 +1,8 @@
 {
   "name": "@commontools/utils",
+  "tasks": {
+    "test": "deno test"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./defer": "./src/defer.ts",
