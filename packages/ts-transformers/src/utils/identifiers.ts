@@ -257,3 +257,37 @@ export function createParameterFromBindings(
     undefined,
   );
 }
+
+/**
+ * Generate both property name and param name for an expression,
+ * following the standard pattern used across derive/opaque-ref bindings.
+ *
+ * @param expressionText - Base text from the expression (typically from getExpressionText)
+ * @param isIdentifier - Whether the expression is a simple identifier
+ * @param index - Index for fallback naming (e.g., ref1, ref2, _v1, _v2)
+ * @param usedPropertyNames - Set of used property names (mutated)
+ * @param usedParamNames - Set of used param names (mutated)
+ * @returns Object with propertyName and paramName
+ */
+export function createPropertyParamNames(
+  expressionText: string,
+  isIdentifier: boolean,
+  index: number,
+  usedPropertyNames: Set<string>,
+  usedParamNames: Set<string>,
+): { propertyName: string; paramName: string } {
+  // Property name: use expression text with dots replaced by underscores
+  const baseName = expressionText.replace(/\./g, "_");
+  const propertyName = getUniqueIdentifier(baseName, usedPropertyNames, {
+    fallback: `ref${index + 1}`,
+    trimLeadingUnderscores: true,
+  });
+
+  // Param name: use identifier text directly, or fallback to _v1, _v2, etc.
+  const paramCandidate = isIdentifier ? expressionText : `_v${index + 1}`;
+  const paramName = getUniqueIdentifier(paramCandidate, usedParamNames, {
+    fallback: `_v${index + 1}`,
+  });
+
+  return { propertyName, paramName };
+}

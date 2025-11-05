@@ -13,6 +13,7 @@ import {
   reserveIdentifier,
   createBindingElementsFromNames,
   createParameterFromBindings,
+  createPropertyParamNames,
 } from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(
@@ -70,17 +71,13 @@ function planDeriveEntries(
   const usedParamNames = new Set<string>();
 
   fallback.forEach((ref, index) => {
-    const baseName = getExpressionText(ref).replace(/\./g, "_");
-    const propertyName = getUniqueIdentifier(baseName, usedPropertyNames, {
-      fallback: `ref${index + 1}`,
-      trimLeadingUnderscores: true,
-    });
-
-    const paramName = ts.isIdentifier(ref)
-      ? getUniqueIdentifier(ref.text, usedParamNames)
-      : getUniqueIdentifier(`_v${index + 1}`, usedParamNames, {
-        fallback: `_v${index + 1}`,
-      });
+    const { propertyName, paramName } = createPropertyParamNames(
+      getExpressionText(ref),
+      ts.isIdentifier(ref),
+      index,
+      usedPropertyNames,
+      usedParamNames,
+    );
 
     fallbackEntries.push({ ref, propertyName, paramName });
     refToParamName.set(ref, paramName);
