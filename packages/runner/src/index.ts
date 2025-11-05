@@ -6,7 +6,7 @@ export type {
   ErrorWithContext as RuntimeErrorWithContext,
   RuntimeOptions,
 } from "./runtime.ts";
-export { raw } from "./module.ts";
+export { rawImpl } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-utils.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";

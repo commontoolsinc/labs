@@ -1,4 +1,4 @@
-import { raw } from "../module.ts";
+import { rawImpl } from "../module.ts";
 import { map } from "./map.ts";
 import { fetchData } from "./fetch-data.ts";
 import { streamData } from "./stream-data.ts";
@@ -21,31 +21,34 @@ import { llmDialog } from "./llm-dialog.ts";
 export function registerBuiltins(runtime: IRuntime) {
   const moduleRegistry = runtime.moduleRegistry;
 
-  moduleRegistry.addModuleByRef("map", raw(map));
-  moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
-  moduleRegistry.addModuleByRef("streamData", raw(streamData));
-  moduleRegistry.addModuleByRef("llm", raw(llm));
-  moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
-  moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
-  moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
+  moduleRegistry.addModuleByRef("map", rawImpl(runtime, map));
+  moduleRegistry.addModuleByRef("fetchData", rawImpl(runtime, fetchData));
+  moduleRegistry.addModuleByRef("streamData", rawImpl(runtime, streamData));
+  moduleRegistry.addModuleByRef("llm", rawImpl(runtime, llm));
+  moduleRegistry.addModuleByRef("llmDialog", rawImpl(runtime, llmDialog));
+  moduleRegistry.addModuleByRef("ifElse", rawImpl(runtime, ifElse));
+  moduleRegistry.addModuleByRef(
+    "compileAndRun",
+    rawImpl(runtime, compileAndRun),
+  );
   moduleRegistry.addModuleByRef(
     "generateObject",
-    raw<BuiltInGenerateObjectParams, {
+    rawImpl<BuiltInGenerateObjectParams, {
       pending: Cell<boolean>;
       result: Cell<Record<string, unknown> | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
-    }>(generateObject),
+    }>(runtime, generateObject),
   );
   moduleRegistry.addModuleByRef(
     "generateText",
-    raw<BuiltInGenerateTextParams, {
+    rawImpl<BuiltInGenerateTextParams, {
       pending: Cell<boolean>;
       result: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
-    }>(generateText),
+    }>(runtime, generateText),
   );
-  moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
-  moduleRegistry.addModuleByRef("wish", raw(wish));
+  moduleRegistry.addModuleByRef("navigateTo", rawImpl(runtime, navigateTo));
+  moduleRegistry.addModuleByRef("wish", rawImpl(runtime, wish));
 }

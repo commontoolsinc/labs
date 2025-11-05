@@ -59,7 +59,7 @@ export const Counter = recipe<RecipeState>((state) => {
   };
 });
 
-export default recipe((state: RecipeState) => {
+export default recipe<RecipeState>((state) => {
   const counter = Counter({ value: state.value });
 
   return {

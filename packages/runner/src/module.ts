@@ -1,4 +1,4 @@
-import { createNodeFactory } from "./builder/module.ts";
+import { createNodeFactoryImpl } from "./builder/module.ts";
 import { Module, type ModuleFactory } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
@@ -33,7 +33,8 @@ export class ModuleRegistry implements IModuleRegistry {
 // This corresponds to the node factory factories in common-builder:module.ts.
 // But it's here, because the signature depends on implementation details of the
 // runner, and won't work with any other runners.
-export function raw<T, R>(
+export function rawImpl<T, R>(
+  runtime: IRuntime,
   implementation: (
     inputsCell: Cell<T>,
     sendResult: (tx: IExtendedStorageTransaction, result: R) => void,
@@ -43,7 +44,7 @@ export function raw<T, R>(
     runtime: IRuntime,
   ) => Action,
 ): ModuleFactory<T, R> {
-  return createNodeFactory({
+  return createNodeFactoryImpl(runtime, {
     type: "raw",
     implementation,
   });

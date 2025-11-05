@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 
 import { handler, lift } from "../src/builder/module.ts";
-import { str } from "../src/builder/built-in.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import {
   type AnyCellWrapping,
   type Frame,
@@ -36,6 +36,7 @@ describe("Schema-to-TS Type Conversion", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
+  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -47,6 +48,8 @@ describe("Schema-to-TS Type Conversion", () => {
     });
     tx = runtime.edit();
     frame = pushFrame();
+    const { commontools } = createBuilder(runtime);
+    ({ str } = commontools);
   });
 
   afterEach(async () => {

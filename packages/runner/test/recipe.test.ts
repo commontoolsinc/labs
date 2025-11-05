@@ -31,7 +31,7 @@ describe("recipe function", () => {
   it("creates a recipe, with an inner opaque ref", () => {
     const doubleRecipe = recipe<{ x: number }>("Double a number", () => {
       const x = opaqueRef<number>(1);
-      x.setName("x");
+      x.for("x");
       const double = lift(({ x }) => x * 2);
       return { double: double({ x }) };
     });

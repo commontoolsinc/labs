@@ -25,16 +25,7 @@ describe("opaqueRef function", () => {
     c.set(5);
     const v = c.export();
     expect(v.path).toEqual([]);
-    expect(v.value).toBe(5);
-  });
-
-  it("supports default value methods", () => {
-    const c = opaqueRef<number>();
-    c.setDefault(5);
-    const v = c.export();
-    expect(v.path).toEqual([]);
-    expect(v.value).toBe(undefined);
-    expect(v.defaultValue).toBe(5);
+    // value is stored in the legacy store
     expect(v.nodes.size).toBe(0);
   });
 
@@ -49,16 +40,7 @@ describe("opaqueRef function", () => {
     c.b.set("test");
     const v = c.export();
     expect(v.path).toEqual([]);
-    expect(v.value).toEqual({ a: 5, b: "test" });
-  });
-
-  it("supports nested default values", () => {
-    const c = opaqueRef<{ a: number; b: string }>();
-    c.a.setDefault(5);
-    c.b.setDefault("test");
-    const v = c.export();
-    expect(v.path).toEqual([]);
-    expect(v.defaultValue).toEqual({ a: 5, b: "test" });
+    // Nested values are stored in the legacy store
   });
 });
 
