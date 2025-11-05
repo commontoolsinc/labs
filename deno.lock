@@ -115,6 +115,7 @@
     "npm:pino-pretty@13": "13.1.2",
     "npm:pino@^9.6.0": "9.14.0",
     "npm:plaid@36": "36.0.0",
+    "npm:playwright@^1.56.1": "1.56.1",
     "npm:quickjs-emscripten-core@*": "0.31.0",
     "npm:source-map-js@^1.2.1": "1.2.1",
     "npm:stoker@^1.4.2": "1.4.3_@hono+zod-openapi@0.18.4__hono@4.10.1__zod@3.25.76_hono@4.10.1_zod@3.25.76",
@@ -1317,6 +1318,11 @@
         "mime-types"
       ]
     },
+    "fsevents@2.3.2": {
+      "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
+      "os": ["darwin"],
+      "scripts": true
+    },
     "function-bind@1.1.2": {
       "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="
     },
@@ -1613,6 +1619,20 @@
         "axios"
       ]
     },
+    "playwright-core@1.56.1": {
+      "integrity": "sha512-hutraynyn31F+Bifme+Ps9Vq59hKuUCz7H1kDOcBs+2oGguKkWTU50bBWrtz34OUWmIwpBTWDxaRPXrIXkgvmQ==",
+      "bin": true
+    },
+    "playwright@1.56.1": {
+      "integrity": "sha512-aFi5B0WovBHTEvpM3DzXTUaeN6eN0qWnTkKx4NQaH4Wvcmc153PdaY2UBdSYKaGYw+UyWXSVyxDUg5DoPEttjw==",
+      "dependencies": [
+        "playwright-core"
+      ],
+      "optionalDependencies": [
+        "fsevents"
+      ],
+      "bin": true
+    },
     "process-warning@5.0.0": {
       "integrity": "sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA=="
     },
@@ -1793,6 +1813,11 @@
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
     ],
+    "packageJson": {
+      "dependencies": [
+        "npm:playwright@^1.56.1"
+      ]
+    },
     "members": {
       "packages/cli": {
         "dependencies": [
