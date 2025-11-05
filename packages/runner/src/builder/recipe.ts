@@ -118,7 +118,7 @@ export function recipe<T, R>(
   // values.
   const frame = pushFrame();
 
-  const inputs = opaqueRef<Required<T>>(
+  const inputs = opaqueRef(
     undefined,
     typeof argumentSchema === "string"
       ? undefined
