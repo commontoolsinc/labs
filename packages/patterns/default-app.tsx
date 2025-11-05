@@ -99,10 +99,6 @@ const spawnNote = handler<void, void>((_, __) => {
   }));
 });
 
-const getCharmName = lift(({ charm }: { charm: MinimalCharm }) => {
-  return charm?.[NAME] || "Untitled Charm";
-});
-
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
@@ -176,7 +172,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 <tbody>
                   {allCharms.map((charm) => (
                     <tr>
-                      <td>{getCharmName({ charm })}</td>
+		      <td>{charm?.[NAME] || "Untitled Charm"}</td>
                       <td>
                         <ct-hstack gap="2">
                           <ct-button
