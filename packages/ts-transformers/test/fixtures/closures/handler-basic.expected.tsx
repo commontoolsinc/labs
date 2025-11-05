@@ -23,8 +23,7 @@ export default recipe({
                     properties: {
                         counter: {
                             type: "number",
-                            asCell: true,
-                            asOpaque: true
+                            asCell: true
                         }
                     },
                     required: ["counter"]

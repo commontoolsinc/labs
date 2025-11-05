@@ -52,16 +52,14 @@ export default recipe({
                             properties: {
                                 clicks: {
                                     type: "number",
-                                    asCell: true,
-                                    asOpaque: true
+                                    asCell: true
                                 }
                             },
                             required: ["clicks"]
                         },
                         metrics: {
                             type: "number",
-                            asCell: true,
-                            asOpaque: true
+                            asCell: true
                         }
                     },
                     required: ["user", "metrics"]

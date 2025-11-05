@@ -34,8 +34,7 @@ export default recipe({
                     properties: {
                         nested: {
                             type: "string",
-                            asCell: true,
-                            asOpaque: true
+                            asCell: true
                         }
                     },
                     required: ["nested"]
