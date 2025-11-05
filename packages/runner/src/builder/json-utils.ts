@@ -2,15 +2,13 @@ import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
 import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
-  canBeOpaqueRef,
-  isOpaqueCell,
+  isOpaqueRef,
   isRecipe,
   isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONSchemaTypes,
   type JSONValue,
-  makeOpaqueRef,
   type Module,
   type Opaque,
   type OpaqueRef,
@@ -22,6 +20,10 @@ import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
@@ -33,29 +35,29 @@ export function toJSONWithLegacyAliases(
   // preserving alias metadata for consumers that still rely on it.
 
   // Convert regular cells and results from Cell.get() to opaque refs
-  if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   // Verify that opaque refs are not in a parent frame
-  if (isOpaqueCell(value) && value.export().frame !== getTopFrame()) {
+  if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
     throw new Error(
       `Opaque ref with parent cell not found in current frame. Should have been converted to a shadow ref.`,
     );
   }
 
   // If this is an external reference, just copy the reference as is.
-  if (isOpaqueCell(value)) {
+  if (isOpaqueRef(value)) {
     const { external } = value.export();
     if (external) return external as JSONValue;
   }
 
   // Otherwise it's an internal reference. Extract the schema and output a link.
-  if (isOpaqueCell(value) || isShadowRef(value)) {
+  if (isOpaqueRef(value) || isShadowRef(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
       // Add schema from exported value if available
-      const exported = isOpaqueCell(value) ? value.export() : undefined;
+      const exported = isOpaqueRef(value) ? value.export() : undefined;
       return {
         $alias: {
           ...(isShadowRef(value) ? { cell: value } : {}),

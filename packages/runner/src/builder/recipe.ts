@@ -1,12 +1,10 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import {
-  canBeOpaqueRef,
   type Frame,
-  isOpaqueCell,
+  isOpaqueRef,
   isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
-  makeOpaqueRef,
   type Module,
   type Node,
   type NodeRef,
@@ -21,7 +19,7 @@ import {
   UI,
   type UnsafeBinding,
 } from "./types.ts";
-import { createShadowRef, opaqueRef } from "./opaque-ref.ts";
+import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -36,6 +34,10 @@ import {
 import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import { sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 /** Declare a recipe
  *
@@ -168,18 +170,18 @@ function factoryFromRecipe<T, R>(
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, (value) => {
-      if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-      if (isOpaqueCell(value)) value = value.unsafe_getExternal();
+      if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
+      if (isOpaqueRef(value)) value = value.unsafe_getExternal();
       if (
-        (isOpaqueCell(value) || isShadowRef(value)) && !cells.has(value) &&
+        (isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) &&
         !shadows.has(value as ShadowRef)
       ) {
-        if (isOpaqueCell(value) && value.export().frame !== getTopFrame()) {
+        if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
           throw new Error("Shadow refs no longer supported");
         }
         if (isShadowRef(value)) {
           throw new Error("Shadow refs no longer supported");
-        } else if (isOpaqueCell(value)) {
+        } else if (isOpaqueRef(value)) {
           cells.add(value);
           value.export().nodes.forEach((node: NodeRef) => {
             if (!nodes.has(node)) {
@@ -209,7 +211,7 @@ function factoryFromRecipe<T, R>(
   // First from results
   if (isRecord(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
-      if (isOpaqueCell(value)) {
+      if (isOpaqueRef(value)) {
         const ref = value; // Typescript needs this to avoid type errors
         const exported = ref.export();
         if (
@@ -231,7 +233,7 @@ function factoryFromRecipe<T, R>(
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueCell(input) && input.export().cell === cell &&
+            isOpaqueRef(input) && input.export().cell === cell &&
             !cell.export().name && !usedNames.has(key)
           ) {
             cell.for(key, true); // allowIfSet=true to not override existing causes

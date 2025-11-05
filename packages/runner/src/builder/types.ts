@@ -142,16 +142,16 @@ declare module "@commontools/api" {
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueCell<T = any>(
+export function isOpaqueRef<T = any>(
   value: unknown,
-): value is OpaqueCell<T> {
+): value is OpaqueRef<T> {
   return !!value &&
     typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
       "boolean";
 }
 
 export type NodeRef = {
-  module: Module | Recipe | OpaqueCell<Module | Recipe>;
+  module: Module | Recipe | OpaqueRef<Module | Recipe>;
   inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
@@ -223,20 +223,6 @@ export function isRecipe(value: unknown): value is Recipe {
   );
 }
 
-type CanBeOpaqueRef = { [toCell]: () => OpaqueRef<any> };
-
-export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
-  return (
-    (typeof value === "object" || typeof value === "function") &&
-    value !== null &&
-    typeof (value as any)[toCell] === "function"
-  );
-}
-
-export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
-  return value[toCell]();
-}
-
 export type ShadowRef = {
   shadowOf: OpaqueRef<any> | ShadowRef;
 };
@@ -246,7 +232,7 @@ export function isShadowRef(value: unknown): value is ShadowRef {
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueCell((value as ShadowRef).shadowOf) ||
+    (isOpaqueRef((value as ShadowRef).shadowOf) ||
       isShadowRef((value as ShadowRef).shadowOf))
   );
 }

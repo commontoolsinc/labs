@@ -5,7 +5,7 @@ import { Module, Recipe, TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,
-  isQueryResultForDereferencing,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
@@ -690,7 +690,7 @@ function getCharmMetadataFromFrame(): {
 
   const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
 
-  if (!isQueryResultForDereferencing(sourceAsProxy)) {
+  if (!isCellResultForDereferencing(sourceAsProxy)) {
     return;
   }
   const result: ReturnType<typeof getCharmMetadataFromFrame> = {};

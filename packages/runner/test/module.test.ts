@@ -4,7 +4,7 @@ import { JSONSchemaObj } from "@commontools/api";
 import {
   type Frame,
   isModule,
-  isOpaqueCell,
+  isOpaqueRef,
   type JSONSchema,
   type Module,
   type OpaqueRef,
@@ -39,7 +39,7 @@ describe("module", () => {
     it("creates a opaque ref when called", () => {
       const add = lift<{ a: number; b: number }, number>(({ a, b }) => a + b);
       const result = add({ a: opaqueRef(1), b: opaqueRef(2) });
-      expect(isOpaqueCell(result)).toBe(true);
+      expect(isOpaqueRef(result)).toBe(true);
     });
 
     it("supports JSON Schema validation", () => {
@@ -120,7 +120,7 @@ describe("module", () => {
         { proxy: true },
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueCell(stream)).toBe(true);
+      expect(isOpaqueRef(stream)).toBe(true);
       const { value, nodes } =
         (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });
@@ -195,7 +195,7 @@ describe("module", () => {
       const elements = opaqueRef({ button1: true, button2: false });
       const result = toggleHandler({ elements } as any);
 
-      expect(isOpaqueCell(result)).toBe(true);
+      expect(isOpaqueRef(result)).toBe(true);
       const { nodes } = result.export();
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
@@ -212,7 +212,7 @@ describe("module", () => {
         { proxy: true },
       );
       const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueCell(stream)).toBe(true);
+      expect(isOpaqueRef(stream)).toBe(true);
       const { value, nodes } =
         (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });

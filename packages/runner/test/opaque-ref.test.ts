@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Frame, isOpaqueCell, isShadowRef } from "../src/builder/types.ts";
+import { type Frame, isOpaqueRef, isShadowRef } from "../src/builder/types.ts";
 import { createShadowRef, opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 
@@ -17,7 +17,7 @@ describe("opaqueRef function", () => {
 
   it("creates an opaque ref", () => {
     const c = opaqueRef<number>();
-    expect(isOpaqueCell(c)).toBe(true);
+    expect(isOpaqueRef(c)).toBe(true);
   });
 
   it("supports set methods", () => {

@@ -1,4 +1,3 @@
-import { isRecord } from "@commontools/utils/types";
 import {
   isOpaqueRefMarker,
   type JSONSchema,
@@ -10,13 +9,16 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
 } from "./types.ts";
-import { toOpaqueRef } from "../back-to-cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 import { createCell } from "../cell.ts";
 import type { IRuntime } from "../runtime.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 
 let mapFactory: NodeFactory<any, any> | undefined;
 
@@ -142,11 +144,8 @@ export function opaqueRef<T>(
       unsafe_getExternal: () => {
         if (!unsafe_binding) return proxy;
         const value = unsafe_materialize(unsafe_binding, path);
-        if (
-          isRecord(value) && value[toOpaqueRef] &&
-          typeof value[toOpaqueRef] === "function"
-        ) {
-          return (value[toOpaqueRef] as () => OpaqueRef<any>)();
+        if (isCellResultForDereferencing(value)) {
+          return getCellOrThrow(value);
         } else return proxy;
       },
       map: <S>(

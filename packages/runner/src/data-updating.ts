@@ -16,7 +16,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
@@ -188,7 +188,7 @@ export function normalizeAndDiff(
   }
 
   // Unwrap proxies and handle special types
-  if (isQueryResultForDereferencing(newValue)) {
+  if (isCellResultForDereferencing(newValue)) {
     const parsedLink = parseLink(newValue);
     const sigilLink = createSigilLinkFromParsedLink(parsedLink);
     diffLogger.debug(() =>

@@ -15,10 +15,9 @@ import {
 } from "./link-utils.ts";
 import {
   createQueryResultProxy,
-  isQueryResultForDereferencing,
-  makeOpaqueRef,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { toCell } from "./back-to-cell.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -311,15 +310,11 @@ function annotateWithBackToCellSymbols(
   tx: IExtendedStorageTransaction | undefined,
 ) {
   if (
-    isRecord(value) && !isCell(value) && !isQueryResultForDereferencing(value)
+    isRecord(value) && !isCell(value) && !isCellResultForDereferencing(value)
   ) {
     // Non-enumerable, so that {...obj} won't copy these symbols
     Object.defineProperty(value, toCell, {
       value: () => createCell(runtime, link, tx),
-      enumerable: false,
-    });
-    Object.defineProperty(value, toOpaqueRef, {
-      value: () => makeOpaqueRef(link),
       enumerable: false,
     });
     Object.freeze(value);

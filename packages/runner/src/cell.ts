@@ -21,13 +21,13 @@ import {
   type Stream,
   TYPE,
 } from "./builder/types.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { toCell } from "./back-to-cell.ts";
 import { isOpaqueRefMarker } from "./builder/types.ts";
 import {
+  type CellResult,
   createQueryResultProxy,
   getCellOrThrow,
-  isQueryResultForDereferencing,
-  type QueryResult,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -112,7 +112,7 @@ declare module "@commontools/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
-    ): QueryResult<DeepKeyLookup<T, Path>>;
+    ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
       options?: {
@@ -180,7 +180,6 @@ declare module "@commontools/api" {
     sourceURI: URI;
     path: readonly PropertyKey[];
     copyTrap: boolean;
-    [toOpaqueRef]: () => OpaqueRef<any>;
   }
 }
 
@@ -724,7 +723,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
-  ): QueryResult<DeepKeyLookup<T, Path>> {
+  ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
     return createQueryResultProxy(
@@ -1074,11 +1073,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       "Copy trap: Something is trying to traverse a cell.",
     );
   }
-
-  [toOpaqueRef](): OpaqueRef<any> {
-    // Since all cells are now also OpaqueRefs, just return this cell
-    return this as unknown as OpaqueRef<any>;
-  }
 }
 
 function subscribeToReferencedDocs<T>(
@@ -1217,7 +1211,7 @@ export function convertCellsToLinks(
     };
   }
 
-  if (isQueryResultForDereferencing(value)) {
+  if (isCellResultForDereferencing(value)) {
     value = getCellOrThrow(value).getAsLink();
   } else if (isCell(value)) {
     value = value.getAsLink();

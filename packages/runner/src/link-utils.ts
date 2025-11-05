@@ -19,9 +19,9 @@ import {
 import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
+  CellResultInternals,
   getCellOrThrow,
-  isQueryResultForDereferencing,
-  QueryResultInternals,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import type {
   IMemorySpaceAddress,
@@ -57,7 +57,7 @@ export type CellLink =
   | Cell<any>
   | Stream<any>
   | SigilLink
-  | QueryResultInternals
+  | CellResultInternals
   | LegacyJSONCellLink // @deprecated
   | LegacyAlias // @deprecated
   | { "/": string }; // @deprecated
@@ -143,7 +143,7 @@ export function isLink(
   value: any,
 ): value is CellLink {
   return (
-    isQueryResultForDereferencing(value) ||
+    isCellResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
@@ -230,7 +230,7 @@ export function parseLink(
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
-  if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
