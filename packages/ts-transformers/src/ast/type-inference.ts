@@ -214,3 +214,167 @@ export function registerTypeForNode(
   }
   return typeNode;
 }
+
+/**
+ * Helper to find Reference type within an intersection type
+ */
+function findReferenceTypeInIntersection(
+  intersectionType: ts.IntersectionType,
+): ts.Type | undefined {
+  for (const type of intersectionType.types) {
+    if (type.flags & ts.TypeFlags.Object) {
+      const objType = type as ts.ObjectType;
+      if (objType.objectFlags & ts.ObjectFlags.Reference) {
+        return type;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Helper to find OpaqueRef type within a union type
+ */
+function findOpaqueRefInUnion(
+  unionType: ts.UnionType,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  for (const member of unionType.types) {
+    if (
+      member.flags & ts.TypeFlags.Intersection ||
+      isOpaqueRefType(member, checker)
+    ) {
+      return member;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract element type from an array type (T[] → T)
+ */
+function extractElementFromArrayType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (checker.isArrayType(type)) {
+    return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  }
+  return undefined;
+}
+
+/**
+ * Infer the element type from an array-like expression (e.g., OpaqueRef<T[]> or Array<T>).
+ * Unwraps one level of array wrapping to get the element type.
+ *
+ * Handles:
+ * - OpaqueRef<T[]> → T[] → T (intersection type case)
+ * - Opaque<T[]> → OpaqueRef<T[]> → T[] → T (union type case)
+ * - Plain Array<T> → T
+ *
+ * @param arrayExpr - Expression representing an array or array-like type
+ * @param context - Context with checker, factory, and sourceFile
+ * @returns Element type and its TypeNode representation, or unknown if inference fails
+ */
+export function inferArrayElementType(
+  arrayExpr: ts.Expression,
+  context: {
+    checker: ts.TypeChecker;
+    factory: ts.NodeFactory;
+    sourceFile: ts.SourceFile;
+  },
+): { typeNode: ts.TypeNode; type?: ts.Type } {
+  const { checker, factory } = context;
+  const arrayType = checker.getTypeAtLocation(arrayExpr);
+
+  // Try to unwrap OpaqueRef<T[]> → T[] → T
+  let actualType = arrayType;
+
+  // Handle intersections (OpaqueRef case)
+  if (arrayType.flags & ts.TypeFlags.Intersection) {
+    const refType = findReferenceTypeInIntersection(
+      arrayType as ts.IntersectionType,
+    );
+    if (refType) {
+      actualType = refType;
+    }
+  }
+
+  // Handle unions (Opaque<T[]> case)
+  if (arrayType.flags & ts.TypeFlags.Union) {
+    const opaqueType = findOpaqueRefInUnion(
+      arrayType as ts.UnionType,
+      checker,
+    );
+    if (opaqueType) {
+      actualType = opaqueType;
+    }
+  }
+
+  // Extract type arguments from the reference type
+  let typeArgs: readonly ts.Type[] | undefined;
+
+  // First check if actualType is an intersection (OpaqueRef case)
+  if (actualType.flags & ts.TypeFlags.Intersection) {
+    const intersectionType = actualType as ts.IntersectionType;
+    // Look for the Reference type member within the intersection
+    for (const member of intersectionType.types) {
+      if (member.flags & ts.TypeFlags.Object) {
+        const objType = member as ts.ObjectType;
+        if (objType.objectFlags & ts.ObjectFlags.Reference) {
+          typeArgs = checker.getTypeArguments(objType as ts.TypeReference);
+          break;
+        }
+      }
+    }
+  } else if (actualType.flags & ts.TypeFlags.Object) {
+    // Plain object/reference type case
+    const objectType = actualType as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
+    }
+  }
+
+  if (typeArgs && typeArgs.length > 0) {
+    const innerType = typeArgs[0];
+    if (innerType) {
+      // innerType is either T[] or T depending on the structure
+      let elementType: ts.Type;
+      if (checker.isArrayType(innerType)) {
+        // It's T[], extract T
+        const extracted = extractElementFromArrayType(innerType, checker);
+        if (extracted) {
+          elementType = extracted;
+        } else {
+          return {
+            typeNode: factory.createKeywordTypeNode(
+              ts.SyntaxKind.UnknownKeyword,
+            ),
+          };
+        }
+      } else {
+        // It's already T
+        elementType = innerType;
+      }
+
+      // Convert Type to TypeNode
+      const typeNode = typeToTypeNode(elementType, checker, context.sourceFile) ??
+        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      return { typeNode, type: elementType };
+    }
+  }
+
+  // Fallback for plain Array<T>
+  const elementType = extractElementFromArrayType(arrayType, checker);
+  if (elementType) {
+    const typeNode = typeToTypeNode(elementType, checker, context.sourceFile) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+    return { typeNode, type: elementType };
+  }
+
+  return {
+    typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+  };
+}

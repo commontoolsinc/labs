@@ -8,9 +8,19 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
+  inferArrayElementType,
   registerTypeForNode,
   tryExplicitParameterType,
 } from "../ast/type-inference.ts";
+import {
+  isDeclaredWithinFunction,
+  isFunctionDeclaration,
+  isModuleScopedDeclaration,
+} from "../ast/scope-analysis.ts";
+import {
+  buildTypeElementsFromCaptureTree,
+  expressionToTypeNode,
+} from "../ast/type-building.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -39,74 +49,6 @@ export class ClosureTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     return transformClosures(context);
   }
-}
-
-/**
- * Check if a declaration is at module scope (top-level of source file).
- */
-function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
-  // Walk up to find the parent
-  let parent = decl.parent;
-
-  // For variable declarations, need to go up through VariableDeclarationList
-  if (ts.isVariableDeclaration(decl)) {
-    // VariableDeclaration -> VariableDeclarationList -> VariableStatement -> SourceFile
-    parent = parent?.parent?.parent;
-  }
-  // For function declarations, parent is already SourceFile (if module-scoped)
-  // No need to reassign
-
-  return parent ? ts.isSourceFile(parent) : false;
-}
-
-/**
- * Check if a declaration represents a function (we can't serialize functions).
- */
-function isFunctionDeclaration(decl: ts.Declaration): boolean {
-  // Direct function declarations
-  if (ts.isFunctionDeclaration(decl)) {
-    return true;
-  }
-
-  // Arrow functions or function expressions assigned to variables
-  if (ts.isVariableDeclaration(decl) && decl.initializer) {
-    const init = decl.initializer;
-    if (
-      ts.isArrowFunction(init) ||
-      ts.isFunctionExpression(init) ||
-      ts.isCallExpression(init) // Includes handler(), lift(), etc.
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Check if a declaration is within a callback's scope using node identity.
- */
-function isDeclaredWithinCallback(
-  decl: ts.Declaration,
-  func: ts.FunctionLikeDeclaration,
-): boolean {
-  // Walk up the tree from the declaration
-  let current: ts.Node | undefined = decl;
-  while (current) {
-    // Found our callback function
-    if (current === func) {
-      return true;
-    }
-
-    // Stop at function boundaries (don't cross into nested functions)
-    if (current !== decl && ts.isFunctionLike(current)) {
-      return false;
-    }
-
-    current = current.parent;
-  }
-
-  return false;
 }
 
 /**
@@ -146,7 +88,7 @@ function shouldCapturePropertyAccess(
 
   // Check if ANY declaration is outside the callback
   const hasExternalDeclaration = declarations.some((decl) =>
-    !isDeclaredWithinCallback(decl, func)
+    !isDeclaredWithinFunction(decl, func)
   );
 
   if (hasExternalDeclaration) {
@@ -240,7 +182,7 @@ function shouldCaptureIdentifier(
 
   // Check if ALL real declarations are within the callback
   const allDeclaredInside = realDeclarations.every((decl) =>
-    isDeclaredWithinCallback(decl, func)
+    isDeclaredWithinFunction(decl, func)
   );
 
   if (allDeclaredInside) {
@@ -427,89 +369,6 @@ function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
-function typeNodeForExpression(
-  expr: ts.Expression,
-  context: TransformationContext,
-): ts.TypeNode {
-  const { factory, checker } = context;
-  const exprType = checker.getTypeAtLocation(expr);
-  const node = checker.typeToTypeNode(
-    exprType,
-    context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation |
-      ts.NodeBuilderFlags.UseStructuralFallback,
-  ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-  const typeRegistry = context.options.typeRegistry;
-  if (typeRegistry) {
-    typeRegistry.set(node, exprType);
-  }
-
-  return node;
-}
-
-function buildCaptureTypeProperties(
-  node: CaptureTreeNode,
-  context: TransformationContext,
-): ts.TypeElement[] {
-  const { factory } = context;
-  const properties: ts.TypeElement[] = [];
-
-  for (const [propName, childNode] of node.properties) {
-    let typeNode: ts.TypeNode;
-    if (childNode.properties.size > 0 && !childNode.expression) {
-      const nested = buildCaptureTypeProperties(childNode, context);
-      typeNode = factory.createTypeLiteralNode(nested);
-    } else if (childNode.expression) {
-      typeNode = typeNodeForExpression(childNode.expression, context);
-    } else {
-      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    }
-
-    properties.push(
-      factory.createPropertySignature(
-        undefined,
-        createPropertyName(propName, factory),
-        undefined,
-        typeNode,
-      ),
-    );
-  }
-
-  return properties;
-}
-
-function buildParamsTypeElements(
-  captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext,
-): ts.TypeElement[] {
-  const { factory } = context;
-  const properties: ts.TypeElement[] = [];
-
-  for (const [rootName, rootNode] of captureTree) {
-    let typeNode: ts.TypeNode;
-    if (rootNode.properties.size > 0 && !rootNode.expression) {
-      const nested = buildCaptureTypeProperties(rootNode, context);
-      typeNode = factory.createTypeLiteralNode(nested);
-    } else if (rootNode.expression) {
-      typeNode = typeNodeForExpression(rootNode.expression, context);
-    } else {
-      typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-    }
-
-    properties.push(
-      factory.createPropertySignature(
-        undefined,
-        createPropertyName(rootName, factory),
-        undefined,
-        typeNode,
-      ),
-    );
-  }
-
-  return properties;
-}
-
 function determineElementType(
   mapCall: ts.CallExpression,
   elemParam: ts.ParameterDeclaration | undefined,
@@ -608,7 +467,7 @@ function buildCallbackParamTypeNode(
   }
 
   // 5. Build params object type with hierarchical captures
-  const paramsProperties = buildParamsTypeElements(
+  const paramsProperties = buildTypeElementsFromCaptureTree(
     captureTree,
     context,
   );
@@ -628,12 +487,14 @@ function buildCallbackParamTypeNode(
 
 /**
  * Infer the element type from an OpaqueRef<T[]> or Array<T> being mapped.
+ * This is a thin wrapper around inferArrayElementType that extracts the array expression
+ * from the map call.
  */
 function inferElementType(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): { typeNode: ts.TypeNode; type?: ts.Type } {
-  const { factory, checker } = context;
+  const { factory } = context;
 
   if (!ts.isPropertyAccessExpression(mapCall.expression)) {
     return {
@@ -642,121 +503,7 @@ function inferElementType(
   }
 
   const arrayExpr = mapCall.expression.expression;
-  const arrayType = checker.getTypeAtLocation(arrayExpr);
-
-  // Handle OpaqueRef<T[]> which is an intersection type
-  let actualArrayType = arrayType;
-  if (arrayType.flags & ts.TypeFlags.Intersection) {
-    const intersectionType = arrayType as ts.IntersectionType;
-    // Look for the Reference type member (e.g., OpaqueRefMethods<T[]>)
-    for (const type of intersectionType.types) {
-      if (type.flags & ts.TypeFlags.Object) {
-        const objType = type as ts.ObjectType;
-        if (objType.objectFlags & ts.ObjectFlags.Reference) {
-          actualArrayType = type;
-          break;
-        }
-      }
-    }
-  }
-
-  // Handle Opaque<T[]> which is a union type (T[] | OpaqueRef<T[]>)
-  if (arrayType.flags & ts.TypeFlags.Union) {
-    const unionType = arrayType as ts.UnionType;
-    // Look for the OpaqueRef<T[]> member (intersection type)
-    for (const member of unionType.types) {
-      if (
-        member.flags & ts.TypeFlags.Intersection ||
-        isOpaqueRefType(member, checker)
-      ) {
-        actualArrayType = member;
-        break;
-      }
-    }
-  }
-
-  // Get type arguments from the reference type
-  let typeArgs: readonly ts.Type[] | undefined;
-
-  // First check if actualArrayType is an intersection (OpaqueRef case)
-  if (actualArrayType.flags & ts.TypeFlags.Intersection) {
-    const intersectionType = actualArrayType as ts.IntersectionType;
-    // Look for the Reference type member within the intersection
-    for (const member of intersectionType.types) {
-      if (member.flags & ts.TypeFlags.Object) {
-        const objType = member as ts.ObjectType;
-        if (objType.objectFlags & ts.ObjectFlags.Reference) {
-          typeArgs = checker.getTypeArguments(objType as ts.TypeReference);
-          break;
-        }
-      }
-    }
-  } else if (actualArrayType.flags & ts.TypeFlags.Object) {
-    // Plain object/reference type case
-    const objectType = actualArrayType as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
-    }
-  }
-
-  if (typeArgs && typeArgs.length > 0) {
-    const innerType = typeArgs[0];
-    if (innerType) {
-      // innerType is either T[] or T depending on the structure
-      let elementType: ts.Type;
-      if (checker.isArrayType(innerType)) {
-        // It's T[], extract T
-        const extracted = checker.getIndexTypeOfType(
-          innerType,
-          ts.IndexKind.Number,
-        );
-        if (extracted) {
-          elementType = extracted;
-        } else {
-          return {
-            typeNode: factory.createKeywordTypeNode(
-              ts.SyntaxKind.UnknownKeyword,
-            ),
-          };
-        }
-      } else {
-        // It's already T
-        elementType = innerType;
-      }
-
-      // Convert Type to TypeNode
-      const typeNode = checker.typeToTypeNode(
-        elementType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
-      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-      return { typeNode, type: elementType };
-    }
-  }
-
-  // Fallback for plain Array<T>
-  if (checker.isArrayType(arrayType)) {
-    const elementType = checker.getIndexTypeOfType(
-      arrayType,
-      ts.IndexKind.Number,
-    );
-    if (elementType) {
-      const typeNode = checker.typeToTypeNode(
-        elementType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
-      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-      return { typeNode, type: elementType };
-    }
-  }
-
-  return {
-    typeNode: factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
-  };
+  return inferArrayElementType(arrayExpr, context);
 }
 
 /**
@@ -819,8 +566,8 @@ function buildHandlerStateTypeNode(
   const explicit = tryExplicitParameterType(stateParam, checker, typeRegistry);
   if (explicit) return explicit.typeNode;
 
-  // Fallback: build from captures (buildParamsTypeElements handles its own registration)
-  const paramsProperties = buildParamsTypeElements(captureTree, context);
+  // Fallback: build from captures (buildTypeElementsFromCaptureTree handles its own registration)
+  const paramsProperties = buildTypeElementsFromCaptureTree(captureTree, context);
   return factory.createTypeLiteralNode(paramsProperties);
 }
 
