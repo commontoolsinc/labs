@@ -22,6 +22,7 @@ import type {
   JSONSchemaObj,
   JSONValue,
   LiftFunction,
+  LinkFunction,
   LLMDialogFunction,
   LLMFunction,
   Module,
@@ -245,6 +246,7 @@ export interface BuilderFunctionsAndConstants {
   compileAndRun: CompileAndRunFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
+  link: LinkFunction;
 
   // Cell creation
   createCell: CreateCellFunction;

@@ -1049,6 +1049,11 @@ export type WishFunction = {
   ): OpaqueRef<T>;
 };
 
+export type LinkFunction = (
+  source: Opaque<string>,
+  target: Opaque<string>,
+) => OpaqueRef<{ success?: string; error?: string }>;
+
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
@@ -1121,6 +1126,7 @@ export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
+export declare const link: LinkFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;

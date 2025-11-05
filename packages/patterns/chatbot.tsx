@@ -18,6 +18,7 @@ import {
   wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
+import { createLinkHandler } from "./link-tool.tsx";
 
 function schemaifyWish<T>(path: string) {
   return derive<T, T>(wish<T>(path), (i) => i);
@@ -381,6 +382,11 @@ export default recipe<ChatInput, ChatOutput>(
         description:
           "Remove an attachment from the attachments array by its mentionable NAME.",
         handler: removeAttachmentTool({ allAttachments }),
+      },
+      createLink: {
+        description:
+          "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
+        handler: createLinkHandler({}),
       },
     };
 

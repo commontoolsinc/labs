@@ -28,6 +28,7 @@ import {
   generateObject,
   generateText,
   ifElse,
+  link,
   llm,
   llmDialog,
   navigateTo,
@@ -124,6 +125,7 @@ export const createBuilder = (
       compileAndRun,
       navigateTo,
       wish,
+      link,
 
       // Cell creation
       createCell,

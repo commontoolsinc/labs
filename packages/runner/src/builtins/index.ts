@@ -8,6 +8,7 @@ import type { IRuntime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
 import { navigateTo } from "./navigate-to.ts";
 import { wish } from "./wish.ts";
+import { link } from "./link.ts";
 import type { Cell } from "../cell.ts";
 import type {
   BuiltInGenerateObjectParams,
@@ -48,4 +49,11 @@ export function registerBuiltins(runtime: IRuntime) {
   );
   moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
   moduleRegistry.addModuleByRef("wish", raw(wish));
+  moduleRegistry.addModuleByRef(
+    "link",
+    raw<[unknown, unknown], {
+      success: Cell<string | undefined>;
+      error: Cell<string | undefined>;
+    }>(link),
+  );
 }
