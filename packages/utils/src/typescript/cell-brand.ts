@@ -199,6 +199,14 @@ function extractWrapperTypeReference(
     }
   }
 
+  if (type.flags & ts.TypeFlags.Union) {
+    const unionType = type as ts.UnionType;
+    for (const member of unionType.types) {
+      const ref = extractWrapperTypeReference(member, checker, seen);
+      if (ref) return ref;
+    }
+  }
+
   return undefined;
 }
 

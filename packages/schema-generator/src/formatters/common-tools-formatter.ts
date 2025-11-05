@@ -45,6 +45,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       return true;
     }
 
+    if ((type.flags & ts.TypeFlags.Union) !== 0) {
+      return false;
+    }
+
     // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
     return wrapperInfo !== undefined;
@@ -93,7 +97,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
-    if (wrapperInfo) {
+    if (wrapperInfo && !(type.flags & ts.TypeFlags.Union)) {
       const nodeToPass = this.selectWrapperTypeNode(
         n,
         resolvedWrapper,
@@ -250,9 +254,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Check if this type itself is the target wrapper
-    const wrapperInfo = getCellWrapperInfo(type, checker);
-    if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
-      return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      const wrapperInfo = getCellWrapperInfo(type, checker);
+      if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
+        return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
+      }
     }
 
     // If this is a union (e.g., from Opaque<T>), check each member
