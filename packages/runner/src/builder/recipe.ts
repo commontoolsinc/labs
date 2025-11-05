@@ -145,7 +145,7 @@ export function recipeFromFrame<T, R>(
   resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
-  const inputs = opaqueRef<Required<T>>(
+  const inputs = opaqueRef(
     undefined,
     typeof argumentSchema === "string"
       ? undefined
