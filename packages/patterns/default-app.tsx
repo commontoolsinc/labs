@@ -165,29 +165,38 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack gap="4" padding="6">
+              <style>{`
+                .pattern-link {
+                  cursor: pointer;
+                  color: inherit;
+                  text-decoration: none;
+                }
+                .pattern-link:hover {
+                  text-decoration: underline;
+                }
+              `}</style>
               <h2>Patterns</h2>
 
               <ct-table full-width hover>
                 <tbody>
                   {allCharms.map((charm) => (
                     <tr>
-                      <td>{charm?.[NAME] || "Untitled Charm"}</td>
                       <td>
-                        <ct-hstack gap="2">
-                          <ct-button
-                            size="sm"
-                            onClick={visit({ charm })}
-                          >
-                            Visit
-                          </ct-button>
-                          <ct-button
-                            size="sm"
-                            variant="destructive"
-                            onClick={removeCharm({ charm, allCharms })}
-                          >
-                            Remove
-                          </ct-button>
-                        </ct-hstack>
+                        <a
+                          className="pattern-link"
+                          onClick={visit({ charm })}
+                        >
+                          {charm?.[NAME] || "Untitled Charm"}
+                        </a>
+                      </td>
+                      <td>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          🗑️
+                        </ct-button>
                       </td>
                     </tr>
                   ))}
