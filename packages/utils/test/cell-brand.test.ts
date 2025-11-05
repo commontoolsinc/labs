@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import ts from "typescript";
 
 import { getCellWrapperInfo } from "../src/typescript/cell-brand.ts";
@@ -45,7 +45,9 @@ function getPropertyType(
   const iface = statements.find((stmt) => stmt.name.text === interfaceName);
   assertExists(iface, `Interface ${interfaceName} not found`);
 
-  const property = iface.members.find((member): member is ts.PropertySignature =>
+  const property = iface.members.find((
+    member,
+  ): member is ts.PropertySignature =>
     ts.isPropertySignature(member) &&
     !!member.name &&
     ts.isIdentifier(member.name) &&
@@ -74,7 +76,12 @@ Deno.test("getCellWrapperInfo handles unions containing branded cells", () => {
 
   const { checker, sourceFile } = createProgram(source);
   const maybeType = getPropertyType(checker, sourceFile, "Schema", "maybe");
-  const nullableType = getPropertyType(checker, sourceFile, "Schema", "nullable");
+  const nullableType = getPropertyType(
+    checker,
+    sourceFile,
+    "Schema",
+    "nullable",
+  );
 
   const maybeInfo = getCellWrapperInfo(maybeType, checker);
   assertExists(maybeInfo, "Expected wrapper info for MaybeCell");
