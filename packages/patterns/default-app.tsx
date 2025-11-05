@@ -170,15 +170,9 @@ export default recipe<CharmsListInput, CharmsListOutput>(
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack gap="4" padding="6">
-              <h2>Charms ({allCharms.length})</h2>
+              <h2>Patterns</h2>
 
               <ct-table full-width hover>
-                <thead>
-                  <tr>
-                    <th>Charm Name</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
                 <tbody>
                   {allCharms.map((charm) => (
                     <tr>
