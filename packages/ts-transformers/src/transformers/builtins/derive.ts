@@ -11,6 +11,8 @@ import {
   isSafeIdentifierText,
   createPropertyName,
   reserveIdentifier,
+  createBindingElementsFromNames,
+  createParameterFromBindings,
 } from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(
@@ -100,20 +102,9 @@ function createParameterForPlan(
     return reserveIdentifier(candidate, usedNames, factory);
   };
 
-  for (const [rootName] of captureTree) {
-    const bindingIdentifier = register(rootName);
-    const propertyName = isSafeIdentifierText(rootName)
-      ? undefined
-      : createPropertyName(rootName, factory);
-    bindings.push(
-      factory.createBindingElement(
-        undefined,
-        propertyName,
-        bindingIdentifier,
-        undefined,
-      ),
-    );
-  }
+  bindings.push(
+    ...createBindingElementsFromNames(captureTree.keys(), factory, register),
+  );
 
   for (const entry of fallbackEntries) {
     const bindingIdentifier = register(entry.paramName);
@@ -131,32 +122,7 @@ function createParameterForPlan(
     );
   }
 
-  const shouldInlineSoleBinding = bindings.length === 1 &&
-    captureTree.size === 0 &&
-    fallbackEntries.length === 1 &&
-    !bindings[0]!.propertyName &&
-    !bindings[0]!.dotDotDotToken &&
-    !bindings[0]!.initializer;
-
-  if (shouldInlineSoleBinding) {
-    return factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      bindings[0]!.name,
-      undefined,
-      undefined,
-      undefined,
-    );
-  }
-
-  return factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindings),
-    undefined,
-    undefined,
-    undefined,
-  );
+  return createParameterFromBindings(bindings, factory);
 }
 
 function createDeriveArgs(

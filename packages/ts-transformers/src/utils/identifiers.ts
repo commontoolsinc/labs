@@ -199,3 +199,61 @@ export function reserveIdentifier(
   });
   return factory.createIdentifier(unique);
 }
+
+/**
+ * Creates binding elements for object destructuring from property names.
+ * Handles safe identifier vs string literal property names automatically.
+ *
+ * @param names - Property names to create bindings for
+ * @param factory - TypeScript node factory
+ * @param createBindingName - Callback to generate the binding identifier/pattern for each property
+ * @returns Array of binding elements suitable for createObjectBindingPattern
+ */
+export function createBindingElementsFromNames(
+  names: Iterable<string>,
+  factory: ts.NodeFactory,
+  createBindingName: (propertyName: string) => ts.BindingName,
+): ts.BindingElement[] {
+  const elements: ts.BindingElement[] = [];
+  for (const name of names) {
+    const propertyName = isSafeIdentifierText(name)
+      ? undefined
+      : createPropertyName(name, factory);
+    elements.push(
+      factory.createBindingElement(
+        undefined,
+        propertyName,
+        createBindingName(name),
+        undefined,
+      ),
+    );
+  }
+  return elements;
+}
+
+export interface ParameterFromBindingsOptions {
+  readonly type?: ts.TypeNode;
+}
+
+/**
+ * Creates a parameter declaration with object binding pattern from binding elements.
+ *
+ * @param bindings - Binding elements for the parameter
+ * @param factory - TypeScript node factory
+ * @param options - Optional configuration
+ * @returns Parameter declaration with object binding pattern
+ */
+export function createParameterFromBindings(
+  bindings: readonly ts.BindingElement[],
+  factory: ts.NodeFactory,
+  options: ParameterFromBindingsOptions = {},
+): ts.ParameterDeclaration {
+  return factory.createParameterDeclaration(
+    undefined,
+    undefined,
+    factory.createObjectBindingPattern([...bindings]),
+    undefined,
+    options.type,
+    undefined,
+  );
+}

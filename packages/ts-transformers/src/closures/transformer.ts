@@ -11,6 +11,8 @@ import {
   isSafeIdentifierText,
   createPropertyName,
   reserveIdentifier,
+  createBindingElementsFromNames,
+  createParameterFromBindings,
 } from "../utils/identifiers.ts";
 import {
   analyzeElementBinding,
@@ -894,20 +896,11 @@ function createRecipeCallWithParams(
     );
   }
 
-  const paramsBindings: ts.BindingElement[] = [];
-  for (const [rootName] of captureTree) {
-    const propertyName = isSafeIdentifierText(rootName)
-      ? undefined
-      : createPropertyName(rootName, factory);
-    paramsBindings.push(
-      factory.createBindingElement(
-        undefined,
-        propertyName,
-        createBindingIdentifier(rootName),
-        undefined,
-      ),
-    );
-  }
+  const paramsBindings = createBindingElementsFromNames(
+    captureTree.keys(),
+    factory,
+    createBindingIdentifier,
+  );
 
   const paramsPattern = factory.createObjectBindingPattern(paramsBindings);
 
@@ -920,13 +913,9 @@ function createRecipeCallWithParams(
     ),
   );
 
-  const destructuredParam = factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindingElements),
-    undefined,
-    undefined,
-    undefined,
+  const destructuredParam = createParameterFromBindings(
+    bindingElements,
+    factory,
   );
 
   const visitedAliases: ComputedAliasInfo[] = elementAnalysis
