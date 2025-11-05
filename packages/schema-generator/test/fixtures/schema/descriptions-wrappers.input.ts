@@ -1,9 +1,9 @@
 type Default<T, V extends T = T> = T;
-interface Cell<T> {
+interface Cell<T> extends BrandedCell<T, "cell"> {
   get(): T;
   set(v: T): void;
 }
-interface Stream<T> {
+interface Stream<T> extends BrandedCell<T, "stream"> {
   subscribe(cb: (v: T) => void): void;
 }
 

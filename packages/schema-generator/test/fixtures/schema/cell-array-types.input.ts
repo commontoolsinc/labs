@@ -1,4 +1,4 @@
-interface Cell<T> {
+interface Cell<T> extends BrandedCell<T, "cell"> {
   get(): T;
   set(v: T): void;
 }

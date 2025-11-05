@@ -23,7 +23,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
   it("Cell<Default<string,'default'>>", async () => {
     const code = `
       interface Default<T, V> {}
-      interface Cell<T> { get(): T; set(v: T): void; }
+      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
       interface X { value: Cell<Default<string, "default">>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -39,7 +39,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
   it("Stream<Default<string,'initial'>>", async () => {
     const code = `
       interface Default<T, V> {}
-      interface Stream<T> { subscribe(cb: (v:T) => void): void; }
+      interface Stream<T> extends BrandedCell<T, "stream"> { subscribe(cb: (v:T) => void): void; }
       interface X { events: Stream<Default<string, "initial">>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -55,7 +55,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
   it("Stream<Default<string[], ['a']>> yields array schema with default", async () => {
     const code = `
       interface Default<T, V> {}
-      interface Stream<T> { subscribe(cb: (v:T) => void): void; }
+      interface Stream<T> extends BrandedCell<T, "stream"> { subscribe(cb: (v:T) => void): void; }
       interface X { events: Stream<Default<string[], ["a"]>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -72,7 +72,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
 
   it("array of Cell<string>", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(v: T): void; }
+      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
       interface X { items: Array<Cell<string>>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -91,7 +91,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
 
   it("Cell<string[]>", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(v: T): void; }
+      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
       interface X { tags: Cell<string[]>; }
     `;
     const { type, checker } = await getTypeFromCode(code, "X");
@@ -108,7 +108,7 @@ describe("Schema: Nested wrappers (Cell, Stream, Default)", () => {
   it("complex nesting: Cell<Default<string,'d'>> and Default<string[], ['a','b']>", async () => {
     const code = `
       interface Default<T, V> {}
-      interface Cell<T> { get(): T; set(v: T): void; }
+      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
       interface X {
         cellOfDefault: Cell<Default<string, "d">>;
         defaultArray: Default<string[], ["a", "b"]>;

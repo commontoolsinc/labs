@@ -388,15 +388,15 @@ export class CommonToolsFormatter implements TypeFormatter {
       | undefined,
     targetKind: WrapperKind,
   ): ts.TypeReferenceNode | undefined {
-    if (resolvedWrapper?.kind === targetKind) {
-      return resolvedWrapper.node;
-    }
     if (
       originalNode &&
       ts.isTypeReferenceNode(originalNode) &&
       originalNode.typeArguments
     ) {
       return originalNode;
+    }
+    if (resolvedWrapper?.kind === targetKind) {
+      return resolvedWrapper.node;
     }
     return undefined;
   }

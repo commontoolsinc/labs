@@ -1,32 +1,49 @@
 {
-  "properties": {
-    "comparableValue": {
+  "$defs": {
+    "MyComparableCell": {
       "asCell": true,
       "type": "number"
     },
-    "readonlyValue": {
+    "MyOpaque": {
+      "asOpaque": true,
+      "type": "boolean"
+    },
+    "MyReadonlyCell": {
       "asCell": true,
       "type": "string"
     },
-    "writeonlyValue": {
-      "asCell": true,
-      "type": "boolean"
-    },
-    "streamValue": {
+    "MyStream": {
       "asStream": true,
       "type": "number"
     },
-    "opaqueValue": {
-      "asOpaque": true,
+    "MyWriteonlyCell": {
+      "asCell": true,
       "type": "boolean"
+    }
+  },
+  "properties": {
+    "comparableValue": {
+      "$ref": "#/$defs/MyComparableCell"
+    },
+    "opaqueValue": {
+      "$ref": "#/$defs/MyOpaque"
+    },
+    "readonlyValue": {
+      "$ref": "#/$defs/MyReadonlyCell"
+    },
+    "streamValue": {
+      "$ref": "#/$defs/MyStream"
+    },
+    "writeonlyValue": {
+      "$ref": "#/$defs/MyWriteonlyCell"
     }
   },
   "required": [
     "comparableValue",
+    "opaqueValue",
     "readonlyValue",
-    "writeonlyValue",
     "streamValue",
-    "opaqueValue"
+    "writeonlyValue"
   ],
   "type": "object"
 }

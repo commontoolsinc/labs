@@ -6,8 +6,8 @@ import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 describe("Schema: type-to-schema parity", () => {
   it("generates schemas for inputs/outputs structures", async () => {
     const code = `
-      interface Cell<T> { get(): T; set(v: T): void; }
-      interface Stream<T> { subscribe(cb: (v:T)=>void): void }
+      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
+      interface Stream<T> extends BrandedCell<T, "stream"> { subscribe(cb: (v:T)=>void): void }
 
       interface UpdaterInput { newValues: string[]; }
       interface RecipeInput { values: Cell<string[]>; }
