@@ -25,8 +25,9 @@ export function typeToTypeNodeWithRegistry(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   flags = DEFAULT_TYPE_NODE_FLAGS,
 ): ts.TypeNode {
-  const node = context.checker.typeToTypeNode(type, context.sourceFile, flags) ??
-    context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  const node =
+    context.checker.typeToTypeNode(type, context.sourceFile, flags) ??
+      context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
   if (typeRegistry) {
     typeRegistry.set(node, type);

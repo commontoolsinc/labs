@@ -358,8 +358,9 @@ export function inferArrayElementType(
       }
 
       // Convert Type to TypeNode
-      const typeNode = typeToTypeNode(elementType, checker, context.sourceFile) ??
-        factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+      const typeNode =
+        typeToTypeNode(elementType, checker, context.sourceFile) ??
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       return { typeNode, type: elementType };
     }

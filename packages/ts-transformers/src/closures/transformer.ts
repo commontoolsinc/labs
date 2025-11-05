@@ -17,10 +17,7 @@ import {
   isFunctionDeclaration,
   isModuleScopedDeclaration,
 } from "../ast/scope-analysis.ts";
-import {
-  buildTypeElementsFromCaptureTree,
-  expressionToTypeNode,
-} from "../ast/type-building.ts";
+import { buildTypeElementsFromCaptureTree } from "../ast/type-building.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -567,7 +564,10 @@ function buildHandlerStateTypeNode(
   if (explicit) return explicit.typeNode;
 
   // Fallback: build from captures (buildTypeElementsFromCaptureTree handles its own registration)
-  const paramsProperties = buildTypeElementsFromCaptureTree(captureTree, context);
+  const paramsProperties = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
+  );
   return factory.createTypeLiteralNode(paramsProperties);
 }
 
