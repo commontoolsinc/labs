@@ -77,8 +77,7 @@ export default recipe({
                                 properties: {
                                     count: {
                                         type: "number",
-                                        asCell: true,
-                                        asOpaque: true
+                                        asCell: true
                                     }
                                 },
                                 required: ["count"]
