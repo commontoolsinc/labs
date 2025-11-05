@@ -6,6 +6,7 @@ import type {
   ModuleFactory,
   NodeRef,
   Opaque,
+  OpaqueCell,
   OpaqueRef,
   Schema,
   SchemaWithoutCell,
@@ -41,7 +42,7 @@ export function createNodeFactory<T = any, R = any>(
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
     connectInputAndOutputs(node);
-    outputs.connect(node);
+    (outputs as OpaqueCell<R>).connect(node);
 
     return outputs;
   }, module);
@@ -160,7 +161,7 @@ export function handler<E, T>(
     const stream = opaqueRef<E>(undefined, eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
-    stream.set({ $stream: true } as E);
+    (stream as OpaqueCell<E>).set({ $stream: true } as E);
     const node: NodeRef = {
       module,
       inputs: { $ctx: props, $event: stream },
@@ -169,7 +170,7 @@ export function handler<E, T>(
     };
 
     connectInputAndOutputs(node);
-    stream.connect(node);
+    (stream as OpaqueCell<E>).connect(node);
 
     return stream;
   }, module);

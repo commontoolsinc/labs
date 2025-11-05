@@ -12,7 +12,7 @@ import {
 
 interface ConditionalBranchArgs {
   value: Default<number, 0>;
-  enabled: Default<boolean, false>;
+  enabled: Cell<Default<boolean, false>>;
 }
 
 const toggleFlag = handler(

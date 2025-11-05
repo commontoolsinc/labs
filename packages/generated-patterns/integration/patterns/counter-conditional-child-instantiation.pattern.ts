@@ -102,7 +102,11 @@ export const counterWithConditionalChildInstantiation = recipe<
       ) => {
         const existing = childSlot.get();
         if (!state.active) {
-          if (existing !== undefined) childSlot.set(undefined);
+          if (existing !== undefined) {
+            (childSlot as unknown as Cell<ChildCounterState | undefined>).set(
+              undefined,
+            );
+          }
           return state.active;
         }
         if (existing === undefined) {

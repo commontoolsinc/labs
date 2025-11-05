@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeRef,
   type Opaque,
+  type OpaqueCell,
   type OpaqueRef,
   type Recipe,
   type RecipeFactory,
@@ -293,7 +294,7 @@ function factoryFromRecipe<T, R>(
 
   // Collect default values for the inputs
   const defaults = toJSONWithLegacyAliases(
-    inputs.export().defaultValue ?? {},
+    (inputs as OpaqueCell<T>).export().defaultValue ?? {},
     paths,
     true,
   )!;
@@ -386,7 +387,7 @@ function factoryFromRecipe<T, R>(
     };
 
     connectInputAndOutputs(node);
-    outputs.connect(node);
+    (outputs as OpaqueCell<R>).connect(node);
 
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;

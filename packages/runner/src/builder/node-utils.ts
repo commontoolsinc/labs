@@ -7,7 +7,7 @@ import {
   makeOpaqueRef,
   type NodeRef,
   type Opaque,
-  type OpaqueRef,
+  OpaqueCell,
 } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -56,7 +56,7 @@ export function applyInputIfcToOutput<T, R>(
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isOpaqueCell(item)) {
-      const { schema: inputSchema, rootSchema } = (item as OpaqueRef<T>)
+      const { schema: inputSchema, rootSchema } = (item as OpaqueCell<T>)
         .export();
       if (inputSchema !== undefined) {
         ContextualFlowControl.joinSchema(
@@ -81,7 +81,7 @@ function attachCfcToOutputs<T, R>(
   lubClassification: string,
 ) {
   if (isOpaqueCell(outputs)) {
-    const exported = (outputs as OpaqueRef<T>).export();
+    const exported = (outputs as OpaqueCell<T>).export();
     const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<string>([lubClassification]);
@@ -99,7 +99,7 @@ function attachCfcToOutputs<T, R>(
       ...outpuSchemaObj,
       ifc,
     };
-    (outputs as OpaqueRef<T>).setSchema(cfcSchema);
+    (outputs as OpaqueCell<T>).setSchema(cfcSchema);
     return;
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
