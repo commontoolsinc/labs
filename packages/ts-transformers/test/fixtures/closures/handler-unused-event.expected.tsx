@@ -14,7 +14,15 @@ export default recipe({
     required: ["counter"]
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(true as const satisfies __ctHelpers.JSONSchema, {
+        [UI]: (<button type="button" onClick={__ctHelpers.handler({
+            anyOf: [{
+                    type: "object",
+                    properties: {
+                        detail: true
+                    },
+                    required: ["detail"]
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
             $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
