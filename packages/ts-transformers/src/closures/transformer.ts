@@ -479,6 +479,7 @@ interface ElementBindingAnalysis {
   readonly bindingName: ts.BindingName;
   readonly elementIdentifier: ts.Identifier;
   readonly computedAliases: readonly ComputedAliasInfo[];
+  readonly destructureStatement?: ts.Statement;
 }
 function collectComputedAliases(
   name: ts.BindingName,
@@ -570,6 +571,95 @@ function collectComputedAliases(
   }
 }
 
+function cloneWithoutComputedProperties(
+  name: ts.BindingName,
+  context: TransformationContext,
+  used: Set<string>,
+): ts.BindingName | undefined {
+  const { factory } = context;
+
+  if (ts.isIdentifier(name)) {
+    return factory.createIdentifier(name.text);
+  }
+
+  if (ts.isObjectBindingPattern(name)) {
+    const elements: ts.BindingElement[] = [];
+
+    for (const element of name.elements) {
+      if (
+        element.propertyName &&
+        ts.isComputedPropertyName(element.propertyName)
+      ) {
+        continue;
+      }
+
+      let clonedName: ts.BindingName | undefined;
+      if (ts.isIdentifier(element.name)) {
+        clonedName = factory.createIdentifier(element.name.text);
+      } else if (isBindingPattern(element.name)) {
+        clonedName = cloneWithoutComputedProperties(
+          element.name,
+          context,
+          used,
+        );
+      }
+
+      if (!clonedName && !element.dotDotDotToken) {
+        continue;
+      }
+
+      elements.push(
+        factory.createBindingElement(
+          element.dotDotDotToken,
+          element.propertyName,
+          clonedName ?? element.name,
+          element.initializer as ts.Expression | undefined,
+        ),
+      );
+    }
+
+    if (elements.length === 0) {
+      return undefined;
+    }
+
+    return factory.createObjectBindingPattern(elements);
+  }
+
+  if (ts.isArrayBindingPattern(name)) {
+    const newElements = name.elements.map((element) => {
+      if (ts.isOmittedExpression(element)) {
+        return element;
+      }
+      if (ts.isBindingElement(element)) {
+        let clonedName: ts.BindingName | undefined;
+        if (ts.isIdentifier(element.name)) {
+          clonedName = factory.createIdentifier(element.name.text);
+        } else if (isBindingPattern(element.name)) {
+          clonedName = cloneWithoutComputedProperties(
+            element.name,
+            context,
+            used,
+          );
+        }
+        if (!clonedName && !element.dotDotDotToken) {
+          return element;
+        }
+        return factory.createBindingElement(
+          element.dotDotDotToken,
+          element.propertyName,
+          clonedName ?? element.name,
+          element.initializer as ts.Expression | undefined,
+        );
+      }
+      return element;
+    });
+
+    return factory.createArrayBindingPattern(newElements);
+  }
+
+  return undefined;
+}
+
 function analyzeElementBinding(
   elemParam: ts.ParameterDeclaration | undefined,
   captureTree: CaptureTreeMap,
@@ -628,10 +718,40 @@ function analyzeElementBinding(
     captureTree.has("element") ? "__ct_element" : "element",
   );
 
+  const residualPattern = cloneWithoutComputedProperties(
+    elemParam.name,
+    context,
+    used,
+  );
+
+  let destructureStatement: ts.Statement | undefined;
+  if (residualPattern) {
+    const normalized = normalizeBindingName(
+      residualPattern,
+      factory,
+      used,
+    );
+    destructureStatement = factory.createVariableStatement(
+      undefined,
+      factory.createVariableDeclarationList(
+        [
+          factory.createVariableDeclaration(
+            normalized,
+            undefined,
+            undefined,
+            factory.createIdentifier(elementIdentifier.text),
+          ),
+        ],
+        ts.NodeFlags.Const,
+      ),
+    );
+  }
+
   return {
     bindingName: elementIdentifier,
     elementIdentifier,
     computedAliases: aliasBucket,
+    destructureStatement,
   };
 }
 
@@ -738,6 +858,10 @@ function rewriteCallbackBody(
   }
 
   const prologue: ts.Statement[] = [];
+
+  if (analysis.destructureStatement) {
+    prologue.push(analysis.destructureStatement);
+  }
 
   for (const info of analysis.computedAliases) {
     prologue.push(
@@ -1332,6 +1456,7 @@ function createRecipeCallWithParams(
     {
       bindingName: elementAnalysis.bindingName,
       elementIdentifier: elementAnalysis.elementIdentifier,
+      destructureStatement: elementAnalysis.destructureStatement,
       computedAliases: visitedAliases,
     },
     context,
