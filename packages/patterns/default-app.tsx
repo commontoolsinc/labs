@@ -195,15 +195,13 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                         </a>
                       </td>
                       <td>
-                        <ct-hstack gap="8">
-                          <ct-button
-                            size="sm"
-                            variant="ghost"
-                            onClick={removeCharm({ charm, allCharms })}
-                          >
-                            🗑️
-                          </ct-button>
-                        </ct-hstack>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          🗑️
+                        </ct-button>
                       </td>
                     </tr>
                   ))}
