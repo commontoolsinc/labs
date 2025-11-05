@@ -9,6 +9,8 @@ import {
 import {
   getUniqueIdentifier,
   isSafeIdentifierText,
+  createPropertyName,
+  reserveIdentifier,
 } from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(
@@ -85,15 +87,6 @@ function planDeriveEntries(
   return { captureTree, fallbackEntries, refToParamName };
 }
 
-function createPropertyName(
-  factory: ts.NodeFactory,
-  name: string,
-): ts.PropertyName {
-  return isSafeIdentifierText(name)
-    ? factory.createIdentifier(name)
-    : factory.createStringLiteral(name);
-}
-
 function createParameterForPlan(
   factory: ts.NodeFactory,
   captureTree: ReturnType<typeof groupCapturesByRoot>,
@@ -104,21 +97,14 @@ function createParameterForPlan(
   const usedNames = new Set<string>();
 
   const register = (candidate: string): ts.Identifier => {
-    if (isSafeIdentifierText(candidate) && !usedNames.has(candidate)) {
-      usedNames.add(candidate);
-      return factory.createIdentifier(candidate);
-    }
-    const unique = getUniqueIdentifier(candidate, usedNames, {
-      fallback: candidate.length > 0 ? candidate : "ref",
-    });
-    return factory.createIdentifier(unique);
+    return reserveIdentifier(candidate, usedNames, factory);
   };
 
   for (const [rootName] of captureTree) {
     const bindingIdentifier = register(rootName);
     const propertyName = isSafeIdentifierText(rootName)
       ? undefined
-      : createPropertyName(factory, rootName);
+      : createPropertyName(rootName, factory);
     bindings.push(
       factory.createBindingElement(
         undefined,
@@ -183,7 +169,7 @@ function createDeriveArgs(
   for (const [rootName, node] of captureTree) {
     properties.push(
       factory.createPropertyAssignment(
-        createPropertyName(factory, rootName),
+        createPropertyName(rootName, factory),
         buildHierarchicalParamsValue(node, rootName, factory),
       ),
     );

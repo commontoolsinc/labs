@@ -165,3 +165,37 @@ export function createSafeIdentifier(
   const text = getUniqueIdentifier(name, used, options);
   return ts.factory.createIdentifier(text);
 }
+
+export function createPropertyName(
+  name: string,
+  factory: ts.NodeFactory,
+): ts.PropertyName {
+  return isSafeIdentifierText(name)
+    ? factory.createIdentifier(name)
+    : factory.createStringLiteral(name);
+}
+
+export interface ReserveIdentifierOptions extends UniqueIdentifierOptions {
+  readonly emptyFallback?: string;
+}
+
+export function reserveIdentifier(
+  candidate: string,
+  used: Set<string>,
+  factory: ts.NodeFactory,
+  options: ReserveIdentifierOptions = {},
+): ts.Identifier {
+  if (isSafeIdentifierText(candidate) && !used.has(candidate)) {
+    used.add(candidate);
+    return factory.createIdentifier(candidate);
+  }
+
+  const emptyFallback = options.emptyFallback ?? "ref";
+  const baseCandidate = candidate.length > 0 ? candidate : emptyFallback;
+
+  const unique = getUniqueIdentifier(baseCandidate, used, {
+    ...options,
+    fallback: emptyFallback,
+  });
+  return factory.createIdentifier(unique);
+}

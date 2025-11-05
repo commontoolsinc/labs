@@ -70,9 +70,9 @@ export default recipe({
                 const __ct_val_key = dynamicKey();
                 const { foo } = element;
                 const val = __ctHelpers.derive({
-                    element,
-                    __ct_val_key
-                }, ({ element: element, __ct_val_key: __ct_val_key }) => element[__ct_val_key]);
+                    element: element,
+                    __ct_val_key: __ct_val_key
+                }, ({ element, __ct_val_key }) => element[__ct_val_key]);
                 return (<span>{__ctHelpers.derive({
                     foo: foo,
                     val: val
