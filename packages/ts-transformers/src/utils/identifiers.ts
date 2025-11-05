@@ -13,13 +13,20 @@ export interface UniqueIdentifierOptions extends SanitizeIdentifierOptions {
 
 export function isSafeIdentifierText(name: string): boolean {
   if (name.length === 0) return false;
-  const first = name.codePointAt(0)!;
-  if (!ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)) {
+  const codePoints = Array.from(name);
+  const first = codePoints[0]?.codePointAt(0);
+  if (
+    first === undefined ||
+    !ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+  ) {
     return false;
   }
-  for (let i = 1; i < name.length; i++) {
-    const code = name.codePointAt(i)!;
-    if (!ts.isIdentifierPart(code, ts.ScriptTarget.ESNext)) {
+  for (const codePoint of codePoints.slice(1)) {
+    const code = codePoint.codePointAt(0);
+    if (
+      code === undefined ||
+      !ts.isIdentifierPart(code, ts.ScriptTarget.ESNext)
+    ) {
       return false;
     }
   }
@@ -53,7 +60,11 @@ export function sanitizeIdentifierCandidate(
       return DEFAULT_FALLBACK;
     }
 
-    if (!ts.isIdentifierStart(text.charCodeAt(0), ts.ScriptTarget.ESNext)) {
+    const first = text.codePointAt(0);
+    if (
+      first === undefined ||
+      !ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+    ) {
       text = `${DEFAULT_FALLBACK}${text}`;
     }
 
@@ -79,7 +90,11 @@ export function sanitizeIdentifierCandidate(
 
   const ensureIdentifierStart = (text: string): string => {
     if (text.length === 0) return fallback;
-    if (ts.isIdentifierStart(text.charCodeAt(0), ts.ScriptTarget.ESNext)) {
+    const first = text.codePointAt(0);
+    if (
+      first !== undefined &&
+      ts.isIdentifierStart(first, ts.ScriptTarget.ESNext)
+    ) {
       return text;
     }
     return `${fallback}${text}`;
@@ -149,4 +164,130 @@ export function createSafeIdentifier(
 ): ts.Identifier {
   const text = getUniqueIdentifier(name, used, options);
   return ts.factory.createIdentifier(text);
+}
+
+export function createPropertyName(
+  name: string,
+  factory: ts.NodeFactory,
+): ts.PropertyName {
+  return isSafeIdentifierText(name)
+    ? factory.createIdentifier(name)
+    : factory.createStringLiteral(name);
+}
+
+export interface ReserveIdentifierOptions extends UniqueIdentifierOptions {
+  readonly emptyFallback?: string;
+}
+
+export function reserveIdentifier(
+  candidate: string,
+  used: Set<string>,
+  factory: ts.NodeFactory,
+  options: ReserveIdentifierOptions = {},
+): ts.Identifier {
+  if (isSafeIdentifierText(candidate) && !used.has(candidate)) {
+    used.add(candidate);
+    return factory.createIdentifier(candidate);
+  }
+
+  const emptyFallback = options.emptyFallback ?? "ref";
+  const baseCandidate = candidate.length > 0 ? candidate : emptyFallback;
+
+  const unique = getUniqueIdentifier(baseCandidate, used, {
+    ...options,
+    fallback: emptyFallback,
+  });
+  return factory.createIdentifier(unique);
+}
+
+/**
+ * Creates binding elements for object destructuring from property names.
+ * Handles safe identifier vs string literal property names automatically.
+ *
+ * @param names - Property names to create bindings for
+ * @param factory - TypeScript node factory
+ * @param createBindingName - Callback to generate the binding identifier/pattern for each property
+ * @returns Array of binding elements suitable for createObjectBindingPattern
+ */
+export function createBindingElementsFromNames(
+  names: Iterable<string>,
+  factory: ts.NodeFactory,
+  createBindingName: (propertyName: string) => ts.BindingName,
+): ts.BindingElement[] {
+  const elements: ts.BindingElement[] = [];
+  for (const name of names) {
+    const propertyName = isSafeIdentifierText(name)
+      ? undefined
+      : createPropertyName(name, factory);
+    elements.push(
+      factory.createBindingElement(
+        undefined,
+        propertyName,
+        createBindingName(name),
+        undefined,
+      ),
+    );
+  }
+  return elements;
+}
+
+export interface ParameterFromBindingsOptions {
+  readonly type?: ts.TypeNode;
+}
+
+/**
+ * Creates a parameter declaration with object binding pattern from binding elements.
+ *
+ * @param bindings - Binding elements for the parameter
+ * @param factory - TypeScript node factory
+ * @param options - Optional configuration
+ * @returns Parameter declaration with object binding pattern
+ */
+export function createParameterFromBindings(
+  bindings: readonly ts.BindingElement[],
+  factory: ts.NodeFactory,
+  options: ParameterFromBindingsOptions = {},
+): ts.ParameterDeclaration {
+  return factory.createParameterDeclaration(
+    undefined,
+    undefined,
+    factory.createObjectBindingPattern([...bindings]),
+    undefined,
+    options.type,
+    undefined,
+  );
+}
+
+/**
+ * Generate both property name and param name for an expression,
+ * following the standard pattern used across derive/opaque-ref bindings.
+ *
+ * @param expressionText - Base text from the expression (typically from getExpressionText)
+ * @param isIdentifier - Whether the expression is a simple identifier
+ * @param index - Index for fallback naming (e.g., ref1, ref2, _v1, _v2)
+ * @param usedPropertyNames - Set of used property names (mutated)
+ * @param usedParamNames - Set of used param names (mutated)
+ * @returns Object with propertyName and paramName
+ */
+export function createPropertyParamNames(
+  expressionText: string,
+  isIdentifier: boolean,
+  index: number,
+  usedPropertyNames: Set<string>,
+  usedParamNames: Set<string>,
+): { propertyName: string; paramName: string } {
+  // Property name: use expression text with dots replaced by underscores
+  const baseName = expressionText.replace(/\./g, "_");
+  const propertyName = getUniqueIdentifier(baseName, usedPropertyNames, {
+    fallback: `ref${index + 1}`,
+    trimLeadingUnderscores: true,
+  });
+
+  // Param name: use identifier text directly, or fallback to _v1, _v2, etc.
+  const paramCandidate = isIdentifier ? expressionText : `_v${index + 1}`;
+  const paramName = getUniqueIdentifier(paramCandidate, usedParamNames, {
+    fallback: `_v${index + 1}`,
+  });
+
+  return { propertyName, paramName };
 }

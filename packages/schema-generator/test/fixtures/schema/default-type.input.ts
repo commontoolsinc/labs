@@ -41,10 +41,6 @@ interface ComplexDefault {
 }
 
 // Test Default with Cell types
-interface Cell<T> {
-  get(): T;
-  set(v: T): void;
-}
 interface CellDefaults {
   counter: Cell<Default<number, 0>>;
   messages: Cell<Default<string[], []>>;

@@ -234,7 +234,7 @@ export default recipe({
                     }
                 },
                 required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<li>{__ctHelpers.derive(name, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: name, params: {} }) => (<li>{__ctHelpers.derive({ name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>)), {})}
         </ul>
 
         {/* Reduce with reactive accumulator */}

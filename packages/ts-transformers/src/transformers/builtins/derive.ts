@@ -7,8 +7,11 @@ import {
   parseCaptureExpression,
 } from "../../utils/capture-tree.ts";
 import {
-  getUniqueIdentifier,
-  isSafeIdentifierText,
+  createBindingElementsFromNames,
+  createParameterFromBindings,
+  createPropertyName,
+  createPropertyParamNames,
+  reserveIdentifier,
 } from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(
@@ -66,32 +69,19 @@ function planDeriveEntries(
   const usedParamNames = new Set<string>();
 
   fallback.forEach((ref, index) => {
-    const baseName = getExpressionText(ref).replace(/\./g, "_");
-    const propertyName = getUniqueIdentifier(baseName, usedPropertyNames, {
-      fallback: `ref${index + 1}`,
-      trimLeadingUnderscores: true,
-    });
-
-    const paramName = ts.isIdentifier(ref)
-      ? getUniqueIdentifier(ref.text, usedParamNames)
-      : getUniqueIdentifier(`_v${index + 1}`, usedParamNames, {
-        fallback: `_v${index + 1}`,
-      });
+    const { propertyName, paramName } = createPropertyParamNames(
+      getExpressionText(ref),
+      ts.isIdentifier(ref),
+      index,
+      usedPropertyNames,
+      usedParamNames,
+    );
 
     fallbackEntries.push({ ref, propertyName, paramName });
     refToParamName.set(ref, paramName);
   });
 
   return { captureTree, fallbackEntries, refToParamName };
-}
-
-function createPropertyName(
-  factory: ts.NodeFactory,
-  name: string,
-): ts.PropertyName {
-  return isSafeIdentifierText(name)
-    ? factory.createIdentifier(name)
-    : factory.createStringLiteral(name);
 }
 
 function createParameterForPlan(
@@ -104,30 +94,12 @@ function createParameterForPlan(
   const usedNames = new Set<string>();
 
   const register = (candidate: string): ts.Identifier => {
-    if (isSafeIdentifierText(candidate) && !usedNames.has(candidate)) {
-      usedNames.add(candidate);
-      return factory.createIdentifier(candidate);
-    }
-    const unique = getUniqueIdentifier(candidate, usedNames, {
-      fallback: candidate.length > 0 ? candidate : "ref",
-    });
-    return factory.createIdentifier(unique);
+    return reserveIdentifier(candidate, usedNames, factory);
   };
 
-  for (const [rootName] of captureTree) {
-    const bindingIdentifier = register(rootName);
-    const propertyName = isSafeIdentifierText(rootName)
-      ? undefined
-      : createPropertyName(factory, rootName);
-    bindings.push(
-      factory.createBindingElement(
-        undefined,
-        propertyName,
-        bindingIdentifier,
-        undefined,
-      ),
-    );
-  }
+  bindings.push(
+    ...createBindingElementsFromNames(captureTree.keys(), factory, register),
+  );
 
   for (const entry of fallbackEntries) {
     const bindingIdentifier = register(entry.paramName);
@@ -145,32 +117,7 @@ function createParameterForPlan(
     );
   }
 
-  const shouldInlineSoleBinding = bindings.length === 1 &&
-    captureTree.size === 0 &&
-    fallbackEntries.length === 1 &&
-    !bindings[0]!.propertyName &&
-    !bindings[0]!.dotDotDotToken &&
-    !bindings[0]!.initializer;
-
-  if (shouldInlineSoleBinding) {
-    return factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      bindings[0]!.name,
-      undefined,
-      undefined,
-      undefined,
-    );
-  }
-
-  return factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindings),
-    undefined,
-    undefined,
-    undefined,
-  );
+  return createParameterFromBindings(bindings, factory);
 }
 
 function createDeriveArgs(
@@ -183,7 +130,7 @@ function createDeriveArgs(
   for (const [rootName, node] of captureTree) {
     properties.push(
       factory.createPropertyAssignment(
-        createPropertyName(factory, rootName),
+        createPropertyName(rootName, factory),
         buildHierarchicalParamsValue(node, rootName, factory),
       ),
     );
@@ -201,16 +148,6 @@ function createDeriveArgs(
           entry.ref,
         ),
       );
-    }
-  }
-
-  if (properties.length === 1 && fallbackEntries.length === 0) {
-    const first = captureTree.values().next();
-    if (!first.done) {
-      const node = first.value;
-      if (node.expression && node.properties.size === 0) {
-        return [node.expression];
-      }
     }
   }
 

@@ -8,10 +8,17 @@ import {
 } from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import {
-  getUniqueIdentifier,
-  isSafeIdentifierText,
-  maybeReuseIdentifier,
+  createBindingElementsFromNames,
+  createParameterFromBindings,
+  createPropertyName,
+  reserveIdentifier,
 } from "../utils/identifiers.ts";
+import {
+  analyzeElementBinding,
+  normalizeBindingName,
+  rewriteCallbackBody,
+} from "./computed-aliases.ts";
+import type { ComputedAliasInfo } from "./computed-aliases.ts";
 
 export class ClosureTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
@@ -404,63 +411,6 @@ function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
-/**
- * Extract the root identifier name from an expression.
- * For property access like state.discount, returns "state".
- */
-type CaptureTreeMap = Map<string, CaptureTreeNode>;
-
-function createSafePropertyName(
-  name: string,
-  factory: ts.NodeFactory,
-): ts.PropertyName {
-  return isSafeIdentifierText(name)
-    ? factory.createIdentifier(name)
-    : factory.createStringLiteral(name);
-}
-
-function normalizeBindingName(
-  name: ts.BindingName,
-  factory: ts.NodeFactory,
-  used: Set<string>,
-): ts.BindingName {
-  if (ts.isIdentifier(name)) {
-    return maybeReuseIdentifier(name, used);
-  }
-
-  if (ts.isObjectBindingPattern(name)) {
-    const elements = name.elements.map((element) =>
-      factory.createBindingElement(
-        element.dotDotDotToken,
-        element.propertyName,
-        normalizeBindingName(element.name, factory, used),
-        element.initializer as ts.Expression | undefined,
-      )
-    );
-    return factory.createObjectBindingPattern(elements);
-  }
-
-  if (ts.isArrayBindingPattern(name)) {
-    const elements = name.elements.map((element) => {
-      if (ts.isOmittedExpression(element)) {
-        return element;
-      }
-      if (ts.isBindingElement(element)) {
-        return factory.createBindingElement(
-          element.dotDotDotToken,
-          element.propertyName,
-          normalizeBindingName(element.name, factory, used),
-          element.initializer as ts.Expression | undefined,
-        );
-      }
-      return element;
-    });
-    return factory.createArrayBindingPattern(elements);
-  }
-
-  return name;
-}
-
 function typeNodeForExpression(
   expr: ts.Expression,
   context: TransformationContext,
@@ -503,7 +453,7 @@ function buildCaptureTypeProperties(
     properties.push(
       factory.createPropertySignature(
         undefined,
-        createSafePropertyName(propName, factory),
+        createPropertyName(propName, factory),
         undefined,
         typeNode,
       ),
@@ -534,7 +484,7 @@ function buildParamsTypeElements(
     properties.push(
       factory.createPropertySignature(
         undefined,
-        createSafePropertyName(rootName, factory),
+        createPropertyName(rootName, factory),
         undefined,
         typeNode,
       ),
@@ -891,6 +841,7 @@ function createRecipeCallWithParams(
   arrayParam: ts.ParameterDeclaration | undefined,
   captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
+  visitor: ts.Visitor,
 ): ts.CallExpression {
   const { factory } = context;
 
@@ -898,26 +849,25 @@ function createRecipeCallWithParams(
   const usedBindingNames = new Set<string>();
 
   const createBindingIdentifier = (name: string): ts.Identifier => {
-    if (isSafeIdentifierText(name) && !usedBindingNames.has(name)) {
-      usedBindingNames.add(name);
-      return factory.createIdentifier(name);
-    }
-    const fallback = name.length > 0 ? name : "ref";
-    const unique = getUniqueIdentifier(fallback, usedBindingNames, {
-      fallback: "ref",
-    });
-    return factory.createIdentifier(unique);
+    return reserveIdentifier(name, usedBindingNames, factory);
   };
 
-  const elementBindingName = elemParam
-    ? normalizeBindingName(elemParam.name, factory, usedBindingNames)
-    : createBindingIdentifier(
-      captureTree.has("element") ? "__ct_element" : "element",
-    );
+  const elementAnalysis = analyzeElementBinding(
+    elemParam,
+    captureTree,
+    context,
+    usedBindingNames,
+    createBindingIdentifier,
+  );
+  const elementBindingName = elementAnalysis.bindingName;
+  const elementPropertyName = ts.isIdentifier(elementBindingName) &&
+      elementBindingName.text === "element"
+    ? undefined
+    : factory.createIdentifier("element");
   bindingElements.push(
     factory.createBindingElement(
       undefined,
-      factory.createIdentifier("element"),
+      elementPropertyName,
       elementBindingName,
       undefined,
     ),
@@ -945,20 +895,11 @@ function createRecipeCallWithParams(
     );
   }
 
-  const paramsBindings: ts.BindingElement[] = [];
-  for (const [rootName] of captureTree) {
-    const propertyName = isSafeIdentifierText(rootName)
-      ? undefined
-      : createSafePropertyName(rootName, factory);
-    paramsBindings.push(
-      factory.createBindingElement(
-        undefined,
-        propertyName,
-        createBindingIdentifier(rootName),
-        undefined,
-      ),
-    );
-  }
+  const paramsBindings = createBindingElementsFromNames(
+    captureTree.keys(),
+    factory,
+    createBindingIdentifier,
+  );
 
   const paramsPattern = factory.createObjectBindingPattern(paramsBindings);
 
@@ -971,13 +912,30 @@ function createRecipeCallWithParams(
     ),
   );
 
-  const destructuredParam = factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindingElements),
-    undefined,
-    undefined,
-    undefined,
+  const destructuredParam = createParameterFromBindings(
+    bindingElements,
+    factory,
+  );
+
+  const visitedAliases: ComputedAliasInfo[] = elementAnalysis
+    .computedAliases.map((info) => {
+      const keyExpression = ts.visitNode(
+        info.keyExpression,
+        visitor,
+        ts.isExpression,
+      ) ?? info.keyExpression;
+      return { ...info, keyExpression };
+    });
+
+  const rewrittenBody = rewriteCallbackBody(
+    transformedBody,
+    {
+      bindingName: elementAnalysis.bindingName,
+      elementIdentifier: elementAnalysis.elementIdentifier,
+      destructureStatement: elementAnalysis.destructureStatement,
+      computedAliases: visitedAliases,
+    },
+    context,
   );
 
   const newCallback = factory.createArrowFunction(
@@ -988,7 +946,7 @@ function createRecipeCallWithParams(
     ts.isArrowFunction(callback)
       ? callback.equalsGreaterThanToken
       : factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-    transformedBody,
+    rewrittenBody,
   );
 
   context.markAsMapCallback(newCallback);
@@ -1013,7 +971,7 @@ function createRecipeCallWithParams(
   for (const [rootName, rootNode] of captureTree) {
     paramProperties.push(
       factory.createPropertyAssignment(
-        createSafePropertyName(rootName, factory),
+        createPropertyName(rootName, factory),
         buildHierarchicalParamsValue(rootNode, rootName, factory),
       ),
     );
@@ -1082,6 +1040,7 @@ function transformMapCallback(
     arrayParam,
     captureTree,
     context,
+    visitor,
   );
 }
 

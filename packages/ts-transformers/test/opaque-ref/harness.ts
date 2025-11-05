@@ -2,6 +2,23 @@ import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
 
+// Shared prelude for tests that need Cell variants
+export const CELL_VARIANTS_PRELUDE = `
+interface Cell<T> extends BrandedCell<T, "cell"> {}
+interface Stream<T> extends BrandedCell<T, "stream"> {}
+interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
+interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
+interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+
+declare const cells: {
+  cell: Cell<number>;
+  stream: Stream<string>;
+  comparable: ComparableCell<boolean>;
+  readonly: ReadonlyCell<number>;
+  writeonly: WriteonlyCell<number>;
+};
+`;
+
 export interface AnalysisHarnessResult {
   readonly sourceFile: ts.SourceFile;
   readonly checker: ts.TypeChecker;

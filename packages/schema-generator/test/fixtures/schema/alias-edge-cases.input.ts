@@ -1,12 +1,3 @@
-interface Cell<T> {
-  get(): T;
-  set(v: T): void;
-}
-
-interface Stream<T> {
-  subscribe(cb: (v: T) => void): void;
-}
-
 // Test 1: Deep alias chains for Cell and Stream
 type MyCell<T> = Cell<T>;
 type DeepCell<T> = MyCell<T>;

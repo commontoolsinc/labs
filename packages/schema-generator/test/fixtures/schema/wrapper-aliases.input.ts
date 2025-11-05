@@ -1,13 +1,6 @@
 // Test wrapper type aliases - both direct and aliased wrapper types
 // Using proper interface definitions that match actual CommonTools wrappers
 type Default<T, V = T> = T;
-interface Cell<T> {
-  get(): T;
-  set(v: T): void;
-}
-interface Stream<T> {
-  subscribe(cb: (v: T) => void): void;
-}
 
 // Define wrapper aliases
 type RecursiveItemArray = RecursiveItem[];

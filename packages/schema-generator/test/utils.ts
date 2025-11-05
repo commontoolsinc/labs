@@ -6,6 +6,22 @@ import type { JSONSchemaObj } from "@commontools/api";
 // Cache for TypeScript library definitions
 let typeLibsCache: Record<string, string> | undefined;
 
+const CELL_BRAND_PRELUDE = `
+declare const CELL_BRAND: unique symbol;
+
+declare interface BrandedCell<T, Brand extends string = "cell"> {
+  readonly [CELL_BRAND]: Brand;
+}
+
+declare interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {}
+declare interface OpaqueRef<T> extends OpaqueCell<T> {}
+declare interface Cell<T> extends BrandedCell<T, "cell"> {}
+declare interface Stream<T> extends BrandedCell<T, "stream"> {}
+declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
+declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
+declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+`;
+
 /**
  * Load TypeScript environment types (es2023, dom, jsx)
  * Same functionality as js-runtime but implemented independently
@@ -35,10 +51,11 @@ export async function createTestProgram(
 ): Promise<
   { program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }
 > {
+  const fullCode = `${CELL_BRAND_PRELUDE}\n${code}`;
   const fileName = "test.ts";
   const sourceFile = ts.createSourceFile(
     fileName,
-    code,
+    fullCode,
     ts.ScriptTarget.ES2023,
     true,
   );
@@ -89,7 +106,7 @@ export async function createTestProgram(
       return false;
     },
     readFile: (name) => {
-      if (name === fileName) return code;
+      if (name === fileName) return fullCode;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return typeLibs.es2023;
       }

@@ -11,8 +11,8 @@ export default recipe<State>("MapOuterElement", (state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map(() => (
-          <span>{element}</span>
+        {state.items.map((_, index) => (
+          <span key={index}>{element}</span>
         ))}
       </div>
     ),
