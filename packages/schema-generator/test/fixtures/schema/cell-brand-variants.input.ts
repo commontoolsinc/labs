@@ -1,3 +1,9 @@
+declare const CELL_BRAND: unique symbol;
+
+interface BrandedCell<T, Brand extends string> {
+  readonly [CELL_BRAND]: Brand;
+}
+
 interface MyComparableCell<T> extends BrandedCell<T, "comparable"> {}
 interface MyReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 interface MyWriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
