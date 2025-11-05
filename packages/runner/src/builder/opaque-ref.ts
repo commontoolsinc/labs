@@ -1,76 +1,70 @@
 import { isRecord } from "@commontools/utils/types";
 import {
-  type IOpaqueCell,
   isOpaqueRefMarker,
   type JSONSchema,
   type NodeFactory,
   type NodeRef,
   type Opaque,
-  type OpaqueCell,
   type OpaqueRef,
   type Recipe,
   type SchemaWithoutCell,
   type ShadowRef,
-  type UnsafeBinding,
 } from "./types.ts";
-import { toOpaqueRef } from "../back-to-cell.ts";
+import { toCell, toOpaqueRef } from "../back-to-cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
-import { createCell, type Cell } from "../cell.ts";
+import { createCell } from "../cell.ts";
 import type { IRuntime } from "../runtime.ts";
 
 let mapFactory: NodeFactory<any, any> | undefined;
 
 /**
- * Creates an opaqueRef factory bound to a runtime.
- * This allows opaqueRef to create actual Cells underneath instead of proxies.
+ * Implementation of opaqueRef that takes runtime as first parameter.
+ * This creates actual Cells underneath instead of proxies.
  * @param runtime - The runtime to use for creating cells
- * @returns A factory function for creating OpaqueRefs
+ * @param value - Optional initial value
+ * @param schema - Optional schema
+ * @returns An OpaqueRef
  */
-export function createOpaqueRefFactory(runtime: IRuntime) {
-  return function opaqueRef<T>(
-    value?: Opaque<T> | T,
-    schema?: JSONSchema,
-  ): OpaqueRef<T> {
-    const cfc = new ContextualFlowControl();
+export function opaqueRefImpl<T>(
+  runtime: IRuntime,
+  value?: Opaque<T> | T,
+  schema?: JSONSchema,
+): OpaqueRef<T> {
+  const cfc = new ContextualFlowControl();
 
-    // Create a Cell without a link - it will be created on demand via .for()
-    const cell = createCell<T>(runtime, undefined, undefined, false);
+  // Create a Cell without a link - it will be created on demand via .for()
+  const cell = createCell<T>(runtime, undefined, undefined, false);
 
-    // If schema provided, apply it
-    if (schema) {
-      cell.setSchema(schema);
-    }
+  // If schema provided, apply it
+  if (schema) {
+    cell.setSchema(schema);
+  }
 
-    // Set initial value if provided (cast to any to avoid type issues with Opaque)
-    if (value !== undefined) {
-      cell.set(value as any);
-    }
+  // Set initial value if provided (cast to any to avoid type issues with Opaque)
+  if (value !== undefined) {
+    cell.set(value as any);
+  }
 
-    // Store OpaqueRef-specific data that Cell doesn't track
-    const opaqueStore = {
-      defaultValue: undefined as Opaque<any> | undefined,
-      name: undefined as string | undefined,
-    };
-
-    // Create a proxy wrapper that adds iterator and toPrimitive support
-    const proxy = new Proxy(cell, {
+  // Recursively wrap child cells in proxies
+  function wrapCell(
+    childCell: any,
+    childSchema?: JSONSchema,
+  ): OpaqueRef<any> {
+    const childProxy = new Proxy(childCell, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
           // Iterator support for array destructuring
           return function* () {
             let index = 0;
             while (index < 50) { // Limit to 50 items like original
-              const childSchema = cfc.getSchemaAtPath(schema, [
+              const itemSchema = cfc.getSchemaAtPath(childSchema, [
                 index.toString(),
               ], schema);
-              const childCell = (target as any).key(index);
-              if (childSchema) {
-                childCell.setSchema(childSchema);
-              }
-              yield childCell;
+              const itemCell = (target as any).key(index);
+              yield wrapCell(itemCell, itemSchema);
               index++;
             }
           };
@@ -80,34 +74,27 @@ export function createOpaqueRefFactory(runtime: IRuntime) {
               "Tried to directly access an opaque value. Use `derive` instead, passing this variable in as parameter to derive, not closing over it",
             );
           };
+        } else if (prop === toCell) {
+          // Return a function that returns the unproxied cell
+          return () => target;
         } else if (prop === isOpaqueRefMarker) {
           return true;
-        } else if (prop === "setName") {
-          return (name: string) => {
-            opaqueStore.name = name;
-          };
-        } else if (prop === "setDefault") {
-          return (newValue: Opaque<any>) => {
-            opaqueStore.defaultValue = newValue;
-            // Also call Cell's setDefault (though it's deprecated)
-            cell.setDefault(newValue);
-          };
-        } else if (prop === "export") {
-          return () => {
-            const cellExport = (target as any).export();
-            return {
-              ...cellExport,
-              ...opaqueStore,
-            };
-          };
+        } else if (typeof prop === "string" || typeof prop === "number") {
+          // Recursive property access - wrap the child cell
+          const nestedSchema = cfc.getSchemaAtPath(childSchema, [
+            prop.toString(),
+          ], schema);
+          const nestedCell = (target as any).key(prop);
+          return wrapCell(nestedCell, nestedSchema);
         }
         // Delegate everything else to the Cell
         return (target as any)[prop];
       },
     });
+    return childProxy as unknown as OpaqueRef<any>;
+  }
 
-    return proxy as unknown as OpaqueRef<T>;
-  };
+  return wrapCell(cell, schema);
 }
 
 // Legacy opaqueRef for backward compatibility - creates proxies without Cell
@@ -143,23 +130,23 @@ export function opaqueRef<T>(
     nestedSchema: JSONSchema | undefined,
     rootSchema: JSONSchema | undefined,
   ): OpaqueRef<any> {
-    // Create the methods object that implements IOpaqueCell
-    // These methods are shared by both OpaqueRef and Cell, ensuring compatibility
-    const methods: IOpaqueCell<T> = {
+    // Create the methods object for the legacy opaqueRef proxy
+    // This provides the core OpaqueRef API methods
+    const methods = {
       get: () => unsafe_materialize(unsafe_binding, path) as T,
       set: (newValue: Opaque<any>) => {
         if (unsafe_binding) {
           unsafe_materialize(unsafe_binding, path); // TODO(seefeld): Set value
         } else setValueAtPath(store, ["value", ...path], newValue);
       },
-      key: (key: PropertyKey) => {
+      key: (key: PropertyKey): OpaqueRef<any> => {
         // Determine child schema when accessing a property
         const childSchema = key in methods
           ? undefined
           : cfc.getSchemaAtPath(nestedSchema, [key.toString()], rootSchema);
         return createNestedProxy(
           [...path, key],
-          key in methods ? methods[key as keyof IOpaqueCell<T>] : store,
+          key in methods ? (methods as any)[key] : store,
           childSchema,
           childSchema === undefined ? undefined : rootSchema,
         );
@@ -170,9 +157,13 @@ export function opaqueRef<T>(
         }
       },
       setPreExisting: (ref: any) => setValueAtPath(store, ["external"], ref),
-      setName: (name: string) => {
-        if (path.length === 0) store.name = name;
-        else throw new Error("Can only set name for root opaque ref");
+      for: (cause: unknown, allowIfSet?: boolean) => {
+        // Store the cause as the name for legacy OpaqueRef
+        // The actual .for() will be called when this becomes a Cell
+        if (path.length === 0 && (allowIfSet || !store.name)) {
+          store.name = typeof cause === "string" ? cause : String(cause);
+        }
+        return proxy;
       },
       setSchema: (newSchema: JSONSchema) => {
         // This sets the schema of the nested proxy, but does not alter the parent store's
@@ -284,9 +275,9 @@ export function opaqueRef<T>(
     const proxy = new Proxy(target || {}, {
       get(_, prop) {
         if (typeof prop === "symbol") {
-          return methods[prop as keyof IOpaqueCell<T>];
+          return (methods as any)[prop];
         } else {
-          return (methods as unknown as OpaqueCell<unknown>).key(prop);
+          return methods.key(prop);
         }
       },
       set(_, prop, value) {

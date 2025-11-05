@@ -19,23 +19,17 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { createOpaqueRefFactory, stream } from "./opaque-ref.ts";
+import { opaqueRefImpl, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
-import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
-  compileAndRun,
-  fetchData,
-  generateObject,
-  generateText,
-  ifElse,
-  llm,
-  llmDialog,
-  navigateTo,
-  patternTool,
-  str,
-  streamData,
-  wish,
-} from "./built-in.ts";
+  byRefImpl,
+  computeImpl,
+  deriveImpl,
+  handlerImpl,
+  liftImpl,
+  renderImpl,
+} from "./module.ts";
+import { createBuiltIns } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -99,14 +93,24 @@ export const createBuilder = (
     }
   };
 
-  // Create the opaqueRef factory bound to this runtime
-  const opaqueRef = createOpaqueRefFactory(runtime);
+  // Create runtime-bound versions of module creation functions
+  const opaqueRef = <T>(value?: T, schema?: JSONSchema) =>
+    opaqueRefImpl<T>(runtime, value, schema);
+  const lift = (...args: any[]) => (liftImpl as any)(runtime, ...args);
+  const handler = (...args: any[]) => (handlerImpl as any)(runtime, ...args);
+  const derive = (...args: any[]) => (deriveImpl as any)(runtime, ...args);
+  const compute = computeImpl(runtime);
+  const render = renderImpl(runtime);
+  const byRef = <T, R>(ref: string) => byRefImpl<T, R>(runtime, ref);
+
+  // Create built-in modules
+  const builtIns = createBuiltIns(runtime);
 
   return {
     commontools: {
       // Recipe creation
       recipe,
-      patternTool,
+      patternTool: builtIns.patternTool,
 
       // Module creation
       lift,
@@ -116,17 +120,17 @@ export const createBuilder = (
       render,
 
       // Built-in modules
-      str,
-      ifElse,
-      llm,
-      llmDialog,
-      generateObject,
-      generateText,
-      fetchData,
-      streamData,
-      compileAndRun,
-      navigateTo,
-      wish,
+      str: builtIns.str,
+      ifElse: builtIns.ifElse,
+      llm: builtIns.llm,
+      llmDialog: builtIns.llmDialog,
+      generateObject: builtIns.generateObject,
+      generateText: builtIns.generateText,
+      fetchData: builtIns.fetchData,
+      streamData: builtIns.streamData,
+      compileAndRun: builtIns.compileAndRun,
+      navigateTo: builtIns.navigateTo,
+      wish: builtIns.wish,
 
       // Cell creation
       createCell,

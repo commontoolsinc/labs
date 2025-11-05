@@ -241,8 +241,6 @@ export interface IOpaquable<T> {
   /** deprecated */
   setPreExisting(ref: any): void;
   /** deprecated */
-  setName(name: string): void;
-  /** deprecated */
   setSchema(schema: JSONSchema): void;
 }
 
@@ -264,7 +262,7 @@ export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
  * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
  */
 export interface IOpaqueCell<T>
-  extends IKeyableOpaque<T>, IDerivable<T>, IOpaquable<T> {}
+  extends IAnyCell<T>, IKeyableOpaque<T>, IDerivable<T>, IOpaquable<T> {}
 
 export interface OpaqueCell<T>
   extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}

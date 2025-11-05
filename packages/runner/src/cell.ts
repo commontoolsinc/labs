@@ -14,6 +14,7 @@ import {
   type NodeFactory,
   type NodeRef,
   type Opaque,
+  type OpaqueCell,
   type OpaqueRef,
   type Recipe,
   type Schema,
@@ -150,29 +151,21 @@ declare module "@commontools/api" {
     freeze(reason: string): void;
     isFrozen(): boolean;
     setPreExisting(ref: any): void;
-    setDefault(value: Opaque<any>): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
-      cell: Cell<any>;
+      cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       link?: NormalizedFullLink;
       schema?: JSONSchema;
       rootSchema?: JSONSchema;
       nodes: Set<NodeRef>;
       frame: Frame;
+      value?: Opaque<T> | T;
+      defaultValue?: Opaque<T>;
+      name?: string;
+      external?: unknown;
     };
-    map<S>(
-      fn: (
-        element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-        index: OpaqueRef<number>,
-        array: OpaqueRef<T>,
-      ) => Opaque<S>,
-    ): OpaqueRef<S[]>;
-    mapWithPattern<S>(
-      op: Recipe,
-      params: Record<string, any>,
-    ): OpaqueRef<S[]>;
     toJSON(): LegacyJSONCellLink | null;
     runtime: IRuntime;
     tx: IExtendedStorageTransaction | undefined;
@@ -884,15 +877,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   /**
-   * @deprecated Use schema defaults instead. This method is provided for compatibility
-   * during the OpaqueRef/Cell merge but will be removed in the future.
-   */
-  setDefault(value: Opaque<any>): void {
-    // Defaults should be handled via schema
-    console.warn("setDefault is deprecated and will be removed");
-  }
-
-  /**
    * Set the schema for this cell. Only works if the cause isn't set yet.
    * Prefer using .asSchema() instead.
    */
@@ -926,23 +910,31 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * If the cell has a link, it's included as 'external'.
    */
   export(): {
-    cell: Cell<any>;
+    cell: OpaqueCell<any>;
     path: readonly PropertyKey[];
     link?: NormalizedFullLink;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     nodes: Set<NodeRef>;
     frame: Frame;
+    value?: Opaque<T> | T;
+    defaultValue?: Opaque<T>;
+    name?: string;
+    external?: unknown;
   } {
     const frame = getTopFrame();
     return {
-      cell: this as unknown as Cell<any>,
+      cell: this as unknown as OpaqueCell<any>,
       path: this.path,
       link: this.hasFullLink() ? this.link : undefined,
       schema: this.schema,
       rootSchema: this.rootSchema,
       nodes: cellNodes.get(this) || new Set(),
       frame: frame!,
+      value: undefined,
+      defaultValue: undefined,
+      name: undefined,
+      external: undefined,
     };
   }
 

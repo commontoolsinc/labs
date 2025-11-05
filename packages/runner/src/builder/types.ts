@@ -1,6 +1,8 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
-import { toOpaqueRef } from "../back-to-cell.ts";
+import { toCell } from "../back-to-cell.ts";
 import type { SchemaContext } from "@commontools/memory/interface";
+import type { NormalizedFullLink } from "../link-utils.ts";
+import type { LegacyJSONCellLink } from "../sigil-types.ts";
 
 import type {
   ByRefFunction,
@@ -110,14 +112,15 @@ declare module "@commontools/api" {
     export(): {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
-      value?: Opaque<T> | T;
-      defaultValue?: Opaque<T>;
-      nodes: Set<NodeRef>;
-      external?: unknown;
-      name?: string;
+      link?: NormalizedFullLink;
       schema?: JSONSchema;
       rootSchema?: JSONSchema;
+      nodes: Set<NodeRef>;
       frame: Frame;
+      value?: Opaque<T> | T;
+      defaultValue?: Opaque<T>;
+      name?: string;
+      external?: unknown;
     };
 
     connect(node: NodeRef): void;
@@ -130,7 +133,7 @@ declare module "@commontools/api" {
     unsafe_getExternal(): OpaqueCell<T>;
 
     // Additional utility methods
-    toJSON(): unknown;
+    toJSON(): LegacyJSONCellLink | null;
     [Symbol.iterator](): Iterator<T>;
     [Symbol.toPrimitive](hint: string): T;
     [isOpaqueRefMarker]: true;
@@ -220,18 +223,18 @@ export function isRecipe(value: unknown): value is Recipe {
   );
 }
 
-type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
+type CanBeOpaqueRef = { [toCell]: () => OpaqueRef<any> };
 
 export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
   return (
     (typeof value === "object" || typeof value === "function") &&
     value !== null &&
-    typeof (value as any)[toOpaqueRef] === "function"
+    typeof (value as any)[toCell] === "function"
   );
 }
 
 export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
-  return value[toOpaqueRef]();
+  return value[toCell]();
 }
 
 export type ShadowRef = {

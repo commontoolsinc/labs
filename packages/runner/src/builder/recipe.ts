@@ -217,7 +217,7 @@ function factoryFromRecipe<T, R>(
           !exported.name &&
           !usedNames.has(key)
         ) {
-          ref.setName(key);
+          ref.for(key, true); // allowIfSet=true to not override existing causes
           usedNames.add(key);
         }
       }
@@ -234,7 +234,7 @@ function factoryFromRecipe<T, R>(
             isOpaqueCell(input) && input.export().cell === cell &&
             !cell.export().name && !usedNames.has(key)
           ) {
-            cell.setName(key);
+            cell.for(key, true); // allowIfSet=true to not override existing causes
             usedNames.add(key);
           }
         });
