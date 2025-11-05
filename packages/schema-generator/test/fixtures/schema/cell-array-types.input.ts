@@ -1,7 +1,3 @@
-interface Cell<T> extends BrandedCell<T, "cell"> {
-  get(): T;
-  set(v: T): void;
-}
 interface SchemaRoot {
   v: Cell<number[]>;
   w: Cell<Array<{ id: string }>>;

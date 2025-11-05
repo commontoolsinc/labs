@@ -2,10 +2,6 @@
 // This mimics the structure of BuiltInLLMState where cancelGeneration: Stream<void>
 // becomes Opaque<OpaqueRef<Stream<void>>> when returned inside OpaqueRef<BuiltInLLMState>
 
-interface Stream<T> extends BrandedCell<T, "stream"> {
-  send(event: T): void;
-}
-
 interface OpaqueRefMethods<T> {
   get(): T;
   set(value: T): void;
