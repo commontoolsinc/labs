@@ -8,11 +8,10 @@ import {
 } from "../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import {
-  isSafeIdentifierText,
-  createPropertyName,
-  reserveIdentifier,
   createBindingElementsFromNames,
   createParameterFromBindings,
+  createPropertyName,
+  reserveIdentifier,
 } from "../utils/identifiers.ts";
 import {
   analyzeElementBinding,

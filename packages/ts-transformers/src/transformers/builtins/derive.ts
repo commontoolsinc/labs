@@ -7,13 +7,11 @@ import {
   parseCaptureExpression,
 } from "../../utils/capture-tree.ts";
 import {
-  getUniqueIdentifier,
-  isSafeIdentifierText,
-  createPropertyName,
-  reserveIdentifier,
   createBindingElementsFromNames,
   createParameterFromBindings,
+  createPropertyName,
   createPropertyParamNames,
+  reserveIdentifier,
 } from "../../utils/identifiers.ts";
 
 function replaceOpaqueRefsWithParams(

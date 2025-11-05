@@ -3,7 +3,6 @@ import {
   Cell,
   derive,
   handler,
-  lift,
   NAME,
   navigateTo,
   recipe,
@@ -172,7 +171,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 <tbody>
                   {allCharms.map((charm) => (
                     <tr>
-		      <td>{charm?.[NAME] || "Untitled Charm"}</td>
+                      <td>{charm?.[NAME] || "Untitled Charm"}</td>
                       <td>
                         <ct-hstack gap="2">
                           <ct-button
