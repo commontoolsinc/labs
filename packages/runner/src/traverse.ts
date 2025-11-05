@@ -350,8 +350,8 @@ export interface IObjectCreator<T> {
   // This should also handle annotation of the default value if needed.
   applyDefault(
     link: NormalizedFullLink,
-    defaultValue: T,
-  ): T;
+    defaultValue: T | undefined,
+  ): T | undefined;
 
   // In the SchemaObjectTraverser system, we don't need to annotate the object
   // or even create a returned value.
@@ -373,8 +373,8 @@ class StandardObjectCreator implements IObjectCreator<JSONValue> {
   }
   applyDefault(
     _link: NormalizedFullLink,
-    defaultValue: JSONValue,
-  ): JSONValue {
+    defaultValue: JSONValue | undefined,
+  ): JSONValue | undefined {
     return defaultValue;
   }
   createObject(
@@ -1481,15 +1481,78 @@ export class SchemaObjectTraverser<V extends JSONValue>
         rootSchema: schemaContext.rootSchema,
       });
       if (val !== undefined) {
+        console.log("merging", propKey, val);
         filteredObj[propKey] = val;
       }
     }
+
+    // Apply defaults from our schema
+    if (isObject(schema) && schema.properties) {
+      for (const propKey of Object.keys(schema.properties)) {
+        if (propKey in filteredObj) {
+          continue;
+        }
+        const propSchema = this.cfc.getSchemaAtPath(
+          schema,
+          [propKey],
+          schemaContext.rootSchema,
+        );
+        if (!isObject(propSchema) || propSchema.default == undefined) {
+          continue;
+        }
+        if (propSchema.asCell || propSchema.asStream) {
+          const val = this.traverseWithSchemaContext({
+            ...doc,
+            address: {
+              ...doc.address,
+              path: [...doc.address.path, propKey],
+            },
+            value: undefined,
+          }, {
+            schema: propSchema,
+            rootSchema: schemaContext.rootSchema,
+          });
+          if (val !== undefined) {
+            console.log("merging asCell/asStream default", propKey, val);
+            filteredObj[propKey] = val;
+          }
+        } else {
+          const propLink = getNormalizedLink(
+            {
+              ...doc.address,
+              path: [...doc.address.path, propKey],
+            },
+            this.space,
+            propSchema,
+            schemaContext.rootSchema,
+          );
+          const val = this.objectCreator.applyDefault(
+            propLink,
+            propSchema.default,
+          );
+          // const propDocAddress = {
+          //   ...doc.address,
+          //   path: [...doc.address.path, propKey],
+          // };
+          // const val = this.applyDefault({
+          //   address: propDocAddress,
+          //   value: undefined,
+          // }, propSchema);
+          if (val !== undefined) {
+            console.log("merging schema default", propKey, val);
+            filteredObj[propKey] = val;
+          }
+        }
+      }
+    }
+
     // Check that all required fields are present
     if (isObject(schema) && "required" in schema) {
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
           if (!(requiredProperty in filteredObj)) {
+            console.log("Aborting; missing ", requiredProperty);
             return undefined;
           }
         }
@@ -1534,6 +1597,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       !this.traverseCells &&
       SchemaObjectTraverser.asCellOrStream(normalizedLink.schema)
     ) {
+      console.log("TPWS creating object");
       return this.objectCreator.createObject(normalizedLink, undefined);
     }
     // FIXME: we should use the schema from normalizedLink here too
@@ -1597,7 +1661,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
     return false;
   }
 
-  private applyDefault(doc: IAttestation, schema: JSONSchema): JSONValue {
+  private applyDefault(
+    doc: IAttestation,
+    schema: JSONSchema,
+  ): JSONValue | undefined {
+    console.log("SOT.AD", doc.value, schema);
     if (isObject(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(
         doc.address,
