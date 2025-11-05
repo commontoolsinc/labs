@@ -402,12 +402,16 @@ function factoryFromRecipe<T, R>(
 
 const frames: Frame[] = [];
 
-export function pushFrame(frame?: Frame): Frame {
+export function pushFrame(frame?: Frame, runtime?: import("../runtime.ts").IRuntime): Frame {
   if (!frame) {
+    const parent = getTopFrame();
+    // If no runtime provided, try to inherit from parent (may be undefined during construction)
+    const frameRuntime = runtime || parent?.runtime;
     frame = {
-      parent: getTopFrame(),
+      parent,
       opaqueRefs: new Set(),
       generatedIdCounter: 0,
+      ...(frameRuntime && { runtime: frameRuntime }),
     };
   }
   frames.push(frame);
@@ -418,14 +422,21 @@ export function pushFrameFromCause(
   cause: any,
   unsafe_binding?: UnsafeBinding,
   inHandler: boolean = false,
+  runtime?: import("../runtime.ts").IRuntime,
 ): Frame {
+  const parent = getTopFrame();
+  // If no runtime provided, try to inherit from parent (may be undefined during construction)
+  const frameRuntime = runtime || parent?.runtime;
+
   const frame = {
-    parent: getTopFrame(),
+    parent,
     cause,
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
-    // Extract space from unsafe_binding if available and set it on frame
+    ...(frameRuntime && { runtime: frameRuntime }),
+    // Extract space and tx from unsafe_binding if available and set on frame
     ...(unsafe_binding?.space && { space: unsafe_binding.space }),
+    ...(unsafe_binding?.tx && { tx: unsafe_binding.tx }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
     ...(inHandler && { inHandler }),
   };

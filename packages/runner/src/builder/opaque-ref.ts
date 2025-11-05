@@ -14,7 +14,6 @@ import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 import { createCell } from "../cell.ts";
-import type { IRuntime } from "../runtime.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -23,20 +22,25 @@ import {
 let mapFactory: NodeFactory<any, any> | undefined;
 
 /**
- * Implementation of opaqueRef that takes runtime as first parameter.
- * This creates actual Cells underneath instead of proxies.
- * @param runtime - The runtime to use for creating cells
+ * Implementation of opaqueRef that creates actual Cells.
+ * Uses getTopFrame() to access the runtime.
  * @param value - Optional initial value
  * @param schema - Optional schema
  * @returns An OpaqueRef
  */
-export function opaqueRefImpl<T>(
-  runtime: IRuntime,
+function opaqueRefWithCell<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
+  const frame = getTopFrame();
+  if (!frame || !frame.runtime) {
+    throw new Error(
+      "Can't create Cell-backed OpaqueRef without runtime in frame",
+    );
+  }
+
   // Create a Cell without a link - it will be created on demand via .for()
-  const cell = createCell<T>(runtime, undefined, undefined, false);
+  const cell = createCell<T>(frame.runtime, undefined, undefined, false);
 
   // If schema provided, apply it
   if (schema) {
@@ -67,6 +71,13 @@ export function opaqueRef<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
+  // If we have a runtime in the frame, use Cell-backed OpaqueRef
+  const frame = getTopFrame();
+  if (frame?.runtime) {
+    return opaqueRefWithCell<T>(value, schema);
+  }
+
+  // Otherwise, fall back to legacy proxy-based OpaqueRef for recipe construction
   const store = {
     value,
     defaultValue: undefined,

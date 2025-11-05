@@ -19,16 +19,9 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { opaqueRefImpl, stream } from "./opaque-ref.ts";
+import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
-import {
-  byRefImpl,
-  computeImpl,
-  deriveImpl,
-  handlerImpl,
-  liftImpl,
-  renderImpl,
-} from "./module.ts";
+import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import { createBuiltIns } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
@@ -93,17 +86,7 @@ export const createBuilder = (
     }
   };
 
-  // Create runtime-bound versions of module creation functions
-  const opaqueRef = <T>(value?: T, schema?: JSONSchema) =>
-    opaqueRefImpl<T>(runtime, value, schema);
-  const lift = (...args: any[]) => (liftImpl as any)(runtime, ...args);
-  const handler = (...args: any[]) => (handlerImpl as any)(runtime, ...args);
-  const derive = (...args: any[]) => (deriveImpl as any)(runtime, ...args);
-  const compute = computeImpl(runtime);
-  const render = renderImpl(runtime);
-  const byRef = <T, R>(ref: string) => byRefImpl<T, R>(runtime, ref);
-
-  // Create built-in modules
+  // Create built-in modules that need runtime
   const builtIns = createBuiltIns(runtime);
 
   return {
@@ -112,7 +95,7 @@ export const createBuilder = (
       recipe,
       patternTool: builtIns.patternTool,
 
-      // Module creation
+      // Module creation - these now get runtime from frame
       lift,
       handler,
       derive,

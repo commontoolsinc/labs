@@ -14,8 +14,7 @@ import type {
   toJSON,
 } from "./types.ts";
 import { isModule } from "./types.ts";
-import type { IRuntime } from "../runtime.ts";
-import { opaqueRefImpl } from "./opaque-ref.ts";
+import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
@@ -25,8 +24,7 @@ import { traverseValue } from "./traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
 import { generateHandlerSchema } from "../schema.ts";
 
-export function createNodeFactoryImpl<T = any, R = any>(
-  runtime: IRuntime,
+export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
 ): ModuleFactory<T, R> {
   const module: Module & toJSON = {
@@ -40,7 +38,7 @@ export function createNodeFactoryImpl<T = any, R = any>(
     module.resultSchema,
   );
   return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
-    const outputs = opaqueRefImpl<R>(runtime);
+    const outputs = opaqueRef<R>();
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
     connectInputAndOutputs(node);
@@ -48,40 +46,6 @@ export function createNodeFactoryImpl<T = any, R = any>(
 
     return outputs;
   }, module);
-}
-
-// Legacy version without runtime - will be removed
-export function createNodeFactory<T = any, R = any>(
-  _moduleSpec: Module,
-): ModuleFactory<T, R> {
-  throw new Error(
-    "createNodeFactory called without runtime. Use createNodeFactoryImpl from factory instead.",
-  );
-}
-
-/** Declare a module - implementation that takes runtime
- *
- * @param implementation A function that takes an input and returns a result
- *
- * @returns A module node factory that also serializes as module.
- */
-export function liftImpl<T, R>(
-  runtime: IRuntime,
-  argumentSchema?: JSONSchema | ((input: any) => any),
-  resultSchema?: JSONSchema,
-  implementation?: (input: T) => R,
-): ModuleFactory<T, R> {
-  if (typeof argumentSchema === "function") {
-    implementation = argumentSchema;
-    argumentSchema = resultSchema = undefined;
-  }
-
-  return createNodeFactoryImpl(runtime, {
-    type: "javascript",
-    implementation,
-    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
-    ...(resultSchema !== undefined ? { resultSchema } : {}),
-  });
 }
 
 /** Declare a module
@@ -108,33 +72,31 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
-  _argumentSchema?: JSONSchema | ((input: any) => any),
-  _resultSchema?: JSONSchema,
-  _implementation?: (input: T) => R,
+  argumentSchema?: JSONSchema | ((input: any) => any),
+  resultSchema?: JSONSchema,
+  implementation?: (input: T) => R,
 ): ModuleFactory<T, R> {
-  throw new Error(
-    "lift called without runtime. Use liftImpl from factory instead.",
-  );
+  if (typeof argumentSchema === "function") {
+    implementation = argumentSchema;
+    argumentSchema = resultSchema = undefined;
+  }
+
+  return createNodeFactory({
+    type: "javascript",
+    implementation,
+    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
+    ...(resultSchema !== undefined ? { resultSchema } : {}),
+  });
 }
 
-export function byRefImpl<T, R>(
-  runtime: IRuntime,
-  ref: string,
-): ModuleFactory<T, R> {
-  return createNodeFactoryImpl(runtime, {
+export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
+  return createNodeFactory({
     type: "ref",
     implementation: ref,
   });
 }
 
-export function byRef<T, R>(_ref: string): ModuleFactory<T, R> {
-  throw new Error(
-    "byRef called without runtime. Use byRefImpl from factory instead.",
-  );
-}
-
-export function handlerImpl<E, T>(
-  runtime: IRuntime,
+function handlerInternal<E, T>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
@@ -176,7 +138,7 @@ export function handlerImpl<E, T>(
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
-    const stream = opaqueRefImpl<E>(runtime, undefined, eventSchema);
+    const stream = opaqueRef<E>(undefined, eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
     (stream as OpaqueCell<E>).set({ $stream: true } as E);
@@ -217,42 +179,14 @@ export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
-  _eventSchema:
+  eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  _stateSchema?: JSONSchema | { proxy: true },
-  _handler?: (event: E, props: T) => any,
+  stateSchema?: JSONSchema | { proxy: true },
+  handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
-  throw new Error(
-    "handler called without runtime. Use handlerImpl from factory instead.",
-  );
-}
-
-export function deriveImpl<In, Out>(
-  runtime: IRuntime,
-  ...args: any[]
-): OpaqueRef<any> {
-  if (args.length === 4) {
-    const [argumentSchema, resultSchema, input, f] = args as [
-      JSONSchema,
-      JSONSchema,
-      Opaque<SchemaWithoutCell<any>>,
-      (input: Schema<any>) => Schema<any>,
-    ];
-    return liftImpl(
-      runtime,
-      argumentSchema,
-      resultSchema,
-      f as (input: Schema<any>) => Schema<any>,
-    )(input);
-  }
-
-  const [input, f] = args as [
-    Opaque<In>,
-    (input: In) => Out,
-  ];
-  return liftImpl(runtime, f)(input);
+  return handlerInternal(eventSchema, stateSchema, handler);
 }
 
 export function derive<
@@ -270,43 +204,38 @@ export function derive<In, Out>(
   input: Opaque<In>,
   f: (input: In) => Out,
 ): OpaqueRef<Out>;
-export function derive<In, Out>(..._args: any[]): OpaqueRef<any> {
-  throw new Error(
-    "derive called without runtime. Use deriveImpl from factory instead.",
-  );
+export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
+  if (args.length === 4) {
+    const [argumentSchema, resultSchema, input, f] = args as [
+      JSONSchema,
+      JSONSchema,
+      Opaque<SchemaWithoutCell<any>>,
+      (input: Schema<any>) => Schema<any>,
+    ];
+    return lift(
+      argumentSchema,
+      resultSchema,
+      f as (input: Schema<any>) => Schema<any>,
+    )(input);
+  }
+
+  const [input, f] = args as [
+    Opaque<In>,
+    (input: In) => Out,
+  ];
+  return lift(f)(input);
 }
 
 // unsafe closures: like derive, but doesn't need any arguments
-export function computeImpl(
-  runtime: IRuntime,
-): <T>(fn: () => T) => OpaqueRef<T> {
-  return <T>(fn: () => T) => liftImpl<any, T>(runtime, fn)(undefined);
-}
-
-export const compute: <T>(fn: () => T) => OpaqueRef<T> = (_fn: () => any) => {
-  throw new Error(
-    "compute called without runtime. Use computeImpl from factory instead.",
-  );
-};
+export const compute: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
+  lift<any, T>(fn)(undefined);
 
 // unsafe closures: like compute, but also convert all functions to handlers
-export function renderImpl(
-  runtime: IRuntime,
-): <T>(fn: () => T) => OpaqueRef<T> {
-  const computeFn = computeImpl(runtime);
-  const handlerFn = handlerImpl.bind(null, runtime);
-  return <T>(fn: () => T): OpaqueRef<T> =>
-    computeFn(() =>
-      traverseValue(fn(), (v: (event: unknown, props: unknown) => any) => {
-        // Modules are functions, so we need to exclude them
-        if (!isModule(v) && typeof v === "function") return handlerFn(v)({});
-        else return v;
-      })
-    );
-}
-
-export const render = <T>(_fn: () => T): OpaqueRef<T> => {
-  throw new Error(
-    "render called without runtime. Use renderImpl from factory instead.",
+export const render = <T>(fn: () => T): OpaqueRef<T> =>
+  compute(() =>
+    traverseValue(fn(), (v: (event: unknown, props: unknown) => any) => {
+      // Modules are functions, so we need to exclude them
+      if (!isModule(v) && typeof v === "function") return handler(v)({});
+      else return v;
+    })
   );
-};

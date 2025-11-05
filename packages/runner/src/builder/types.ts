@@ -249,6 +249,8 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  runtime?: import("../runtime.ts").IRuntime;
+  tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;

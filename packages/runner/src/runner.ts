@@ -979,6 +979,7 @@ export class Runner implements IRunner {
             tx,
           },
           true, // Set the event on the frame
+          this.runtime, // Pass runtime to frame
         );
 
         const argument = module.argumentSchema
@@ -1062,6 +1063,8 @@ export class Runner implements IRunner {
             space: processCell.space,
             tx,
           } satisfies UnsafeBinding,
+          false, // not in handler
+          this.runtime, // Pass runtime to frame
         );
         const result = fn(argument);
 

@@ -1,5 +1,6 @@
-import { createNodeFactoryImpl } from "./builder/module.ts";
+import { createNodeFactory } from "./builder/module.ts";
 import { Module, type ModuleFactory } from "./builder/types.ts";
+import { pushFrame, popFrame } from "./builder/recipe.ts";
 import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
@@ -44,8 +45,14 @@ export function rawImpl<T, R>(
     runtime: IRuntime,
   ) => Action,
 ): ModuleFactory<T, R> {
-  return createNodeFactoryImpl(runtime, {
-    type: "raw",
-    implementation,
-  });
+  // Push a frame with runtime so createNodeFactory can access it
+  const frame = pushFrame(undefined, runtime);
+  try {
+    return createNodeFactory({
+      type: "raw",
+      implementation,
+    });
+  } finally {
+    popFrame(frame);
+  }
 }

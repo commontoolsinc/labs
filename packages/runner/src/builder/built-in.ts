@@ -1,8 +1,7 @@
 import { BuiltInLLMDialogState } from "@commontools/api";
-import { createNodeFactoryImpl, liftImpl } from "./module.ts";
+import { createNodeFactory, lift } from "./module.ts";
 import { recipe } from "./recipe.ts";
 import { isRecipe } from "./types.ts";
-import type { IRuntime } from "../runtime.ts";
 import type {
   Cell,
   JSONSchema,
@@ -25,29 +24,29 @@ import type {
   PatternToolFunction,
 } from "commontools";
 
-export function createBuiltIns(runtime: IRuntime) {
-  const compileAndRun = createNodeFactoryImpl(runtime, {
+export function createBuiltIns(_runtime: unknown) {
+  const compileAndRun = createNodeFactory({
     type: "ref",
     implementation: "compileAndRun",
   }) as <T = any, S = any>(
     params: Opaque<BuiltInCompileAndRunParams<T>>,
   ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
-  const llm = createNodeFactoryImpl(runtime, {
+  const llm = createNodeFactory({
     type: "ref",
     implementation: "llm",
   }) as (
     params: Opaque<BuiltInLLMParams>,
   ) => OpaqueRef<BuiltInLLMState>;
 
-  const llmDialog = createNodeFactoryImpl(runtime, {
+  const llmDialog = createNodeFactory({
     type: "ref",
     implementation: "llmDialog",
   }) as (
     params: Opaque<BuiltInLLMParams>,
   ) => OpaqueRef<BuiltInLLMDialogState>;
 
-  const generateObject = createNodeFactoryImpl(runtime, {
+  const generateObject = createNodeFactory({
     type: "ref",
     implementation: "generateObject",
   }) as <T = any>(
@@ -73,7 +72,7 @@ export function createBuiltIns(runtime: IRuntime) {
     }>,
   ) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
-  const streamData = createNodeFactoryImpl(runtime, {
+  const streamData = createNodeFactory({
     type: "ref",
     implementation: "streamData",
   }) as <T>(
@@ -91,14 +90,14 @@ export function createBuiltIns(runtime: IRuntime) {
     ifTrue: Opaque<U>,
     ifFalse: Opaque<V>,
   ): OpaqueRef<U | V> {
-    ifElseFactory ||= createNodeFactoryImpl(runtime, {
+    ifElseFactory ||= createNodeFactory({
       type: "ref",
       implementation: "ifElse",
     });
     return ifElseFactory([condition, ifTrue, ifFalse]) as OpaqueRef<U | V>;
   }
 
-  const navigateTo = createNodeFactoryImpl(runtime, {
+  const navigateTo = createNodeFactory({
     type: "ref",
     implementation: "navigateTo",
   }) as (cell: OpaqueRef<unknown>) => OpaqueRef<string>;
@@ -116,7 +115,7 @@ export function createBuiltIns(runtime: IRuntime) {
     target: Opaque<string>,
     defaultValue?: Opaque<T> | T,
   ): OpaqueRef<T | undefined> {
-    wishFactory ||= createNodeFactoryImpl(runtime, {
+    wishFactory ||= createNodeFactory({
       type: "ref",
       implementation: "wish",
     });
@@ -143,7 +142,7 @@ export function createBuiltIns(runtime: IRuntime) {
         "",
       );
 
-    return liftImpl<any, string>(runtime, interpolatedString)({
+    return lift<any, string>(interpolatedString)({
       strings,
       values,
     });
