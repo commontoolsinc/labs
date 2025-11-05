@@ -3,8 +3,9 @@ import {
   type Cell,
   cell,
   type Default,
-  derive,
   generateText,
+  Default,
+  derive,
   handler,
   NAME,
   navigateTo,
@@ -176,7 +177,7 @@ const Note = recipe<Input, Output>(
         ) => {
           const result = generateText({
             system: str`Translate the content to ${language}.`,
-            prompt: str`<to_translate>${content}</to_translate>`,
+            prompt: str`<to_translate>${content}</to_translate>`
           });
 
           return derive(result, ({ pending, result }) => {
