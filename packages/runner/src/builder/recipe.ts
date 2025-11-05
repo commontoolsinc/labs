@@ -402,16 +402,22 @@ function factoryFromRecipe<T, R>(
 
 const frames: Frame[] = [];
 
-export function pushFrame(frame?: Frame, runtime?: import("../runtime.ts").IRuntime): Frame {
+export function pushFrame(
+  frame?: Frame,
+  runtime?: import("../runtime.ts").IRuntime,
+  tx?: import("../storage/interface.ts").IExtendedStorageTransaction,
+): Frame {
   if (!frame) {
     const parent = getTopFrame();
     // If no runtime provided, try to inherit from parent (may be undefined during construction)
     const frameRuntime = runtime || parent?.runtime;
+    const frameTx = tx || parent?.tx;
     frame = {
       parent,
       opaqueRefs: new Set(),
       generatedIdCounter: 0,
       ...(frameRuntime && { runtime: frameRuntime }),
+      ...(frameTx && { tx: frameTx }),
     };
   }
   frames.push(frame);

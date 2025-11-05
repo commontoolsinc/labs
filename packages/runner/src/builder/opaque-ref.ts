@@ -40,7 +40,8 @@ function opaqueRefWithCell<T>(
   }
 
   // Create a Cell without a link - it will be created on demand via .for()
-  const cell = createCell<T>(frame.runtime, undefined, undefined, false);
+  // Use tx from frame if available
+  const cell = createCell<T>(frame.runtime, undefined, frame.tx, false);
 
   // If schema provided, apply it
   if (schema) {

@@ -49,6 +49,8 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
+import { popFrame, pushFrame } from "./builder/recipe.ts";
+import type { Frame } from "./builder/types.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -331,6 +333,7 @@ export class Runtime implements IRuntime {
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
+  private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
     this.id = options.storageManager.id;
@@ -383,6 +386,9 @@ export class Runtime implements IRuntime {
         telemetry: !!this.telemetry,
       });
     }
+
+    // Push a default frame with this runtime so builder functions can access it
+    this.defaultFrame = pushFrame(undefined, this);
   }
 
   /**
@@ -407,6 +413,12 @@ export class Runtime implements IRuntime {
 
     // Wait for any pending operations
     await this.scheduler.idle();
+
+    // Pop the default frame
+    if (this.defaultFrame) {
+      popFrame(this.defaultFrame);
+      this.defaultFrame = undefined;
+    }
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

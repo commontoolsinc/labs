@@ -134,8 +134,9 @@ describe("Cell with Optional Link", () => {
       const cell = new CellImpl(runtime, tx);
 
       // Trying to get the cell value without a link should throw
+      // Note: Now that we have a default frame with runtime, the error is about missing space
       expect(() => cell.get()).toThrow(
-        "Cannot create cell link: no frame context.",
+        "Cannot create cell link: space is required.",
       );
     });
 
@@ -165,8 +166,9 @@ describe("Cell with Optional Link", () => {
       const cell = new CellImpl(runtime, tx, { path: [], space }, false);
 
       // Without a cause, should throw
+      // Note: Now that we have a default frame with runtime, the error is about missing cause
       expect(() => cell.path).toThrow(
-        "Cannot create cell link: no frame context.",
+        "Cannot create cell link: not in a handler context and no cause was provided.",
       );
 
       pushFrame({
