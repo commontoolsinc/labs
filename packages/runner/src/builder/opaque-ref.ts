@@ -103,7 +103,13 @@ export function opaqueRef<T>(
       export: () => {
         // Store's schema won't be the same as ours as a nested proxy
         // We also don't adjust the defaultValue to be relative to our path
-        return { cell: top, ...store, path, rootSchema, schema: nestedSchema };
+        return {
+          cell: top as OpaqueCell<T>,
+          ...store,
+          path,
+          rootSchema,
+          schema: nestedSchema,
+        };
       },
       unsafe_bindToRecipeAndPath: (
         recipe: Recipe,

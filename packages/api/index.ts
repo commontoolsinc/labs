@@ -180,12 +180,12 @@ export interface IKeyableOpaque<T> {
   key<K extends PropertyKey>(
     this: IsThisObject,
     valueKey: K,
-  ): unknown extends K ? OpaqueRef<any>
-    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueRef<any>
-        : UnwrapCell<T>[K] extends never ? OpaqueRef<any>
-        : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueRef<U>
-        : OpaqueRef<UnwrapCell<T>[K]>)
-    : OpaqueRef<any>;
+  ): unknown extends K ? OpaqueCell<any>
+    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
+        : UnwrapCell<T>[K] extends never ? OpaqueCell<any>
+        : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U>
+        : OpaqueCell<UnwrapCell<T>[K]>)
+    : OpaqueCell<any>;
 }
 
 /**
@@ -352,12 +352,16 @@ export interface WriteonlyCell<T>
  * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
  * Each key access returns another OpaqueRef, allowing chained property access.
  * This is temporary until AST transformation handles .key() automatically.
+ *
+ * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> =
-  & OpaqueCell<T>
-  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
-    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
-    : T);
+export type OpaqueRef<T> = T extends BrandedCell<any> ? T
+  :
+    & OpaqueCell<T>
+    & (T extends Array<infer U> ? Array<OpaqueRef<U>>
+      : T extends BrandedCell<any> ? T
+      : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+      : T);
 
 // ============================================================================
 // CellLike and Opaque - Utility types for accepting cells

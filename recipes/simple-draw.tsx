@@ -168,7 +168,7 @@ export const UserSession = recipe<
                     y={derive(m, (msg) => msg.y)}
                     hidden={ifElse(
                       derive(m, (msg) => msg.hidden === true),
-                      "true",
+                      "true" as const,
                       undefined,
                     )}
                     onpositionchange={updateMessagePosition({
