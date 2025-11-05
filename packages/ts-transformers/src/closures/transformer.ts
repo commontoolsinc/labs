@@ -481,183 +481,145 @@ interface ElementBindingAnalysis {
   readonly computedAliases: readonly ComputedAliasInfo[];
   readonly destructureStatement?: ts.Statement;
 }
-function collectComputedAliases(
-  name: ts.BindingName,
-  context: TransformationContext,
-  path: readonly string[],
-  template: ts.Expression | undefined,
-  aliasBucket: ComputedAliasInfo[],
-  keyNames: Set<string>,
-): void {
-  if (ts.isObjectBindingPattern(name)) {
-    for (const element of name.elements) {
-      const propertyName = element.propertyName;
-      let nextPath = path;
-      let nextTemplate = template;
-
-      if (propertyName && ts.isComputedPropertyName(propertyName)) {
-        if (ts.isIdentifier(element.name)) {
-          const symbol = context.checker.getSymbolAtLocation(element.name);
-          if (symbol) {
-            const aliasName = element.name.text;
-            const keyBase = `__ct_${aliasName}_key`;
-            const unique = getUniqueIdentifier(keyBase, keyNames, {
-              fallback: keyBase,
-            });
-            keyNames.add(unique);
-            aliasBucket.push({
-              symbol,
-              aliasName,
-              keyExpression: propertyName.expression,
-              keyIdentifier: context.factory.createIdentifier(unique),
-              path,
-              baseTemplate: template,
-            });
-          }
-        }
-        continue;
-      }
-
-      if (propertyName && ts.isIdentifier(propertyName)) {
-        nextPath = [...path, propertyName.text];
-        const base = nextTemplate ??
-          context.factory.createIdentifier("__ct_placeholder");
-        nextTemplate = context.factory.createPropertyAccessExpression(
-          base,
-          context.factory.createIdentifier(propertyName.text),
-        );
-      } else if (propertyName && ts.isStringLiteral(propertyName)) {
-        nextPath = [...path, propertyName.text];
-        const base = nextTemplate ??
-          context.factory.createIdentifier("__ct_placeholder");
-        nextTemplate = context.factory.createElementAccessExpression(
-          base,
-          context.factory.createStringLiteral(propertyName.text),
-        );
-      } else if (!propertyName && ts.isIdentifier(element.name)) {
-        nextPath = [...path, element.name.text];
-        const base = nextTemplate ??
-          context.factory.createIdentifier("__ct_placeholder");
-        nextTemplate = context.factory.createPropertyAccessExpression(
-          base,
-          context.factory.createIdentifier(element.name.text),
-        );
-      }
-
-      if (isBindingPattern(element.name)) {
-        collectComputedAliases(
-          element.name,
-          context,
-          nextPath,
-          nextTemplate,
-          aliasBucket,
-          keyNames,
-        );
-      }
-    }
-  } else if (ts.isArrayBindingPattern(name)) {
-    for (const element of name.elements) {
-      if (ts.isBindingElement(element) && isBindingPattern(element.name)) {
-        collectComputedAliases(
-          element.name,
-          context,
-          path,
-          template,
-          aliasBucket,
-          keyNames,
-        );
-      }
-    }
-  }
+interface ElementBindingPlan {
+  readonly aliases: ComputedAliasInfo[];
+  readonly residualPattern?: ts.BindingName;
 }
 
-function cloneWithoutComputedProperties(
-  name: ts.BindingName,
+function buildElementBindingPlan(
+  elemParam: ts.ParameterDeclaration,
   context: TransformationContext,
-  used: Set<string>,
-): ts.BindingName | undefined {
-  const { factory } = context;
+): ElementBindingPlan {
+  const { factory, checker } = context;
 
-  if (ts.isIdentifier(name)) {
-    return factory.createIdentifier(name.text);
-  }
+  const aliasBucket: ComputedAliasInfo[] = [];
+  const keyNames = new Set<string>();
 
-  if (ts.isObjectBindingPattern(name)) {
-    const elements: ts.BindingElement[] = [];
-
-    for (const element of name.elements) {
-      if (
-        element.propertyName &&
-        ts.isComputedPropertyName(element.propertyName)
-      ) {
-        continue;
-      }
-
-      let clonedName: ts.BindingName | undefined;
-      if (ts.isIdentifier(element.name)) {
-        clonedName = factory.createIdentifier(element.name.text);
-      } else if (isBindingPattern(element.name)) {
-        clonedName = cloneWithoutComputedProperties(
-          element.name,
-          context,
-          used,
-        );
-      }
-
-      if (!clonedName && !element.dotDotDotToken) {
-        continue;
-      }
-
-      elements.push(
-        factory.createBindingElement(
-          element.dotDotDotToken,
-          element.propertyName,
-          clonedName ?? element.name,
-          element.initializer as ts.Expression | undefined,
-        ),
-      );
+  const walk = (
+    node: ts.BindingName,
+    path: readonly string[],
+    template: ts.Expression | undefined,
+  ): ts.BindingName | undefined => {
+    if (ts.isIdentifier(node)) {
+      return factory.createIdentifier(node.text);
     }
 
-    if (elements.length === 0) {
-      return undefined;
-    }
+    if (ts.isObjectBindingPattern(node)) {
+      const elements: ts.BindingElement[] = [];
 
-    return factory.createObjectBindingPattern(elements);
-  }
+      for (const element of node.elements) {
+        const propertyName = element.propertyName;
+        let nextPath = path;
+        let nextTemplate = template;
 
-  if (ts.isArrayBindingPattern(name)) {
-    const newElements = name.elements.map((element) => {
-      if (ts.isOmittedExpression(element)) {
-        return element;
-      }
-      if (ts.isBindingElement(element)) {
+        if (propertyName && ts.isComputedPropertyName(propertyName)) {
+          if (ts.isIdentifier(element.name)) {
+            const symbol = checker.getSymbolAtLocation(element.name);
+            if (symbol) {
+              const aliasName = element.name.text;
+              const keyBase = `__ct_${aliasName}_key`;
+              const unique = getUniqueIdentifier(keyBase, keyNames, {
+                fallback: keyBase,
+              });
+              keyNames.add(unique);
+              aliasBucket.push({
+                symbol,
+                aliasName,
+                keyExpression: propertyName.expression,
+                keyIdentifier: factory.createIdentifier(unique),
+                path,
+                baseTemplate: template,
+              });
+            }
+          }
+          continue;
+        }
+
+        if (propertyName && ts.isIdentifier(propertyName)) {
+          nextPath = [...path, propertyName.text];
+          const base = nextTemplate ??
+            factory.createIdentifier("__ct_placeholder");
+          nextTemplate = factory.createPropertyAccessExpression(
+            base,
+            factory.createIdentifier(propertyName.text),
+          );
+        } else if (propertyName && ts.isStringLiteral(propertyName)) {
+          nextPath = [...path, propertyName.text];
+          const base = nextTemplate ??
+            factory.createIdentifier("__ct_placeholder");
+          nextTemplate = factory.createElementAccessExpression(
+            base,
+            factory.createStringLiteral(propertyName.text),
+          );
+        } else if (!propertyName && ts.isIdentifier(element.name)) {
+          nextPath = [...path, element.name.text];
+          const base = nextTemplate ??
+            factory.createIdentifier("__ct_placeholder");
+          nextTemplate = factory.createPropertyAccessExpression(
+            base,
+            factory.createIdentifier(element.name.text),
+          );
+        }
+
         let clonedName: ts.BindingName | undefined;
         if (ts.isIdentifier(element.name)) {
           clonedName = factory.createIdentifier(element.name.text);
         } else if (isBindingPattern(element.name)) {
-          clonedName = cloneWithoutComputedProperties(
-            element.name,
-            context,
-            used,
-          );
+          clonedName = walk(element.name, nextPath, nextTemplate);
         }
+
         if (!clonedName && !element.dotDotDotToken) {
-          return element;
+          continue;
         }
-        return factory.createBindingElement(
-          element.dotDotDotToken,
-          element.propertyName,
-          clonedName ?? element.name,
-          element.initializer as ts.Expression | undefined,
+
+        elements.push(
+          factory.createBindingElement(
+            element.dotDotDotToken,
+            element.propertyName,
+            clonedName ?? element.name,
+            element.initializer as ts.Expression | undefined,
+          ),
         );
       }
-      return element;
-    });
 
-    return factory.createArrayBindingPattern(newElements);
-  }
+      if (elements.length === 0) return undefined;
+      return factory.createObjectBindingPattern(elements);
+    }
 
-  return undefined;
+    if (ts.isArrayBindingPattern(node)) {
+      const newElements = node.elements.map((element) => {
+        if (ts.isOmittedExpression(element)) return element;
+        if (ts.isBindingElement(element)) {
+          let clonedName: ts.BindingName | undefined;
+          if (ts.isIdentifier(element.name)) {
+            clonedName = factory.createIdentifier(element.name.text);
+          } else if (isBindingPattern(element.name)) {
+            clonedName = walk(element.name, path, template);
+          }
+          if (!clonedName && !element.dotDotDotToken) {
+            return element;
+          }
+          return factory.createBindingElement(
+            element.dotDotDotToken,
+            element.propertyName,
+            clonedName ?? element.name,
+            element.initializer as ts.Expression | undefined,
+          );
+        }
+        return element;
+      });
+      return factory.createArrayBindingPattern(newElements);
+    }
+
+    return undefined;
+  };
+
+  const residualPattern = walk(elemParam.name, [], undefined);
+
+  return {
+    aliases: aliasBucket,
+    residualPattern,
+  };
 }
 
 function analyzeElementBinding(
@@ -689,17 +651,9 @@ function analyzeElementBinding(
     };
   }
 
-  const aliasBucket: ComputedAliasInfo[] = [];
-  collectComputedAliases(
-    elemParam.name,
-    context,
-    [],
-    undefined,
-    aliasBucket,
-    new Set(),
-  );
+  const plan = buildElementBindingPlan(elemParam, context);
 
-  if (aliasBucket.length === 0) {
+  if (plan.aliases.length === 0) {
     const normalized = normalizeBindingName(
       elemParam.name,
       factory,
@@ -718,16 +672,10 @@ function analyzeElementBinding(
     captureTree.has("element") ? "__ct_element" : "element",
   );
 
-  const residualPattern = cloneWithoutComputedProperties(
-    elemParam.name,
-    context,
-    used,
-  );
-
   let destructureStatement: ts.Statement | undefined;
-  if (residualPattern) {
+  if (plan.residualPattern) {
     const normalized = normalizeBindingName(
-      residualPattern,
+      plan.residualPattern,
       factory,
       used,
     );
@@ -750,16 +698,9 @@ function analyzeElementBinding(
   return {
     bindingName: elementIdentifier,
     elementIdentifier,
-    computedAliases: aliasBucket,
+    computedAliases: plan.aliases,
     destructureStatement,
   };
-}
-
-function cloneComputedExpression(
-  expr: ts.Expression,
-  _factory: ts.NodeFactory,
-): ts.Expression {
-  return expr;
 }
 
 function createDerivedAliasExpression(
@@ -900,7 +841,7 @@ function rewriteCallbackBody(
               factory.createIdentifier(info.keyIdentifier.text),
               undefined,
               undefined,
-              cloneComputedExpression(info.keyExpression, factory),
+              info.keyExpression,
             ),
           ],
           ts.NodeFlags.Const,
