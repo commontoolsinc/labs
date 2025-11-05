@@ -381,7 +381,9 @@ export class CTSelect extends BaseElement {
         const values = (currentValue as unknown[] | undefined) ?? [];
         Array.from(this._select.options).forEach((opt) => {
           const item = this._keyMap.get(opt.value);
-          opt.selected = item ? values.some(v => areLinksSame(v, item.value)) : false;
+          opt.selected = item
+            ? values.some((v) => areLinksSame(v, item.value))
+            : false;
         });
       } else {
         const val = currentValue;
