@@ -4,7 +4,6 @@ import {
   cell,
   type Default,
   generateText,
-  Default,
   derive,
   handler,
   NAME,
