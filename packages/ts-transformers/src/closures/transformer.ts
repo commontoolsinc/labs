@@ -427,7 +427,6 @@ function isOpaqueRefArrayMapCall(
     hasArrayTypeArgument(originType, checker);
 }
 
-
 function typeNodeForExpression(
   expr: ts.Expression,
   context: TransformationContext,
@@ -1078,7 +1077,9 @@ function createHandlerCallback(
     createBindingIdentifier,
   );
 
-  const paramsBindingPattern = factory.createObjectBindingPattern(paramsBindings);
+  const paramsBindingPattern = factory.createObjectBindingPattern(
+    paramsBindings,
+  );
 
   let paramsBindingName: ts.BindingName;
   if (stateParam) {
