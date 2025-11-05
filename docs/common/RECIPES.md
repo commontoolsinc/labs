@@ -579,7 +579,46 @@ logic.
    )}
    ```
 
-   **Note**: Items inside derive callbacks are read-only. For bidirectional binding (like `$checked`), use the cells directly outside the derive, or structure your code to avoid needing mutable access inside the callback.
+   **⚠️ CRITICAL: Items Inside Derive Callbacks Are Read-Only**:
+
+   When you use `derive()` for conditional rendering and then `.map()` over arrays inside the callback, the items become **read-only snapshots**. This means you cannot access mutable properties or use bidirectional binding on those items.
+
+   ```typescript
+   // ❌ BROKEN - Using derive for conditional rendering with .map()
+   {derive(customFields, (fields) => fields.length > 0 ? (
+     <ct-vstack>
+       {fields.map((field) => (
+         <ct-input
+           value={field.value}  // field.value will be undefined/read-only!
+           onct-input={updateField({ fieldKey: field.key })}
+         />
+       ))}
+     </ct-vstack>
+   ) : null)}
+
+   // ✅ CORRECT - Use ifElse for conditional rendering, map over cell directly
+   {ifElse(
+     derive(customFields, (fields) => fields.length > 0),
+     <ct-vstack>
+       {customFields.map((field) => (  // Map over the cell, not the derived array
+         <ct-input
+           value={field.value}  // Now field.value works correctly!
+           onct-input={updateField({ fieldKey: field.key })}
+         />
+       ))}
+     </ct-vstack>,
+     null
+   )}
+   ```
+
+   **Why this happens**: Inside a `derive()` callback, all values are immutable snapshots for consistency. When you map over a derived array, each item is also a snapshot, losing access to mutable properties.
+
+   **The fix**: Use `ifElse()` for conditional rendering (which only needs a reactive boolean), and map directly over the cell itself. This keeps the items mutable and accessible.
+
+   **This applies to**:
+   - Bidirectional binding (`$checked`, `$value`)
+   - Accessing nested cell properties (`.value`, `.field`)
+   - Any pattern where you need to interact with individual items in a mapped array
 
 10. **Access Properties Directly on Derived Objects**: You can access properties on derived objects without additional helpers:
 
