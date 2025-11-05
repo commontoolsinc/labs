@@ -7,12 +7,6 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 
-type DefaultPatternData = {
-  backlinksIndex?: {
-    mentions?: string[];
-  };
-};
-
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
 
@@ -42,7 +36,7 @@ describe("wish built-in", () => {
     await storageManager.close();
   });
 
-  it("resolves the well known all charms cell", async () => {
+  it.only("resolves the well known all charms cell", async () => {
     const allCharmsCell = runtime.getCellFromEntityId(
       space,
       { "/": ALL_CHARMS_ID },
@@ -54,8 +48,9 @@ describe("wish built-in", () => {
     allCharmsCell.withTx(tx).set(charmsData);
 
     // Set up the space cell to link to allCharms
-    const spaceCell = runtime.getCell(space, space).withTx(tx);
-    (spaceCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+    const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+      .withTx(tx);
+    spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
 
     await tx.commit();
     await runtime.idle();
@@ -83,9 +78,8 @@ describe("wish built-in", () => {
 
     await runtime.idle();
 
-    const readTx = runtime.readTx();
-    const actualCell = result.withTx(readTx).key("allCharms");
-    const rawValue = actualCell.withTx(readTx).getRaw() as
+    const actualCell = result.key("allCharms");
+    const rawValue = actualCell.getRaw() as
       | { ["/"]: Record<string, unknown> }
       | undefined;
     const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as

@@ -151,7 +151,6 @@ declare module "@commontools/api" {
     setSourceCell(sourceCell: Cell<any>): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
-    setPreExisting(ref: any): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -167,7 +166,9 @@ declare module "@commontools/api" {
       name?: string;
       external?: unknown;
     };
-    getAsOpaqueRefProxy(): OpaqueRef<T>;
+    getAsOpaqueRefProxy(
+      boundTarget?: (...args: unknown[]) => unknown,
+    ): OpaqueRef<T>;
     toJSON(): LegacyJSONCellLink | null;
     runtime: IRuntime;
     tx: IExtendedStorageTransaction | undefined;
@@ -399,7 +400,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   get path(): readonly PropertyKey[] {
-    return this.link.path;
+    return this._link.path;
   }
 
   get schema(): JSONSchema | undefined {
@@ -868,16 +869,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   /**
-   * @deprecated Use schema defaults instead. This method is provided for compatibility
-   * during the OpaqueRef/Cell merge but will be removed in the future.
-   */
-  setPreExisting(ref: any): void {
-    // This was used in toOpaqueRef which can go away
-    // For now, do nothing as this is deprecated
-    console.warn("setPreExisting is deprecated and will be removed");
-  }
-
-  /**
    * Set the schema for this cell. Only works if the cause isn't set yet.
    * Prefer using .asSchema() instead.
    */
@@ -935,7 +926,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       value: undefined,
       defaultValue: undefined,
       name: undefined,
-      external: undefined,
+      external: this._link.id
+        ? this.getAsWriteRedirectLink({
+          baseSpace: getTopFrame()?.space,
+          includeSchema: true,
+        })
+        : undefined,
     };
   }
 
@@ -946,15 +942,18 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    *
    * @returns A proxied version of this cell with OpaqueRef behavior
    */
-  getAsOpaqueRefProxy(): OpaqueRef<T> {
-    const proxy = new Proxy(this, {
+  getAsOpaqueRefProxy(
+    boundTarget?: (...args: unknown[]) => unknown,
+  ): OpaqueRef<T> {
+    const self = this as unknown as Cell<T>;
+    const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
           // Iterator support for array destructuring
           return function* () {
             let index = 0;
             while (index < 50) { // Limit to 50 items like original
-              const itemCell = (target as any).key(index);
+              const itemCell = self.key(index) as Cell<unknown>;
               yield itemCell.getAsOpaqueRefProxy();
               index++;
             }
@@ -967,15 +966,22 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           };
         } else if (prop === toCell) {
           // Return a function that returns the unproxied cell
-          return () => target;
+          return () => self;
         } else if (prop === isOpaqueRefMarker) {
           return true;
         } else if (typeof prop === "string" || typeof prop === "number") {
           // Recursive property access - wrap the child cell
-          const nestedCell = (target as any).key(prop);
-          return nestedCell.getAsOpaqueRefProxy();
+          const nestedCell = self.key(prop) as Cell<T>;
+
+          // Check if this is a method on the cell
+          const cellValue = self[prop as keyof Cell<T>];
+          if (typeof cellValue === "function") {
+            return nestedCell.getAsOpaqueRefProxy(cellValue.bind(self));
+          } else {
+            return nestedCell.getAsOpaqueRefProxy();
+          }
         }
-        // Delegate everything else to the Cell
+        // Delegate everything else to orignal target
         return (target as any)[prop];
       },
     });

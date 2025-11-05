@@ -1,5 +1,4 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { createShadowRef } from "./opaque-ref.ts";
 import {
   isOpaqueRef,
   type JSONSchema,
@@ -18,10 +17,11 @@ export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isOpaqueRef(value)) {
-      // Return shadow ref it this is a parent opaque ref. Note: No need to
-      // connect to the cell. The connection is there to traverse the graph to
-      // find all other nodes, but this points to the parent graph instead.
-      if (value.export().frame !== node.frame) return createShadowRef(value);
+      if (value.export().frame !== node.frame) {
+        throw new Error(
+          "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
+        );
+      }
       value.connect(node);
     }
     return undefined;

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Frame, isOpaqueRef, isShadowRef } from "../src/builder/types.ts";
-import { createShadowRef, opaqueRef } from "../src/builder/opaque-ref.ts";
+import { type Frame, isOpaqueRef } from "../src/builder/types.ts";
+import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 
 describe("opaqueRef function", () => {
@@ -41,37 +41,5 @@ describe("opaqueRef function", () => {
     const v = c.export();
     expect(v.path).toEqual([]);
     // Nested values are stored in the legacy store
-  });
-});
-
-describe("shadowRef function", () => {
-  let frame: Frame;
-
-  beforeEach(() => {
-    frame = pushFrame();
-  });
-
-  afterEach(() => {
-    popFrame(frame);
-  });
-
-  it("creates a shadow ref", () => {
-    const ref = opaqueRef();
-    const frame = pushFrame();
-    const shadow = createShadowRef(ref);
-    popFrame(frame);
-    expect(isShadowRef(shadow)).toBe(true);
-    expect(shadow.shadowOf).toBe(ref);
-  });
-
-  it("creates a shadow ref two levels deep", () => {
-    const ref = opaqueRef();
-    const frame1 = pushFrame();
-    const frame2 = pushFrame();
-    const shadow = createShadowRef(ref);
-    popFrame(frame2);
-    popFrame(frame1);
-    expect(isShadowRef(shadow)).toBe(true);
-    expect(shadow.shadowOf).toBe(ref);
   });
 });

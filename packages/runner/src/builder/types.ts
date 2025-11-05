@@ -125,13 +125,6 @@ declare module "@commontools/api" {
 
     connect(node: NodeRef): void;
 
-    // Unsafe methods for internal use
-    unsafe_bindToRecipeAndPath(
-      recipe: Recipe,
-      path: readonly PropertyKey[],
-    ): void;
-    unsafe_getExternal(): OpaqueCell<T>;
-
     // Additional utility methods
     toJSON(): LegacyJSONCellLink | null;
     [Symbol.iterator](): Iterator<T>;

@@ -49,7 +49,7 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
-import { popFrame, pushFrame } from "./builder/recipe.ts";
+import { getTopFrame, popFrame, pushFrame } from "./builder/recipe.ts";
 import type { Frame } from "./builder/types.ts";
 
 // @ts-ignore - This is temporary to debug integration test
@@ -416,7 +416,10 @@ export class Runtime implements IRuntime {
 
     // Pop the default frame
     if (this.defaultFrame) {
-      popFrame(this.defaultFrame);
+      if (getTopFrame() !== this.defaultFrame) {
+        console.error("Default frame mismatch");
+      }
+      popFrame();
       this.defaultFrame = undefined;
     }
 

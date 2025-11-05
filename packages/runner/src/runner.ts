@@ -6,7 +6,6 @@ import {
   isModule,
   isOpaqueRef,
   isRecipe,
-  isShadowRef,
   isStreamValue,
   type JSONSchema,
   type JSONValue,
@@ -56,6 +55,7 @@ import type {
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
 import "./builtins/index.ts";
+import { isCellResult } from "./query-result-proxy.ts";
 
 const logger = getLogger("runner");
 
@@ -779,8 +779,7 @@ export class Runner implements IRunner {
     }
 
     if (
-      !isRecord(value) || isOpaqueRef(value) || isShadowRef(value) ||
-      isCell(value)
+      !isRecord(value) || isCell(value) || isCellResult(value)
     ) {
       return;
     }
@@ -796,9 +795,9 @@ export class Runner implements IRunner {
       return;
     }
 
-    for (const key in value as Record<string, JSONValue>) {
+    for (const key in value as Record<string, any>) {
       this.discoverAndCacheFunctionsFromValue(
-        value[key],
+        value[key] as JSONValue,
         seen,
       );
     }

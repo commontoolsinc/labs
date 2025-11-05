@@ -2,7 +2,6 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Frame,
   isOpaqueRef,
-  isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
   type Module,
@@ -38,6 +37,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import { isCell } from "../cell.ts";
 
 /** Declare a recipe
  *
@@ -165,32 +165,28 @@ function factoryFromRecipe<T, R>(
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
-  const shadows = new Set<ShadowRef>();
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
-      if (isOpaqueRef(value)) value = value.unsafe_getExternal();
-      if (
-        (isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) &&
-        !shadows.has(value as ShadowRef)
-      ) {
-        if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
-          throw new Error("Shadow refs no longer supported");
+      if (isCell(value) && !cells.has(value)) {
+        const { frame, nodes, value: cellValue } = value.export();
+        if (isOpaqueRef(value) && frame !== getTopFrame()) {
+          throw new Error(
+            "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
+          );
         }
-        if (isShadowRef(value)) {
-          throw new Error("Shadow refs no longer supported");
-        } else if (isOpaqueRef(value)) {
-          cells.add(value);
-          value.export().nodes.forEach((node: NodeRef) => {
-            if (!nodes.has(node)) {
-              nodes.add(node);
-              node.inputs = collectCellsAndNodes(node.inputs);
-              node.outputs = collectCellsAndNodes(node.outputs);
-            }
-          });
-          value.set(collectCellsAndNodes(value.export().value));
+        cells.add(value);
+        nodes.forEach((node: NodeRef) => {
+          if (!nodes.has(node)) {
+            nodes.add(node);
+            node.inputs = collectCellsAndNodes(node.inputs);
+            node.outputs = collectCellsAndNodes(node.outputs);
+          }
+        });
+        if (cellValue !== undefined) {
+          value.set(collectCellsAndNodes(cellValue));
         }
       }
       return value;
@@ -211,15 +207,14 @@ function factoryFromRecipe<T, R>(
   // First from results
   if (isRecord(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
-      if (isOpaqueRef(value)) {
-        const ref = value; // Typescript needs this to avoid type errors
-        const exported = ref.export();
+      if (isCell(value)) {
+        const exported = value.export();
         if (
           !exported.path.length &&
           !exported.name &&
           !usedNames.has(key)
         ) {
-          ref.for(key, true); // allowIfSet=true to not override existing causes
+          value.for(key, true); // allowIfSet=true to not override existing causes
           usedNames.add(key);
         }
       }
@@ -279,10 +274,6 @@ function factoryFromRecipe<T, R>(
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
     }
-  });
-  shadows.forEach((shadow) => {
-    if (paths.has(shadow)) return;
-    paths.set(shadow, []);
   });
 
   // Creates a query (i.e. aliases) into the cells for the result
@@ -387,15 +378,6 @@ function factoryFromRecipe<T, R>(
 
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;
-
-  // Bind all cells to the recipe
-  // TODO(seefeld): Does OpaqueRef cause issues here?
-  [...cells]
-    // Only bind root cells that are not external
-    .filter((cell) => !cell.export().path.length && !cell.export().external)
-    .forEach((cell) =>
-      cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!)
-    );
 
   return recipeFactory;
 }

@@ -162,26 +162,10 @@ describe("Cell with Optional Link", () => {
       popFrame();
     });
 
-    it("should throw error when accessing path without cause", () => {
+    it("should not throw error when accessing path without cause", () => {
       const cell = new CellImpl(runtime, tx, { path: [], space }, false);
 
-      // Without a cause, should throw
-      // Note: Now that we have a default frame with runtime, the error is about missing cause
-      expect(() => cell.path).toThrow(
-        "Cannot create cell link: not in a handler context and no cause was provided.",
-      );
-
-      pushFrame({
-        space,
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      });
-
-      expect(() => cell.path).toThrow(
-        "Cannot create cell link: not in a handler context and no cause was provided",
-      );
-
-      popFrame();
+      expect(cell.path).toEqual([]);
     });
 
     it("should create link when accessing cell with cause and space", () => {

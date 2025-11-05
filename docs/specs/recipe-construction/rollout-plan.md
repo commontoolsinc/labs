@@ -44,22 +44,23 @@
     ambiguous cases.
 - [x] Add space and event to Frame
 - [ ] First merge of OpaqueRef and RegularCell
-  - [ ] Add methods that allow linking to node invocations
-    - [ ] `setPreExisting` can be deprecated (used in toOpaqueRef which itself
-      can go away, see below)
-    - [ ] `setDefault` can be deprecated
-    - [ ] `setSchema` is tricky (asSchema is cleaner). Let's support it for now,
+  - [x] Create OpaqueCell type
+  - [x] Make OpaqueRef a proxy around OpaqueCell
+  - [x] Add methods to Cell that allow linking to node invocations
+    - [x] `setPreExisting` deprecated
+    - [x] `setDefault` deprecated
+    - [x] `setSchema` is tricky (asSchema is cleaner). Let's support it for now,
       but only if the cause isn't set yet.
-    - [ ] `connect` copy over and add a direction field, so can distinguish
+    - [x] `connect` copy over and add a direction field, so can distinguish
       where this node is used as input vs where the passed node is an input to
       this node.
-    - [ ] `export` make the analogous version, if link is present use that as
+    - [x] `export` make the analogous version, if link is present use that as
       `external`.
-    - [ ] `map` and `mapWithPattern`: Copy over
-    - [ ] `toJSON` return `null` when no link otherwise what Cell does.
-  - [ ] No need for `toOpaqueRef` anymore, since all cells are now also
+    - [x] `map` and `mapWithPattern`: Copy over
+    - [x] `toJSON` return `null` when no link otherwise what Cell does.
+  - [x] No need for `toOpaqueRef` anymore, since all cells are now also
     OpaqueRef. So remove all that.
-  - [ ] Call that for returned value in lift/handler, with a .for("assigned
+  - [x] Call that for returned value in lift/handler, with a .for("assigned
     variable of property", true)
   - [ ] For now treat result as recipe, but it should be one where all nodes
     already have links associated with them (no internal necessary).
