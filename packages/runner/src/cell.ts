@@ -21,7 +21,8 @@ import {
   type Stream,
   TYPE,
 } from "./builder/types.ts";
-import { toOpaqueRef } from "./back-to-cell.ts";
+import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { isOpaqueRefMarker } from "./builder/types.ts";
 import {
   createQueryResultProxy,
   getCellOrThrow,
@@ -166,6 +167,7 @@ declare module "@commontools/api" {
       name?: string;
       external?: unknown;
     };
+    getAsOpaqueRefProxy(): OpaqueRef<T>;
     toJSON(): LegacyJSONCellLink | null;
     runtime: IRuntime;
     tx: IExtendedStorageTransaction | undefined;
@@ -936,6 +938,49 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       name: undefined,
       external: undefined,
     };
+  }
+
+  /**
+   * Wrap this cell in a proxy that provides OpaqueRef behavior.
+   * The proxy adds Symbol.iterator, Symbol.toPrimitive, and toCell support,
+   * and recursively wraps child cells accessed via property access.
+   *
+   * @returns A proxied version of this cell with OpaqueRef behavior
+   */
+  getAsOpaqueRefProxy(): OpaqueRef<T> {
+    const proxy = new Proxy(this, {
+      get(target, prop) {
+        if (prop === Symbol.iterator) {
+          // Iterator support for array destructuring
+          return function* () {
+            let index = 0;
+            while (index < 50) { // Limit to 50 items like original
+              const itemCell = (target as any).key(index);
+              yield itemCell.getAsOpaqueRefProxy();
+              index++;
+            }
+          };
+        } else if (prop === Symbol.toPrimitive) {
+          return () => {
+            throw new Error(
+              "Tried to directly access an opaque value. Use `derive` instead, passing this variable in as parameter to derive, not closing over it",
+            );
+          };
+        } else if (prop === toCell) {
+          // Return a function that returns the unproxied cell
+          return () => target;
+        } else if (prop === isOpaqueRefMarker) {
+          return true;
+        } else if (typeof prop === "string" || typeof prop === "number") {
+          // Recursive property access - wrap the child cell
+          const nestedCell = (target as any).key(prop);
+          return nestedCell.getAsOpaqueRefProxy();
+        }
+        // Delegate everything else to the Cell
+        return (target as any)[prop];
+      },
+    });
+    return proxy as unknown as OpaqueRef<T>;
   }
 
   /**

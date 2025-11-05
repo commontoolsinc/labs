@@ -10,7 +10,7 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
 } from "./types.ts";
-import { toCell, toOpaqueRef } from "../back-to-cell.ts";
+import { toOpaqueRef } from "../back-to-cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
@@ -33,8 +33,6 @@ export function opaqueRefImpl<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
-  const cfc = new ContextualFlowControl();
-
   // Create a Cell without a link - it will be created on demand via .for()
   const cell = createCell<T>(runtime, undefined, undefined, false);
 
@@ -48,53 +46,8 @@ export function opaqueRefImpl<T>(
     cell.set(value as any);
   }
 
-  // Recursively wrap child cells in proxies
-  function wrapCell(
-    childCell: any,
-    childSchema?: JSONSchema,
-  ): OpaqueRef<any> {
-    const childProxy = new Proxy(childCell, {
-      get(target, prop) {
-        if (prop === Symbol.iterator) {
-          // Iterator support for array destructuring
-          return function* () {
-            let index = 0;
-            while (index < 50) { // Limit to 50 items like original
-              const itemSchema = cfc.getSchemaAtPath(childSchema, [
-                index.toString(),
-              ], schema);
-              const itemCell = (target as any).key(index);
-              yield wrapCell(itemCell, itemSchema);
-              index++;
-            }
-          };
-        } else if (prop === Symbol.toPrimitive) {
-          return () => {
-            throw new Error(
-              "Tried to directly access an opaque value. Use `derive` instead, passing this variable in as parameter to derive, not closing over it",
-            );
-          };
-        } else if (prop === toCell) {
-          // Return a function that returns the unproxied cell
-          return () => target;
-        } else if (prop === isOpaqueRefMarker) {
-          return true;
-        } else if (typeof prop === "string" || typeof prop === "number") {
-          // Recursive property access - wrap the child cell
-          const nestedSchema = cfc.getSchemaAtPath(childSchema, [
-            prop.toString(),
-          ], schema);
-          const nestedCell = (target as any).key(prop);
-          return wrapCell(nestedCell, nestedSchema);
-        }
-        // Delegate everything else to the Cell
-        return (target as any)[prop];
-      },
-    });
-    return childProxy as unknown as OpaqueRef<any>;
-  }
-
-  return wrapCell(cell, schema);
+  // Use the cell's built-in method to get a proxied OpaqueRef
+  return cell.getAsOpaqueRefProxy();
 }
 
 // Legacy opaqueRef for backward compatibility - creates proxies without Cell
