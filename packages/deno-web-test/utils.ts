@@ -81,6 +81,7 @@ async function copy(src: string, dest: string): Promise<void> {
   } else if (stat.isDirectory) {
     await copyDir(src, dest);
   } else {
+    await Deno.mkdir(path.dirname(dest), { recursive: true });
     await Deno.copyFile(src, dest);
   }
 }

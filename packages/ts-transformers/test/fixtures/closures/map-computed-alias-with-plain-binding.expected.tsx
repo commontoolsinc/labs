@@ -1,9 +1,11 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
-const dynamicKey = "value" as const;
+function dynamicKey(): "value" {
+    return "value";
+}
 interface Item {
+    foo: number;
     value: number;
-    other: number;
 }
 interface State {
     items: Item[];
@@ -24,14 +26,14 @@ export default recipe({
         Item: {
             type: "object",
             properties: {
-                value: {
+                foo: {
                     type: "number"
                 },
-                other: {
+                value: {
                     type: "number"
                 }
             },
-            required: ["value", "other"]
+            required: ["foo", "value"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
@@ -54,24 +56,27 @@ export default recipe({
                     Item: {
                         type: "object",
                         properties: {
-                            value: {
+                            foo: {
                                 type: "number"
                             },
-                            other: {
+                            value: {
                                 type: "number"
                             }
                         },
-                        required: ["value", "other"]
+                        required: ["foo", "value"]
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => {
-                const __ct_val_key = dynamicKey;
+                const __ct_val_key = dynamicKey();
+                const { foo } = element;
                 const val = __ctHelpers.derive({
                     element: element,
                     __ct_val_key: __ct_val_key
                 }, ({ element, __ct_val_key }) => element[__ct_val_key]);
-                "use strict";
-                return <span key={val}>{__ctHelpers.derive({ val: val }, ({ val }) => val * 2)}</span>;
+                return (<span>{__ctHelpers.derive({
+                    foo: foo,
+                    val: val
+                }, ({ foo, val }) => foo + val)}</span>);
             }), {})}
       </div>),
     };

@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { traverseTypeHierarchy } from "./type-traversal.ts";
 
 export type CellBrand =
   | "opaque"
@@ -56,50 +57,13 @@ function findCellBrandSymbol(
   checker: ts.TypeChecker,
   seen: Set<ts.Type>,
 ): ts.Symbol | undefined {
-  if (seen.has(type)) return undefined;
-  seen.add(type);
-
-  const direct = getBrandSymbolFromType(type, checker);
-  if (direct) return direct;
-
-  const apparent = checker.getApparentType(type);
-  if (apparent !== type) {
-    const fromApparent = findCellBrandSymbol(apparent, checker, seen);
-    if (fromApparent) return fromApparent;
-  }
-
-  if (type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) {
-    const compound = type as ts.UnionOrIntersectionType;
-    for (const child of compound.types) {
-      const childSymbol = findCellBrandSymbol(child, checker, seen);
-      if (childSymbol) return childSymbol;
-    }
-  }
-
-  if (!(type.flags & ts.TypeFlags.Object)) {
-    return undefined;
-  }
-
-  const objectType = type as ts.ObjectType;
-
-  if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-    const typeRef = objectType as ts.TypeReference;
-    if (typeRef.target) {
-      const fromTarget = findCellBrandSymbol(typeRef.target, checker, seen);
-      if (fromTarget) return fromTarget;
-    }
-  }
-
-  if (objectType.objectFlags & ts.ObjectFlags.ClassOrInterface) {
-    const baseTypes = checker.getBaseTypes(objectType as ts.InterfaceType) ??
-      [];
-    for (const base of baseTypes) {
-      const fromBase = findCellBrandSymbol(base, checker, seen);
-      if (fromBase) return fromBase;
-    }
-  }
-
-  return undefined;
+  return traverseTypeHierarchy(type, {
+    checker,
+    checkType: (t) => getBrandSymbolFromType(t, checker),
+    visitApparentType: true,
+    visitTypeReferenceTarget: true,
+    visitBaseTypes: true,
+  }, seen);
 }
 
 export function getCellBrand(
@@ -176,38 +140,23 @@ function extractWrapperTypeReference(
   checker: ts.TypeChecker,
   seen: Set<ts.Type>,
 ): ts.TypeReference | undefined {
-  if (seen.has(type)) return undefined;
-  seen.add(type);
-
-  if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const typeRef = objectType as ts.TypeReference;
-      const typeArgs = typeRef.typeArguments ??
-        checker.getTypeArguments(typeRef);
-      if (typeArgs && typeArgs.length > 0) {
-        return typeRef;
+  return traverseTypeHierarchy(type, {
+    checker,
+    checkType: (t) => {
+      if (t.flags & ts.TypeFlags.Object) {
+        const objectType = t as ts.ObjectType;
+        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+          const typeRef = objectType as ts.TypeReference;
+          const typeArgs = typeRef.typeArguments ??
+            checker.getTypeArguments(typeRef);
+          if (typeArgs && typeArgs.length > 0) {
+            return typeRef;
+          }
+        }
       }
-    }
-  }
-
-  if (type.flags & ts.TypeFlags.Intersection) {
-    const intersectionType = type as ts.IntersectionType;
-    for (const constituent of intersectionType.types) {
-      const ref = extractWrapperTypeReference(constituent, checker, seen);
-      if (ref) return ref;
-    }
-  }
-
-  if (type.flags & ts.TypeFlags.Union) {
-    const unionType = type as ts.UnionType;
-    for (const member of unionType.types) {
-      const ref = extractWrapperTypeReference(member, checker, seen);
-      if (ref) return ref;
-    }
-  }
-
-  return undefined;
+      return undefined;
+    },
+  }, seen);
 }
 
 export function getCellWrapperInfo(

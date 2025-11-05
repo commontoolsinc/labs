@@ -5,7 +5,7 @@ export default recipe("Optional Element Access", () => {
     return {
         [NAME]: "Optional element access",
         [UI]: (<div>
-        {__ctHelpers.derive(list, ({ list }) => !list?.[0] && <span>No first entry</span>)}
+        {__ctHelpers.derive({ list: list }, ({ list }) => !list?.[0] && <span>No first entry</span>)}
       </div>),
     };
 });

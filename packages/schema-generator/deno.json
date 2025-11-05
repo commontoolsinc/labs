@@ -4,7 +4,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./interface": "./src/interface.ts",
-    "./typescript/cell-brand": "./src/typescript/cell-brand.ts"
+    "./typescript/cell-brand": "./src/typescript/cell-brand.ts",
+    "./typescript/type-traversal": "./src/typescript/type-traversal.ts"
   },
   "imports": {
     "typescript": "npm:typescript",

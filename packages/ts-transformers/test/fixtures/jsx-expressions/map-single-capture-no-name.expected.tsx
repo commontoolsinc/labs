@@ -7,7 +7,7 @@ export default recipe(true as const satisfies __ctHelpers.JSONSchema, (_state: a
     ]);
     return {
         [UI]: (<div>
-        {__ctHelpers.derive(people, ({ people }) => people.length > 0 && (<ul>
+        {__ctHelpers.derive({ people: people }, ({ people }) => people.length > 0 && (<ul>
             {people.map((person) => (<li key={person.id}>{person.name}</li>))}
           </ul>))}
       </div>),
