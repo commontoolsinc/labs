@@ -184,10 +184,14 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                       <td>{charm?.[NAME] || "Untitled Charm"}</td>
                       <td>
                         <a
+                          href="#"
                           className="pattern-link"
-                          onClick={visit({ charm })}
+                          onClick={(e: any) => {
+                            e.preventDefault();
+                            visit({ charm })(e);
+                          }}
                         >
-                          {getCharmName({ charm })}
+                          {charm?.[NAME] || "Untitled"}
                         </a>
                       </td>
                       <td>
