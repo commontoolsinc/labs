@@ -789,7 +789,53 @@ const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
 
 **Reference:** See `packages/patterns/chatbot-list-view.tsx` for the canonical implementation, specifically the `storeCharm` lift and `createChatRecipe` handler. Full details in `HANDLERS.md` under "Storing Pattern Instances in Cell Arrays".
 
-#### 6. Not Including All Cells in Derive Dependencies
+#### 6. Manually Creating Cells for Array Items (Stack Overflow)
+
+```typescript
+// ❌ WRONG - Manually wrapping items in cells causes stack overflow
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    const currentItems = items.get();
+    const newItems = data.map(d => cell({ name: d.name })); // ❌ Don't do this!
+    items.set([...currentItems, ...newItems]); // RangeError: Maximum call stack size exceeded
+  }
+);
+
+// ✅ CORRECT - Use plain objects with .push(), framework auto-wraps
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    data.forEach(d => {
+      items.push({ name: d.name }); // ✅ Plain object, framework wraps it
+    });
+  }
+);
+
+// ✅ ALSO CORRECT - Use .set() with plain objects only
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    const currentItems = items.get();
+    const newItems = data.map(d => ({ name: d.name })); // Plain objects
+    items.set([...currentItems, ...newItems]); // ✅ Works when all are plain
+  }
+);
+```
+
+**When you'll encounter this:** Applying bulk data (like LLM extraction results) to arrays in your recipe. You might think you need to wrap each item in `cell()` before adding it to a `Cell<T[]>` array.
+
+**Why this is a pitfall:** When using `.set([...currentItems, ...newItems])`, `currentItems` are already wrapped in cells by the framework. Manually wrapping `newItems` with `cell()` creates a mix of framework-wrapped cells and manually-created cells, causing infinite recursion in the reactive system. The cryptic "Maximum call stack size exceeded" error doesn't indicate the solution.
+
+**Rule:** Never manually call `cell()` when adding items to `Cell<T[]>` arrays. Use `.push(plainObject)` to add items one at a time (framework auto-wraps each), or use `.set([...plainObjects])` with only plain objects. Let the framework handle all cell wrapping.
+
+#### 7. Not Including All Cells in Derive Dependencies
 
 ```typescript
 // ❌ WRONG - items is used in callback but not in dependencies
