@@ -117,6 +117,6 @@
     "multiformats": "npm:multiformats@^13.3.2",
     "turndown": "npm:turndown@^7.1.2",
     "zod": "npm:zod@^3.24.1",
-    "@commontools/cell-brand": "./packages/utils/src/typescript/cell-brand.ts"
+    "@commontools/schema-generator/cell-brand": "./packages/schema-generator/src/typescript/cell-brand.ts"
   }
 }

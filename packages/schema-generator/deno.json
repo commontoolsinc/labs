@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",
-    "./interface": "./src/interface.ts"
+    "./interface": "./src/interface.ts",
+    "./typescript/cell-brand": "./src/typescript/cell-brand.ts"
   },
   "imports": {
     "typescript": "npm:typescript",
     "@commontools/utils": "../utils/src/index.ts",
-    "@commontools/static": "../static/index.ts",
-    "@commontools/cell-brand": "../utils/src/typescript/cell-brand.ts"
+    "@commontools/static": "../static/index.ts"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS test/**/*.test.ts",

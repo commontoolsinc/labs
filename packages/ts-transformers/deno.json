@@ -8,7 +8,7 @@
   },
   "imports": {
     "typescript": "npm:typescript",
-    "@commontools/cell-brand": "../utils/src/typescript/cell-brand.ts",
+    "@commontools/schema-generator/cell-brand": "../schema-generator/src/typescript/cell-brand.ts",
     "@commontools/utils": "../utils/src/index.ts"
   },
   "tasks": {

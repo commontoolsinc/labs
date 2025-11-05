@@ -6,8 +6,6 @@ import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 describe("Schema: Type aliases and shared types", () => {
   it("handles basic Cell/Stream/Default aliases", async () => {
     const code = `
-      interface Cell<T> extends BrandedCell<T, "cell"> { get(): T; set(v: T): void; }
-      interface Stream<T> extends BrandedCell<T, "stream"> { subscribe(cb: (v:T) => void): void; }
       interface Default<T, V> {}
       type MyCell<T> = Cell<T>;
       type StringCell = Cell<string>;

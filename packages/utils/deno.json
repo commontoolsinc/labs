@@ -1,8 +1,5 @@
 {
   "name": "@commontools/utils",
-  "tasks": {
-    "test": "deno test --allow-env"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./defer": "./src/defer.ts",
@@ -13,10 +10,6 @@
     "./types": "./src/types.ts",
     "./integration": "./src/integration.ts",
     "./zod-utils": "./src/zod-utils.ts",
-    "./logger": "./src/logger.ts",
-    "./typescript/cell-brand": "./src/typescript/cell-brand.ts"
-  },
-  "imports": {
-    "typescript": "npm:typescript"
+    "./logger": "./src/logger.ts"
   }
 }

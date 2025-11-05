@@ -9,7 +9,7 @@ import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
-import { isCellType } from "@commontools/cell-brand";
+import { isCellType } from "../typescript/cell-brand.ts";
 
 const logger = getLogger("schema-generator.intersection");
 const DOC_CONFLICT_COMMENT =

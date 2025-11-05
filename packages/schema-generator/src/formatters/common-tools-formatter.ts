@@ -4,7 +4,7 @@ import {
   getCellBrand,
   getCellWrapperInfo,
   isCellBrand,
-} from "@commontools/cell-brand";
+} from "../typescript/cell-brand.ts";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -224,6 +224,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Determine the property name to add based on wrapper kind
+    // TODO(gideon): Consider updating as[Cell,Opaque,Stream] properties to use an array of brands
+    // instead of boolean values, to support multiple brands like ["cell", "comparable"]
     const propertyName = wrapperKind === "Cell" ? "asCell" : "asOpaque";
 
     // Handle case where innerSchema might be boolean (per JSON Schema spec)
