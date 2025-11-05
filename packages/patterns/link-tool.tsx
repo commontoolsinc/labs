@@ -39,7 +39,7 @@ export const createLinkHandler = handler<
     result.set(outcome);
   }
 
-  return linkResult;
+  // Handlers should not return OpaqueRefs - they're for side effects only
 });
 
 type LinkToolInput = Record<string, never>;
