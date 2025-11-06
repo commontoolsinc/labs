@@ -230,16 +230,54 @@ function shouldCaptureIdentifier(
 }
 
 /**
- * Type guard for function declarations (excludes signature declarations)
- * Used to identify nested functions that can have their own captures
+ * Type guard for function-like declarations (excludes signature declarations).
+ * Used to identify nested functions that can have their own captures.
+ * Naming matches pattern: isFunctionLikeExpression (for callbacks), isFunctionLikeDeclaration (for nested functions).
  */
-function isFunctionDeclarationLike(
+function isFunctionLikeDeclaration(
   node: ts.Node,
 ): node is ts.FunctionLikeDeclaration {
   return ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
     ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
     ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
     ts.isConstructorDeclaration(node);
+}
+
+/**
+ * Determines if a capture from a nested function should be added to the outer function's captures.
+ * Filters out captures that are parameters of the outer function.
+ *
+ * For identifiers: Check if the identifier name matches an outer function parameter.
+ * For property accesses: Check if the root identifier matches an outer function parameter.
+ *   Example: If outer function has parameter `item`, then inner function's capture of
+ *   `item.name` should NOT be added to outer function's captures (since `item` is the
+ *   outer function's own parameter, not a capture from further out).
+ */
+function shouldAddNestedCapture(
+  capture: ts.Expression,
+  funcParams: Set<string>,
+): boolean {
+  if (ts.isIdentifier(capture)) {
+    // Simple identifier: check directly
+    return !funcParams.has(capture.text);
+  }
+
+  if (ts.isPropertyAccessExpression(capture)) {
+    // Property access: check if root identifier is a parameter
+    // Walk down the chain to find the root: a.b.c -> a
+    let rootExpr: ts.Expression = capture;
+    while (ts.isPropertyAccessExpression(rootExpr)) {
+      rootExpr = rootExpr.expression;
+    }
+    if (ts.isIdentifier(rootExpr)) {
+      return !funcParams.has(rootExpr.text);
+    }
+    // Root is not an identifier (e.g., computed property access) - include it
+    return true;
+  }
+
+  // Other types of captures (e.g., element access, call expressions) - include them
+  return true;
 }
 
 /**
@@ -257,9 +295,15 @@ function collectCaptures(
     // Even though they have their own scope for parameters, they still
     // close over variables from outer scopes, and we need to know about
     // all such captures for the derive/handler transformation
-    if (node !== func && isFunctionDeclarationLike(node)) {
+    if (node !== func && isFunctionLikeDeclaration(node)) {
       const nestedCaptures = collectCaptures(node, checker);
       // Filter out captures that are parameters of the current function
+      //
+      // CRITICAL: We must filter based on root identifiers for property accesses.
+      // Example: Outer map has parameter `item`, inner map uses `item.name`
+      //   - Without this filtering: `item.name` gets added to outer params → collision with `element: item` → generates `item_1`
+      //   - With this filtering: Recognizes `item` is outer param → filters out `item.name` → only `state` in outer params
+      // This prevents spurious name collisions when nested callbacks reference outer parameters.
       const funcParams = new Set(
         func.parameters.map((p) => p.name).filter(ts.isIdentifier).map((id) =>
           id.text
@@ -267,28 +311,7 @@ function collectCaptures(
       );
 
       for (const capture of nestedCaptures) {
-        // Only add if it's not a parameter of the outer function
-        if (ts.isIdentifier(capture)) {
-          if (!funcParams.has(capture.text)) {
-            captures.add(capture);
-          }
-        } else if (ts.isPropertyAccessExpression(capture)) {
-          // For property accesses like item.name, check if the root identifier
-          // is a parameter of the outer function
-          let rootExpr: ts.Expression = capture;
-          while (ts.isPropertyAccessExpression(rootExpr)) {
-            rootExpr = rootExpr.expression;
-          }
-          if (ts.isIdentifier(rootExpr)) {
-            if (!funcParams.has(rootExpr.text)) {
-              captures.add(capture);
-            }
-          } else {
-            // Root is not an identifier (e.g., computed property access)
-            captures.add(capture);
-          }
-        } else {
-          // Other types of captures (e.g., element access, call expressions)
+        if (shouldAddNestedCapture(capture, funcParams)) {
           captures.add(capture);
         }
       }

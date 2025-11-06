@@ -345,14 +345,18 @@ export function getNamedTypeKey(
     const ref = type as unknown as ts.TypeReference;
     name = ref.target?.symbol?.name ?? name;
   }
+  // Helper to check if a name is compiler-internal/anonymous (e.g., __type, __object, __computed)
+  const isAnonymousName = (n: string | undefined) =>
+    !n || n.startsWith("__");
+
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
   // but the type has an explicit alias name
-  if ((!name || name === "__type" || name.startsWith("__")) && aliasName) {
+  if (isAnonymousName(name) && aliasName) {
     name = aliasName;
   }
-  // Filter out compiler-internal anonymous type names (e.g., __type, __object, __computed)
-  if (!name || name === "__type" || name.startsWith("__")) {
+  // Filter out compiler-internal anonymous type names
+  if (isAnonymousName(name)) {
     return undefined;
   }
   // Exclude property/method-like symbols (member names), which are not real named types
