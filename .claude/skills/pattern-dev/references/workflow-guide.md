@@ -13,7 +13,7 @@ This guide covers high-level workflow patterns and best practices for developing
 1. **Write minimal pattern** - Basic types, minimal UI, single feature
 2. **Deploy and test** - Use ct skill for deployment commands
 3. **Inspect and verify** - Use ct skill for inspection commands
-4. **Iterate with updates** - Use `ct charm setsrc` for fast updates (via ct skill)
+4. **Iterate with updates** - Use `deno task ct charm setsrc` for fast updates (via ct skill)
 5. **Add next feature** - One at a time, repeat cycle
 
 **Why this works:**
@@ -93,7 +93,7 @@ patterns/feature/
    - Cell operations? → See `RECIPES.md`
 3. Find similar example in `packages/patterns/`
 4. Apply fix
-5. Verify with `ct dev --no-run` (via ct skill)
+5. Verify with `deno task ct dev --no-run` (via ct skill)
 
 ### Runtime Error → Solution Mapping
 
@@ -218,9 +218,9 @@ Use `derive()` judiciously for expensive operations.
 ### Using ct Effectively
 
 **Fast iteration:**
-- Deploy once with `ct charm new`
-- Update repeatedly with `ct charm setsrc`
-- Inspect with `ct charm inspect`
+- Deploy once with `deno task ct charm new`
+- Update repeatedly with `deno task ct charm setsrc`
+- Inspect with `deno task ct charm inspect`
 
 **See ct skill for all command details.**
 
