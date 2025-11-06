@@ -65,14 +65,8 @@ export type IsThisArray =
  * IAnyCell is an interface that is used by all calls and to which the runner
  * attaches the internal methods..
  */
+// deno-lint-ignore no-empty-interface
 export interface IAnyCell<T> {
-  /**
-   * Set a cause for this cell. Used to create a link when the cell doesn't have
-   * one yet.
-   * @param cause - The cause to associate with this cell
-   * @returns This cell for method chaining
-   */
-  //  for(cause: unknown): Cell<T>;
 }
 
 /**
@@ -204,6 +198,19 @@ export interface IKeyableOpaque<T> {
 }
 
 /**
+ * Cells that can be created with a cause.
+ */
+export interface ICreatable<C extends BrandedCell<any>> {
+  /**
+   * Set a cause for this cell. Used to create a link when the cell doesn't have
+   * one yet.
+   * @param cause - The cause to associate with this cell
+   * @returns This cell for method chaining
+   */
+  for(cause: unknown): C;
+}
+
+/**
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
  */
@@ -267,7 +274,12 @@ export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
  * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
  */
 export interface IOpaqueCell<T>
-  extends IAnyCell<T>, IKeyableOpaque<T>, IDerivable<T>, IOpaquable<T> {}
+  extends
+    IAnyCell<T>,
+    ICreatable<OpaqueCell<T>>,
+    IKeyableOpaque<T>,
+    IDerivable<T>,
+    IOpaquable<T> {}
 
 export interface OpaqueCell<T>
   extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
@@ -285,6 +297,7 @@ export interface AsCell extends HKT {
 export interface ICell<T>
   extends
     IAnyCell<T>,
+    ICreatable<Cell<T>>,
     IReadable<T>,
     IWritable<T>,
     IStreamable<T>,
@@ -303,7 +316,11 @@ export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
  * Note: This is an interface (not a type) to allow module augmentation by the runtime.
  */
 export interface Stream<T>
-  extends BrandedCell<T, "stream">, IAnyCell<T>, IStreamable<T> {}
+  extends
+    BrandedCell<T, "stream">,
+    IAnyCell<T>,
+    ICreatable<Stream<T>>,
+    IStreamable<T> {}
 
 /**
  * Comparable-only cell - just for equality checks and keying.
@@ -318,6 +335,7 @@ export interface ComparableCell<T>
   extends
     BrandedCell<T, "comparable">,
     IAnyCell<T>,
+    ICreatable<ComparableCell<T>>,
     IEquatable,
     IKeyable<T, AsComparableCell> {}
 
@@ -334,6 +352,7 @@ export interface ReadonlyCell<T>
   extends
     BrandedCell<T, "readonly">,
     IAnyCell<T>,
+    ICreatable<ReadonlyCell<T>>,
     IReadable<T>,
     IEquatable,
     IKeyable<T, AsReadonlyCell> {}
@@ -351,6 +370,7 @@ export interface WriteonlyCell<T>
   extends
     BrandedCell<T, "writeonly">,
     IAnyCell<T>,
+    ICreatable<WriteonlyCell<T>>,
     IWritable<T>,
     IKeyable<T, AsWriteonlyCell> {}
 

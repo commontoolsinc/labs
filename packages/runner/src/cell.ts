@@ -101,7 +101,6 @@ declare module "@commontools/api" {
    * on Cell in the runner runtime.
    */
   interface IAnyCell<out T> {
-    for(cause: unknown, allowIfSet?: boolean): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -181,6 +180,10 @@ declare module "@commontools/api" {
     sourceURI: URI;
     path: readonly PropertyKey[];
     copyTrap: boolean;
+  }
+
+  interface ICreatable<C extends BrandedCell<any>> {
+    for(cause: unknown, allowIfSet?: boolean): C;
   }
 }
 
