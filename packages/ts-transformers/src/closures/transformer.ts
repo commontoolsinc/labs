@@ -263,13 +263,30 @@ function collectCaptures(
       const funcParams = new Set(
         func.parameters.map(p => p.name).filter(ts.isIdentifier).map(id => id.text)
       );
+
       for (const capture of nestedCaptures) {
         // Only add if it's not a parameter of the outer function
         if (ts.isIdentifier(capture)) {
           if (!funcParams.has(capture.text)) {
             captures.add(capture);
           }
+        } else if (ts.isPropertyAccessExpression(capture)) {
+          // For property accesses like item.name, check if the root identifier
+          // is a parameter of the outer function
+          let rootExpr: ts.Expression = capture;
+          while (ts.isPropertyAccessExpression(rootExpr)) {
+            rootExpr = rootExpr.expression;
+          }
+          if (ts.isIdentifier(rootExpr)) {
+            if (!funcParams.has(rootExpr.text)) {
+              captures.add(capture);
+            }
+          } else {
+            // Root is not an identifier (e.g., computed property access)
+            captures.add(capture);
+          }
         } else {
+          // Other types of captures (e.g., element access, call expressions)
           captures.add(capture);
         }
       }

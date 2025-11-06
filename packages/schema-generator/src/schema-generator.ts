@@ -572,6 +572,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
   ): SchemaDefinition {
     const typeRegistry = context.typeRegistry;
+
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
       const properties: Record<string, SchemaDefinition> = {};

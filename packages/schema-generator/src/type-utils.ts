@@ -439,11 +439,9 @@ export function getArrayElementInfo(
   if (typeNode) {
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
-      const elementType = safeGetTypeFromTypeNode(
-        checker,
-        typeNode.elementType,
-        "array element type",
-      );
+      // For array types, get the element type from the parent array Type
+      // instead of from the element TypeNode (which would widen to any for synthetic nodes)
+      const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
       if (elementType) {
         return {
           elementType,
