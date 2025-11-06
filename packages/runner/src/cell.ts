@@ -182,7 +182,7 @@ declare module "@commontools/api" {
     copyTrap: boolean;
   }
 
-  interface ICreatable<C extends BrandedCell<any>> {
+  interface ICreatable<C extends AnyBrandedCell<any>> {
     for(cause: unknown, allowIfSet?: boolean): C;
   }
 }

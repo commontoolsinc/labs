@@ -40,9 +40,11 @@ export type CellKind =
   | "writeonly";
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
-export type BrandedCell<T, Kind extends CellKind | string = string> = {
+export type AnyBrandedCell<T, Kind extends string = string> = {
   [CELL_BRAND]: Kind | string;
 };
+
+export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
 
 // ============================================================================
 // Cell Capability Interfaces
@@ -51,15 +53,15 @@ export type BrandedCell<T, Kind extends CellKind | string = string> = {
 // To constrain methods that only exists on objects
 export type IsThisObject =
   | IsThisArray
-  | BrandedCell<JSONObject>
-  | BrandedCell<Record<string, unknown>>;
+  | AnyBrandedCell<JSONObject>
+  | AnyBrandedCell<Record<string, unknown>>;
 
 export type IsThisArray =
-  | BrandedCell<JSONArray>
-  | BrandedCell<Array<unknown>>
-  | BrandedCell<Array<any>>
-  | BrandedCell<unknown>
-  | BrandedCell<any>;
+  | AnyBrandedCell<JSONArray>
+  | AnyBrandedCell<Array<unknown>>
+  | AnyBrandedCell<Array<any>>
+  | AnyBrandedCell<unknown>
+  | AnyBrandedCell<any>;
 
 /*
  * IAnyCell is an interface that is used by all calls and to which the runner
@@ -175,7 +177,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
 export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
   ? Apply<Wrap, any> // variance guard for K = any
   : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
-  : T extends BrandedCell<any, any> // wrapping a cell? delegate to it's .key
+  : T extends AnyBrandedCell<any, any> // wrapping a cell? delegate to it's .key
     ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
   : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
 
@@ -192,7 +194,7 @@ export interface IKeyableOpaque<T> {
   ): unknown extends K ? OpaqueCell<any>
     : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
         : UnwrapCell<T>[K] extends never ? OpaqueCell<any>
-        : UnwrapCell<T>[K] extends BrandedCell<infer U> ? OpaqueCell<U>
+        : UnwrapCell<T>[K] extends AnyBrandedCell<infer U> ? OpaqueCell<U>
         : OpaqueCell<UnwrapCell<T>[K]>)
     : OpaqueCell<any>;
 }
@@ -200,7 +202,7 @@ export interface IKeyableOpaque<T> {
 /**
  * Cells that can be created with a cause.
  */
-export interface ICreatable<C extends BrandedCell<any>> {
+export interface ICreatable<C extends AnyBrandedCell<any>> {
   /**
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
@@ -214,7 +216,7 @@ export interface ICreatable<C extends BrandedCell<any>> {
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
  */
-export interface IResolvable<T, C extends BrandedCell<T>> {
+export interface IResolvable<T, C extends AnyBrandedCell<T>> {
   resolveAsCell(): C;
 }
 
@@ -265,7 +267,7 @@ export interface IOpaquable<T> {
  * interface with internal only API. Uses a second symbol brand to distinguish
  * from core cell brand without any methods.
  */
-export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
+export interface AnyCell<T = unknown> extends AnyBrandedCell<T>, IAnyCell<T> {
 }
 
 /**
@@ -276,7 +278,7 @@ export interface AnyCell<T = unknown> extends BrandedCell<T>, IAnyCell<T> {
 export interface IOpaqueCell<T>
   extends
     IAnyCell<T>,
-    ICreatable<OpaqueCell<T>>,
+    ICreatable<AnyBrandedCell<T>>,
     IKeyableOpaque<T>,
     IDerivable<T>,
     IOpaquable<T> {}
@@ -297,7 +299,7 @@ export interface AsCell extends HKT {
 export interface ICell<T>
   extends
     IAnyCell<T>,
-    ICreatable<Cell<T>>,
+    ICreatable<AnyBrandedCell<T>>,
     IReadable<T>,
     IWritable<T>,
     IStreamable<T>,
@@ -385,11 +387,11 @@ export interface WriteonlyCell<T>
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> = T extends BrandedCell<any> ? T
+export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
   :
     & OpaqueCell<T>
     & (T extends Array<infer U> ? Array<OpaqueRef<U>>
-      : T extends BrandedCell<any> ? T
+      : T extends AnyBrandedCell<any> ? T
       : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
       : T);
 
@@ -403,10 +405,10 @@ export type OpaqueRef<T> = T extends BrandedCell<any> ? T
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = BrandedCell<MaybeCellWrapped<T>>;
+export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>>;
 type MaybeCellWrapped<T> =
   | T
-  | BrandedCell<T>
+  | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>>
     : T extends object ? { [K in keyof T]: MaybeCellWrapped<T[K]> }
     : never);
@@ -423,10 +425,10 @@ type MaybeCellWrapped<T> =
 export type Opaque<T> =
   | T
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
-  // to work if we just say BrandedCell<T>
+  // to work if we just say AnyBrandedCell<T>
   | OpaqueRef<T>
   | AnyCell<T>
-  | BrandedCell<T>
+  | AnyBrandedCell<T>
   | OpaqueCell<T>
   | Cell<T>
   | Stream<T>
@@ -438,9 +440,9 @@ export type Opaque<T> =
     : T);
 
 /**
- * Recursively unwraps BrandedCell types at any nesting level.
- * UnwrapCell<BrandedCell<BrandedCell<string>>> = string
- * UnwrapCell<BrandedCell<{ a: BrandedCell<number> }>> = { a: BrandedCell<number> }
+ * Recursively unwraps AnyBrandedCell types at any nesting level.
+ * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
+ * UnwrapCell<AnyBrandedCell<{ a: AnyBrandedCell<number> }>> = { a: AnyBrandedCell<number> }
  *
  * Special cases:
  * - UnwrapCell<any> = any
@@ -449,8 +451,8 @@ export type Opaque<T> =
 export type UnwrapCell<T> =
   // Preserve any
   0 extends (1 & T) ? T
-    // Unwrap BrandedCell
-    : T extends BrandedCell<infer S> ? UnwrapCell<S>
+    // Unwrap AnyBrandedCell
+    : T extends AnyBrandedCell<infer S> ? UnwrapCell<S>
     // Otherwise return as-is
     : T;
 
@@ -463,19 +465,19 @@ export type UnwrapCell<T> =
  * allows controlling id generation and can only be passed to write operations.
  */
 export type AnyCellWrapping<T> =
-  // Handle existing BrandedCell<> types, allowing unwrapping
-  T extends BrandedCell<infer U>
-    ? AnyCellWrapping<U> | BrandedCell<AnyCellWrapping<U>>
+  // Handle existing AnyBrandedCell<> types, allowing unwrapping
+  T extends AnyBrandedCell<infer U>
+    ? AnyCellWrapping<U> | AnyBrandedCell<AnyCellWrapping<U>>
     // Handle arrays
     : T extends Array<infer U>
-      ? Array<AnyCellWrapping<U>> | BrandedCell<Array<AnyCellWrapping<U>>>
+      ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
           & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
-        | BrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
+        | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
-    : T | BrandedCell<T>;
+    : T | AnyBrandedCell<T>;
 
 // Factory types
 
@@ -1349,7 +1351,7 @@ export type Props = {
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | BrandedCell<InnerRenderNode>
+  | AnyBrandedCell<InnerRenderNode>
   | Array<RenderNode>;
 
 type InnerRenderNode =
