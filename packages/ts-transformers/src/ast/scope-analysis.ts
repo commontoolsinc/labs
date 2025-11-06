@@ -20,10 +20,12 @@ export function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
 
 /**
  * Check if a declaration represents a function (we can't serialize functions).
- * NOTE: Currently treats all CallExpressions as functions, which may be overly broad.
- * Consider refining to only match handler(), lift(), recipe() calls.
+ * Uses TypeScript's type system to check if the declared value is a function type.
  */
-export function isFunctionDeclaration(decl: ts.Declaration): boolean {
+export function isFunctionDeclaration(
+  decl: ts.Declaration,
+  checker?: ts.TypeChecker,
+): boolean {
   // Direct function declarations
   if (ts.isFunctionDeclaration(decl)) {
     return true;
@@ -32,12 +34,20 @@ export function isFunctionDeclaration(decl: ts.Declaration): boolean {
   // Arrow functions or function expressions assigned to variables
   if (ts.isVariableDeclaration(decl) && decl.initializer) {
     const init = decl.initializer;
-    if (
-      ts.isArrowFunction(init) ||
-      ts.isFunctionExpression(init) ||
-      ts.isCallExpression(init) // Includes handler(), lift(), etc.
-    ) {
+
+    // Direct function syntax
+    if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
       return true;
+    }
+
+    // For call expressions, use type system to determine if result is a function
+    if (checker && ts.isCallExpression(init)) {
+      const type = checker.getTypeAtLocation(init);
+      // Check if the type has call signatures (making it a function type)
+      const signatures = type.getCallSignatures();
+      if (signatures.length > 0) {
+        return true;
+      }
     }
   }
 
