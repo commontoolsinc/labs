@@ -22,7 +22,20 @@ import { h } from "@commontools/html";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
-import { createBuiltIns } from "./built-in.ts";
+import {
+  compileAndRun,
+  fetchData,
+  generateObject,
+  generateText,
+  ifElse,
+  llm,
+  llmDialog,
+  navigateTo,
+  patternTool,
+  str,
+  streamData,
+  wish,
+} from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -86,16 +99,13 @@ export const createBuilder = (
     }
   };
 
-  // Create built-in modules that need runtime
-  const builtIns = createBuiltIns();
-
   return {
     commontools: {
       // Recipe creation
       recipe,
-      patternTool: builtIns.patternTool,
+      patternTool,
 
-      // Module creation - these now get runtime from frame
+      // Module creation
       lift,
       handler,
       derive,
@@ -103,17 +113,17 @@ export const createBuilder = (
       render,
 
       // Built-in modules
-      str: builtIns.str,
-      ifElse: builtIns.ifElse,
-      llm: builtIns.llm,
-      llmDialog: builtIns.llmDialog,
-      generateObject: builtIns.generateObject,
-      generateText: builtIns.generateText,
-      fetchData: builtIns.fetchData,
-      streamData: builtIns.streamData,
-      compileAndRun: builtIns.compileAndRun,
-      navigateTo: builtIns.navigateTo,
-      wish: builtIns.wish,
+      str,
+      ifElse,
+      llm,
+      llmDialog,
+      generateObject,
+      generateText,
+      fetchData,
+      streamData,
+      compileAndRun,
+      navigateTo,
+      wish,
 
       // Cell creation
       createCell,
