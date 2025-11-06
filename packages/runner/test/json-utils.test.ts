@@ -6,16 +6,10 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import {
   createJsonSchema,
-  toJSONWithLegacyAliases,
 } from "../src/builder/json-utils.ts";
 import {
-  isOpaqueRefMarker,
   type JSONSchema,
-  type Opaque,
-  type OpaqueRef,
-  type ShadowRef,
 } from "../src/builder/types.ts";
-import type { LegacyAlias } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

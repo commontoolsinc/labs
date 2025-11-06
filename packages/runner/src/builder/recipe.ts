@@ -1,9 +1,8 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import {
   type Frame,
   isOpaqueRef,
   type JSONSchema,
-  type JSONSchemaMutable,
   type Module,
   type Node,
   type NodeRef,
@@ -15,7 +14,6 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
   type toJSON,
-  UI,
   type UnsafeBinding,
 } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
@@ -25,7 +23,6 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import {
-  createJsonSchema,
   moduleToJSON,
   recipeToJSON,
   toJSONWithLegacyAliases,
@@ -171,7 +168,7 @@ function factoryFromRecipe<T, R>(
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
-        const { frame, nodes, value: cellValue } = value.export();
+        const { frame, nodes } = value.export();
         if (isOpaqueRef(value) && frame !== getTopFrame()) {
           throw new Error(
             "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",

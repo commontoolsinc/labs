@@ -1,6 +1,6 @@
 import { createNodeFactory } from "./builder/module.ts";
 import { Module, type ModuleFactory } from "./builder/types.ts";
-import { pushFrame, popFrame } from "./builder/recipe.ts";
+import { popFrame, pushFrame } from "./builder/recipe.ts";
 import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";

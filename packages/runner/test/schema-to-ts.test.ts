@@ -6,12 +6,11 @@ import { handler, lift } from "../src/builder/module.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import {
   type AnyCellWrapping,
-  type Frame,
   type JSONSchema,
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
-import { popFrame, pushFrame, recipe } from "../src/builder/recipe.ts";
+import { recipe } from "../src/builder/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";

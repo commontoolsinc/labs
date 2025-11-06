@@ -1,16 +1,14 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
-import { type Frame, type OpaqueRef } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
-import { opaqueRef } from "./builder/opaque-ref.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { fromURI, toURI } from "./uri-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
