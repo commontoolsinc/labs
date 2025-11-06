@@ -36,7 +36,7 @@ describe("wish built-in", () => {
     await storageManager.close();
   });
 
-  it.only("resolves the well known all charms cell", async () => {
+  it("resolves the well known all charms cell", async () => {
     const allCharmsCell = runtime.getCellFromEntityId(
       space,
       { "/": ALL_CHARMS_ID },
