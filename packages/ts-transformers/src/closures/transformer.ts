@@ -216,7 +216,9 @@ function shouldCaptureIdentifier(
   }
 
   // Skip function declarations (can't serialize functions)
-  const isFunction = declarations.some((decl) => isFunctionDeclaration(decl, checker));
+  const isFunction = declarations.some((decl) =>
+    isFunctionDeclaration(decl, checker)
+  );
   if (isFunction) {
     return undefined;
   }
@@ -251,7 +253,11 @@ function collectCaptures(
       const methodTarget = getMethodCallTarget(node);
       if (methodTarget) {
         // Method call on a property access (e.g., state.counter.set())
-        const captured = shouldCapturePropertyAccess(methodTarget, func, checker);
+        const captured = shouldCapturePropertyAccess(
+          methodTarget,
+          func,
+          checker,
+        );
         if (captured) {
           captures.add(captured);
           // Don't visit children
@@ -1155,7 +1161,10 @@ function extractDeriveCallback(
   // 2-arg form: callback is at index 1
   if (args.length === 2) {
     const callback = args[1];
-    if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+    if (
+      callback &&
+      (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+    ) {
       return callback;
     }
   }
@@ -1163,7 +1172,10 @@ function extractDeriveCallback(
   // 4-arg form: callback is at index 3
   if (args.length === 4) {
     const callback = args[3];
-    if (callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+    if (
+      callback &&
+      (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+    ) {
       return callback;
     }
   }
@@ -1185,16 +1197,19 @@ function buildDeriveInputObject(
 
   // Add the original input as a property
   // Use shorthand if the original input is a simple identifier matching the param name
-  if (ts.isIdentifier(originalInput) && originalInput.text === originalInputParamName) {
+  if (
+    ts.isIdentifier(originalInput) &&
+    originalInput.text === originalInputParamName
+  ) {
     properties.push(
-      factory.createShorthandPropertyAssignment(originalInput, undefined)
+      factory.createShorthandPropertyAssignment(originalInput, undefined),
     );
   } else {
     properties.push(
       factory.createPropertyAssignment(
         createPropertyName(originalInputParamName, factory),
-        originalInput
-      )
+        originalInput,
+      ),
     );
   }
 
@@ -1203,14 +1218,14 @@ function buildDeriveInputObject(
     properties.push(
       factory.createPropertyAssignment(
         createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory)
-      )
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
     );
   }
 
   return factory.createObjectLiteralExpression(
     properties,
-    properties.length > 1
+    properties.length > 1,
   );
 }
 
@@ -1234,22 +1249,22 @@ function createDeriveCallback(
     // No parameter - shouldn't happen for derive, but handle gracefully
     return ts.isArrowFunction(callback)
       ? factory.createArrowFunction(
-          callback.modifiers,
-          callback.typeParameters,
-          [],
-          callback.type,
-          callback.equalsGreaterThanToken,
-          transformedBody
-        )
+        callback.modifiers,
+        callback.typeParameters,
+        [],
+        callback.type,
+        callback.equalsGreaterThanToken,
+        transformedBody,
+      )
       : factory.createFunctionExpression(
-          callback.modifiers,
-          callback.asteriskToken,
-          callback.name,
-          callback.typeParameters,
-          [],
-          callback.type,
-          transformedBody as ts.Block
-        );
+        callback.modifiers,
+        callback.asteriskToken,
+        callback.name,
+        callback.typeParameters,
+        [],
+        callback.type,
+        transformedBody as ts.Block,
+      );
   }
 
   // Build the binding elements for the destructured parameter
@@ -1259,7 +1274,7 @@ function createDeriveCallback(
   const originalParamBinding = normalizeBindingName(
     originalParam.name,
     factory,
-    usedBindingNames
+    usedBindingNames,
   );
 
   bindingElements.push(
@@ -1267,8 +1282,8 @@ function createDeriveCallback(
       undefined,
       factory.createIdentifier(originalInputParamName), // Property name
       originalParamBinding, // Binding name (what it's called in the function body)
-      undefined
-    )
+      undefined,
+    ),
   );
 
   // Add bindings for captures
@@ -1280,8 +1295,8 @@ function createDeriveCallback(
     ...createBindingElementsFromNames(
       captureTree.keys(),
       factory,
-      createBindingIdentifier
-    )
+      createBindingIdentifier,
+    ),
   );
 
   // Create the parameter with object binding pattern
@@ -1291,7 +1306,7 @@ function createDeriveCallback(
     factory.createObjectBindingPattern(bindingElements),
     undefined,
     undefined, // No type annotation - rely on inference
-    undefined
+    undefined,
   );
 
   // Create the new callback
@@ -1302,7 +1317,7 @@ function createDeriveCallback(
       [parameter],
       undefined, // No return type - rely on inference
       callback.equalsGreaterThanToken,
-      transformedBody
+      transformedBody,
     );
   } else {
     return factory.createFunctionExpression(
@@ -1312,7 +1327,7 @@ function createDeriveCallback(
       callback.typeParameters,
       [parameter],
       undefined, // No return type - rely on inference
-      transformedBody as ts.Block
+      transformedBody as ts.Block,
     );
   }
 }
@@ -1340,13 +1355,13 @@ function buildDeriveInputSchema(
       undefined,
       factory.createIdentifier(originalInputParamName),
       undefined,
-      inputTypeNode
-    )
+      inputTypeNode,
+    ),
   );
 
   // Add type elements for captures
   typeElements.push(
-    ...buildTypeElementsFromCaptureTree(captureTree, context)
+    ...buildTypeElementsFromCaptureTree(captureTree, context),
   );
 
   // Create object type literal
@@ -1383,13 +1398,12 @@ function transformDeriveCall(
   // Recursively transform the callback body first
   const transformedBody = ts.visitNode(
     callback.body,
-    visitor
+    visitor,
   ) as ts.ConciseBody;
 
   // Determine original input and parameter name
   const args = deriveCall.arguments;
   let originalInput: ts.Expression | undefined;
-  let hasExplicitSchemas = false;
 
   if (args.length === 2) {
     // 2-arg form: derive(input, callback)
@@ -1397,7 +1411,6 @@ function transformDeriveCall(
   } else if (args.length === 4) {
     // 4-arg form: derive(inputSchema, resultSchema, input, callback)
     originalInput = args[2];
-    hasExplicitSchemas = true;
   } else {
     // Invalid number of arguments
     return undefined;
@@ -1427,7 +1440,7 @@ function transformDeriveCall(
     originalInput,
     originalInputParamName,
     captureTree,
-    factory
+    factory,
   );
 
   // Create new callback with parameter aliasing
@@ -1436,7 +1449,7 @@ function transformDeriveCall(
     transformedBody,
     originalInputParamName,
     captureTree,
-    context
+    context,
   );
 
   // Build TypeNodes for schema generation (similar to handlers/maps pattern)
@@ -1445,7 +1458,7 @@ function transformDeriveCall(
     originalInputParamName,
     originalInput,
     captureTree,
-    context
+    context,
   );
 
   // Infer result type from callback
@@ -1462,7 +1475,8 @@ function transformDeriveCall(
     resultTypeNode = context.checker.typeToTypeNode(
       returnType,
       context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
     );
   }
 
@@ -1473,7 +1487,7 @@ function transformDeriveCall(
   const newDeriveCall = factory.createCallExpression(
     deriveExpr,
     resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode], // Type arguments
-    [mergedInput, newCallback] // Runtime arguments
+    [mergedInput, newCallback], // Runtime arguments
   );
 
   return newDeriveCall;

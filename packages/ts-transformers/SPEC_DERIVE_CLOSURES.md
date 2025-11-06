@@ -1,12 +1,14 @@
 # Specification: Derive Closure Transformation
 
-**Date:** 2025-11-05
-**Status:** Draft
-**Feature Branch:** `feature/derive-closure-transformer`
+**Date:** 2025-11-05 **Status:** Draft **Feature Branch:**
+`feature/derive-closure-transformer`
 
 ## Overview
 
-This specification defines closure transformation support for user-written `derive()` calls. Currently, the transformer handles closures in handler JSX attributes and map callbacks. This extends that infrastructure to support derive calls.
+This specification defines closure transformation support for user-written
+`derive()` calls. Currently, the transformer handles closures in handler JSX
+attributes and map callbacks. This extends that infrastructure to support derive
+calls.
 
 ## Motivation
 
@@ -14,17 +16,23 @@ User-written derive calls often capture variables from outer scope:
 
 ```tsx
 const multiplier = cell(2);
-derive(value, (v) => v * multiplier.get())
+derive(value, (v) => v * multiplier.get());
 ```
 
-Without transformation, these closures don't work correctly in the reactive system. The derive callback needs explicit parameters for captured variables, similar to how handlers and maps work.
+Without transformation, these closures don't work correctly in the reactive
+system. The derive callback needs explicit parameters for captured variables,
+similar to how handlers and maps work.
 
 ## Goals
 
-1. **Reuse existing infrastructure:** Leverage `collectCaptures()`, `groupCapturesByRoot()`, and hierarchical params
-2. **Minimal rewriting:** Preserve user's callback parameter names via destructuring aliases
-3. **Consistent behavior:** Match the patterns established by handler and map closure transformations
-4. **Type safety:** Integrate with TypeScript type inference and schema generation
+1. **Reuse existing infrastructure:** Leverage `collectCaptures()`,
+   `groupCapturesByRoot()`, and hierarchical params
+2. **Minimal rewriting:** Preserve user's callback parameter names via
+   destructuring aliases
+3. **Consistent behavior:** Match the patterns established by handler and map
+   closure transformations
+4. **Type safety:** Integrate with TypeScript type inference and schema
+   generation
 
 ## Current Behavior
 
@@ -46,10 +54,10 @@ Gets schema injection only:
 
 ```tsx
 // Input
-derive(value, (v) => v * 2)
+derive(value, (v) => v * 2);
 
 // Output
-derive(inputSchema, resultSchema, value, (v) => v * 2)
+derive(inputSchema, resultSchema, value, (v) => v * 2);
 ```
 
 ### User-Written Derive (With Closures)
@@ -58,10 +66,10 @@ derive(inputSchema, resultSchema, value, (v) => v * 2)
 
 ```tsx
 // Input
-derive(value, (v) => v * multiplier.get())
+derive(value, (v) => v * multiplier.get());
 
 // Output (current - BROKEN)
-derive(inputSchema, resultSchema, value, (v) => v * multiplier.get())
+derive(inputSchema, resultSchema, value, (v) => v * multiplier.get());
 // ❌ multiplier is captured but not passed as parameter
 ```
 
@@ -73,20 +81,22 @@ derive(inputSchema, resultSchema, value, (v) => v * multiplier.get())
 
 ```tsx
 // Input
-derive(value, (v) => v * multiplier.get())
+derive(value, (v) => v * multiplier.get());
 
 // Output (new)
 derive(
   inputSchema,
   resultSchema,
-  {value, multiplier},
-  ({value: v, multiplier}) => v * multiplier
-)
+  { value, multiplier },
+  ({ value: v, multiplier }) => v * multiplier,
+);
 ```
 
 **Key aspects:**
+
 1. First argument becomes object containing input + captures
-2. Callback parameter destructures object with **aliasing** to preserve user's parameter name
+2. Callback parameter destructures object with **aliasing** to preserve user's
+   parameter name
 3. Schema is generated for the new object structure
 4. Callback body references updated (`multiplier.get()` → `multiplier`)
 
@@ -95,11 +105,13 @@ derive(
 ### Rule 1: Basic Closure Capture
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v * multiplier.get())
+derive(value, (v) => v * multiplier.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {type: "object", properties: {value: {...}, multiplier: {...}}},
@@ -110,6 +122,7 @@ derive(
 ```
 
 **Notes:**
+
 - Input wrapped in object literal
 - Callback parameter uses destructuring with alias: `{value: v}`
 - User's parameter name `v` preserved in callback body
@@ -118,11 +131,13 @@ derive(
 ### Rule 2: Multiple Captures
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v * multiplier.get() + offset.get())
+derive(value, (v) => v * multiplier.get() + offset.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {type: "object", properties: {value: {...}, multiplier: {...}, offset: {...}}},
@@ -137,11 +152,13 @@ derive(
 Uses the same hierarchical params structure as handlers and maps:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v + state.user.profile.name.get())
+derive(value, (v) => v + state.user.profile.name.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {
@@ -182,20 +199,24 @@ derive(
 ```
 
 **Notes:**
+
 - Nested captures organized hierarchically
 - Avoids duplication of parent objects
 - Reflects JavaScript destructuring semantics
 
 ### Rule 4: Object Literal Input
 
-When user provides object literal as input, add captures as additional properties:
+When user provides object literal as input, add captures as additional
+properties:
 
 **Input:**
+
 ```tsx
-derive({a, b}, ({a, b}) => a + b + external.get())
+derive({ a, b }, ({ a, b }) => a + b + external.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {type: "object", properties: {a: {...}, b: {...}, external: {...}}},
@@ -206,11 +227,13 @@ derive(
 ```
 
 **Input with nested structure:**
+
 ```tsx
-derive({user: state.user}, ({user}) => user.name + multiplier.get())
+derive({ user: state.user }, ({ user }) => user.name + multiplier.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {type: "object", properties: {user: {...}, multiplier: {...}}},
@@ -225,11 +248,13 @@ derive(
 User may destructure the derive parameter:
 
 **Input:**
+
 ```tsx
-derive(obj, ({x, y}) => x + y + offset.get())
+derive(obj, ({ x, y }) => x + y + offset.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   {type: "object", properties: {obj: {...}, offset: {...}}},
@@ -240,25 +265,30 @@ derive(
 ```
 
 **Notes:**
+
 - Original destructuring pattern preserved via alias
 - User's destructuring applied to aliased binding
 - Offset added as peer property
 
 ### Rule 6: No Captures
 
-If callback has no captures, skip closure transformation (schema injection only):
+If callback has no captures, skip closure transformation (schema injection
+only):
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v * 2)
+derive(value, (v) => v * 2);
 ```
 
 **Output:**
+
 ```tsx
-derive(inputSchema, resultSchema, value, (v) => v * 2)
+derive(inputSchema, resultSchema, value, (v) => v * 2);
 ```
 
 **Notes:**
+
 - No closure transformation needed
 - Only schema injection applied
 - Input and callback unchanged
@@ -270,24 +300,28 @@ derive(inputSchema, resultSchema, value, (v) => v * 2)
 When user provides type annotation on callback parameter:
 
 **Input:**
+
 ```tsx
-derive(value, (v: number) => v * multiplier.get())
+derive(value, (v: number) => v * multiplier.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value, multiplier},
-  ({value: v, multiplier}) => v * multiplier
-)
+  { value, multiplier },
+  ({ value: v, multiplier }) => v * multiplier,
+);
 // Note: Type annotation removed
 ```
 
-**Rule:** Remove explicit type annotations, rely on TypeScript inference from the first argument.
+**Rule:** Remove explicit type annotations, rely on TypeScript inference from
+the first argument.
 
 **Rationale:**
+
 - Parameter structure changes fundamentally (scalar → object)
 - Original type annotation no longer applicable
 - TypeScript infers correct type from object literal
@@ -296,6 +330,7 @@ derive(
 ### Type Inference
 
 The transformer must:
+
 1. Infer types for captured variables using TypeScript's type checker
 2. Build schema reflecting the merged object structure
 3. Register types in the type registry for schema generation
@@ -308,32 +343,38 @@ The transformer must:
 When capture name conflicts with callback parameter name:
 
 **Input:**
+
 ```tsx
 const value = external;
-derive(value, (value) => value * 2)
+derive(value, (value) => value * 2);
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value},
-  ({value}) => value * 2
-)
+  { value },
+  ({ value }) => value * 2,
+);
 ```
 
 **Notes:**
+
 - No capture added (input IS the captured value)
 - No collision occurs in this case
 
 **Complex collision:**
+
 ```tsx
 const state = external;
-derive(value, (v) => v + state.get())
+derive(value, (v) => v + state.get());
 ```
 
-If callback somehow had `state` parameter (invalid for derive but hypothetically):
+If callback somehow had `state` parameter (invalid for derive but
+hypothetically):
+
 ```tsx
 // Would need renaming - use numeric suffix like handlers
 ({value: v, state: state_1}) => ...
@@ -346,18 +387,20 @@ Use the same collision resolution as handlers: append numeric suffix.
 Captures may use reserved identifiers:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v + __ctHelpers.get())
+derive(value, (v) => v + __ctHelpers.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value, __ctHelpers},
-  ({value: v, __ctHelpers}) => v + __ctHelpers
-)
+  { value, __ctHelpers },
+  ({ value: v, __ctHelpers }) => v + __ctHelpers,
+);
 ```
 
 **Rule:** Allow reserved identifiers, let runtime handle any issues.
@@ -367,85 +410,99 @@ derive(
 Captures may reference functions or classes:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => transform(v))
+derive(value, (v) => transform(v));
 ```
 
 Where `transform` is a function.
 
-**Rule:** Ignore non-serializable captures (functions, classes). Don't add to captures.
+**Rule:** Ignore non-serializable captures (functions, classes). Don't add to
+captures.
 
-**Detection:** Use same logic as handlers/maps - check if declaration is a function or import.
+**Detection:** Use same logic as handlers/maps - check if declaration is a
+function or import.
 
 ### Optional Chaining
 
 Captures may use optional chaining:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v + state?.user?.name?.get())
+derive(value, (v) => v + state?.user?.name?.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value, state: {user: {name: state?.user?.name}}},
-  ({value: v, state: {user: {name}}}) => v + name
-)
+  { value, state: { user: { name: state?.user?.name } } },
+  ({ value: v, state: { user: { name } } }) => v + name,
+);
 ```
 
-**Rule:** Preserve optional chaining in property access, but capture the full expression.
+**Rule:** Preserve optional chaining in property access, but capture the full
+expression.
 
 ### Computed Properties
 
 Captures with computed property access:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v + obj[key].get())
+derive(value, (v) => v + obj[key].get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value, obj_key: obj[key]},
-  ({value: v, obj_key}) => v + obj_key
-)
+  { value, obj_key: obj[key] },
+  ({ value: v, obj_key }) => v + obj_key,
+);
 ```
 
-**Rule:** Use fallback entry mechanism (same as derive builtin currently handles).
+**Rule:** Use fallback entry mechanism (same as derive builtin currently
+handles).
 
 ### Nested Derive
 
 User writes nested derive calls:
 
 **Input:**
+
 ```tsx
-derive(outer, (o) => derive(inner, (i) => o + i + capture.get()))
+derive(outer, (o) => derive(inner, (i) => o + i + capture.get()));
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema1,
   resultSchema1,
-  {outer, capture},
-  ({outer: o, capture}) => derive(
-    schema2,
-    resultSchema2,
-    {inner, capture},
-    ({inner: i, capture}) => o + i + capture
-  )
-)
+  { outer, capture },
+  ({ outer: o, capture }) =>
+    derive(
+      schema2,
+      resultSchema2,
+      { inner, capture },
+      ({ inner: i, capture }) => o + i + capture,
+    ),
+);
 ```
 
 **Notes:**
+
 - Both derive calls transformed independently
-- Inner derive captures both `o` (from outer callback) and `capture` (from outer scope)
+- Inner derive captures both `o` (from outer callback) and `capture` (from outer
+  scope)
 - Handled naturally by recursive visitor pattern
 
 ### Method Calls
@@ -453,27 +510,31 @@ derive(
 Captures in method calls:
 
 **Input:**
+
 ```tsx
-derive(value, (v) => v * counter.get())
+derive(value, (v) => v * counter.get());
 ```
 
 **Output:**
+
 ```tsx
 derive(
   schema,
   resultSchema,
-  {value, counter},
-  ({value: v, counter}) => v * counter
-)
+  { value, counter },
+  ({ value: v, counter }) => v * counter,
+);
 ```
 
-**Rule:** Capture the object (`counter`), not the method (`.get()`). Same as handlers/maps.
+**Rule:** Capture the object (`counter`), not the method (`.get()`). Same as
+handlers/maps.
 
 ## Detection Algorithm
 
 ### When to Transform
 
 Transform a derive call when:
+
 1. It's a call to `derive` (imported from commontools)
 2. The callback parameter (2nd or 4th argument) has captures from outer scope
 3. Captures include serializable variables (exclude functions, imports)
@@ -483,7 +544,7 @@ Transform a derive call when:
 ```typescript
 function shouldTransformDerive(
   deriveCall: ts.CallExpression,
-  context: TransformationContext
+  context: TransformationContext,
 ): boolean {
   // 1. Check it's a derive call
   if (!isDeriveCall(deriveCall)) return false;
@@ -504,6 +565,7 @@ function shouldTransformDerive(
 ### Derive Call Signature Detection
 
 Derive has two signatures:
+
 ```typescript
 // Simple form (2 arguments)
 derive<In, Out>(input: Opaque<In>, f: (input: In) => Out): OpaqueRef<Out>
@@ -518,6 +580,7 @@ derive<InputSchema, ResultSchema>(
 ```
 
 **Detection:**
+
 - 2 args: callback at index 1
 - 4 args: callback at index 3
 
@@ -526,6 +589,7 @@ derive<InputSchema, ResultSchema>(
 ### Reuse Existing Infrastructure
 
 Reuse from handler/map closures:
+
 1. `collectCaptures()` - Capture detection using TypeScript symbols
 2. `groupCapturesByRoot()` - Hierarchical organization
 3. `buildTypeElementsFromCaptureTree()` - Schema generation
@@ -539,27 +603,27 @@ Reuse from handler/map closures:
 // Detect derive calls
 function isDeriveCall(
   callExpr: ts.CallExpression,
-  context: TransformationContext
-): boolean
+  context: TransformationContext,
+): boolean;
 
 // Extract callback from derive call (2 or 4 arg form)
 function extractDeriveCallback(
-  deriveCall: ts.CallExpression
-): ts.ArrowFunction | ts.FunctionExpression | undefined
+  deriveCall: ts.CallExpression,
+): ts.ArrowFunction | ts.FunctionExpression | undefined;
 
 // Transform derive call with closures
 function transformDeriveCall(
   deriveCall: ts.CallExpression,
   context: TransformationContext,
-  visitor: ts.Visitor
-): ts.CallExpression
+  visitor: ts.Visitor,
+): ts.CallExpression;
 
 // Build merged input object (original input + captures)
 function buildDeriveInputObject(
   originalInput: ts.Expression,
   captureTree: Map<string, CaptureTreeNode>,
-  factory: ts.NodeFactory
-): ts.ObjectLiteralExpression
+  factory: ts.NodeFactory,
+): ts.ObjectLiteralExpression;
 
 // Create callback with aliased destructuring
 function createDeriveCallback(
@@ -567,15 +631,15 @@ function createDeriveCallback(
   transformedBody: ts.ConciseBody,
   originalParam: ts.ParameterDeclaration,
   captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext
-): ts.ArrowFunction | ts.FunctionExpression
+  context: TransformationContext,
+): ts.ArrowFunction | ts.FunctionExpression;
 
 // Build schema for merged input
 function buildDeriveInputSchema(
   originalInput: ts.Expression,
   captureTree: Map<string, CaptureTreeNode>,
-  context: TransformationContext
-): ts.TypeNode
+  context: TransformationContext,
+): ts.TypeNode;
 ```
 
 ### Transformation Pipeline
@@ -641,6 +705,7 @@ function createClosureTransformVisitor(
 Location: `packages/ts-transformers/test/fixtures/closures/`
 
 **Basic Cases:**
+
 1. ✅ `derive-basic-capture.input/expected.tsx`
    - Single capture, simple expression
    - `derive(value, (v) => v * multiplier.get())`
@@ -653,37 +718,37 @@ Location: `packages/ts-transformers/test/fixtures/closures/`
    - Multiple unrelated captures
    - `derive(value, (v) => v * multiplier.get() + offset.get())`
 
-**Hierarchical Captures:**
-4. ✅ `derive-nested-captures.input/expected.tsx`
-   - Nested property access
-   - `derive(value, (v) => v + state.user.profile.name.get())`
+**Hierarchical Captures:** 4. ✅ `derive-nested-captures.input/expected.tsx`
+
+- Nested property access
+- `derive(value, (v) => v + state.user.profile.name.get())`
 
 5. ✅ `derive-mixed-captures.input/expected.tsx`
    - Mix of root and nested captures
    - `derive(value, (v) => v + state.counter.get() + external.get())`
 
-**Object Literal Input:**
-6. ✅ `derive-object-input-with-capture.input/expected.tsx`
-   - Object literal input + captures
-   - `derive({a, b}, ({a, b}) => a + b + external.get())`
+**Object Literal Input:** 6. ✅
+`derive-object-input-with-capture.input/expected.tsx`
+
+- Object literal input + captures
+- `derive({a, b}, ({a, b}) => a + b + external.get())`
 
 7. ✅ `derive-object-nested-input.input/expected.tsx`
    - Object with nested structure + captures
    - `derive({user: state.user}, ({user}) => user.name + multiplier.get())`
 
-**Parameter Patterns:**
-8. ✅ `derive-destructured-param.input/expected.tsx`
-   - User destructures parameter
-   - `derive(obj, ({x, y}) => x + y + offset.get())`
+**Parameter Patterns:** 8. ✅ `derive-destructured-param.input/expected.tsx`
+
+- User destructures parameter
+- `derive(obj, ({x, y}) => x + y + offset.get())`
 
 9. ✅ `derive-computed-property.input/expected.tsx`
    - Computed property in destructuring
    - `derive(obj, ({[key]: value}) => value + external.get())`
 
-**Edge Cases:**
-10. ✅ `derive-name-collision.input/expected.tsx`
-    - Capture name conflicts with parameter
-    - `const value = external; derive(value, (value) => value * 2)`
+**Edge Cases:** 10. ✅ `derive-name-collision.input/expected.tsx` - Capture name
+conflicts with parameter -
+`const value = external; derive(value, (value) => value * 2)`
 
 11. ✅ `derive-reserved-names.input/expected.tsx`
     - Captures use reserved identifiers
@@ -693,10 +758,9 @@ Location: `packages/ts-transformers/test/fixtures/closures/`
     - Parameter has type annotation (should be removed)
     - `derive(value, (v: number) => v * multiplier.get())`
 
-**Complex Scenarios:**
-13. ✅ `derive-nested-derive.input/expected.tsx`
-    - Derive inside derive
-    - `derive(outer, (o) => derive(inner, (i) => o + i + capture.get()))`
+**Complex Scenarios:** 13. ✅ `derive-nested-derive.input/expected.tsx` - Derive
+inside derive -
+`derive(outer, (o) => derive(inner, (i) => o + i + capture.get()))`
 
 14. ✅ `derive-in-jsx.input/expected.tsx`
     - User-written derive in JSX expression
@@ -706,10 +770,8 @@ Location: `packages/ts-transformers/test/fixtures/closures/`
     - Optional chaining in captures
     - `derive(value, (v) => v + state?.user?.name?.get())`
 
-**Special Cases:**
-16. ✅ `derive-method-call-capture.input/expected.tsx`
-    - Capture object in method call
-    - `derive(value, (v) => v * counter.get())`
+**Special Cases:** 16. ✅ `derive-method-call-capture.input/expected.tsx` -
+Capture object in method call - `derive(value, (v) => v * counter.get())`
 
 17. ✅ `derive-shorthand-property.input/expected.tsx`
     - Shorthand property in object input
@@ -726,10 +788,12 @@ Location: `packages/ts-transformers/test/fixtures/closures/`
 ### Test Strategy
 
 Each fixture should have:
+
 - `.input.tsx` - Source code before transformation
 - `.expected.tsx` - Expected output after transformation
 
 Tests should verify:
+
 - Correct schema generation
 - Proper parameter aliasing
 - Hierarchical capture organization
@@ -739,6 +803,7 @@ Tests should verify:
 ### Schema Validation
 
 Some fixtures should also test schema generation:
+
 - Location: `packages/ts-transformers/test/fixtures/handler-schema/`
 - Create: `derive-schema-generation.input/expected.tsx`
 - Validates that schemas match expected structure
@@ -746,6 +811,7 @@ Some fixtures should also test schema generation:
 ## Open Questions
 
 ### Resolved
+
 - ✅ Parameter name handling: Use destructuring aliases
 - ✅ Object literal input: Add captures as properties
 - ✅ Type annotations: Remove, rely on inference
@@ -754,6 +820,7 @@ Some fixtures should also test schema generation:
 - ✅ Auto-wrapped derive: No conflict, separate transformations
 
 ### Pending
+
 - ⏳ Performance implications for deeply nested captures?
 - ⏳ Error messages for unsupported patterns?
 - ⏳ Integration testing with runtime behavior?
@@ -786,5 +853,5 @@ Some fixtures should also test schema generation:
 
 ---
 
-**Document Status:** Ready for review and implementation
-**Next Steps:** Review spec with team, then begin implementation
+**Document Status:** Ready for review and implementation **Next Steps:** Review
+spec with team, then begin implementation

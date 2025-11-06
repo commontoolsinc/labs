@@ -62,7 +62,12 @@ export class SchemaGenerator implements ISchemaGenerator {
   ): SchemaDefinition {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
-    return this.generateSchemaInternal(anyType, checker, typeNode, typeRegistry);
+    return this.generateSchemaInternal(
+      anyType,
+      checker,
+      typeNode,
+      typeRegistry,
+    );
   }
 
   /**
