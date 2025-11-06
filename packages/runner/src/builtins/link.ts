@@ -140,13 +140,39 @@ function getAllCharms(
  */
 export function link(
   inputsCell: Cell<[unknown, unknown]>,
-  sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+  sendResult: (
+    tx: IExtendedStorageTransaction,
+    result: {
+      success: Cell<string | undefined>;
+      error: Cell<string | undefined>;
+    },
+  ) => void,
   _addCancel: (cancel: () => void) => void,
-  _cause: Cell<any>[],
+  cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
+  // Create result cells outside the action
+  const successCell = runtime.getCell<string | undefined>(
+    parentCell.space,
+    cause,
+    undefined,
+  );
+  const errorCell = runtime.getCell<string | undefined>(
+    parentCell.space,
+    cause,
+    undefined,
+  );
+
+  let cellsInitialized = false;
+
   return (tx: IExtendedStorageTransaction) => {
+    // Initialize cells on first run
+    if (!cellsInitialized) {
+      sendResult(tx, { success: successCell, error: errorCell });
+      cellsInitialized = true;
+    }
+
     try {
       const inputsWithTx = inputsCell.withTx(tx);
       const sourceValue = inputsWithTx.key(0).asSchema(SOURCE_SCHEMA).get();
@@ -156,9 +182,10 @@ export function link(
       const target = typeof targetValue === "string" ? targetValue.trim() : "";
 
       if (!source || !target) {
-        const error = "Both source and target paths are required";
-        console.error("Link error:", error);
-        sendResult(tx, { error });
+        const errorMsg = "Both source and target paths are required";
+        console.error("Link error:", errorMsg);
+        errorCell.withTx(tx).set(errorMsg);
+        successCell.withTx(tx).set(undefined);
         return;
       }
 
@@ -177,10 +204,11 @@ export function link(
           .map((c: any) => c?.["[NAME]"])
           .filter(Boolean)
           .join(", ");
-        const error =
+        const errorMsg =
           `Source charm "${sourceParsed.charmName}" not found. Available charms: ${charmNames || "none"}`;
-        console.error("Link error:", error);
-        sendResult(tx, { error });
+        console.error("Link error:", errorMsg);
+        errorCell.withTx(tx).set(errorMsg);
+        successCell.withTx(tx).set(undefined);
         return;
       }
 
@@ -192,10 +220,11 @@ export function link(
           .map((c: any) => c?.["[NAME]"])
           .filter(Boolean)
           .join(", ");
-        const error =
+        const errorMsg =
           `Target charm "${targetParsed.charmName}" not found. Available charms: ${charmNames || "none"}`;
-        console.error("Link error:", error);
-        sendResult(tx, { error });
+        console.error("Link error:", errorMsg);
+        errorCell.withTx(tx).set(errorMsg);
+        successCell.withTx(tx).set(undefined);
         return;
       }
 
@@ -207,24 +236,33 @@ export function link(
         ? [targetParsed.cellType, ...targetParsed.path]
         : targetParsed.path;
 
-      // Navigate to cells
+      // Navigate to the source cell
       const sourceCell = navigateToCell(sourceCharm, sourceFullPath).withTx(tx);
-      const targetCell = navigateToCell(targetCharm, targetFullPath).withTx(tx);
 
-      // Create write redirect link (alias)
-      // This makes targetCell an alias of sourceCell:
-      // - Reading targetCell shows sourceCell's value
-      // - Writing to targetCell writes to sourceCell
-      const writeRedirectLink = sourceCell.getAsWriteRedirectLink();
-      targetCell.setRaw(writeRedirectLink);
+      // Navigate to the target path, popping the last segment as the key to set
+      const targetKey = targetFullPath.pop();
+      if (targetKey === undefined) {
+        throw new Error("Target path cannot be empty");
+      }
 
-      const success = `Successfully linked ${target} → ${source}`;
-      console.log("Link created:", success);
-      sendResult(tx, { success });
+      // Navigate to the parent of where we want to set the link
+      const targetParentCell = navigateToCell(targetCharm, targetFullPath).withTx(
+        tx,
+      );
+
+      // Create link by setting the source cell as the value
+      // This is the same approach used in CharmManager.link()
+      targetParentCell.key(targetKey).set(sourceCell);
+
+      const successMsg = `Successfully linked ${target} → ${source}`;
+      console.log("Link created:", successMsg);
+      successCell.withTx(tx).set(successMsg);
+      errorCell.withTx(tx).set(undefined);
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Link creation failed:", errorMsg);
-      sendResult(tx, { error: errorMsg });
+      errorCell.withTx(tx).set(errorMsg);
+      successCell.withTx(tx).set(undefined);
     }
   };
 }
