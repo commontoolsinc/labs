@@ -1,6 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
-import { isAnyCellLink, isLink } from "../link-utils.ts";
+import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
   isRecipe,
   type JSONSchema,
@@ -67,8 +67,25 @@ export function toJSONWithLegacyAliases(
   }
 
   // If we encounter a link, it's from a nested recipe.
-  if (isAnyCellLink(value)) {
-    return value as JSONValue;
+  if (isLegacyAlias(value)) {
+    const alias = (value as LegacyAlias).$alias;
+    // If this was a shadow ref, i.e. a closed over reference, see whether
+    // we're now at the level that it should be resolved to the actual cell.
+    // (i.e. we're generating the recipe from which the closed over reference
+    // was captured)
+    if (!("cell" in alias) || typeof alias.cell === "number") {
+      // If we encounter an existing alias and it isn't an absolute reference
+      // with a cell id, then increase the nesting level.
+      return {
+        $alias: {
+          ...alias, // Preserve existing metadata.
+          cell: ((alias.cell as number) ?? 0) + 1, // Increase nesting level.
+          path: alias.path as (string | number)[],
+        },
+      } satisfies LegacyAlias;
+    } else {
+      throw new Error(`Invalid alias cell`);
+    }
   }
 
   // If this is an array, process each element recursively.
