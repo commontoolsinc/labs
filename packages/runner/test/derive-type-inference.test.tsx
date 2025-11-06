@@ -1,6 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { BuiltInLLMMessage, cell, derive, recipe } from "@commontools/api";
+import {
+  BuiltInLLMMessage,
+  type Cell,
+  cell,
+  derive,
+  type OpaqueRef,
+  recipe,
+} from "@commontools/api";
 
 describe("derive type inference", () => {
   it("should unwrap OpaqueRef<T[]> to T[] in callback", () => {
@@ -99,6 +106,32 @@ describe("derive type inference", () => {
       // Type check: u should be User
       const _typeCheck: User = u;
       return `${u.name} (${u.profile.city})`;
+    });
+
+    expect(displayName).toBeDefined();
+  });
+
+  it("should handle object with nested properties", () => {
+    interface User {
+      name: string;
+      email: string;
+      profile: {
+        age: number;
+        city: string;
+      };
+    }
+
+    const user = cell<User>();
+    user.set({
+      name: "Alice",
+      email: "alice@example.com",
+      profile: { age: 30, city: "NYC" },
+    });
+
+    const displayName = derive({ user }, ({ user }) => {
+      // Type check: u should be User
+      const _typeCheck: User = user;
+      return `${user.name} (${user.profile.city})`;
     });
 
     expect(displayName).toBeDefined();
@@ -292,5 +325,58 @@ describe("derive type inference", () => {
     );
 
     expect(assistantCount).toBeDefined();
+  });
+
+  describe("derive with Cell inputs", () => {
+    interface UserProfile {
+      name: string;
+      active: boolean;
+    }
+
+    const profileSource = cell<UserProfile>();
+    profileSource.set({ name: "Ada", active: true });
+    const profileCell = profileSource as unknown as Cell<UserProfile>;
+
+    it("should unwrap Cell<T> inputs directly", () => {
+      const result = derive(profileCell, (profile) => {
+        const _typeCheck: Cell<UserProfile> = profile;
+        return profile === profile ? 1 : 0;
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    it("should unwrap OpaqueRef<Cell<T>> inputs", () => {
+      const profileCellRef = profileCell as unknown as OpaqueRef<
+        Cell<UserProfile>
+      >;
+      const isActive = derive(profileCellRef, (profile) => {
+        const _typeCheck: Cell<UserProfile> = profile;
+        return profile;
+      });
+
+      expect(isActive).toBeDefined();
+    });
+
+    it("should unwrap destructured objects containing Cell<T>", () => {
+      const derived = derive({ profile: profileCell }, ({ profile }) => {
+        const _typeCheck: Cell<UserProfile> = profile;
+        return profile;
+      });
+
+      expect(derived).toBeDefined();
+    });
+
+    it("should unwrap destructured OpaqueRef objects containing Cell<T>", () => {
+      const container = { profile: profileCell } as OpaqueRef<
+        { profile: Cell<UserProfile> }
+      >;
+      const derived = derive(container, ({ profile }) => {
+        const _typeCheck: Cell<UserProfile> = profile;
+        return profile;
+      });
+
+      expect(derived).toBeDefined();
+    });
   });
 });

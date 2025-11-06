@@ -447,6 +447,13 @@ export type Opaque<T> =
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
 
+type OpaqueRefOnly<T> =
+  | T
+  | OpaqueRef<T>
+  | (T extends Array<infer U> ? Array<OpaqueRefOnly<U>>
+    : T extends object ? { [K in keyof T]: OpaqueRefOnly<T[K]> }
+    : T);
+
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
@@ -908,7 +915,7 @@ export type DeriveFunction = {
     ) => Schema<ResultSchema>,
   ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 
-  <In, Out>(input: Opaque<In>, f: (input: In) => Out): OpaqueRef<Out>;
+  <In, Out>(input: OpaqueRefOnly<In>, f: (input: In) => Out): OpaqueRef<Out>;
 };
 
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
