@@ -1,0 +1,45 @@
+import * as __ctHelpers from "commontools";
+import { cell, derive } from "commontools";
+export default function TestDerive() {
+    const value = cell(10);
+    const config = { multiplier: 2, divisor: 5 };
+    const key = "multiplier";
+    const result = __ctHelpers.derive({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {
+            value: {
+                type: "number",
+                asOpaque: true
+            },
+            config: {
+                type: "object",
+                properties: {
+                    multiplier: {
+                        type: "number"
+                    },
+                    divisor: {
+                        type: "number"
+                    }
+                },
+                required: ["multiplier", "divisor"]
+            },
+            key: {
+                type: "string"
+            }
+        },
+        required: ["value", "config", "key"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        value,
+        config: config,
+        key: key
+    }, ({ value: v, config, key }) => v * config[key]);
+    return result;
+}
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
