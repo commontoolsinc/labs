@@ -18,7 +18,7 @@ import {
   wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
-import { createLinkTool } from "./link-tool.tsx";
+import { linkTool } from "./link-tool.tsx";
 
 function schemaifyWish<T>(path: string) {
   return derive<T, T>(wish<T>(path), (i) => i);
@@ -386,7 +386,7 @@ export default recipe<ChatInput, ChatOutput>(
       createLink: {
         description:
           "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
-        pattern: createLinkTool,
+        handler: linkTool({}),
       },
     };
 

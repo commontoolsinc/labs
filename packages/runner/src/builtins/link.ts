@@ -2,7 +2,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema } from "../builder/types.ts";
+import { type JSONSchema, NAME } from "../builder/types.ts";
 
 const SOURCE_SCHEMA = {
   type: "string",
@@ -70,27 +70,13 @@ function findCharmByName(
     return undefined;
   }
 
-  // Try exact match first
-  const exactMatch = charms.find((c: any) => {
-    const charmName = c?.["[NAME]"];
-    return charmName === name;
-  });
-  if (exactMatch) return exactMatch;
+  for (let i = 0; i < charms.length; i++) {
+    const charmCell = charmsCell.key(i);
+    const charmName = charmCell.get()?.[NAME];
+    if (charmName === name) return charmCell;
+  }
 
-  // Case-insensitive match
-  const lowerName = name.toLowerCase();
-  const caseInsensitive = charms.find((c: any) => {
-    const charmName = c?.["[NAME]"];
-    return charmName?.toLowerCase() === lowerName;
-  });
-  if (caseInsensitive) return caseInsensitive;
-
-  // Partial match (contains)
-  const partial = charms.find((c: any) => {
-    const charmName = c?.["[NAME]"];
-    return charmName?.toLowerCase().includes(lowerName);
-  });
-  return partial;
+  return undefined;
 }
 
 /**

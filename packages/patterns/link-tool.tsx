@@ -5,6 +5,7 @@ import {
   patternTool,
   recipe,
   UI,
+  handler
 } from "commontools";
 
 /**
@@ -16,6 +17,10 @@ export const createLinkTool = patternTool(
     return link(source, target);
   },
 );
+
+export const linkTool = handler<{ source: string, target: string }, {}>(({ source, target }) => {
+  return link(source, target);
+});
 
 type LinkToolInput = Record<string, never>;
 type LinkToolOutput = {
