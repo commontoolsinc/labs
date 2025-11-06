@@ -114,7 +114,7 @@ const addItem = handler<
 
 ### Step 4: Test and Deploy
 
-Use the **ct** skill for testing with `ct dev` and deploying with `ct charm new/setsrc`.
+Use the **ct** skill for testing with `deno task ct dev` and deploying with `deno task ct charm new/setsrc`.
 
 ## Modifying Patterns
 
@@ -128,8 +128,8 @@ Use the **ct** skill to retrieve source:
 ### Making Changes
 
 1. Edit the pattern file
-2. Check syntax: Use **ct** skill for `ct dev pattern.tsx --no-run`
-3. Update charm: Use **ct** skill for `ct charm setsrc`
+2. Check syntax: Use **ct** skill for `deno task ct dev pattern.tsx --no-run`
+3. Update charm: Use **ct** skill for `deno task ct charm setsrc`
 
 ## Debugging Patterns
 
@@ -152,7 +152,7 @@ Use the **ct** skill to retrieve source:
 
 ### Debugging Process
 
-1. **Check TypeScript errors first** - Use **ct** skill for `ct dev pattern.tsx --no-run`
+1. **Check TypeScript errors first** - Use **ct** skill for `deno task ct dev pattern.tsx --no-run`
 2. **Consult the docs** - Match error pattern to relevant doc:
    - Type errors → `HANDLERS.md`
    - Component issues → `COMPONENTS.md`

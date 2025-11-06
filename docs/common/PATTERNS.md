@@ -762,7 +762,7 @@ echo '{"title": "Test", "done": false}' | \
 
 ### Tips for Fast Iteration
 
-- ✅ Use `ct dev` first to catch TypeScript errors
+- ✅ Use `deno task ct dev` first to catch TypeScript errors
 - ✅ Deploy once, then use `setsrc` for updates
 - ✅ Test one feature at a time
 - ✅ Use `charm inspect` to debug data issues
@@ -917,4 +917,4 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 2. Use handlers for side effects and structural changes
 3. Use `derive()` for reactive transformations
 4. Keep it simple - don't over-engineer
-5. Test incrementally with `ct dev` and `charm setsrc`
+5. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`

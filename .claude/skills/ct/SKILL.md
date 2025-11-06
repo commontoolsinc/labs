@@ -97,7 +97,7 @@ Most commands require these parameters:
 
 ### 1. Testing Recipes Locally
 
-Use `ct dev` for rapid iteration during recipe development:
+Use `deno task ct dev` for rapid iteration during recipe development:
 
 ```bash
 # Type check and execute
@@ -115,10 +115,10 @@ deno task ct dev --help
 ### 2. Deploying and Managing Charms
 
 **Workflow pattern:**
-1. List charms → `ct charm ls`
-2. Deploy new → `ct charm new`
-3. Update existing → `ct charm setsrc` (faster than redeploying)
-4. Inspect state → `ct charm inspect`
+1. List charms → `deno task ct charm ls`
+2. Deploy new → `deno task ct charm new`
+3. Update existing → `deno task ct charm setsrc` (faster than redeploying)
+4. Inspect state → `deno task ct charm inspect`
 
 **Discover commands:**
 ```bash
@@ -133,9 +133,9 @@ deno task ct charm --help
 - **Path syntax**: Use forward slashes (e.g., `items/0/name`, `config/database/host`)
 
 **Commands:**
-- `ct charm get` - Read data from charm
-- `ct charm set` - Direct field modification
-- `ct charm call` - Execute handler (for validation/side effects)
+- `deno task ct charm get` - Read data from charm
+- `deno task ct charm set` - Direct field modification
+- `deno task ct charm call` - Execute handler (for validation/side effects)
 
 **Decision guide:**
 - Use **GET** to inspect charm state
@@ -165,7 +165,7 @@ deno task ct charm link --help
 
 ### 5. Visualizing Space Architecture
 
-Use `ct charm map` to understand charm relationships:
+Use `deno task ct charm map` to understand charm relationships:
 
 ```bash
 # ASCII map
@@ -213,8 +213,8 @@ echo '{"name": "John"}' | deno task ct charm set ... user
 **Debugging steps:**
 1. For recipe errors: Run `deno task ct dev [recipe] --no-run` to check syntax
 2. For connection issues: Verify Tailnet connection for `*.ts.net` URLs
-3. For data issues: Use `ct charm inspect` to examine charm state
-4. For linking issues: Use `ct charm map` to visualize connections
+3. For data issues: Use `deno task ct charm inspect` to examine charm state
+4. For linking issues: Use `deno task ct charm map` to visualize connections
 
 ## Building Complex Applications
 
@@ -222,7 +222,7 @@ echo '{"name": "John"}' | deno task ct charm set ... user
 1. Create small, focused recipes (each does one thing well)
 2. Deploy recipes as separate charms
 3. Link charms together for data flow
-4. Use `ct charm map` to visualize architecture
+4. Use `deno task ct charm map` to visualize architecture
 5. Add new functionality by deploying and linking new charms
 
 **Example architecture:**
@@ -243,7 +243,7 @@ Documentation of well-known charm IDs (like `allCharms`) that provide access to 
 ## Remember
 
 - **Use `--help` flags** - The tool itself is the documentation
-- **Check `ct charm --help`** before asking about available commands
+- **Check `deno task ct charm --help`** before asking about available commands
 - **Path syntax** - Always forward slashes, numeric array indices
 - **JSON format** - All values must be valid JSON (strings need quotes)
 - **Environment variables** - Set `CT_API_URL` and `CT_IDENTITY` for convenience
