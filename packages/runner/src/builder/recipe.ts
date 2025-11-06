@@ -185,9 +185,6 @@ function factoryFromRecipe<T, R>(
             node.outputs = collectCellsAndNodes(node.outputs);
           }
         });
-        if (cellValue !== undefined) {
-          value.set(collectCellsAndNodes(cellValue));
-        }
       }
       return value;
     });
