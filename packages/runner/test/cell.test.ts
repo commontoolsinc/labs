@@ -2163,6 +2163,7 @@ describe("asCell with schema", () => {
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
+    const frame = pushFrame();
     const c = runtime.getCell<{ items: any[] }>(
       space,
       "push-with-id",
@@ -2171,7 +2172,6 @@ describe("asCell with schema", () => {
     );
     c.set({ items: [] });
     const arrayCell = c.key("items");
-    const frame = pushFrame();
     arrayCell.push({ value: 42 });
     expect(frame.generatedIdCounter).toEqual(1);
     arrayCell.push({ [ID]: "test", value: 43 });
