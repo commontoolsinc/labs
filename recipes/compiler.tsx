@@ -1,13 +1,16 @@
 /// <cts-enable />
 import {
   Cell,
+  cell,
   compileAndRun,
   Default,
   handler,
   ifElse,
+  lift,
   NAME,
   navigateTo,
   recipe,
+  toSchema,
   UI,
 } from "commontools";
 
@@ -27,6 +30,25 @@ const updateCode = handler<
   },
 );
 
+// Lift that waits for the compiled result to be ready before navigating
+// Similar to the storeCharm pattern in chatbot-list-view.tsx
+const navigateWhenReady = lift(
+  toSchema<{
+    result: any;
+    isNavigated: Cell<boolean>;
+  }>(),
+  undefined,
+  ({ result, isNavigated }) => {
+    // Only navigate once the result is populated and we haven't navigated yet
+    if (result && !isNavigated.get()) {
+      console.log("navigateWhenReady: result is ready, navigating", result);
+      isNavigated.set(true);
+      return navigateTo(result);
+    }
+    return undefined;
+  },
+);
+
 const visit = handler<
   { detail: { value: string } },
   { code: string }
@@ -37,9 +59,16 @@ const visit = handler<
       main: "/main.tsx",
     });
 
-    console.log("result", result);
+    console.log("visit: compileAndRun returned result cell", result);
 
-    return navigateTo(result);
+    // Use a cell to track if we've already navigated
+    const isNavigated = cell(false);
+
+    // Use the lift to wait for result to be ready before navigating
+    return navigateWhenReady({
+      result,
+      isNavigated,
+    });
   },
 );
 
@@ -63,7 +92,7 @@ export default recipe<Input>(
           />
           {ifElse(
             error,
-            <b>fix the errors</b>,
+            <b>fix the error: {error}</b>,
             <ct-button
               onClick={visit({ code })}
             >
