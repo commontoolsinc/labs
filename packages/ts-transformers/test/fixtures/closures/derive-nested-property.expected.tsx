@@ -38,7 +38,9 @@ export default function TestDerive(state: State) {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         state: {
-            config: state.config
+            config: {
+                multiplier: state.config.multiplier
+            }
         }
     }, ({ value: v, state }) => v * state.config.multiplier);
     return result;

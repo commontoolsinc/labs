@@ -19,7 +19,8 @@ export default function TestDerive(config: Config) {
                     multiplier: {
                         type: "number"
                     }
-                }
+                },
+                required: ["multiplier"]
             }
         },
         required: ["value", "config"]

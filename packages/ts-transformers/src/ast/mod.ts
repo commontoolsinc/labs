@@ -5,6 +5,7 @@ export {
   isEventHandlerJsxAttribute,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
+export { isFunctionLikeExpression } from "./function-predicates.ts";
 export {
   getExpressionText,
   getMemberSymbol,

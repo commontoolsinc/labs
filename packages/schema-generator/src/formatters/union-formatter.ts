@@ -89,6 +89,12 @@ export class UnionFormatter implements TypeFormatter {
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
     const anyOf = nonNull.map((m) => generate(m));
     if (hasNull) anyOf.push({ type: "null" });
+
+    // If only one schema remains after filtering, return it directly without anyOf wrapper
+    if (anyOf.length === 1) {
+      return anyOf[0]!;
+    }
+
     return { anyOf };
   }
 }

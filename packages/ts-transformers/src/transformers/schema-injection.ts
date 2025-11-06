@@ -6,18 +6,13 @@ import {
   inferReturnType,
   isAnyOrUnknownType,
   typeToSchemaTypeNode,
+  isFunctionLikeExpression,
 } from "../ast/mod.ts";
 import {
   TransformationContext,
   Transformer,
   type TypeRegistry,
 } from "../core/mod.ts";
-
-function isFunctionLikeExpression(
-  expression: ts.Expression,
-): expression is ts.ArrowFunction | ts.FunctionExpression {
-  return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
-}
 
 function collectFunctionSchemaTypeNodes(
   fn: ts.ArrowFunction | ts.FunctionExpression,

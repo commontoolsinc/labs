@@ -6,6 +6,7 @@ import {
   detectCallKind,
   getMethodCallTarget,
   isEventHandlerJsxAttribute,
+  isFunctionLikeExpression,
   isMethodCall,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -229,6 +230,19 @@ function shouldCaptureIdentifier(
 }
 
 /**
+ * Type guard for function declarations (excludes signature declarations)
+ * Used to identify nested functions that can have their own captures
+ */
+function isFunctionDeclarationLike(
+  node: ts.Node,
+): node is ts.FunctionLikeDeclaration {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
+    ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node);
+}
+
+/**
  * Detects captured variables in a function using TypeScript's symbol table.
  * Returns all captured expressions (both reactive and non-reactive).
  */
@@ -239,8 +253,27 @@ function collectCaptures(
   const captures = new Set<ts.Expression>();
 
   function visit(node: ts.Node) {
-    // Don't visit inside nested functions - their scope is separate
-    if (node !== func && ts.isFunctionLike(node)) {
+    // For nested functions, recursively collect their captures too
+    // Even though they have their own scope for parameters, they still
+    // close over variables from outer scopes, and we need to know about
+    // all such captures for the derive/handler transformation
+    if (node !== func && isFunctionDeclarationLike(node)) {
+      const nestedCaptures = collectCaptures(node, checker);
+      // Filter out captures that are parameters of the current function
+      const funcParams = new Set(
+        func.parameters.map(p => p.name).filter(ts.isIdentifier).map(id => id.text)
+      );
+      for (const capture of nestedCaptures) {
+        // Only add if it's not a parameter of the outer function
+        if (ts.isIdentifier(capture)) {
+          if (!funcParams.has(capture.text)) {
+            captures.add(capture);
+          }
+        } else {
+          captures.add(capture);
+        }
+      }
+      // Don't visit children since we just recursively processed them
       return;
     }
 
@@ -677,10 +710,7 @@ function createClosureTransformVisitor(
     if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
       const callback = node.arguments[0];
 
-      if (
-        callback &&
-        (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-      ) {
+      if (callback && isFunctionLikeExpression(callback)) {
         if (shouldTransformMap(node, context)) {
           return transformMapCallback(node, callback, context, visit);
         }
@@ -1161,10 +1191,7 @@ function extractDeriveCallback(
   // 2-arg form: callback is at index 1
   if (args.length === 2) {
     const callback = args[1];
-    if (
-      callback &&
-      (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-    ) {
+    if (callback && isFunctionLikeExpression(callback)) {
       return callback;
     }
   }
@@ -1172,10 +1199,7 @@ function extractDeriveCallback(
   // 4-arg form: callback is at index 3
   if (args.length === 4) {
     const callback = args[3];
-    if (
-      callback &&
-      (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-    ) {
+    if (callback && isFunctionLikeExpression(callback)) {
       return callback;
     }
   }

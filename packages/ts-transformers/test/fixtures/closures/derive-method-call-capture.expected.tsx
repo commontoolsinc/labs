@@ -7,6 +7,7 @@ interface State {
 }
 export default function TestDerive(state: State) {
     const value = cell(10);
+    // Capture property before method call
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
@@ -38,7 +39,9 @@ export default function TestDerive(state: State) {
     } as const satisfies __ctHelpers.JSONSchema, {
         value,
         state: {
-            counter: state.counter
+            counter: {
+                value: state.counter.value
+            }
         }
     }, ({ value: v, state }) => v + state.counter.value);
     return result;

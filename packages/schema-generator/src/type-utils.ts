@@ -348,10 +348,11 @@ export function getNamedTypeKey(
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
   // but the type has an explicit alias name
-  if ((!name || name === "__type") && aliasName) {
+  if ((!name || name === "__type" || name.startsWith("__")) && aliasName) {
     name = aliasName;
   }
-  if (!name || name === "__type") {
+  // Filter out compiler-internal anonymous type names (e.g., __type, __object, __computed)
+  if (!name || name === "__type" || name.startsWith("__")) {
     return undefined;
   }
   // Exclude property/method-like symbols (member names), which are not real named types

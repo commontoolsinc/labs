@@ -6,6 +6,7 @@ import {
   isFunctionParameter,
   isMethodCall,
 } from "./utils.ts";
+import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { detectCallKind } from "./call-kind.ts";
@@ -890,7 +891,7 @@ export function createDataFlowAnalyzer(
       const callee = analyzeExpression(expression.expression, scope, context);
       const analyses: InternalAnalysis[] = [callee];
       for (const arg of expression.arguments) {
-        if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+        if (isFunctionLikeExpression(arg)) {
           const parameterSymbols: ts.Symbol[] = [];
           for (const parameter of arg.parameters) {
             const symbol = checker.getSymbolAtLocation(parameter.name);
@@ -938,7 +939,7 @@ export function createDataFlowAnalyzer(
       return handleCallExpression(combined, callKind, callee, rewriteHint);
     }
 
-    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) {
+    if (isFunctionLikeExpression(expression)) {
       const parameterSymbols: ts.Symbol[] = [];
       for (const parameter of expression.parameters) {
         const symbol = checker.getSymbolAtLocation(parameter.name);

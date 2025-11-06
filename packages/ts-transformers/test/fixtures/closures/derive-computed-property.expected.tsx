@@ -25,7 +25,8 @@ export default function TestDerive() {
                 required: ["multiplier", "divisor"]
             },
             key: {
-                type: "string"
+                type: "string",
+                enum: ["multiplier"]
             }
         },
         required: ["value", "config", "key"]

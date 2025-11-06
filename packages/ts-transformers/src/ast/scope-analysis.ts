@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isFunctionLikeExpression } from "./function-predicates.ts";
 
 /**
  * Check if a declaration is at module scope (top-level of source file).
@@ -36,7 +37,7 @@ export function isFunctionDeclaration(
     const init = decl.initializer;
 
     // Direct function syntax
-    if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+    if (isFunctionLikeExpression(init)) {
       return true;
     }
 

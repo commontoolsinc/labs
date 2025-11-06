@@ -7,11 +7,23 @@ interface Point {
 export default function TestDerive() {
     const point = cell({ x: 10, y: 20 } as Point);
     const multiplier = cell(2);
+    // Destructured parameter
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             point: {
+                $ref: "#/$defs/Point",
+                asOpaque: true
+            },
+            multiplier: {
+                type: "number",
+                asOpaque: true
+            }
+        },
+        required: ["point", "multiplier"],
+        $defs: {
+            Point: {
                 type: "object",
                 properties: {
                     x: {
@@ -21,15 +33,9 @@ export default function TestDerive() {
                         type: "number"
                     }
                 },
-                required: ["x", "y"],
-                asOpaque: true
-            },
-            multiplier: {
-                type: "number",
-                asOpaque: true
+                required: ["x", "y"]
             }
-        },
-        required: ["point", "multiplier"]
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"

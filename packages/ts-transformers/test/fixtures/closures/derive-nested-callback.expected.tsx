@@ -3,6 +3,7 @@ import { cell, derive } from "commontools";
 export default function TestDerive() {
     const numbers = cell([1, 2, 3]);
     const multiplier = cell(2);
+    // Nested callback - inner array map should not capture outer multiplier
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
