@@ -348,11 +348,6 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
   return isRecord(value) && originalIndex in value;
 }
 
-const linkToOpaqueRef = new WeakMap<
-  Frame,
-  Map<string, OpaqueRef<any>>
->();
-
 /**
  * Get cell or throw if not a cell value proxy.
  *

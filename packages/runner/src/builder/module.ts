@@ -14,7 +14,7 @@ import type {
   toJSON,
 } from "./types.ts";
 import { isModule } from "./types.ts";
-import { opaqueRef } from "./opaque-ref.ts";
+import { opaqueRef, stream } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
@@ -138,21 +138,20 @@ function handlerInternal<E, T>(
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
-    const stream = opaqueRef<E>(undefined, eventSchema);
+    const eventStream = stream<E>(eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
-    (stream as OpaqueCell<E>).set({ $stream: true } as E);
     const node: NodeRef = {
       module,
-      inputs: { $ctx: props, $event: stream },
+      inputs: { $ctx: props, $event: eventStream },
       outputs: {},
       frame: getTopFrame(),
     };
 
     connectInputAndOutputs(node);
-    (stream as OpaqueCell<E>).connect(node);
+    eventStream.connect(node);
 
-    return stream;
+    return eventStream;
   }, module);
 
   return factory;

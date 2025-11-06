@@ -70,6 +70,7 @@ export type {
   AnyCell,
   AnyCellWrapping,
   Cell,
+  CellKind,
   CreateCellFunction,
   Handler,
   HandlerFactory,
@@ -107,7 +108,7 @@ export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 // Augment the public interface with the internal OpaqueRefMethods interface.
 // This adds runtime-specific methods beyond what the public API defines.
 declare module "@commontools/api" {
-  interface IOpaquable<T> {
+  interface IOxpaquable<T> {
     // Export method for introspection
     export(): {
       cell: OpaqueCell<any>;
@@ -118,7 +119,6 @@ declare module "@commontools/api" {
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
-      defaultValue?: Opaque<T>;
       name?: string;
       external?: unknown;
     };

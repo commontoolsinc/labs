@@ -120,11 +120,16 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with default values", async () => {
-    const recipeWithDefaults = recipe<{ a: number; b: number }>(
-      "Recipe with Defaults",
+    const recipeWithDefaults = recipe(
+      {
+        type: "object",
+        properties: {
+          a: { type: "number", default: 5 },
+          b: { type: "number", default: 10 },
+        },
+      },
+      { type: "object", properties: { sum: { type: "number" } } },
       ({ a, b }) => {
-        a.setDefault(5);
-        b.setDefault(10);
         const { sum } = lift(({ x, y }) => ({ sum: x + y }))({ x: a, y: b });
         return { sum };
       },

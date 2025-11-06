@@ -148,13 +148,13 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should take space from frame if no id provided", () => {
-      const cell = new CellImpl(runtime, tx);
-
       pushFrame({
         space,
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
+
+      const cell = new CellImpl(runtime, tx);
 
       // Take space from frame.
       expect(cell.space).toEqual(space);
@@ -169,7 +169,6 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should create link when accessing cell with cause and space", () => {
-      const cell = new CellImpl(runtime, tx);
       const cause = { type: "test-cause" };
 
       pushFrame({
@@ -178,6 +177,8 @@ describe("Cell with Optional Link", () => {
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
+
+      const cell = new CellImpl(runtime, tx);
 
       cell.for(cause);
 
@@ -189,8 +190,6 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should create link using frame cause when in handler context", () => {
-      const cell = new CellImpl(runtime, tx);
-
       // Create a frame with a cause
       pushFrame({
         cause: { type: "handler-cause" },
@@ -201,6 +200,8 @@ describe("Cell with Optional Link", () => {
       });
 
       try {
+        const cell = new CellImpl(runtime, tx);
+
         // With frame cause and space, link should be created automatically
         expect(cell.space).toBe(space);
         expect(cell.path).toEqual([]);
@@ -311,9 +312,6 @@ describe("Cell with Optional Link", () => {
 
   describe("Sibling cells share link creation", () => {
     it("should share cause across siblings created with .asSchema()", () => {
-      const cell1 = new CellImpl(runtime, tx);
-      const cell2 = cell1.asSchema({ type: "object" });
-
       const cause = { type: "shared-cause" };
 
       pushFrame({
@@ -322,6 +320,9 @@ describe("Cell with Optional Link", () => {
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
+
+      const cell1 = new CellImpl(runtime, tx);
+      const cell2 = cell1.asSchema({ type: "object" });
 
       // Set cause on cell2
       cell2.for(cause);
@@ -340,9 +341,6 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should share cause across siblings created with .withTx()", () => {
-      const cell1 = new CellImpl(runtime, tx);
-      const cell2 = cell1.withTx(tx);
-
       const cause = { type: "shared-cause" };
 
       pushFrame({
@@ -351,6 +349,9 @@ describe("Cell with Optional Link", () => {
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
+
+      const cell1 = new CellImpl(runtime, tx);
+      const cell2 = cell1.withTx(tx);
 
       // Set cause on cell1
       cell1.for(cause);
@@ -369,10 +370,6 @@ describe("Cell with Optional Link", () => {
     });
 
     it("should share link creation across siblings", () => {
-      const cell1 = new CellImpl(runtime, tx);
-      const cell2 = cell1.asSchema({ type: "object" });
-      const cell3 = cell2.withTx(tx);
-
       const cause = { type: "shared-cause" };
 
       pushFrame({
@@ -381,6 +378,10 @@ describe("Cell with Optional Link", () => {
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
+
+      const cell1 = new CellImpl(runtime, tx);
+      const cell2 = cell1.asSchema({ type: "object" });
+      const cell3 = cell2.withTx(tx);
 
       // Set cause on cell3
       cell3.for(cause);
@@ -403,31 +404,40 @@ describe("Cell with Optional Link", () => {
       }
     });
 
-    it("should NOT share cause with children created via .key()", () => {
-      const parent = new CellImpl(runtime, tx);
-      const child = parent.key("child");
-
-      const cause = { type: "parent-cause" };
-
+    it("should share cause with children created via .key()", () => {
       pushFrame({
-        cause: { type: "frame-cause" },
+        cause: { type: "first-frame" },
         space,
         generatedIdCounter: 0,
         opaqueRefs: new Set(),
       });
 
+      const parent = new CellImpl(runtime, tx);
+
+      const cause = { type: "parent-cause" };
+
+      pushFrame({
+        cause: { type: "second-frame" },
+        space,
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      });
+
+      const child = parent.key("child");
+
       // Set cause on parent
       parent.for(cause);
 
       try {
-        // Parent and child should have DIFFERENT entity IDs
+        // Parent and child should have same entity IDs
         const parentId = parent.entityId;
         const childId = child.entityId;
 
         expect(parentId).toBeDefined();
         expect(childId).toBeDefined();
-        expect(parentId).not.toBe(childId);
+        expect(parentId).toEqual(childId);
       } finally {
+        popFrame();
         popFrame();
       }
     });

@@ -1,25 +1,14 @@
 import {
-  isOpaqueRefMarker,
+  type CellKind,
   type JSONSchema,
-  type NodeFactory,
-  type NodeRef,
+  type JSONValue,
   type Opaque,
   type OpaqueRef,
-  type Recipe,
   type SchemaWithoutCell,
-  type ShadowRef,
 } from "./types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
-import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
-import { getTopFrame, recipe } from "./recipe.ts";
-import { createNodeFactory } from "./module.ts";
+import { getTopFrame } from "./recipe.ts";
 import { createCell } from "../cell.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
-
-let mapFactory: NodeFactory<any, any> | undefined;
+import { ContextualFlowControl } from "../cfc.ts";
 
 /**
  * Implementation of opaqueRef that creates actual Cells.
@@ -31,6 +20,7 @@ let mapFactory: NodeFactory<any, any> | undefined;
 function opaqueRefWithCell<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
+  kind?: CellKind,
 ): OpaqueRef<T> {
   const frame = getTopFrame();
   if (!frame || !frame.runtime) {
@@ -39,19 +29,27 @@ function opaqueRefWithCell<T>(
     );
   }
 
+  // Initial value is treated as default value
+  if (value !== undefined) {
+    schema = {
+      ...ContextualFlowControl.toSchemaObj(schema),
+      default: value as JSONValue,
+    };
+  }
+
   // Create a Cell without a link - it will be created on demand via .for()
   // Use tx from frame if available
-  const cell = createCell<T>(frame.runtime, undefined, frame.tx, false);
-
-  // If schema provided, apply it
-  if (schema) {
-    cell.setSchema(schema);
-  }
-
-  // Set initial value if provided (cast to any to avoid type issues with Opaque)
-  if (value !== undefined) {
-    cell.set(value as any);
-  }
+  const cell = createCell<T>(
+    frame.runtime,
+    {
+      path: [],
+      ...(schema !== undefined && { schema, rootSchema: schema }),
+      ...(frame.space && { space: frame.space }),
+    },
+    frame.tx,
+    false,
+    kind,
+  );
 
   // Use the cell's built-in method to get a proxied OpaqueRef
   return cell.getAsOpaqueRefProxy();
@@ -72,17 +70,11 @@ export function opaqueRef<T>(
   value?: Opaque<T> | T,
   schema?: JSONSchema,
 ): OpaqueRef<T> {
-  // If we have a runtime in the frame, use Cell-backed OpaqueRef
-  const frame = getTopFrame();
-  if (!frame?.runtime) {
-    throw new Error(
-      "Can't create Cell-backed OpaqueRef without runtime in frame",
-    );
-  }
-
   return opaqueRefWithCell<T>(value, schema);
 }
 
-export function stream<T>(): OpaqueRef<T> {
-  return opaqueRef<T>({ $stream: true } as T);
+export function stream<T>(
+  schema?: JSONSchema,
+): OpaqueRef<T> {
+  return opaqueRefWithCell<T>(undefined, schema, "stream");
 }

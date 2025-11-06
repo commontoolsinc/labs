@@ -164,23 +164,23 @@ function factoryFromRecipe<T, R>(
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
-  const cells = new Set<OpaqueRef<any>>();
-  const nodes = new Set<NodeRef>();
+  const allCells = new Set<OpaqueRef<any>>();
+  const allNodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
-      if (isCell(value) && !cells.has(value)) {
+      if (isCell(value) && !allCells.has(value)) {
         const { frame, nodes, value: cellValue } = value.export();
         if (isOpaqueRef(value) && frame !== getTopFrame()) {
           throw new Error(
             "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
           );
         }
-        cells.add(value);
+        allCells.add(value);
         nodes.forEach((node: NodeRef) => {
-          if (!nodes.has(node)) {
-            nodes.add(node);
+          if (!allNodes.has(node)) {
+            allNodes.add(node);
             node.inputs = collectCellsAndNodes(node.inputs);
             node.outputs = collectCellsAndNodes(node.outputs);
           }
@@ -199,7 +199,7 @@ function factoryFromRecipe<T, R>(
   // Fill in reasonable names for all cells, where possible:
 
   const usedNames = new Set<string>();
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     const existingName = cell.export().name;
     if (existingName) usedNames.add(existingName);
   });
@@ -222,7 +222,7 @@ function factoryFromRecipe<T, R>(
   }
 
   // Then from assignments in nodes
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
       if (isRecord(node.inputs)) {
@@ -255,7 +255,7 @@ function factoryFromRecipe<T, R>(
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers
   let count = 0;
-  cells.forEach((cell: OpaqueRef<any>) => {
+  allCells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
     const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
@@ -279,63 +279,30 @@ function factoryFromRecipe<T, R>(
   // Creates a query (i.e. aliases) into the cells for the result
   const result = toJSONWithLegacyAliases(outputs ?? {}, paths, true)!;
 
-  // Collect default values for the inputs
-  const defaults = toJSONWithLegacyAliases(
-    (inputs as OpaqueCell<T>).export().defaultValue ?? {},
-    paths,
-    true,
-  )!;
-
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
-    const { path, value, defaultValue, external } = cell.export();
+    const { path, value, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
     if (value) setValueAtPath(initial, cellPath, value);
-    if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
   });
 
   let argumentSchema: JSONSchema;
 
-  if (
-    typeof argumentSchemaArg === "string" || argumentSchemaArg === undefined
-  ) {
-    // Create a writable schema from defaults
-    const writableSchema: JSONSchemaMutable = createJsonSchema(defaults, true);
-
-    // Set description only if provided
-    if (typeof argumentSchemaArg === "string") {
-      writableSchema.description = argumentSchemaArg;
-    }
-
-    delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
-    if (
-      isObject(writableSchema.properties?.internal) &&
-      writableSchema.properties.internal.properties
-    ) {
-      for (
-        const key of Object.keys(
-          writableSchema.properties.internal.properties as any,
-        )
-      ) {
-        if (key.startsWith("__#")) {
-          delete (writableSchema as any).properties.internal.properties[key];
-        }
-      }
-    }
-    argumentSchema = writableSchema;
+  if (typeof argumentSchemaArg === "string") {
+    argumentSchema = { description: argumentSchemaArg };
   } else {
-    argumentSchema = argumentSchemaArg;
+    argumentSchema = argumentSchemaArg ?? true;
   }
 
   const resultSchema =
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
 
-  const serializedNodes = Array.from(nodes).map((node) => {
+  const serializedNodes = Array.from(allNodes).map((node) => {
     const module = toJSONWithLegacyAliases(
       node.module,
       paths,

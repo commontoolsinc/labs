@@ -89,7 +89,6 @@ export function toJSONWithLegacyAliases(
 
     const result: any = {};
     for (const key in valueToProcess as any) {
-      console.log("key", key);
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
         paths,

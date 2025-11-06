@@ -31,8 +31,16 @@ export declare const CELL_BRAND: unique symbol;
  * Used for type-level operations like unwrapping nested cells without
  * creating circular dependencies.
  */
-export type BrandedCell<T, Brand extends string = string> = {
-  [CELL_BRAND]: Brand;
+export type CellKind =
+  | "cell"
+  | "opaque"
+  | "stream"
+  | "comparable"
+  | "readonly"
+  | "writeonly";
+
+export type BrandedCell<T, Kind extends CellKind = "cell"> = {
+  [CELL_BRAND]: Kind;
 };
 
 // ============================================================================
@@ -236,10 +244,6 @@ export interface IOpaquable<T> {
   get(): T;
   /** deprecated */
   set(newValue: Opaque<Partial<T>>): void;
-  /** deprecated */
-  setDefault(value: Opaque<T> | T): void;
-  /** deprecated */
-  setPreExisting(ref: any): void;
   /** deprecated */
   setSchema(schema: JSONSchema): void;
 }
@@ -975,7 +979,7 @@ export type Default<T, V extends T = T> = T;
 
 // Re-export opaque ref creators
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
-export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
+export type StreamFunction = <T>(schema?: JSONSchema) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
 export type HFunction = {

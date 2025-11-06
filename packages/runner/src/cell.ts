@@ -5,6 +5,7 @@ import { createNodeFactory } from "./builder/module.ts";
 import {
   type AnyCell,
   type Cell,
+  type CellKind,
   type Frame,
   ID,
   ID_FIELD,
@@ -66,7 +67,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 let mapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
-const cellNodes = new WeakMap<CellImpl<any>, Set<NodeRef>>();
+const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -156,13 +157,11 @@ declare module "@commontools/api" {
     export(): {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
-      link?: NormalizedFullLink;
       schema?: JSONSchema;
       rootSchema?: JSONSchema;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
-      defaultValue?: Opaque<T>;
       name?: string;
       external?: unknown;
     };
@@ -197,9 +196,10 @@ export type { MemorySpace } from "@commontools/memory/interface";
 
 export function createCell<T>(
   runtime: IRuntime,
-  link?: NormalizedFullLink,
+  link?: NormalizedLink,
   tx?: IExtendedStorageTransaction,
   synced = false,
+  kind?: CellKind,
 ): Cell<T> {
   return new CellImpl(
     runtime,
@@ -207,6 +207,7 @@ export function createCell<T>(
     link, // Pass the link directly (or undefined)
     synced,
     undefined, // No shared causeContainer
+    kind,
   ) as unknown as Cell<T>; // Cast to set brand
 }
 
@@ -217,6 +218,8 @@ export function createCell<T>(
  * The container stores only the entity reference parts that need to be synchronized.
  */
 interface CauseContainer {
+  // Root cell that created this cause container
+  cell: OpaqueCell<unknown>;
   // Entity reference - shared across all siblings
   id: URI | undefined;
   space: MemorySpace | undefined;
@@ -243,23 +246,33 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   // Shared container for entity ID and cause - siblings share the same instance
   private _causeContainer: CauseContainer;
 
+  private _frame: Frame | undefined;
+
+  private _kind: CellKind;
+
   constructor(
     public readonly runtime: IRuntime,
     public readonly tx: IExtendedStorageTransaction | undefined,
     link?: NormalizedLink,
     private synced: boolean = false,
     causeContainer?: CauseContainer,
+    kind?: CellKind,
   ) {
+    this._frame = getTopFrame();
+
     // Store this cell's own link
     this._link = link ?? { path: [] };
 
     // Use provided container or create one
     // If link has an id, extract it to the container
     this._causeContainer = causeContainer ?? {
+      cell: this as unknown as OpaqueCell<unknown>,
       id: this._link.id,
       space: this._link.space,
       cause: undefined,
     };
+
+    this._kind = kind ?? "cell";
   }
 
   /**
@@ -344,10 +357,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
     // Otherwise, let's attempt to derive the id:
 
-    const frame = getTopFrame();
-
     // We must be in a frame context to derive the id.
-    if (!frame) {
+    if (!this._frame) {
       throw new Error(
         "Cannot create cell link: no frame context.\n" +
           "This typically happens when:\n" +
@@ -357,7 +368,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     }
 
     const space = this._link.space ?? this._causeContainer.space ??
-      frame?.space;
+      this._frame?.space;
 
     // We need a space to create a link
     if (!space) {
@@ -370,7 +381,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
     const cause = this._causeContainer.cause ??
-      (frame.inHandler ? { count: frame.generatedIdCounter++ } : undefined);
+      (this._frame.inHandler
+        ? { count: this._frame.generatedIdCounter++ }
+        : undefined);
 
     if (!cause) {
       throw new Error(
@@ -396,7 +409,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   get space(): MemorySpace {
     return this._link.space ?? this._causeContainer.space ??
-      getTopFrame()?.space!;
+      this._frame?.space!;
   }
 
   get path(): readonly PropertyKey[] {
@@ -504,7 +517,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.tx,
       resolveLink(this.tx, this.link, "writeRedirect"),
       transformedValue,
-      getTopFrame()?.cause,
+      this._frame?.cause,
     );
 
     // Register commit callback if provided
@@ -582,7 +595,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // existing array.
     const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
-    const cause = getTopFrame()?.cause;
+    const cause = this._frame?.cause;
 
     let array = currentValue as unknown[];
     if (array !== undefined && !Array.isArray(array)) {
@@ -651,6 +664,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       childLink,
       this.synced,
       this._causeContainer,
+      this._kind,
     ) as unknown as KeyResultType<T, K, AsCell>;
   }
 
@@ -675,6 +689,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       siblingLink,
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
+      this._kind,
     ) as unknown as Cell<any>;
   }
 
@@ -687,6 +702,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this._link, // Use the same link
       this.synced,
       this._causeContainer, // Share the causeContainer with siblings
+      this._kind,
     ) as unknown as Cell<T>;
   }
 
@@ -891,10 +907,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // For cells created during recipe construction, we need to track which nodes
     // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
     // we'll store this in a WeakMap keyed by the cell instance.
-    if (!cellNodes.has(this)) {
-      cellNodes.set(this, new Set());
+    const top = this._causeContainer.cell;
+    if (!cellNodes.has(top)) {
+      cellNodes.set(top, new Set());
     }
-    cellNodes.get(this)!.add(node);
+    cellNodes.get(top)!.add(node);
   }
 
   /**
@@ -902,33 +919,31 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * If the cell has a link, it's included as 'external'.
    */
   export(): {
-    cell: OpaqueCell<any>;
+    cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
-    link?: NormalizedFullLink;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
-    defaultValue?: Opaque<T>;
     name?: string;
     external?: unknown;
   } {
-    const frame = getTopFrame();
+    if (!this._frame) {
+      throw new Error("Cannot export cell: no frame context.");
+    }
     return {
-      cell: this as unknown as OpaqueCell<any>,
+      cell: this._causeContainer.cell,
       path: this.path,
-      link: this.hasFullLink() ? this.link : undefined,
       schema: this.schema,
       rootSchema: this.rootSchema,
-      nodes: cellNodes.get(this) || new Set(),
-      frame: frame!,
-      value: undefined,
-      defaultValue: undefined,
-      name: undefined,
+      nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
+      frame: this._frame,
+      value: this._kind === "stream" ? { $stream: true } as T : undefined,
+      name: this._causeContainer.cause as string | undefined,
       external: this._link.id
         ? this.getAsWriteRedirectLink({
-          baseSpace: getTopFrame()?.space,
+          baseSpace: this._frame.space,
           includeSchema: true,
         })
         : undefined,

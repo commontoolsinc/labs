@@ -89,7 +89,6 @@ describe("recipes with HTML", () => {
       title: string;
       items: Item[];
     }>("todo list", ({ title, items }) => {
-      title.setDefault("untitled");
       return {
         [UI]: h(
           "div",
