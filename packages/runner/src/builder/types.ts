@@ -78,6 +78,7 @@ export type {
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
+  IsThisObject,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,

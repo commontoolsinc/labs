@@ -11,13 +11,14 @@ import {
   ID_FIELD,
   type IDFields,
   isStreamValue,
+  type IsThisObject,
   type JSONSchema,
   type NodeFactory,
   type NodeRef,
   type Opaque,
   type OpaqueCell,
   type OpaqueRef,
-  type Recipe,
+  type RecipeFactory,
   type Schema,
   type Stream,
   TYPE,
@@ -738,7 +739,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     ) as unknown as Cell<T>;
   }
 
-  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
+  sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel {
     // Check if this is a stream
     if (this.isStream()) {
       // Stream behavior: add listener
@@ -1073,7 +1074,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    * Similar to map but accepts a pre-defined recipe instead of a function.
    */
   mapWithPattern<S>(
-    op: Recipe,
+    this: IsThisObject,
+    op: RecipeFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]> {
     // Create the factory if it doesn't exist
@@ -1134,7 +1136,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 }
 
 function subscribeToReferencedDocs<T>(
-  callback: (value: T) => Cancel | undefined,
+  callback: (value: T) => Cancel | undefined | void,
   runtime: IRuntime,
   link: NormalizedFullLink,
 ): Cancel {
@@ -1149,7 +1151,7 @@ function subscribeToReferencedDocs<T>(
   const log = txToReactivityLog(tx);
 
   // Call the callback once with initial value.
-  let cleanup: Cancel | undefined = callback(value);
+  let cleanup: Cancel | undefined | void = callback(value);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
   // write to other cells, and we retry by design anyway below when read data

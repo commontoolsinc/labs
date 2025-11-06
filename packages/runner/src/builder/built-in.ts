@@ -24,7 +24,7 @@ import type {
   PatternToolFunction,
 } from "commontools";
 
-export function createBuiltIns(_runtime: unknown) {
+export function createBuiltIns() {
   const compileAndRun = createNodeFactory({
     type: "ref",
     implementation: "compileAndRun",
@@ -53,14 +53,14 @@ export function createBuiltIns(_runtime: unknown) {
     params: Opaque<BuiltInGenerateObjectParams>,
   ) => OpaqueRef<BuiltInLLMGenerateObjectState<T>>;
 
-  const generateText = createNodeFactoryImpl(runtime, {
+  const generateText = createNodeFactory({
     type: "ref",
     implementation: "generateText",
   }) as (
     params: Opaque<BuiltInGenerateTextParams>,
   ) => OpaqueRef<BuiltInGenerateTextState>;
 
-  const fetchData = createNodeFactoryImpl(runtime, {
+  const fetchData = createNodeFactory({
     type: "ref",
     implementation: "fetchData",
   }) as <T>(
@@ -170,6 +170,7 @@ export function createBuiltIns(_runtime: unknown) {
     llm,
     llmDialog,
     generateObject,
+    generateText,
     fetchData,
     streamData,
     ifElse,

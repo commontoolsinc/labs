@@ -49,12 +49,12 @@ export type BrandedCell<T, Kind extends CellKind | string = string> = {
 // ============================================================================
 
 // To constrain methods that only exists on objects
-type IsThisObject =
+export type IsThisObject =
   | IsThisArray
   | BrandedCell<JSONObject>
   | BrandedCell<Record<string, unknown>>;
 
-type IsThisArray =
+export type IsThisArray =
   | BrandedCell<JSONArray>
   | BrandedCell<Array<unknown>>
   | BrandedCell<Array<any>>
@@ -72,7 +72,7 @@ export interface IAnyCell<T> {
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
-  for(cause: unknown): Cell<T>;
+  //  for(cause: unknown): Cell<T>;
 }
 
 /**
@@ -235,7 +235,7 @@ export interface IDerivable<T> {
   ): OpaqueRef<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
-    op: Recipe,
+    op: RecipeFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
 }

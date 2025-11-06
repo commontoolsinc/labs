@@ -87,7 +87,7 @@ export const createBuilder = (
   };
 
   // Create built-in modules that need runtime
-  const builtIns = createBuiltIns(runtime);
+  const builtIns = createBuiltIns();
 
   return {
     commontools: {

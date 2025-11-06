@@ -206,27 +206,27 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: AnyCell<unknown> | Cell<unknown> | Stream<unknown>,
+  value: AnyCell<any>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: AnyCell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: AnyCell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".

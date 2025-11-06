@@ -149,7 +149,6 @@ function handlerInternal<E, T>(
     };
 
     connectInputAndOutputs(node);
-    eventStream.connect(node);
 
     return eventStream;
   }, module);
