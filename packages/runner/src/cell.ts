@@ -194,6 +194,38 @@ import type {
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
+const cellMethods = new Set<keyof ICell<unknown>>([
+  "get",
+  "set",
+  "send",
+  "update",
+  "push",
+  "equals",
+  "key",
+  "map",
+  "mapWithPattern",
+  "toJSON",
+  "for",
+  "asSchema",
+  "withTx",
+  "sink",
+  "sync",
+  "getAsQueryResult",
+  "getAsNormalizedFullLink",
+  "getAsLink",
+  "getAsWriteRedirectLink",
+  "getRaw",
+  "setRaw",
+  "getSourceCell",
+  "setSourceCell",
+  "freeze",
+  "isFrozen",
+  "setSchema",
+  "connect",
+  "export",
+  "getAsOpaqueRefProxy",
+]);
+
 export function createCell<T>(
   runtime: IRuntime,
   link?: NormalizedLink,
@@ -936,7 +968,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
-      rootSchema: this.rootSchema,
+      rootSchema: this.rootSchema ?? this.schema,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       value: this._kind === "stream" ? { $stream: true } as T : undefined,
@@ -989,9 +1021,14 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           const nestedCell = self.key(prop) as Cell<T>;
 
           // Check if this is a method on the cell
-          const cellValue = self[prop as keyof Cell<T>];
-          if (typeof cellValue === "function") {
-            return nestedCell.getAsOpaqueRefProxy(cellValue.bind(self));
+          if (cellMethods.has(prop as keyof ICell<T>)) {
+            return nestedCell.getAsOpaqueRefProxy(
+              (self as unknown as Record<
+                string,
+                (...args: unknown[]) => unknown
+              >)[prop]!
+                .bind(self),
+            );
           } else {
             return nestedCell.getAsOpaqueRefProxy();
           }
