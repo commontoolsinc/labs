@@ -32,7 +32,6 @@ type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends
   readonly (infer ElementType)[] ? ElementType : never;
 
 describe("Schema-to-TS Type Conversion", () => {
-  let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -47,7 +46,6 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    frame = pushFrame();
     const { commontools } = createBuilder(runtime);
     ({ str } = commontools);
   });
@@ -56,10 +54,6 @@ describe("Schema-to-TS Type Conversion", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  afterEach(() => {
-    popFrame(frame);
   });
 
   // These tests verify the type conversion at compile time
