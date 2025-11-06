@@ -541,7 +541,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!this.synced) this.sync();
 
     // Looks for arrays and makes sure each object gets its own doc.
-    const transformedValue = recursivelyAddIDIfNeeded(newValue);
+    const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
 
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
@@ -661,7 +661,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.runtime,
       this.tx,
       resolvedLink,
-      recursivelyAddIDIfNeeded([...array, ...value]),
+      recursivelyAddIDIfNeeded([...array, ...value], this._frame),
       cause,
     );
   }
@@ -1199,10 +1199,11 @@ function subscribeToReferencedDocs<T>(
  */
 function recursivelyAddIDIfNeeded<T>(
   value: T,
+  frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
 ): T {
-  // Can't add IDs without top frame.
-  if (!getTopFrame()) return value;
+  // Can't add IDs without handler frame.
+  if (!frame?.inHandler) return value;
 
   // Not a record, no need to add IDs. Already a link, no need to add IDs.
   if (!isRecord(value) || isLink(value)) return value;
@@ -1217,12 +1218,12 @@ function recursivelyAddIDIfNeeded<T>(
     seen.set(value, result);
 
     result.push(...value.map((v) => {
-      const value = recursivelyAddIDIfNeeded(v, seen);
+      const value = recursivelyAddIDIfNeeded(v, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
         isObject(value) && !isLink(value) && !(ID in value)
       ) {
-        return { [ID]: getTopFrame()!.generatedIdCounter++, ...value };
+        return { [ID]: frame.generatedIdCounter++, ...value };
       } else {
         return value;
       }
@@ -1235,7 +1236,7 @@ function recursivelyAddIDIfNeeded<T>(
     seen.set(value, result);
 
     Object.entries(value).forEach(([key, v]) => {
-      result[key] = recursivelyAddIDIfNeeded(v, seen);
+      result[key] = recursivelyAddIDIfNeeded(v, frame, seen);
     });
 
     // Copy supported symbols from original value.
