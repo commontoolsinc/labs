@@ -104,34 +104,6 @@ export type {
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
-// Augment the public interface with the internal OpaqueRefMethods interface.
-// This adds runtime-specific methods beyond what the public API defines.
-declare module "@commontools/api" {
-  interface IOxpaquable<T> {
-    // Export method for introspection
-    export(): {
-      cell: OpaqueCell<any>;
-      path: readonly PropertyKey[];
-      link?: NormalizedFullLink;
-      schema?: JSONSchema;
-      rootSchema?: JSONSchema;
-      nodes: Set<NodeRef>;
-      frame: Frame;
-      value?: Opaque<T> | T;
-      name?: string;
-      external?: unknown;
-    };
-
-    connect(node: NodeRef): void;
-
-    // Additional utility methods
-    toJSON(): LegacyJSONCellLink | null;
-    [Symbol.iterator](): Iterator<T>;
-    [Symbol.toPrimitive](hint: string): T;
-    [isOpaqueRefMarker]: true;
-  }
-}
-
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
 export function isOpaqueRef<T = any>(
