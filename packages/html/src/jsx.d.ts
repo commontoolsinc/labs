@@ -2829,7 +2829,10 @@ type CTEvent<T> = {
   detail: T;
 };
 
-type EventHandler<T> = CellLike<CTEvent<T>> | ((event?: CTEvent<T>) => void);
+type EventHandler<T> =
+  | CellLike<CTEvent<T>>
+  | ((event: CTEvent<T>) => void)
+  | (() => void);
 
 // `Charm` is not a recipe type.
 type Charm = any;
