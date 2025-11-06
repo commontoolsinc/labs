@@ -23,6 +23,7 @@ describe("recipes with HTML", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let str: ReturnType<typeof createBuilder>["commontools"]["str"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
@@ -43,7 +44,7 @@ describe("recipes with HTML", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder(runtime);
-    ({ lift, recipe, str, UI } = commontools);
+    ({ lift, derive, recipe, str, UI } = commontools);
   });
 
   afterEach(async () => {
@@ -97,8 +98,8 @@ describe("recipes with HTML", () => {
           h(
             "ul",
             null,
-            items.map((item, i: number) =>
-              h("li", { key: i.toString() }, item.title)
+            items.map((item, i) =>
+              h("li", { key: derive(i, (i) => i.toString()) }, item.title)
             ) as VNode[],
           ),
         ),
@@ -125,11 +126,9 @@ describe("recipes with HTML", () => {
     const cell = result.key(UI);
     render(root, cell.get(), renderOptions);
 
-    // Keys are "[object Object]" due to mapping an `Opaque<number>` in handler.
-    // Maybe unintentional(?)
     assert.equal(
       root.innerHTML,
-      '<div><h1>test</h1><ul><li key="[object Object]">item 1</li><li key="[object Object]">item 2</li></ul></div>',
+      '<div><h1>test</h1><ul><li key="0">item 1</li><li key="1">item 2</li></ul></div>',
     );
   });
 
