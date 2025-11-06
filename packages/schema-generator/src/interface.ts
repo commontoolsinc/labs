@@ -38,6 +38,8 @@ export interface GenerationContext {
   // Optional context
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
+  /** Optional type registry for synthetic nodes */
+  typeRegistry?: WeakMap<ts.Node, ts.Type>;
 }
 
 /**

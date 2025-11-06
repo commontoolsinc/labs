@@ -36,46 +36,13 @@ export class ArrayFormatter implements TypeFormatter {
     // Handle special cases for any[], unknown[], and never[] with JSON Schema shortcuts
     const elementFlags = info.elementType.flags;
 
-    // If elementType is 'any' but we have a concrete TypeNode, directly use the node
-    // This handles cases where TypeScript widened the type but we have precise node info
-    if ((elementFlags & ts.TypeFlags.Any) && info.elementNode) {
-      const nodeType = context.typeChecker.getTypeFromTypeNode(info.elementNode);
-
-      // For synthetic nodes (pos===-1), use generateSchemaFromSyntheticTypeNode
-      // which has proper handling for keyword types
-      if (info.elementNode.pos === -1 && info.elementNode.end === -1) {
-        let items = this.schemaGenerator.generateSchemaFromSyntheticTypeNode(
-          info.elementNode,
-          context.typeChecker,
-        );
-
-        // Strip the $schema and $defs fields - we only want the inner schema
-        // since this is nested within a parent schema
-        if (typeof items === "object" && items !== null && "$schema" in items) {
-          const { $schema, $defs, ...innerSchema} = items as Record<string, unknown>;
-          items = innerSchema;
-        }
-
-        return { type: "array", items };
-      }
-
-      if (!(nodeType.flags & ts.TypeFlags.Any)) {
-        // Use the more precise type from the node
-        const items = this.schemaGenerator.formatChildType(
-          nodeType,
-          context,
-          info.elementNode,
-        );
-        return { type: "array", items };
-      }
-    }
-
-    if (elementFlags & ts.TypeFlags.Any) {
+    // Special case: explicit any[] or unknown[] (without concrete node info)
+    if ((elementFlags & ts.TypeFlags.Any) && !info.elementNode) {
       // any[] - allow any item type
       return { type: "array", items: true };
     }
 
-    if (elementFlags & ts.TypeFlags.Unknown) {
+    if ((elementFlags & ts.TypeFlags.Unknown) && !info.elementNode) {
       // unknown[] - allow any item type (type safety at compile time)
       return { type: "array", items: true };
     }
@@ -85,6 +52,8 @@ export class ArrayFormatter implements TypeFormatter {
       return { type: "array", items: false };
     }
 
+    // Use formatChildType - it will auto-detect whether to use type-based
+    // or node-based analysis based on whether the type is reliable
     const items = this.schemaGenerator.formatChildType(
       info.elementType,
       context,
