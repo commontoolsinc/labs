@@ -772,8 +772,12 @@ describe("Schema Support", () => {
 
       // Set up circular references using cell links
       c.key("parent").setRaw(c.getAsLink());
-      c.key("children").key(0).key("parent").setRaw(c.getAsLink());
-      c.key("children").key(1).key("parent").setRaw(c.getAsLink());
+      c.key("children").key(0).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
+      c.key("children").key(1).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       const schema = {
         type: "object",
@@ -829,10 +833,10 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").setRaw(
+      c.key("nested").key("items").key(0).key("value").resolveAsCell().setRaw(
         c.getAsLink(),
       );
-      c.key("nested").key("items").key(1).key("value").setRaw(
+      c.key("nested").key("items").key(1).key("value").resolveAsCell().setRaw(
         c.key("nested").getAsLink(),
       );
 
@@ -903,7 +907,9 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").setRaw(c.getAsLink());
+      c.key("children").key(1).key("value").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       const schema = {
         type: "object",
