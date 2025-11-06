@@ -5,8 +5,8 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
-  typeToSchemaTypeNode,
   isFunctionLikeExpression,
+  typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 import {
   TransformationContext,

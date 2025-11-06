@@ -261,7 +261,9 @@ function collectCaptures(
       const nestedCaptures = collectCaptures(node, checker);
       // Filter out captures that are parameters of the current function
       const funcParams = new Set(
-        func.parameters.map(p => p.name).filter(ts.isIdentifier).map(id => id.text)
+        func.parameters.map((p) => p.name).filter(ts.isIdentifier).map((id) =>
+          id.text
+        ),
       );
 
       for (const capture of nestedCaptures) {

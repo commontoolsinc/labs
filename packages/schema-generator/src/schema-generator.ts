@@ -627,7 +627,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Handle ArrayTypeNode (e.g., number[], string[])
     if (ts.isArrayTypeNode(typeNode)) {
       const elementType = checker.getTypeFromTypeNode(typeNode.elementType);
-      const items = this.formatChildType(elementType, context, typeNode.elementType);
+      const items = this.formatChildType(
+        elementType,
+        context,
+        typeNode.elementType,
+      );
       return { type: "array", items };
     }
 
