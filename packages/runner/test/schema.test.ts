@@ -2514,7 +2514,7 @@ describe("Schema Support", () => {
       expect(links[0].id).not.toBe(links[2].id);
     });
 
-    it("should create data URIs for plain objects not marked asCell", () => {
+    it("should create URIs for plain objects not marked asCell", () => {
       const schema = {
         type: "object",
         properties: {
@@ -2555,10 +2555,10 @@ describe("Schema Support", () => {
       const itemCells = result.items.map((item: any) => item[toCell]());
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
-      // Plain objects now get data URIs with empty paths
-      expect(links[0].id).toMatch(/^data:/);
-      expect(links[1].id).toMatch(/^data:/);
-      expect(links[2].id).toMatch(/^data:/);
+      // Plain objects now also get ids assigned
+      expect(links[0].id).toMatch(/^of:/);
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[2].id).toMatch(/^of:/);
       expect(links[0].path).toEqual([]);
       expect(links[1].path).toEqual([]);
       expect(links[2].path).toEqual([]);
@@ -2699,9 +2699,9 @@ describe("Schema Support", () => {
       expect(links[0].id).toMatch(/^of:/);
       expect(links[2].id).toMatch(/^of:/);
 
-      // Plain objects should have data URIs
-      expect(links[1].id).toMatch(/^data:/);
-      expect(links[3].id).toMatch(/^data:/);
+      // Plain objects should have gotten IDs as well
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[3].id).toMatch(/^of:/);
       expect(links[1].id).not.toBe(links[3].id); // Different data URIs
     });
 

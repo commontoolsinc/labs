@@ -1202,8 +1202,8 @@ function recursivelyAddIDIfNeeded<T>(
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
 ): T {
-  // Can't add IDs without handler frame.
-  if (!frame?.inHandler) return value;
+  // Can't add IDs without frame.
+  if (!frame) return value;
 
   // Not a record, no need to add IDs. Already a link, no need to add IDs.
   if (!isRecord(value) || isLink(value)) return value;
