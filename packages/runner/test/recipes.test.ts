@@ -171,12 +171,15 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes", async () => {
+    const multiply = lift<{ x: number; index: number; array: { x: number }[] }>(
+      ({ x, index, array }) => x * (index + 1) * array.length,
+    );
+
     const multipliedArray = recipe<{ values: { x: number }[] }>(
       "Multiply numbers",
       ({ values }) => {
         const multiplied = values.map(({ x }, index, array) => {
-          const multiply = lift<number>((x) => x * (index + 1) * array.length);
-          return { multiplied: multiply(x) };
+          return { multiplied: multiply({ x, index, array }) };
         });
         return { multiplied };
       },
