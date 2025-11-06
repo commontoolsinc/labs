@@ -416,10 +416,7 @@ export class Runtime implements IRuntime {
 
     // Pop the default frame
     if (this.defaultFrame) {
-      if (getTopFrame() !== this.defaultFrame) {
-        console.error("Default frame mismatch");
-      }
-      popFrame();
+      popFrame(this.defaultFrame);
       this.defaultFrame = undefined;
     }
 

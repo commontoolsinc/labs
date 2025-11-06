@@ -3,6 +3,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/html";
 import {
+  type Frame,
   isModule,
   isOpaqueRef,
   isRecipe,
@@ -961,13 +962,6 @@ export class Runner implements IRunner {
           }
         }
 
-        const inputsCell = this.runtime.getImmutableCell(
-          processCell.space,
-          eventInputs,
-          undefined,
-          tx,
-        );
-
         const frame = pushFrameFromCause(
           cause,
           {
@@ -981,41 +975,53 @@ export class Runner implements IRunner {
           this.runtime, // Pass runtime to frame
         );
 
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).get()
-          : inputsCell.getAsQueryResult([], tx);
-        const result = fn(argument);
+        try {
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            eventInputs,
+            undefined,
+            tx,
+          );
 
-        const postRun = (result: any) => {
-          if (containsOpaqueRef(result)) {
-            const resultRecipe = recipeFromFrame(
-              "event handler result",
-              undefined,
-              () => result,
-            );
+          const argument = module.argumentSchema
+            ? inputsCell.asSchema(module.argumentSchema).get()
+            : inputsCell.getAsQueryResult([], tx);
+          const result = fn(argument);
 
-            const resultCell = this.run(
-              tx,
-              resultRecipe,
-              undefined,
-              this.runtime.getCell(
-                processCell.space,
-                { resultFor: cause },
+          const postRun = (result: any) => {
+            if (containsOpaqueRef(result)) {
+              const resultRecipe = recipeFromFrame(
+                "event handler result",
                 undefined,
+                () => result,
+              );
+
+              const resultCell = this.run(
                 tx,
-              ),
-            );
-            addCancel(() => this.stop(resultCell));
+                resultRecipe,
+                undefined,
+                this.runtime.getCell(
+                  processCell.space,
+                  { resultFor: cause },
+                  undefined,
+                  tx,
+                ),
+              );
+              addCancel(() => this.stop(resultCell));
+            }
+            return result;
+          };
+
+          if (result instanceof Promise) {
+            return result.then(postRun);
+          } else {
+            return postRun(result);
           }
-
+        } catch (error) {
+          (error as Error & { frame?: Frame }).frame = frame;
+          throw error;
+        } finally {
           popFrame(frame);
-          return result;
-        };
-
-        if (result instanceof Promise) {
-          return result.then(postRun);
-        } else {
-          return postRun(result);
         }
       };
 
@@ -1049,10 +1055,6 @@ export class Runner implements IRunner {
       let previousResultCell: Cell<any> | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
-
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
           {
@@ -1065,68 +1067,80 @@ export class Runner implements IRunner {
           false, // not in handler
           this.runtime, // Pass runtime to frame
         );
-        const result = fn(argument);
 
-        const postRun = (result: any) => {
-          if (containsOpaqueRef(result)) {
-            const resultRecipe = recipeFromFrame(
-              "action result",
-              undefined,
-              () => result,
-            );
-            const resultCell = previousResultCell ??
-              this.runtime.getCell(
-                processCell.space,
-                { resultFor: { inputs, outputs, fn: fn.toString() } },
+        try {
+          const argument = module.argumentSchema
+            ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+            : inputsCell.getAsQueryResult([], tx);
+
+          const result = fn(argument);
+
+          const postRun = (result: any) => {
+            if (containsOpaqueRef(result)) {
+              const resultRecipe = recipeFromFrame(
+                "action result",
                 undefined,
-                tx,
+                () => result,
+              );
+              const resultCell = previousResultCell ??
+                this.runtime.getCell(
+                  processCell.space,
+                  { resultFor: { inputs, outputs, fn: fn.toString() } },
+                  undefined,
+                  tx,
+                );
+
+              // If nothing changed, don't rerun the recipe
+              const resultRecipeAsString = JSON.stringify(resultRecipe);
+              const previousResultRecipeAsString = this.resultRecipeCache.get(
+                `${resultCell.space}/${resultCell.sourceURI}`,
+              );
+              if (previousResultRecipeAsString === resultRecipeAsString) {
+                return;
+              }
+              this.resultRecipeCache.set(
+                `${resultCell.space}/${resultCell.sourceURI}`,
+                resultRecipeAsString,
               );
 
-            // If nothing changed, don't rerun the recipe
-            const resultRecipeAsString = JSON.stringify(resultRecipe);
-            const previousResultRecipeAsString = this.resultRecipeCache.get(
-              `${resultCell.space}/${resultCell.sourceURI}`,
-            );
-            if (previousResultRecipeAsString === resultRecipeAsString) return;
-            this.resultRecipeCache.set(
-              `${resultCell.space}/${resultCell.sourceURI}`,
-              resultRecipeAsString,
-            );
+              this.run(
+                tx,
+                resultRecipe,
+                undefined,
+                resultCell,
+              );
+              addCancel(() => this.stop(resultCell));
 
-            this.run(
-              tx,
-              resultRecipe,
-              undefined,
-              resultCell,
-            );
-            addCancel(() => this.stop(resultCell));
-
-            if (!previousResultCell) {
-              previousResultCell = resultCell;
+              if (!previousResultCell) {
+                previousResultCell = resultCell;
+                sendValueToBinding(
+                  tx,
+                  processCell,
+                  outputs,
+                  resultCell.getAsLink({ base: processCell }),
+                );
+              }
+            } else {
               sendValueToBinding(
                 tx,
                 processCell,
                 outputs,
-                resultCell.getAsLink({ base: processCell }),
+                result,
               );
             }
+            return result;
+          };
+
+          if (result instanceof Promise) {
+            return result.then(postRun);
           } else {
-            sendValueToBinding(
-              tx,
-              processCell,
-              outputs,
-              result,
-            );
+            return postRun(result);
           }
-
+        } catch (error) {
+          (error as Error & { frame?: Frame }).frame = frame;
+          throw error;
+        } finally {
           popFrame(frame);
-          return result;
-        };
-
-        if (result instanceof Promise) {
-          return result.then(postRun);
-        } else {
-          return postRun(result);
         }
       };
 
