@@ -100,7 +100,7 @@ function attachCfcToOutputs<T, R>(
       ...outpuSchemaObj,
       ifc,
     };
-    (outputs as OpaqueCell<T>).setSchema(cfcSchema);
+    outputs.setSchema(cfcSchema);
     return;
   } else if (isRecord(outputs)) {
     // Descend into objects and arrays
