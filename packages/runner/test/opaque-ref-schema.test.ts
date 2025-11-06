@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
-import type { Frame, JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
@@ -10,7 +9,6 @@ import { Identity } from "@commontools/identity";
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("OpaqueRef Schema Support", () => {
-  let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
