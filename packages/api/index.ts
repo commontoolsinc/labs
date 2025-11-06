@@ -41,7 +41,7 @@ export type CellKind =
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
 export type AnyBrandedCell<T, Kind extends string = string> = {
-  [CELL_BRAND]: Kind | string;
+  [CELL_BRAND]: Kind;
 };
 
 export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
