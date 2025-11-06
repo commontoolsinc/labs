@@ -49,7 +49,7 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
-import { getTopFrame, popFrame, pushFrame } from "./builder/recipe.ts";
+import { popFrame, pushFrame } from "./builder/recipe.ts";
 import type { Frame } from "./builder/types.ts";
 
 // @ts-ignore - This is temporary to debug integration test

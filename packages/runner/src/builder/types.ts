@@ -1,7 +1,5 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
 import type { SchemaContext } from "@commontools/memory/interface";
-import type { NormalizedFullLink } from "../link-utils.ts";
-import type { LegacyJSONCellLink } from "../sigil-types.ts";
 
 import type {
   ByRefFunction,
@@ -29,7 +27,6 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
-  OpaqueCell,
   OpaqueRef,
   PatternToolFunction,
   Recipe,
