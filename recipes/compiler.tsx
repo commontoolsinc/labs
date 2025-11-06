@@ -1,16 +1,13 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   compileAndRun,
   Default,
   handler,
   ifElse,
-  lift,
   NAME,
   navigateTo,
   recipe,
-  toSchema,
   UI,
 } from "commontools";
 
@@ -30,52 +27,29 @@ const updateCode = handler<
   },
 );
 
-// Lift that waits for the compiled result to be ready before navigating
-// Similar to the storeCharm pattern in chatbot-list-view.tsx
-const navigateWhenReady = lift(
-  toSchema<{
-    result: any;
-    isNavigated: Cell<boolean>;
-  }>(),
-  undefined,
-  ({ result, isNavigated }) => {
-    // Only navigate once the result is populated and we haven't navigated yet
-    if (result && !isNavigated.get()) {
-      console.log("navigateWhenReady: result is ready, navigating", result);
-      isNavigated.set(true);
-      return navigateTo(result);
-    }
-    return undefined;
+const visit = handler<
+  unknown,
+  { result: Cell<any> }
+>(
+  (_, { result }) => {
+    console.log("visit: navigating to compiled result", result);
+    return navigateTo(result);
   },
 );
 
-const visit = handler<
-  { detail: { value: string } },
-  { code: string }
+const handleEditContent = handler<
+  { code: string },
+  { code: Cell<string> }
 >(
-  (_, state) => {
-    const { result } = compileAndRun({
-      files: [{ name: "/main.tsx", contents: state.code }],
-      main: "/main.tsx",
-    });
-
-    console.log("visit: compileAndRun returned result cell", result);
-
-    // Use a cell to track if we've already navigated
-    const isNavigated = cell(false);
-
-    // Use the lift to wait for result to be ready before navigating
-    return navigateWhenReady({
-      result,
-      isNavigated,
-    });
+  (event, { code }) => {
+    code.set(event.code);
   },
 );
 
 export default recipe<Input>(
   "Compiler",
   ({ code }) => {
-    const { error, errors } = compileAndRun({
+    const { result, error, errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
@@ -94,7 +68,7 @@ export default recipe<Input>(
             error,
             <b>fix the error: {error}</b>,
             <ct-button
-              onClick={visit({ code })}
+              onClick={visit({ result })}
             >
               Navigate To Charm
             </ct-button>,
@@ -102,6 +76,8 @@ export default recipe<Input>(
         </div>
       ),
       code,
+      updateCode: handleEditContent({ code }),
+      visit: visit({ result }),
     };
   },
 );
