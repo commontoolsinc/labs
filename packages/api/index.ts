@@ -39,8 +39,9 @@ export type CellKind =
   | "readonly"
   | "writeonly";
 
-export type BrandedCell<T, Kind extends CellKind = "cell"> = {
-  [CELL_BRAND]: Kind;
+// `string` acts as `any`, e.g. when wanting to match any kind of cell
+export type BrandedCell<T, Kind extends CellKind | string = string> = {
+  [CELL_BRAND]: Kind | string;
 };
 
 // ============================================================================
@@ -289,6 +290,7 @@ export interface ICell<T>
     IStreamable<T>,
     IEquatable,
     IKeyable<T, AsCell>,
+    IDerivable<T>,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
@@ -978,7 +980,10 @@ export type CreateCellFunction = {
 export type Default<T, V extends T = T> = T;
 
 // Re-export opaque ref creators
-export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
+export type CellFunction = <T>(
+  defaultValue?: T,
+  schema?: JSONSchema,
+) => OpaqueRef<T>;
 export type StreamFunction = <T>(schema?: JSONSchema) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
