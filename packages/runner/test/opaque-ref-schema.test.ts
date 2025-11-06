@@ -17,9 +17,6 @@ describe("OpaqueRef Schema Support", () => {
   let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
 
   beforeEach(() => {
-    // Setup frame for the test
-    frame = pushFrame();
-
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
@@ -32,7 +29,6 @@ describe("OpaqueRef Schema Support", () => {
   });
 
   afterEach(async () => {
-    popFrame(frame);
     await runtime?.dispose();
   });
 
