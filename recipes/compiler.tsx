@@ -5,6 +5,7 @@ import {
   Default,
   handler,
   ifElse,
+  derive,
   NAME,
   navigateTo,
   recipe,
@@ -37,7 +38,8 @@ const visit = handler<
       main: "/main.tsx",
     });
 
-    console.log("result", result);
+    const x = derive(result, (r: any) => r)
+    console.log("result", result, x);
 
     return navigateTo(result);
   },
@@ -63,7 +65,7 @@ export default recipe<Input>(
           />
           {ifElse(
             error,
-            <b>fix the errors</b>,
+            <b>fix the error: {error}</b>,
             <ct-button
               onClick={visit({ code })}
             >
