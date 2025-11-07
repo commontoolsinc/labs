@@ -139,8 +139,9 @@ async function test() {
   assertEquals(s1Count, 1);
   assertEquals(s2Count, 0);
 
-  await runtime1.dispose();
+  // Have to dispose in reverse order to match frame order
   await runtime2.dispose();
+  await runtime1.dispose();
 }
 
 async function runTest() {
