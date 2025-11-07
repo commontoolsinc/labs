@@ -30,12 +30,15 @@ function opaqueRefWithCell<T>(
   }
 
   // Initial value is treated as default value
+
+  // TODO(seefeld): Use this once default schemas are properly propagated
+  /*
   if (value !== undefined) {
     schema = {
       ...ContextualFlowControl.toSchemaObj(schema),
       default: value as JSONValue,
     };
-  }
+  }*/
 
   // Create a Cell without a link - it will be created on demand via .for()
   // Use tx from frame if available
