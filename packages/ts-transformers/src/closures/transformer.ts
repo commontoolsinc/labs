@@ -244,33 +244,69 @@ function isFunctionLikeDeclaration(
 }
 
 /**
+ * Helper function to check if an identifier is a parameter or local variable of a function.
+ * Used by both shouldCaptureIdentifier and shouldAddNestedCapture to determine if an
+ * identifier should be filtered out from captures.
+ */
+function isParameterOrLocalVariable(
+  identifier: ts.Identifier,
+  func: ts.FunctionLikeDeclaration,
+  funcParams: Set<string>,
+  checker: ts.TypeChecker,
+): boolean {
+  // Check if it's a function parameter
+  if (funcParams.has(identifier.text)) {
+    return true;
+  }
+
+  // Check if it's a local variable declared within the function
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (symbol) {
+    const declarations = symbol.getDeclarations() || [];
+    for (const decl of declarations) {
+      if (isDeclaredWithinFunction(decl, func)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Determines if a capture from a nested function should be added to the outer function's captures.
- * Filters out captures that are parameters of the outer function.
+ * Filters out captures that are parameters or local variables of the outer function.
  *
- * For identifiers: Check if the identifier name matches an outer function parameter.
- * For property accesses: Check if the root identifier matches an outer function parameter.
- *   Example: If outer function has parameter `item`, then inner function's capture of
- *   `item.name` should NOT be added to outer function's captures (since `item` is the
- *   outer function's own parameter, not a capture from further out).
+ * For identifiers: Check if the identifier is a parameter or local variable of the outer function.
+ * For property accesses: Check if the root identifier is a parameter or local variable.
+ *   Example: If outer function has parameter `item` or local `const item = ...`, then inner
+ *   function's capture of `item.name` should NOT be added to outer function's captures (since
+ *   `item` belongs to the outer function's scope, not from further out).
  */
 function shouldAddNestedCapture(
   capture: ts.Expression,
+  outerFunc: ts.FunctionLikeDeclaration,
   funcParams: Set<string>,
+  checker: ts.TypeChecker,
 ): boolean {
   if (ts.isIdentifier(capture)) {
-    // Simple identifier: check directly
-    return !funcParams.has(capture.text);
+    return !isParameterOrLocalVariable(capture, outerFunc, funcParams, checker);
   }
 
   if (ts.isPropertyAccessExpression(capture)) {
-    // Property access: check if root identifier is a parameter
+    // Property access: check if root identifier is a parameter or local variable
     // Walk down the chain to find the root: a.b.c -> a
     let rootExpr: ts.Expression = capture;
     while (ts.isPropertyAccessExpression(rootExpr)) {
       rootExpr = rootExpr.expression;
     }
     if (ts.isIdentifier(rootExpr)) {
-      return !funcParams.has(rootExpr.text);
+      return !isParameterOrLocalVariable(
+        rootExpr,
+        outerFunc,
+        funcParams,
+        checker,
+      );
     }
     // Root is not an identifier (e.g., computed property access) - include it
     return true;
@@ -311,7 +347,7 @@ function collectCaptures(
       );
 
       for (const capture of nestedCaptures) {
-        if (shouldAddNestedCapture(capture, funcParams)) {
+        if (shouldAddNestedCapture(capture, func, funcParams, checker)) {
           captures.add(capture);
         }
       }

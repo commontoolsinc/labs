@@ -474,6 +474,22 @@ export class CommonToolsFormatter implements TypeFormatter {
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): unknown {
+    // Handle type references that represent empty objects
+    // This includes Record<string, never>, Record<K, never>, and similar mapped types
+    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
+      // For mapped types like Record<K, V>, if V is never, the result is an empty object
+      // Check the last type argument (the value type in mapped types)
+      const lastTypeArg =
+        typeNode.typeArguments[typeNode.typeArguments.length - 1];
+      if (lastTypeArg) {
+        const lastType = context.typeChecker.getTypeFromTypeNode(lastTypeArg);
+        // If the value type is never, this represents an empty object
+        if (lastType.flags & ts.TypeFlags.Never) {
+          return {};
+        }
+      }
+    }
+
     // Handle literal types
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;
@@ -554,7 +570,16 @@ export class CommonToolsFormatter implements TypeFormatter {
     _symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    // For now, try to extract from type string - this is a fallback approach
+    // Check if this is an empty object type (no properties, object type)
+    if (
+      (type.flags & ts.TypeFlags.Object) !== 0 &&
+      context.typeChecker.getPropertiesOfType(type).length === 0
+    ) {
+      return {};
+    }
+
+    // Fallback: try to extract from type string representation
+    // This handles literal types that TypeScript stringifies in a way we can parse
     const typeString = context.typeChecker.typeToString(type);
 
     // Handle array literals like ["item1", "item2"]
