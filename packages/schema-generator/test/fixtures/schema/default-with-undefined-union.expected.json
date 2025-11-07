@@ -14,6 +14,8 @@
     }
   },
   "required": [
+    "maybeCount",
+    "maybeTitle",
     "requiredTitle"
   ],
   "type": "object"
