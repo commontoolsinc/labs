@@ -506,6 +506,26 @@ function determineElementType(
 }
 
 /**
+ * Build property assignments for captured variables from a capture tree.
+ * Used by map, handler, and derive transformations to build params/input objects.
+ */
+function buildCapturePropertyAssignments(
+  captureTree: Map<string, CaptureTreeNode>,
+  factory: ts.NodeFactory,
+): ts.PropertyAssignment[] {
+  const properties: ts.PropertyAssignment[] = [];
+  for (const [rootName, node] of captureTree) {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
+  }
+  return properties;
+}
+
+/**
  * Build a TypeNode for the callback parameter and register property TypeNodes in typeRegistry.
  * Returns a TypeLiteral representing { element: T, index?: number, array?: T[], params: {...} }
  */
@@ -825,15 +845,7 @@ function transformHandlerJsxAttribute(
     [handlerCallback],
   );
 
-  const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [rootName, rootNode] of captureTree) {
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(rootNode, rootName, factory),
-      ),
-    );
-  }
+  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
@@ -1127,15 +1139,7 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
-  const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [rootName, rootNode] of captureTree) {
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(rootNode, rootName, factory),
-      ),
-    );
-  }
+  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
@@ -1280,14 +1284,7 @@ function buildDeriveInputObject(
   }
 
   // Add captures
-  for (const [rootName, node] of captureTree) {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(node, rootName, factory),
-      ),
-    );
-  }
+  properties.push(...buildCapturePropertyAssignments(captureTree, factory));
 
   return factory.createObjectLiteralExpression(
     properties,
