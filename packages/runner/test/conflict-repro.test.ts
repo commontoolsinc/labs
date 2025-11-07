@@ -110,15 +110,19 @@ describe("Conflict Reproduction", () => {
     const result = runtime.run(tx, conflictRepro, {
       items: [{ id: "test" }],
     }, resultCell);
-    tx.commit();
+    await tx.commit();
 
     await runtime.idle();
+
+    // This tests the condition that caused the conflict
+    expect(result.get().sequence).toBe(undefined);
 
     // Trigger the handler
     result.key("action").send({});
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({ action: expect.anything() });
+    // This tests the condition that caused the conflict
+    expect(result.get().sequence).toBe(null);
 
     // Give time for async conflict notifications to be processed
     // The conflict happens during the optimistic transaction retry,
@@ -164,6 +168,7 @@ describe("Conflict Reproduction", () => {
             items,
             sequence,
           }),
+          sequence,
         };
       },
     );
@@ -177,13 +182,19 @@ describe("Conflict Reproduction", () => {
     const result = runtime.run(tx, conflictReproNoLift, {
       items: [{ id: "test" }],
     }, resultCell);
-    tx.commit();
+    await tx.commit();
 
     await runtime.idle();
+
+    // This tests the condition that caused the conflict
+    expect(result.get().sequence).toBe(undefined);
 
     // Trigger the handler
     result.key("action").send({});
     await runtime.idle();
+
+    // This tests the condition that caused the conflict
+    expect(result.get().sequence).toBe(null);
 
     // Give time for async conflict notifications
     await new Promise((resolve) => setTimeout(resolve, 100));
