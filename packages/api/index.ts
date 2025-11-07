@@ -958,9 +958,9 @@ export type DeriveFunction = {
   // Overload 2: Boolean literal union -> boolean
   // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
   // Without this, callback gets (input: true | false) instead of (input: boolean)
-  <Out>(
+  <In extends boolean, Out>(
     input: OpaqueRef<true> | OpaqueRef<false>,
-    f: (input: boolean) => Out,
+    f: (input: In) => Out,
   ): OpaqueRef<Out>;
 
   // Overload 3: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
