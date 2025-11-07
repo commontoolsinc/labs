@@ -342,9 +342,7 @@ In some CI/test environments, you may encounter SSL certificate errors when Deno
 error: Failed caching npm package: invalid peer certificate: UnknownIssuer
 ```
 
-**Root Cause**: This occurs when the system's CA (Certificate Authority) certificate bundle is missing, outdated, or not properly configured. Deno cannot verify the SSL certificates from `registry.npmjs.org`.
-
-**Proper Fix**: Install/update CA certificates on your system:
+This occurs when the system's CA (Certificate Authority) certificate bundle is missing or outdated. Install/update CA certificates on your system:
 
 ```bash
 # Debian/Ubuntu
@@ -356,22 +354,6 @@ apk add --no-cache ca-certificates
 # Update certificate store
 sudo update-ca-certificates
 ```
-
-**Workaround (Testing/Development Only)**: If you're in a sandboxed/containerized environment where installing certificates isn't feasible, you can bypass certificate validation:
-
-```bash
-deno test --unsafely-ignore-certificate-errors
-```
-
-Or set the environment variable:
-
-```bash
-export DENO_TLS_CA_STORE=system
-# or
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-```
-
-**⚠️ Warning**: Only use these workarounds in trusted development/CI environments where you control the network. Never use in production or when downloading untrusted code.
 
 ### Running Tests
 
