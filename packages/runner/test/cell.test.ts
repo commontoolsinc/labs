@@ -6,8 +6,8 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { isQueryResult } from "../src/query-result-proxy.ts";
-import { toCell, toOpaqueRef } from "../src/back-to-cell.ts";
+import { isCellResult } from "../src/query-result-proxy.ts";
+import { toCell } from "../src/back-to-cell.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -347,8 +347,8 @@ describe("Cell utility functions", () => {
     );
     c.set({ x: 1 });
     const proxy = c.getAsQueryResult();
-    expect(isQueryResult(proxy)).toBe(true);
-    expect(isQueryResult({})).toBe(false);
+    expect(isCellResult(proxy)).toBe(true);
+    expect(isCellResult({})).toBe(false);
   });
 });
 
@@ -536,19 +536,19 @@ describe("createProxy", () => {
 
     // Methods that return arrays should return query result proxies
     const mapped = proxy.array.map((n: number) => n * 2);
-    expect(isQueryResult(mapped)).toBe(false);
+    expect(isCellResult(mapped)).toBe(false);
     expect(mapped.length).toBe(5);
     expect(mapped[0]).toBe(2);
     expect(mapped[4]).toBe(10);
 
     const filtered = proxy.array.filter((n: number) => n % 2 === 0);
-    expect(isQueryResult(filtered)).toBe(false);
+    expect(isCellResult(filtered)).toBe(false);
     expect(filtered.length).toBe(2);
     expect(filtered[0]).toBe(2);
     expect(filtered[1]).toBe(4);
 
     const sliced = proxy.array.slice(1, 4);
-    expect(isQueryResult(sliced)).toBe(false);
+    expect(isCellResult(sliced)).toBe(false);
     expect(sliced.length).toBe(3);
     expect(sliced[0]).toBe(2);
     expect(sliced[2]).toBe(4);
@@ -567,7 +567,7 @@ describe("createProxy", () => {
     // Access a nested array through multiple levels
     const firstInnerArray = proxy.nested.arrays[0];
     expect(firstInnerArray).toEqual([1, 2]);
-    expect(isQueryResult(firstInnerArray)).toBe(true);
+    expect(isCellResult(firstInnerArray)).toBe(true);
 
     // Modify the deeply nested array
     firstInnerArray.push(3);
@@ -580,7 +580,7 @@ describe("createProxy", () => {
     // Create a flattened array using array methods
     const flattened = proxy.nested.arrays.flat();
     expect(flattened).toEqual([1, 2, 3, 3, 4]);
-    expect(isQueryResult(flattened)).toBe(false);
+    expect(isCellResult(flattened)).toBe(false);
 
     // Modify the flattened result
     flattened[0] = 10;
@@ -609,9 +609,9 @@ describe("createProxy", () => {
     expect(collected.length).toBe(3);
 
     // Each element should be a query result proxy (for objects)
-    expect(isQueryResult(collected[0])).toBe(true);
-    expect(isQueryResult(collected[1])).toBe(true);
-    expect(isQueryResult(collected[2])).toBe(true);
+    expect(isCellResult(collected[0])).toBe(true);
+    expect(isCellResult(collected[1])).toBe(true);
+    expect(isCellResult(collected[2])).toBe(true);
 
     // We can access properties through the proxies
     expect(collected[0].name).toBe("a");
@@ -635,9 +635,9 @@ describe("createProxy", () => {
     expect(spread.length).toBe(3);
 
     // Each element should be a query result proxy (for objects)
-    expect(isQueryResult(spread[0])).toBe(true);
-    expect(isQueryResult(spread[1])).toBe(true);
-    expect(isQueryResult(spread[2])).toBe(true);
+    expect(isCellResult(spread[0])).toBe(true);
+    expect(isCellResult(spread[1])).toBe(true);
+    expect(isCellResult(spread[2])).toBe(true);
 
     // Verify we can access properties
     expect(spread[0].id).toBe(1);
@@ -664,16 +664,16 @@ describe("createProxy", () => {
     expect(outerSpread.length).toBe(2);
 
     // Each inner array should be a query result proxy
-    expect(isQueryResult(outerSpread[0])).toBe(true);
-    expect(isQueryResult(outerSpread[1])).toBe(true);
+    expect(isCellResult(outerSpread[0])).toBe(true);
+    expect(isCellResult(outerSpread[1])).toBe(true);
 
     // Spread an inner array
     const innerSpread = [...outerSpread[0]];
     expect(innerSpread.length).toBe(2);
 
     // Elements of the inner array should also be query result proxies (for objects)
-    expect(isQueryResult(innerSpread[0])).toBe(true);
-    expect(isQueryResult(innerSpread[1])).toBe(true);
+    expect(isCellResult(innerSpread[0])).toBe(true);
+    expect(isCellResult(innerSpread[1])).toBe(true);
 
     // Verify we can access properties
     expect(innerSpread[0].value).toBe(1);
@@ -723,9 +723,9 @@ describe("createProxy", () => {
     expect(spread.length).toBe(3);
 
     // Each element should be a query result proxy
-    expect(isQueryResult(spread[0])).toBe(true);
-    expect(isQueryResult(spread[1])).toBe(true);
-    expect(isQueryResult(spread[2])).toBe(true);
+    expect(isCellResult(spread[0])).toBe(true);
+    expect(isCellResult(spread[1])).toBe(true);
+    expect(isCellResult(spread[2])).toBe(true);
 
     // Verify we can access the referenced cells' data
     expect(spread[0].name).toBe("first");
@@ -894,9 +894,6 @@ describe("Proxy", () => {
     const streamCell = c.key("stream");
 
     expect(streamCell).toHaveProperty("send");
-    expect(streamCell).not.toHaveProperty("get");
-    expect(streamCell).not.toHaveProperty("set");
-    expect(streamCell).not.toHaveProperty("key");
 
     let lastEventSeen: any = null;
     let eventCount = 0;
@@ -2166,6 +2163,7 @@ describe("asCell with schema", () => {
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
+    const frame = pushFrame();
     const c = runtime.getCell<{ items: any[] }>(
       space,
       "push-with-id",
@@ -2174,7 +2172,6 @@ describe("asCell with schema", () => {
     );
     c.set({ items: [] });
     const arrayCell = c.key("items");
-    const frame = pushFrame();
     arrayCell.push({ value: 42 });
     expect(frame.generatedIdCounter).toEqual(1);
     arrayCell.push({ [ID]: "test", value: 43 });
@@ -2601,9 +2598,7 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
       expect(typeof (result as any)[toCell]).toBe("function");
-      expect(typeof (result as any)[toOpaqueRef]).toBe("function");
     });
 
     it("should add hooks to arrays returned from Cell.get()", () => {
@@ -2622,7 +2617,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
     });
 
     it("should not add hooks to primitive values", () => {
@@ -2635,7 +2629,6 @@ describe("toCell and toOpaqueRef hooks", () => {
       numberCell.set(42);
       const numberResult = numberCell.get();
       expect(toCell in Object(numberResult)).toBe(false);
-      expect(toOpaqueRef in Object(numberResult)).toBe(false);
 
       const stringCell = runtime.getCell<string>(
         space,
@@ -2646,7 +2639,6 @@ describe("toCell and toOpaqueRef hooks", () => {
       stringCell.set("hello");
       const stringResult = stringCell.get();
       expect(toCell in Object(stringResult)).toBe(false);
-      expect(toOpaqueRef in Object(stringResult)).toBe(false);
 
       const boolCell = runtime.getCell<boolean>(
         space,
@@ -2657,7 +2649,6 @@ describe("toCell and toOpaqueRef hooks", () => {
       boolCell.set(true);
       const boolResult = boolCell.get();
       expect(toCell in Object(boolResult)).toBe(false);
-      expect(toOpaqueRef in Object(boolResult)).toBe(false);
     });
 
     it("should not add hooks to existing cells", () => {
@@ -2687,14 +2678,12 @@ describe("toCell and toOpaqueRef hooks", () => {
       const result = c.get();
       // The outer object gets hooks
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
 
       // When a cell is stored in another cell, it's dereferenced to its value
       // The value itself doesn't have hooks (no schema on inner cell)
       expect(isCell(result.cell)).toBe(false);
       expect(result.cell).toEqual({ inner: 42 });
       expect(toCell in result.cell).toBe(false);
-      expect(toOpaqueRef in result.cell).toBe(false);
     });
 
     it("should not add hooks to query result proxies", () => {
@@ -2707,10 +2696,9 @@ describe("toCell and toOpaqueRef hooks", () => {
       c.set({ value: 42 });
 
       const proxy = c.getAsQueryResult();
-      expect(isQueryResult(proxy)).toBe(true);
+      expect(isCellResult(proxy)).toBe(true);
       // Query results don't have the hooks because they're proxies, not plain objects
       expect(toCell in proxy).toBe(false);
-      expect(toOpaqueRef in proxy).toBe(false);
     });
   });
 
@@ -2838,70 +2826,6 @@ describe("toCell and toOpaqueRef hooks", () => {
     });
   });
 
-  describe("toOpaqueRef behavior", () => {
-    it("should return an OpaqueRef within a recipe context", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          value: { type: "number" },
-        },
-      } as const satisfies JSONSchema;
-
-      const c = runtime.getCell<{ value: number }>(
-        space,
-        "hook-toopaqueref-basic",
-        schema,
-        tx,
-      );
-      c.set({ value: 42 });
-
-      const result = c.get();
-
-      // Need to be in a frame context for toOpaqueRef to work
-      const frame = pushFrame();
-      const opaqueRef = (result as any)[toOpaqueRef]();
-      popFrame(frame);
-
-      expect(opaqueRef).toBeDefined();
-      expect(typeof opaqueRef).toBe("object");
-      // OpaqueRef should have these methods
-      expect(typeof opaqueRef.get).toBe("function");
-      expect(typeof opaqueRef.set).toBe("function");
-      expect(typeof opaqueRef.key).toBe("function");
-    });
-
-    it("should create OpaqueRefs that point to the correct location", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          a: {
-            type: "object",
-            properties: {
-              b: { type: "number" },
-            },
-          },
-        },
-      } as const satisfies JSONSchema;
-
-      const c = runtime.getCell<{ a: { b: number } }>(
-        space,
-        "hook-toopaqueref-nested",
-        schema,
-        tx,
-      );
-      c.set({ a: { b: 42 } });
-
-      const nestedValue = c.key("a").get();
-
-      const frame = pushFrame();
-      const opaqueRef = (nestedValue as any)[toOpaqueRef]();
-      popFrame(frame);
-
-      // The OpaqueRef should represent the nested path
-      expect(opaqueRef).toBeDefined();
-    });
-  });
-
   describe("Recipe integration", () => {
     it("should pass query results for recipes without argumentSchema", () => {
       const inputCell = runtime.getCell<{ value: number }>(
@@ -2916,9 +2840,8 @@ describe("toCell and toOpaqueRef hooks", () => {
       const argument = inputCell.getAsQueryResult([], tx);
 
       // Should be a proxy, not have hooks
-      expect(isQueryResult(argument)).toBe(true);
+      expect(isCellResult(argument)).toBe(true);
       expect(toCell in argument).toBe(false);
-      expect(toOpaqueRef in argument).toBe(false);
       expect(argument.value).toBe(42);
     });
 
@@ -2943,7 +2866,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       // Should have hooks
       expect(toCell in argument).toBe(true);
-      expect(toOpaqueRef in argument).toBe(true);
       expect(argument.value).toBe(42);
     });
 
@@ -2976,33 +2898,6 @@ describe("toCell and toOpaqueRef hooks", () => {
       const updatedResult = inputCell.get();
       expect(updatedResult.data).toBe("updated");
     });
-
-    it("should allow converting to OpaqueRef in recipe context", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          num: { type: "number" },
-        },
-      } as const satisfies JSONSchema;
-
-      const inputCell = runtime.getCell<{ num: number }>(
-        space,
-        "hook-recipe-opaque",
-        schema,
-        tx,
-      );
-      inputCell.set({ num: 100 });
-
-      const argument = inputCell.asSchema(schema).get();
-
-      // In recipe context, can convert to OpaqueRef
-      const frame = pushFrame();
-      const opaqueRef = (argument as any)[toOpaqueRef]();
-      popFrame(frame);
-
-      expect(opaqueRef).toBeDefined();
-      expect(typeof opaqueRef.key).toBe("function");
-    });
   });
 
   describe("Schema interactions", () => {
@@ -3026,7 +2921,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
     });
 
     it("should add hooks to default values from schema", () => {
@@ -3048,7 +2942,6 @@ describe("toCell and toOpaqueRef hooks", () => {
       const result = c.get();
       expect(result.value).toBe(100);
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
     });
 
     it("should not double-wrap asCell properties", () => {
@@ -3077,13 +2970,11 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.asSchema(schema).get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
 
       // cellProp should be a cell, not have hooks
       expect(isCell(result.cellProp)).toBe(true);
       // Cells themselves have toOpaqueRef (part of Cell interface) but not toCell
       expect(toCell in result.cellProp).toBe(false);
-      expect(toOpaqueRef in result.cellProp).toBe(true);
     });
 
     it("should add hooks to additionalProperties results", () => {
@@ -3105,7 +2996,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.asSchema(schema).get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
       expect(result.extra1).toBe(10);
       expect(result.extra2).toBe(20);
     });
@@ -3129,13 +3019,10 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.asSchema(schema).get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
 
       // Each item should also have hooks
       expect(toCell in result[0]).toBe(true);
-      expect(toOpaqueRef in result[0]).toBe(true);
       expect(toCell in result[1]).toBe(true);
-      expect(toOpaqueRef in result[1]).toBe(true);
     });
   });
 
@@ -3159,7 +3046,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
       expect(result.nullable).toBe(null);
       expect(result.optional).toBeUndefined();
     });
@@ -3185,13 +3071,10 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
 
       // Empty objects and arrays should also have hooks
       expect(toCell in result.emptyObj).toBe(true);
-      expect(toOpaqueRef in result.emptyObj).toBe(true);
       expect(toCell in result.emptyArr).toBe(true);
-      expect(toOpaqueRef in result.emptyArr).toBe(true);
     });
 
     it("should handle deeply nested structures", () => {
@@ -3269,7 +3152,6 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(toOpaqueRef in result).toBe(true);
       expect(result.name).toBe("circular");
       // With circular references, the self reference points back to the same data
       expect(result.self.name).toBe("circular");

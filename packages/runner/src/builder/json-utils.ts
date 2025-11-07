@@ -2,15 +2,11 @@ import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
 import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
-  canBeOpaqueRef,
-  isOpaqueCell,
   isRecipe,
-  isShadowRef,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONSchemaTypes,
   type JSONValue,
-  makeOpaqueRef,
   type Module,
   type Opaque,
   type OpaqueRef,
@@ -22,6 +18,11 @@ import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { isCell } from "../cell.ts";
 
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
@@ -33,39 +34,33 @@ export function toJSONWithLegacyAliases(
   // preserving alias metadata for consumers that still rely on it.
 
   // Convert regular cells and results from Cell.get() to opaque refs
-  if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  // Verify that opaque refs are not in a parent frame
-  if (isOpaqueCell(value) && value.export().frame !== getTopFrame()) {
-    throw new Error(
-      `Opaque ref with parent cell not found in current frame. Should have been converted to a shadow ref.`,
-    );
-  }
+  if (isCell(value)) {
+    const { external, frame, schema, rootSchema } = value.export();
 
-  // If this is an external reference, just copy the reference as is.
-  if (isOpaqueCell(value)) {
-    const { external } = value.export();
+    // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
-  }
 
-  // Otherwise it's an internal reference. Extract the schema and output a link.
-  if (isOpaqueCell(value) || isShadowRef(value)) {
+    // Verify that opaque refs are not in a parent frame
+    if (frame !== getTopFrame()) {
+      throw new Error(
+        `Cell with parent cell not found in current frame. Should have been converted to a shadow ref.`,
+      );
+    }
+
+    // Otherwise it's an internal reference. Extract the schema and output a link.
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
-      // Add schema from exported value if available
-      const exported = isOpaqueCell(value) ? value.export() : undefined;
       return {
         $alias: {
-          ...(isShadowRef(value) ? { cell: value } : {}),
           path: pathToCell as (string | number)[],
-          ...(exported?.schema
-            ? { schema: sanitizeSchemaForLinks(exported.schema) }
-            : {}),
-          ...(exported?.rootSchema
-            ? { rootSchema: sanitizeSchemaForLinks(exported.rootSchema) }
-            : {}),
+          ...(schema &&
+            { schema: sanitizeSchemaForLinks(schema) }),
+          ...(rootSchema &&
+            { rootSchema: sanitizeSchemaForLinks(rootSchema) }),
         },
       } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);
@@ -78,36 +73,7 @@ export function toJSONWithLegacyAliases(
     // we're now at the level that it should be resolved to the actual cell.
     // (i.e. we're generating the recipe from which the closed over reference
     // was captured)
-    if (isShadowRef(alias.cell)) {
-      const cell = alias.cell.shadowOf;
-      if (cell.export().frame !== getTopFrame()) {
-        let frame = getTopFrame();
-        while (frame && frame.parent !== cell.export().frame) {
-          frame = frame.parent;
-        }
-        if (!frame) {
-          throw new Error(
-            `Shadow ref alias with parent cell not found in current frame`,
-          );
-        }
-        // If we're not at the top level, just emit it again. This will be
-        // converted once the higher level recipe is being processed.
-        return value as JSONValue;
-      }
-      if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
-      // If in top frame, it's an alias to another cell on the process cell. So
-      // we emit the alias without the cell reference (it will be filled in
-      // later with the process cell) and concatenate the path.
-      const { cell: _, ...aliasWithoutCell } = alias;
-      return {
-        $alias: {
-          // Keep any extra metadata (schema, rootSchema, etc.) that might have
-          // been attached to the legacy alias originally.
-          ...aliasWithoutCell,
-          path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
-        },
-      } satisfies LegacyAlias;
-    } else if (!("cell" in alias) || typeof alias.cell === "number") {
+    if (!("cell" in alias) || typeof alias.cell === "number") {
       // If we encounter an existing alias and it isn't an absolute reference
       // with a cell id, then increase the nesting level.
       return {

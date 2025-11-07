@@ -14,7 +14,7 @@ import type {
   toJSON,
 } from "./types.ts";
 import { isModule } from "./types.ts";
-import { opaqueRef } from "./opaque-ref.ts";
+import { opaqueRef, stream } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
@@ -96,27 +96,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
-export function handler<
-  E extends JSONSchema = JSONSchema,
-  T extends JSONSchema = JSONSchema,
->(
-  eventSchema: E,
-  stateSchema: T,
-  handler: (event: Schema<E>, props: Schema<T>) => any,
-): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
-export function handler<E, T>(
-  eventSchema: JSONSchema,
-  stateSchema: JSONSchema,
-  handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
-export function handler<E, T>(
-  handler: (Event: E, props: T) => any,
-  options: { proxy: true },
-): HandlerFactory<T, E>;
-export function handler<E, T>(
-  handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
-export function handler<E, T>(
+function handlerInternal<E, T>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
@@ -158,24 +138,53 @@ export function handler<E, T>(
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
-    const stream = opaqueRef<E>(undefined, eventSchema);
+    const eventStream = stream<E>(eventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
-    (stream as OpaqueCell<E>).set({ $stream: true } as E);
     const node: NodeRef = {
       module,
-      inputs: { $ctx: props, $event: stream },
+      inputs: { $ctx: props, $event: eventStream },
       outputs: {},
       frame: getTopFrame(),
     };
 
     connectInputAndOutputs(node);
-    (stream as OpaqueCell<E>).connect(node);
 
-    return stream;
+    return eventStream;
   }, module);
 
   return factory;
+}
+
+export function handler<
+  E extends JSONSchema = JSONSchema,
+  T extends JSONSchema = JSONSchema,
+>(
+  eventSchema: E,
+  stateSchema: T,
+  handler: (event: Schema<E>, props: Schema<T>) => any,
+): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+export function handler<E, T>(
+  eventSchema: JSONSchema,
+  stateSchema: JSONSchema,
+  handler: (event: E, props: T) => any,
+): HandlerFactory<T, E>;
+export function handler<E, T>(
+  handler: (Event: E, props: T) => any,
+  options: { proxy: true },
+): HandlerFactory<T, E>;
+export function handler<E, T>(
+  handler: (event: E, props: T) => any,
+): HandlerFactory<T, E>;
+export function handler<E, T>(
+  eventSchema:
+    | JSONSchema
+    | ((event: E, props: T) => any)
+    | undefined,
+  stateSchema?: JSONSchema | { proxy: true },
+  handler?: (event: E, props: T) => any,
+): HandlerFactory<T, E> {
+  return handlerInternal(eventSchema, stateSchema, handler);
 }
 
 export function derive<
@@ -216,8 +225,8 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 }
 
 // unsafe closures: like derive, but doesn't need any arguments
-export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
-  lift(fn)(undefined);
+export const compute: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
+  lift<any, T>(fn)(undefined);
 
 // unsafe closures: like compute, but also convert all functions to handlers
 export const render = <T>(fn: () => T): OpaqueRef<T> =>

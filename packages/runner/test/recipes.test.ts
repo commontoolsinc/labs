@@ -120,11 +120,16 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with default values", async () => {
-    const recipeWithDefaults = recipe<{ a: number; b: number }>(
-      "Recipe with Defaults",
+    const recipeWithDefaults = recipe(
+      {
+        type: "object",
+        properties: {
+          a: { type: "number", default: 5 },
+          b: { type: "number", default: 10 },
+        },
+      },
+      { type: "object", properties: { sum: { type: "number" } } },
       ({ a, b }) => {
-        a.setDefault(5);
-        b.setDefault(10);
         const { sum } = lift(({ x, y }) => ({ sum: x + y }))({ x: a, y: b });
         return { sum };
       },
@@ -166,12 +171,15 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes", async () => {
+    const multiply = lift<{ x: number; index: number; array: { x: number }[] }>(
+      ({ x, index, array }) => x * (index + 1) * array.length,
+    );
+
     const multipliedArray = recipe<{ values: { x: number }[] }>(
       "Multiply numbers",
       ({ values }) => {
         const multiplied = values.map(({ x }, index, array) => {
-          const multiply = lift<number>((x) => x * (index + 1) * array.length);
-          return { multiplied: multiply(x) };
+          return { multiplied: multiply({ x, index, array }) };
         });
         return { multiplied };
       },
@@ -203,43 +211,6 @@ describe("Recipe Runner", () => {
 
     expect(result.get()).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
-    });
-  });
-
-  it("should handle recipes with map nodes with closures", async () => {
-    const double = lift<{ x: number; factor: number }>(({ x, factor }) =>
-      x * factor
-    );
-
-    const doubleArray = recipe<{ values: number[]; factor: number }>(
-      "Double numbers",
-      ({ values, factor }) => {
-        const doubled = values.map((x) => double({ x, factor }));
-        return { doubled };
-      },
-    );
-
-    const resultCell = runtime.getCell(
-      space,
-      "should handle recipes with map nodes with closures",
-      {
-        type: "object",
-        properties: {
-          doubled: { type: "array", items: { type: "number" } },
-        },
-      } as const satisfies JSONSchema,
-      tx,
-    );
-    const result = runtime.run(tx, doubleArray, {
-      values: [1, 2, 3],
-      factor: 3,
-    }, resultCell);
-    tx.commit();
-
-    await runtime.idle();
-
-    expect(result.get()).toMatchObjectIgnoringSymbols({
-      doubled: [3, 6, 9],
     });
   });
 

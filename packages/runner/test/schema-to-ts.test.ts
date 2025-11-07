@@ -3,15 +3,14 @@ import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 
 import { handler, lift } from "../src/builder/module.ts";
-import { str } from "../src/builder/built-in.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import {
   type AnyCellWrapping,
-  type Frame,
   type JSONSchema,
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
-import { popFrame, pushFrame, recipe } from "../src/builder/recipe.ts";
+import { recipe } from "../src/builder/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -32,10 +31,10 @@ type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends
   readonly (infer ElementType)[] ? ElementType : never;
 
 describe("Schema-to-TS Type Conversion", () => {
-  let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
+  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -46,17 +45,14 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    frame = pushFrame();
+    const { commontools } = createBuilder(runtime);
+    ({ str } = commontools);
   });
 
   afterEach(async () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  afterEach(() => {
-    popFrame(frame);
   });
 
   // These tests verify the type conversion at compile time

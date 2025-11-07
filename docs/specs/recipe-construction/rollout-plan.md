@@ -24,37 +24,43 @@
     - [ ] Make passing the output of the second into the first work. Tricky
       because we're doing almost opposite expansions on the type.
 - [ ] Add ability to create a cell without a link yet.
-  - [ ] Change constructor for RegularCell to make link optional
-  - [ ] Add .for method to set a cause (within current context)
-    - [ ] second parameter to make it optional/flexible:
-      - [ ] ignores the .for if link already exists
+  - [x] Merge StreamCell into RegularCell and rename RegularCell to CellImpl
+    - [x] Primarily this means changing `.set` to first read the resolved value
+      to see whether we have a stream and then use the stream behavior instead
+      of regular set.
+  - [x] Change constructor for RegularCell to make link optional
+  - [x] Add .for method to set a cause (within current context)
+    - [x] second parameter to make it optional/flexible:
+      - [x] ignores the .for if link already exists
       - [ ] adds extension if cause already exists (see tracker below)
-  - [ ] Make .key work even if there is no cause yet.
-  - [ ] Add some method to force creation of cause, which errors if in
+  - [x] Make .key work even if there is no cause yet.
+  - [x] Add some method to force creation of cause, which errors if in
     non-handler context and no other information was given (as e.g. deriving
     nodes, which do have ids, after asking for them -- this walks the graph up
     until it hits the passed in cells)
-  - [ ] For now though throw in non-handler context when needing a link and it
+  - [x] For now though throw in non-handler context when needing a link and it
     isn't there, e.g. because we need to create a link to the cell (when passed
     into `anotherCell.set()` for example). We want to encourage .for use in
     ambiguous cases.
+- [x] Add space and event to Frame
 - [ ] First merge of OpaqueRef and RegularCell
-  - [ ] Add methods that allow linking to node invocations
-    - [ ] `setPreExisting` can be deprecated (used in toOpaqueRef which itself
-      can go away, see below)
-    - [ ] `setDefault` can be deprecated
-    - [ ] `setSchema` is tricky (asSchema is cleaner). Let's support it for now,
+  - [x] Create OpaqueCell type
+  - [x] Make OpaqueRef a proxy around OpaqueCell
+  - [x] Add methods to Cell that allow linking to node invocations
+    - [x] `setPreExisting` deprecated
+    - [x] `setDefault` deprecated
+    - [x] `setSchema` is tricky (asSchema is cleaner). Let's support it for now,
       but only if the cause isn't set yet.
-    - [ ] `connect` copy over and add a direction field, so can distinguish
+    - [x] `connect` copy over and add a direction field, so can distinguish
       where this node is used as input vs where the passed node is an input to
       this node.
-    - [ ] `export` make the analogous version, if link is present use that as
+    - [x] `export` make the analogous version, if link is present use that as
       `external`.
-    - [ ] `map` and `mapWithPattern`: Copy over
-    - [ ] `toJSON` return `null` when no link otherwise what Cell does.
-  - [ ] No need for `toOpaqueRef` anymore, since all cells are now also
+    - [x] `map` and `mapWithPattern`: Copy over
+    - [x] `toJSON` return `null` when no link otherwise what Cell does.
+  - [x] No need for `toOpaqueRef` anymore, since all cells are now also
     OpaqueRef. So remove all that.
-  - [ ] Call that for returned value in lift/handler, with a .for("assigned
+  - [x] Call that for returned value in lift/handler, with a .for("assigned
     variable of property", true)
   - [ ] For now treat result as recipe, but it should be one where all nodes
     already have links associated with them (no internal necessary).

@@ -3,10 +3,10 @@ import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/html";
 import {
+  type Frame,
   isModule,
-  isOpaqueCell,
+  isOpaqueRef,
   isRecipe,
-  isShadowRef,
   isStreamValue,
   type JSONSchema,
   type JSONValue,
@@ -18,7 +18,6 @@ import {
   UI,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
-  type UnsafeBinding,
 } from "./builder/types.ts";
 import {
   popFrame,
@@ -56,6 +55,7 @@ import type {
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
 import "./builtins/index.ts";
+import { isCellResult } from "./query-result-proxy.ts";
 
 const logger = getLogger("runner");
 
@@ -779,8 +779,7 @@ export class Runner implements IRunner {
     }
 
     if (
-      !isRecord(value) || isOpaqueCell(value) || isShadowRef(value) ||
-      isCell(value)
+      !isRecord(value) || isCell(value) || isCellResult(value)
     ) {
       return;
     }
@@ -790,13 +789,13 @@ export class Runner implements IRunner {
 
     // Recursively search in objects and arrays
     if (Array.isArray(value)) {
-      for (const item of value) {
+      for (const item of value as JSONValue[]) {
         this.discoverAndCacheFunctionsFromValue(item, seen);
       }
       return;
     }
 
-    for (const key in value) {
+    for (const key in value as Record<string, any>) {
       this.discoverAndCacheFunctionsFromValue(
         value[key] as JSONValue,
         seen,
@@ -962,56 +961,70 @@ export class Runner implements IRunner {
           }
         }
 
-        const inputsCell = this.runtime.getImmutableCell(
-          processCell.space,
-          eventInputs,
-          undefined,
-          tx,
+        const frame = pushFrameFromCause(
+          cause,
+          {
+            unsafe_binding: {
+              recipe,
+              materialize: (path: readonly PropertyKey[]) =>
+                processCell.getAsQueryResult(path),
+              space: processCell.space,
+              tx,
+            },
+            inHandler: true,
+            runtime: this.runtime,
+            space: processCell.space,
+            tx,
+          },
         );
 
-        const frame = pushFrameFromCause(cause, {
-          recipe,
-          materialize: (path: readonly PropertyKey[]) =>
-            processCell.getAsQueryResult(path),
-          space: processCell.space,
-          tx,
-        });
+        try {
+          const inputsCell = this.runtime.getImmutableCell(
+            processCell.space,
+            eventInputs,
+            undefined,
+            tx,
+          );
 
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).get()
-          : inputsCell.getAsQueryResult([], tx);
-        const result = fn(argument);
+          const argument = module.argumentSchema
+            ? inputsCell.asSchema(module.argumentSchema).get()
+            : inputsCell.getAsQueryResult([], tx);
+          const result = fn(argument);
 
-        const postRun = (result: any) => {
-          if (containsOpaqueRef(result)) {
-            const resultRecipe = recipeFromFrame(
-              "event handler result",
-              undefined,
-              () => result,
-            );
-
-            const resultCell = this.run(
-              tx,
-              resultRecipe,
-              undefined,
-              this.runtime.getCell(
-                processCell.space,
-                { resultFor: cause },
+          const postRun = (result: any) => {
+            if (containsOpaqueRef(result)) {
+              const resultRecipe = recipeFromFrame(
+                "event handler result",
                 undefined,
+                () => result,
+              );
+
+              const resultCell = this.run(
                 tx,
-              ),
-            );
-            addCancel(() => this.stop(resultCell));
+                resultRecipe,
+                undefined,
+                this.runtime.getCell(
+                  processCell.space,
+                  { resultFor: cause },
+                  undefined,
+                  tx,
+                ),
+              );
+              addCancel(() => this.stop(resultCell));
+            }
+            return result;
+          };
+
+          if (result instanceof Promise) {
+            return result.then(postRun);
+          } else {
+            return postRun(result);
           }
-
+        } catch (error) {
+          (error as Error & { frame?: Frame }).frame = frame;
+          throw error;
+        } finally {
           popFrame(frame);
-          return result;
-        };
-
-        if (result instanceof Promise) {
-          return result.then(postRun);
-        } else {
-          return postRun(result);
         }
       };
 
@@ -1045,82 +1058,96 @@ export class Runner implements IRunner {
       let previousResultCell: Cell<any> | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
-
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
           {
-            recipe,
-            materialize: (path: readonly PropertyKey[]) =>
-              processCell.getAsQueryResult(path, tx),
+            unsafe_binding: {
+              recipe,
+              materialize: (path: readonly PropertyKey[]) =>
+                processCell.getAsQueryResult(path, tx),
+              space: processCell.space,
+              tx,
+            },
+            inHandler: false,
+            runtime: this.runtime,
             space: processCell.space,
             tx,
-          } satisfies UnsafeBinding,
+          },
         );
-        const result = fn(argument);
 
-        const postRun = (result: any) => {
-          if (containsOpaqueRef(result)) {
-            const resultRecipe = recipeFromFrame(
-              "action result",
-              undefined,
-              () => result,
-            );
-            const resultCell = previousResultCell ??
-              this.runtime.getCell(
-                processCell.space,
-                { resultFor: { inputs, outputs, fn: fn.toString() } },
+        try {
+          const argument = module.argumentSchema
+            ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+            : inputsCell.getAsQueryResult([], tx);
+
+          const result = fn(argument);
+
+          const postRun = (result: any) => {
+            if (containsOpaqueRef(result)) {
+              const resultRecipe = recipeFromFrame(
+                "action result",
                 undefined,
-                tx,
+                () => result,
+              );
+              const resultCell = previousResultCell ??
+                this.runtime.getCell(
+                  processCell.space,
+                  { resultFor: { inputs, outputs, fn: fn.toString() } },
+                  undefined,
+                  tx,
+                );
+
+              // If nothing changed, don't rerun the recipe
+              const resultRecipeAsString = JSON.stringify(resultRecipe);
+              const previousResultRecipeAsString = this.resultRecipeCache.get(
+                `${resultCell.space}/${resultCell.sourceURI}`,
+              );
+              if (previousResultRecipeAsString === resultRecipeAsString) {
+                return;
+              }
+              this.resultRecipeCache.set(
+                `${resultCell.space}/${resultCell.sourceURI}`,
+                resultRecipeAsString,
               );
 
-            // If nothing changed, don't rerun the recipe
-            const resultRecipeAsString = JSON.stringify(resultRecipe);
-            const previousResultRecipeAsString = this.resultRecipeCache.get(
-              `${resultCell.space}/${resultCell.sourceURI}`,
-            );
-            if (previousResultRecipeAsString === resultRecipeAsString) return;
-            this.resultRecipeCache.set(
-              `${resultCell.space}/${resultCell.sourceURI}`,
-              resultRecipeAsString,
-            );
+              this.run(
+                tx,
+                resultRecipe,
+                undefined,
+                resultCell,
+              );
+              addCancel(() => this.stop(resultCell));
 
-            this.run(
-              tx,
-              resultRecipe,
-              undefined,
-              resultCell,
-            );
-            addCancel(() => this.stop(resultCell));
-
-            if (!previousResultCell) {
-              previousResultCell = resultCell;
+              if (!previousResultCell) {
+                previousResultCell = resultCell;
+                sendValueToBinding(
+                  tx,
+                  processCell,
+                  outputs,
+                  resultCell.getAsLink({ base: processCell }),
+                );
+              }
+            } else {
               sendValueToBinding(
                 tx,
                 processCell,
                 outputs,
-                resultCell.getAsLink({ base: processCell }),
+                result,
               );
             }
+            return result;
+          };
+
+          if (result instanceof Promise) {
+            return result.then(postRun);
           } else {
-            sendValueToBinding(
-              tx,
-              processCell,
-              outputs,
-              result,
-            );
+            return postRun(result);
           }
-
+        } catch (error) {
+          (error as Error & { frame?: Frame }).frame = frame;
+          throw error;
+        } finally {
           popFrame(frame);
-          return result;
-        };
-
-        if (result instanceof Promise) {
-          return result.then(postRun);
-        } else {
-          return postRun(result);
         }
       };
 
@@ -1270,7 +1297,7 @@ function getSpellLink(recipeId: string): SigilLink {
 }
 
 function containsOpaqueRef(value: unknown): boolean {
-  if (isOpaqueCell(value)) return true;
+  if (isOpaqueRef(value)) return true;
   if (isLink(value)) return false;
   if (isRecord(value)) {
     return Object.values(value).some(containsOpaqueRef);

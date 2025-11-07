@@ -4,7 +4,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { createCell, isCell, isStream } from "./cell.ts";
+import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -15,10 +15,9 @@ import {
 } from "./link-utils.ts";
 import {
   createQueryResultProxy,
-  isQueryResultForDereferencing,
-  makeOpaqueRef,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { toCell } from "./back-to-cell.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -311,16 +310,11 @@ function annotateWithBackToCellSymbols(
   tx: IExtendedStorageTransaction | undefined,
 ) {
   if (
-    isRecord(value) && !isCell(value) && !isStream(value) &&
-    !isQueryResultForDereferencing(value)
+    isRecord(value) && !isCell(value) && !isCellResultForDereferencing(value)
   ) {
     // Non-enumerable, so that {...obj} won't copy these symbols
     Object.defineProperty(value, toCell, {
       value: () => createCell(runtime, link, tx),
-      enumerable: false,
-    });
-    Object.defineProperty(value, toOpaqueRef, {
-      value: () => makeOpaqueRef(link),
       enumerable: false,
     });
     Object.freeze(value);

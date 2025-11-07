@@ -4,7 +4,6 @@ import {
   type Cell,
   isAnyCell,
   isCell,
-  isStream,
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
@@ -20,9 +19,9 @@ import {
 import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
+  CellResultInternals,
   getCellOrThrow,
-  isQueryResultForDereferencing,
-  QueryResultInternals,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import type {
   IMemorySpaceAddress,
@@ -58,7 +57,7 @@ export type CellLink =
   | Cell<any>
   | Stream<any>
   | SigilLink
-  | QueryResultInternals
+  | CellResultInternals
   | LegacyJSONCellLink // @deprecated
   | LegacyAlias // @deprecated
   | { "/": string }; // @deprecated
@@ -144,10 +143,9 @@ export function isLink(
   value: any,
 ): value is CellLink {
   return (
-    isQueryResultForDereferencing(value) ||
+    isCellResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
-    isStream(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
@@ -208,33 +206,33 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: AnyCell<unknown> | Cell<unknown> | Stream<unknown>,
+  value: AnyCell<any>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: AnyCell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: AnyCell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
-  if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
+  if (isCell(value)) return value.getAsNormalizedFullLink();
 
   // Handle new sigil format
   if (isSigilLink(value)) {

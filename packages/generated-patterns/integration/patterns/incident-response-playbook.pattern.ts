@@ -486,14 +486,17 @@ export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
       typeof value === "string" && value.length > 0 ? value : ""
     )(activeStep);
 
-    const activeStepTitle = derive(stepsView, (list) => {
-      const id = activeStep.get();
-      if (!id) {
-        return "idle";
-      }
-      const target = list.find((step) => step.id === id);
-      return target ? target.title : "idle";
-    });
+    const activeStepTitle = derive(
+      { list: stepsView, active: activeStep },
+      ({ list, active }) => {
+        const id = active;
+        if (!id) {
+          return "idle";
+        }
+        const target = list.find((step) => step.id === active);
+        return target ? target.title : "idle";
+      },
+    );
 
     const clockMinutes = lift((value: number | undefined) =>
       typeof value === "number" && Number.isFinite(value) ? value : 0

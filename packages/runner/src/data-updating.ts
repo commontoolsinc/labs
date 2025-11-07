@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { isCell, isStream, RegularCell } from "./cell.ts";
+import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -16,7 +16,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
@@ -118,7 +118,7 @@ export function normalizeAndDiff(
     diffLogger.debug(() =>
       `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`
     );
-    newValue = new RegularCell(runtime, seen.get(newValue)!, tx);
+    newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
@@ -188,7 +188,7 @@ export function normalizeAndDiff(
   }
 
   // Unwrap proxies and handle special types
-  if (isQueryResultForDereferencing(newValue)) {
+  if (isCellResultForDereferencing(newValue)) {
     const parsedLink = parseLink(newValue);
     const sigilLink = createSigilLinkFromParsedLink(parsedLink);
     diffLogger.debug(() =>
@@ -197,12 +197,13 @@ export function normalizeAndDiff(
     newValue = sigilLink;
   }
 
-  // Track whether this link originates from a Cell value (either a cycle we wrapped
-  // into a RegularCell above, or a user-supplied Cell). For Cell-origin links we
-  // preserve the link (do NOT collapse). For links created via query-result
-  // dereferencing (non-Cell), we may collapse immediate-parent self-links.
+  // Track whether this link originates from a Cell value (either a cycle we
+  // wrapped into a CellImpl above, or a user-supplied Cell). For Cell-origin
+  // links we preserve the link (do NOT collapse). For links created via
+  // query-result dereferencing (non-Cell), we may collapse immediate-parent
+  // self-links.
   let linkOriginFromCell = false;
-  if (isCell(newValue) || isStream(newValue)) {
+  if (isCell(newValue)) {
     diffLogger.debug(() =>
       `[BRANCH_CELL] Converting cell to link at path=${pathStr}`
     );

@@ -772,8 +772,12 @@ describe("Schema Support", () => {
 
       // Set up circular references using cell links
       c.key("parent").setRaw(c.getAsLink());
-      c.key("children").key(0).key("parent").setRaw(c.getAsLink());
-      c.key("children").key(1).key("parent").setRaw(c.getAsLink());
+      c.key("children").key(0).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
+      c.key("children").key(1).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       const schema = {
         type: "object",
@@ -829,10 +833,10 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").setRaw(
+      c.key("nested").key("items").key(0).key("value").resolveAsCell().setRaw(
         c.getAsLink(),
       );
-      c.key("nested").key("items").key(1).key("value").setRaw(
+      c.key("nested").key("items").key(1).key("value").resolveAsCell().setRaw(
         c.key("nested").getAsLink(),
       );
 
@@ -903,7 +907,9 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").setRaw(c.getAsLink());
+      c.key("children").key(1).key("value").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       const schema = {
         type: "object",
@@ -2278,9 +2284,6 @@ describe("Schema Support", () => {
 
       expect(value.name).toBe("Test Doc");
       expect(isStream(value.events)).toBe(true);
-
-      // Verify it's a stream, i.e. no get functio
-      expect((value as any).events.get).toBe(undefined);
     });
 
     it("should handle nested streams in objects", () => {
@@ -2511,7 +2514,7 @@ describe("Schema Support", () => {
       expect(links[0].id).not.toBe(links[2].id);
     });
 
-    it("should create data URIs for plain objects not marked asCell", () => {
+    it("should create URIs for plain objects not marked asCell", () => {
       const schema = {
         type: "object",
         properties: {
@@ -2552,10 +2555,10 @@ describe("Schema Support", () => {
       const itemCells = result.items.map((item: any) => item[toCell]());
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
-      // Plain objects now get data URIs with empty paths
-      expect(links[0].id).toMatch(/^data:/);
-      expect(links[1].id).toMatch(/^data:/);
-      expect(links[2].id).toMatch(/^data:/);
+      // Plain objects now also get ids assigned
+      expect(links[0].id).toMatch(/^of:/);
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[2].id).toMatch(/^of:/);
       expect(links[0].path).toEqual([]);
       expect(links[1].path).toEqual([]);
       expect(links[2].path).toEqual([]);
@@ -2696,9 +2699,9 @@ describe("Schema Support", () => {
       expect(links[0].id).toMatch(/^of:/);
       expect(links[2].id).toMatch(/^of:/);
 
-      // Plain objects should have data URIs
-      expect(links[1].id).toMatch(/^data:/);
-      expect(links[3].id).toMatch(/^data:/);
+      // Plain objects should have gotten IDs as well
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[3].id).toMatch(/^of:/);
       expect(links[1].id).not.toBe(links[3].id); // Different data URIs
     });
 

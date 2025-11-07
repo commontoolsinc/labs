@@ -6,7 +6,7 @@ import {
   unsafe_parentRecipe,
 } from "./builder/types.ts";
 import { isLegacyAlias, isLink } from "./link-utils.ts";
-import { type Cell } from "./cell.ts";
+import { type AnyCell, type Cell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -31,7 +31,7 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
  */
 export function sendValueToBinding<T>(
   tx: IExtendedStorageTransaction,
-  cell: Cell<T>,
+  cell: AnyCell<T>,
   binding: unknown,
   value: unknown,
 ): void {
@@ -67,7 +67,6 @@ export function sendValueToBinding<T>(
 /**
  * Unwraps one level of aliases, and
  * - binds top-level aliases to passed doc
- * - reduces wrapping count of closure docs by one
  *
  * This is used for arguments to nodes (which can be recipes, e.g. for map) and
  * for the recipe in recipe nodes.
@@ -141,10 +140,10 @@ export function unsafe_noteParentOnRecipes(
  */
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
-  baseCell: Cell<T>,
+  baseCell: AnyCell<T>,
 ): NormalizedFullLink[] {
   const seen: NormalizedFullLink[] = [];
-  function find(binding: unknown, baseCell: Cell<T>): void {
+  function find(binding: unknown, baseCell: AnyCell<T>): void {
     if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
       return;

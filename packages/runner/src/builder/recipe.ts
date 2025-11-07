@@ -1,12 +1,8 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
 import {
-  canBeOpaqueRef,
   type Frame,
-  isOpaqueCell,
-  isShadowRef,
+  isOpaqueRef,
   type JSONSchema,
-  type JSONSchemaMutable,
-  makeOpaqueRef,
   type Module,
   type Node,
   type NodeRef,
@@ -18,17 +14,15 @@ import {
   type SchemaWithoutCell,
   type ShadowRef,
   type toJSON,
-  UI,
   type UnsafeBinding,
 } from "./types.ts";
-import { createShadowRef, opaqueRef } from "./opaque-ref.ts";
+import { opaqueRef } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import {
-  createJsonSchema,
   moduleToJSON,
   recipeToJSON,
   toJSONWithLegacyAliases,
@@ -36,6 +30,16 @@ import {
 import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import { sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+import { isCell } from "../cell.ts";
+import { IRuntime } from "../runtime.ts";
+import {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
 
 /** Declare a recipe
  *
@@ -162,40 +166,27 @@ function factoryFromRecipe<T, R>(
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
-  const cells = new Set<OpaqueRef<any>>();
-  const shadows = new Set<ShadowRef>();
-  const nodes = new Set<NodeRef>();
+  const allCells = new Set<OpaqueRef<any>>();
+  const allNodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, (value) => {
-      if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-      if (isOpaqueCell(value)) value = value.unsafe_getExternal();
-      if (
-        (isOpaqueCell(value) || isShadowRef(value)) && !cells.has(value) &&
-        !shadows.has(value as ShadowRef)
-      ) {
-        if (isOpaqueCell(value) && value.export().frame !== getTopFrame()) {
-          value = createShadowRef(value.export().value);
+      if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
+      if (isCell(value) && !allCells.has(value)) {
+        const { frame, nodes } = value.export();
+        if (isOpaqueRef(value) && frame !== getTopFrame()) {
+          throw new Error(
+            "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
+          );
         }
-        if (isShadowRef(value)) {
-          shadows.add(value);
-          if (
-            isOpaqueCell(value.shadowOf) &&
-            value.shadowOf.export().frame === getTopFrame()
-          ) {
-            cells.add(value.shadowOf);
+        allCells.add(value);
+        nodes.forEach((node: NodeRef) => {
+          if (!allNodes.has(node)) {
+            allNodes.add(node);
+            node.inputs = collectCellsAndNodes(node.inputs);
+            node.outputs = collectCellsAndNodes(node.outputs);
           }
-        } else if (isOpaqueCell(value)) {
-          cells.add(value);
-          value.export().nodes.forEach((node: NodeRef) => {
-            if (!nodes.has(node)) {
-              nodes.add(node);
-              node.inputs = collectCellsAndNodes(node.inputs);
-              node.outputs = collectCellsAndNodes(node.outputs);
-            }
-          });
-          value.set(collectCellsAndNodes(value.export().value));
-        }
+        });
       }
       return value;
     });
@@ -207,7 +198,7 @@ function factoryFromRecipe<T, R>(
   // Fill in reasonable names for all cells, where possible:
 
   const usedNames = new Set<string>();
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     const existingName = cell.export().name;
     if (existingName) usedNames.add(existingName);
   });
@@ -215,15 +206,14 @@ function factoryFromRecipe<T, R>(
   // First from results
   if (isRecord(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
-      if (isOpaqueCell(value)) {
-        const ref = value; // Typescript needs this to avoid type errors
-        const exported = ref.export();
+      if (isCell(value)) {
+        const exported = value.export();
         if (
           !exported.path.length &&
           !exported.name &&
           !usedNames.has(key)
         ) {
-          ref.setName(key);
+          value.for(key, true); // allowIfSet=true to not override existing causes
           usedNames.add(key);
         }
       }
@@ -231,16 +221,16 @@ function factoryFromRecipe<T, R>(
   }
 
   // Then from assignments in nodes
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
       if (isRecord(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
-            isOpaqueCell(input) && input.export().cell === cell &&
+            isOpaqueRef(input) && input.export().cell === cell &&
             !cell.export().name && !usedNames.has(key)
           ) {
-            cell.setName(key);
+            cell.for(key, true); // allowIfSet=true to not override existing causes
             usedNames.add(key);
           }
         });
@@ -264,7 +254,7 @@ function factoryFromRecipe<T, R>(
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers
   let count = 0;
-  cells.forEach((cell: OpaqueRef<any>) => {
+  allCells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
     const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
@@ -284,71 +274,34 @@ function factoryFromRecipe<T, R>(
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
     }
   });
-  shadows.forEach((shadow) => {
-    if (paths.has(shadow)) return;
-    paths.set(shadow, []);
-  });
 
   // Creates a query (i.e. aliases) into the cells for the result
   const result = toJSONWithLegacyAliases(outputs ?? {}, paths, true)!;
 
-  // Collect default values for the inputs
-  const defaults = toJSONWithLegacyAliases(
-    (inputs as OpaqueCell<T>).export().defaultValue ?? {},
-    paths,
-    true,
-  )!;
-
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
-  cells.forEach((cell) => {
+  allCells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
-    const { path, value, defaultValue, external } = cell.export();
+    const { path, value, external } = cell.export();
     if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
     if (value) setValueAtPath(initial, cellPath, value);
-    if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
   });
 
   let argumentSchema: JSONSchema;
 
-  if (
-    typeof argumentSchemaArg === "string" || argumentSchemaArg === undefined
-  ) {
-    // Create a writable schema from defaults
-    const writableSchema: JSONSchemaMutable = createJsonSchema(defaults, true);
-
-    // Set description only if provided
-    if (typeof argumentSchemaArg === "string") {
-      writableSchema.description = argumentSchemaArg;
-    }
-
-    delete (writableSchema.properties as any)?.[UI]; // TODO(seefeld): This should be a schema for views
-    if (
-      isObject(writableSchema.properties?.internal) &&
-      writableSchema.properties.internal.properties
-    ) {
-      for (
-        const key of Object.keys(
-          writableSchema.properties.internal.properties as any,
-        )
-      ) {
-        if (key.startsWith("__#")) {
-          delete (writableSchema as any).properties.internal.properties[key];
-        }
-      }
-    }
-    argumentSchema = writableSchema;
+  if (typeof argumentSchemaArg === "string") {
+    argumentSchema = { description: argumentSchemaArg };
   } else {
-    argumentSchema = argumentSchemaArg;
+    argumentSchema = argumentSchemaArg ?? true;
   }
 
   const resultSchema =
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
 
-  const serializedNodes = Array.from(nodes).map((node) => {
+  const serializedNodes = Array.from(allNodes).map((node) => {
     const module = toJSONWithLegacyAliases(
       node.module,
       paths,
@@ -392,41 +345,55 @@ function factoryFromRecipe<T, R>(
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;
 
-  // Bind all cells to the recipe
-  // TODO(seefeld): Does OpaqueRef cause issues here?
-  [...cells]
-    // Only bind root cells that are not external
-    .filter((cell) => !cell.export().path.length && !cell.export().external)
-    .forEach((cell) =>
-      cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!)
-    );
-
   return recipeFactory;
 }
 
 const frames: Frame[] = [];
 
-export function pushFrame(frame?: Frame): Frame {
-  if (!frame) {
-    frame = {
-      parent: getTopFrame(),
-      opaqueRefs: new Set(),
-      generatedIdCounter: 0,
-    };
-  }
-  frames.push(frame);
-  return frame;
+export function pushFrame(frame: Partial<Frame> = {}): Frame {
+  const parent = getTopFrame();
+
+  const result = {
+    parent,
+    opaqueRefs: new Set(),
+    generatedIdCounter: 0,
+    ...(parent?.runtime && { runtime: parent.runtime }),
+    ...(parent?.tx && { tx: parent.tx }),
+    ...(parent?.space && { space: parent.space }),
+    ...frame,
+  };
+
+  frames.push(result);
+  return result;
 }
 
 export function pushFrameFromCause(
   cause: any,
-  unsafe_binding?: UnsafeBinding,
+  props: {
+    unsafe_binding?: UnsafeBinding;
+    inHandler?: boolean;
+    runtime?: IRuntime;
+    tx?: IExtendedStorageTransaction;
+    space?: MemorySpace;
+  },
 ): Frame {
+  const parent = getTopFrame();
+  const { unsafe_binding, inHandler, runtime, tx, space } = props;
+
+  // If no runtime provided, try to inherit from parent (may be undefined during construction)
+  const frameRuntime = runtime ?? parent?.runtime;
+  const frameTx = tx ?? unsafe_binding?.tx ?? parent?.tx;
+  const frameSpace = space ?? unsafe_binding?.space ?? parent?.space;
+
   const frame = {
-    parent: getTopFrame(),
+    parent,
     cause,
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
+    ...(frameRuntime && { runtime: frameRuntime }),
+    ...(frameSpace && { space: frameSpace }),
+    ...(frameTx && { tx: frameTx }),
+    ...(inHandler && { inHandler: true }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
   };
   frames.push(frame);

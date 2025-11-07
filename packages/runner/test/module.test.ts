@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JSONSchemaObj } from "@commontools/api";
+import { Identity } from "@commontools/identity";
 import {
   type Frame,
   isModule,
-  isOpaqueCell,
+  isOpaqueRef,
   type JSONSchema,
   type Module,
   type OpaqueRef,
@@ -12,21 +13,42 @@ import {
 import { handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 type MouseEvent = {
   clientX: number;
   clientY: number;
 };
 
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
 describe("module", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
   let frame: Frame;
 
   beforeEach(() => {
-    frame = pushFrame();
+    storageManager = StorageManager.emulate({ as: signer });
+
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    frame = pushFrame({
+      space,
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+      runtime,
+    });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     popFrame(frame);
+    await runtime?.dispose();
   });
 
   describe("lift function", () => {
@@ -39,7 +61,7 @@ describe("module", () => {
     it("creates a opaque ref when called", () => {
       const add = lift<{ a: number; b: number }, number>(({ a, b }) => a + b);
       const result = add({ a: opaqueRef(1), b: opaqueRef(2) });
-      expect(isOpaqueCell(result)).toBe(true);
+      expect(isOpaqueRef(result)).toBe(true);
     });
 
     it("supports JSON Schema validation", () => {
@@ -120,7 +142,7 @@ describe("module", () => {
         { proxy: true },
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueCell(stream)).toBe(true);
+      expect(isOpaqueRef(stream)).toBe(true);
       const { value, nodes } =
         (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });
@@ -195,7 +217,7 @@ describe("module", () => {
       const elements = opaqueRef({ button1: true, button2: false });
       const result = toggleHandler({ elements } as any);
 
-      expect(isOpaqueCell(result)).toBe(true);
+      expect(isOpaqueRef(result)).toBe(true);
       const { nodes } = result.export();
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
@@ -212,7 +234,7 @@ describe("module", () => {
         { proxy: true },
       );
       const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
-      expect(isOpaqueCell(stream)).toBe(true);
+      expect(isOpaqueRef(stream)).toBe(true);
       const { value, nodes } =
         (stream as unknown as OpaqueRef<{ $stream: true }>).export();
       expect(value).toEqual({ $stream: true });

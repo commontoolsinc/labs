@@ -34,9 +34,9 @@ const removeItem = handler<unknown, ListState & { index: number }>(
   },
 );
 
-export default recipe(
+export default recipe<InputSchema>(
   "Simple List with Remove",
-  ({ title, items }: InputSchema) => {
+  ({ title, items }) => {
     return {
       [NAME]: title,
       [UI]: (
@@ -44,7 +44,7 @@ export default recipe(
           <h3>{title}</h3>
           <p>Super Simple Array with Remove</p>
           <ul>
-            {items.map((item: Item, index: number) => (
+            {items.map((item, index) => (
               <li key={index}>
                 <ct-button
                   variant="destructive"

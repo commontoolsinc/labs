@@ -105,9 +105,10 @@ export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
         context: {
           mode: Cell<PipelineMode>;
           switches: Cell<number>;
+          history: Cell<PipelineMode[]>;
         },
       ) => {
-        const current = safeMode.get();
+        const current = context.mode.get();
         const currentMode = current === "mirror" ? "mirror" : "double";
         const requested = event?.mode;
         const next = requested === "mirror"
@@ -126,7 +127,7 @@ export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
         }
 
         historyState = [...historyState, next];
-        pipelineHistory.set(historyState);
+        context.history.set(historyState);
       },
     );
 
@@ -143,6 +144,7 @@ export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
       togglePipeline: togglePipeline({
         mode,
         switches: switchCount,
+        history: pipelineHistory,
       }),
     };
   },

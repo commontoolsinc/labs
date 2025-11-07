@@ -1,5 +1,4 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
-import { toOpaqueRef } from "../back-to-cell.ts";
 import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
@@ -28,7 +27,6 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
-  OpaqueCell,
   OpaqueRef,
   PatternToolFunction,
   Recipe,
@@ -48,6 +46,7 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type RuntimeProgram } from "../harness/types.ts";
+import { type IRuntime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -68,6 +67,7 @@ export type {
   AnyCell,
   AnyCellWrapping,
   Cell,
+  CellKind,
   CreateCellFunction,
   Handler,
   HandlerFactory,
@@ -76,6 +76,7 @@ export type {
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
+  IsThisObject,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,
@@ -102,53 +103,18 @@ export type {
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 
-// Augment the public interface with the internal OpaqueRefMethods interface.
-// This adds runtime-specific methods beyond what the public API defines.
-declare module "@commontools/api" {
-  interface IOpaquable<T> {
-    // Export method for introspection
-    export(): {
-      cell: OpaqueCell<any>;
-      path: readonly PropertyKey[];
-      value?: Opaque<T> | T;
-      defaultValue?: Opaque<T>;
-      nodes: Set<NodeRef>;
-      external?: unknown;
-      name?: string;
-      schema?: JSONSchema;
-      rootSchema?: JSONSchema;
-      frame: Frame;
-    };
-
-    connect(node: NodeRef): void;
-
-    // Unsafe methods for internal use
-    unsafe_bindToRecipeAndPath(
-      recipe: Recipe,
-      path: readonly PropertyKey[],
-    ): void;
-    unsafe_getExternal(): OpaqueCell<T>;
-
-    // Additional utility methods
-    toJSON(): unknown;
-    [Symbol.iterator](): Iterator<T>;
-    [Symbol.toPrimitive](hint: string): T;
-    [isOpaqueRefMarker]: true;
-  }
-}
-
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isOpaqueCell<T = any>(
+export function isOpaqueRef<T = any>(
   value: unknown,
-): value is OpaqueCell<T> {
+): value is OpaqueRef<T> {
   return !!value &&
     typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
       "boolean";
 }
 
 export type NodeRef = {
-  module: Module | Recipe | OpaqueCell<Module | Recipe>;
+  module: Module | Recipe | OpaqueRef<Module | Recipe>;
   inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
@@ -220,20 +186,6 @@ export function isRecipe(value: unknown): value is Recipe {
   );
 }
 
-type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
-
-export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
-  return (
-    (typeof value === "object" || typeof value === "function") &&
-    value !== null &&
-    typeof (value as any)[toOpaqueRef] === "function"
-  );
-}
-
-export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
-  return value[toOpaqueRef]();
-}
-
 export type ShadowRef = {
   shadowOf: OpaqueRef<any> | ShadowRef;
 };
@@ -243,7 +195,7 @@ export function isShadowRef(value: unknown): value is ShadowRef {
     !!value &&
     typeof value === "object" &&
     "shadowOf" in value &&
-    (isOpaqueCell((value as ShadowRef).shadowOf) ||
+    (isOpaqueRef((value as ShadowRef).shadowOf) ||
       isShadowRef((value as ShadowRef).shadowOf))
   );
 }
@@ -260,6 +212,10 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  runtime?: IRuntime;
+  tx?: IExtendedStorageTransaction;
+  space?: MemorySpace;
+  inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
 };

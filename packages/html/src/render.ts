@@ -5,7 +5,6 @@ import {
   convertCellsToLinks,
   effect,
   isCell,
-  isStream,
   type JSONSchema,
   UI,
   useCancelGroup,
@@ -269,7 +268,7 @@ const bindProps = (
   const setProperty = options.setProp ?? setProp;
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isCell(propValue) || isStream(propValue)) {
+    if (isCell(propValue)) {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         const key = cleanEventProp(propKey);
