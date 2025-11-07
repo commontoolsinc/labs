@@ -15,10 +15,19 @@ import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 
-const logger = getLogger("schema-generator.object", {
-  enabled: true,
-  level: "warn",
-});
+const logger = getLogger("schema-generator.object");
+
+/**
+ * Check if a type is a union that includes undefined.
+ * When a property type is `T | undefined`, the property is considered optional.
+ */
+function isUnionWithUndefined(type: ts.Type): boolean {
+  if (!(type.flags & ts.TypeFlags.Union)) {
+    return false;
+  }
+  const unionType = type as ts.UnionType;
+  return unionType.types.some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
+}
 
 /**
  * Formatter for object types (interfaces, type literals, etc.)
@@ -90,7 +99,14 @@ export class ObjectFormatter implements TypeFormatter {
         continue;
       }
 
-      const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      // Property is optional (excluded from required array) if:
+      // 1. It has the `?` optional flag (e.g., `foo?: string`)
+      // 2. Its type is `T | undefined` (e.g., `foo: string | undefined`)
+      // In both cases, the property may be omitted at runtime (JSON-like semantics).
+      const hasOptionalFlag = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      const hasUndefinedUnion = isUnionWithUndefined(resolvedPropType);
+      const isOptional = hasOptionalFlag || hasUndefinedUnion;
+
       if (!isOptional) required.push(propName);
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)

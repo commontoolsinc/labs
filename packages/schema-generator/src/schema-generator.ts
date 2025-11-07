@@ -105,7 +105,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let rootSchema: SchemaDefinition;
-    if (this.shouldUseNodeBasedAnalysis(type, typeNode)) {
+    if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       rootSchema = this.analyzeTypeNodeStructure(
         typeNode!,
@@ -132,12 +132,27 @@ export class SchemaGenerator implements ISchemaGenerator {
    *
    * When TypeScript widens a type to 'any' (e.g., for array element types or synthetic nodes),
    * the TypeNode structure is more reliable than the Type.
+   *
+   * EXCEPTION: Wrapper types (Default/Cell/Stream/OpaqueRef) erase to their inner type,
+   * which may appear as 'any', but they should use type-based analysis because
+   * CommonToolsFormatter handles them specially via typeNode context.
    */
   private shouldUseNodeBasedAnalysis(
     type: ts.Type,
-    typeNode?: ts.TypeNode,
+    typeNode: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
   ): boolean {
-    return typeNode !== undefined && !!(type.flags & ts.TypeFlags.Any);
+    if (!typeNode || !(type.flags & ts.TypeFlags.Any)) {
+      return false;
+    }
+
+    // Check if this is a wrapper type - if so, use type-based analysis
+    const wrapperKind = detectWrapperViaNode(typeNode, checker);
+    if (wrapperKind) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -159,7 +174,12 @@ export class SchemaGenerator implements ISchemaGenerator {
     const childContext = typeNode ? { ...context, typeNode } : baseContext;
 
     // Auto-detect: Should we use node-based or type-based analysis?
-    if (this.shouldUseNodeBasedAnalysis(type, typeNode)) {
+    const useNodeBased = this.shouldUseNodeBasedAnalysis(
+      type,
+      typeNode,
+      context.typeChecker,
+    );
+    if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       return this.analyzeTypeNodeStructure(
         typeNode!,

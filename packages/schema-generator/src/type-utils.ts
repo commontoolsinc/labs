@@ -346,8 +346,7 @@ export function getNamedTypeKey(
     name = ref.target?.symbol?.name ?? name;
   }
   // Helper to check if a name is compiler-internal/anonymous (e.g., __type, __object, __computed)
-  const isAnonymousName = (n: string | undefined) =>
-    !n || n.startsWith("__");
+  const isAnonymousName = (n: string | undefined) => !n || n.startsWith("__");
 
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
