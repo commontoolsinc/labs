@@ -685,3 +685,96 @@ export default recipe<ComposedInput, ComposedInput>(
 ```
 
 For more details on pattern composition, see the "Level 4: Pattern Composition" section in `PATTERNS.md`.
+
+# ct-code-editor
+
+A code editor component with markdown support and charm backlinking capabilities.
+
+## Basic Usage
+
+```tsx
+const note = cell<string>("");
+
+<ct-code-editor
+  $value={note}
+  language="text/markdown"
+  theme="light"
+  wordWrap
+  tabIndent
+  lineNumbers
+  placeholder="Enter your notes..."
+  style="flex: 1;"
+/>
+```
+
+## Charm References with [[
+
+The ct-code-editor supports **`[[` syntax** for referencing other charms in the space. When a user types `[[`, an autocomplete menu appears showing available charms.
+
+**IMPORTANT**: Use `[[` double square brackets, NOT `@` for charm references.
+
+### Setting Up Charm References
+
+To enable `[[` references, you need three props:
+
+```tsx
+import { type MentionableCharm } from "./backlinks-index.tsx";
+
+const mentionable = derive<MentionableCharm[], MentionableCharm[]>(
+  wish<MentionableCharm[]>("#mentionable", []),
+  (i) => i,
+);
+const mentioned = cell<MentionableCharm[]>([]);
+const pattern = derive(undefined, () => JSON.stringify(MyPattern));
+
+<ct-code-editor
+  $value={content}
+  $mentionable={mentionable}
+  $mentioned={mentioned}
+  $pattern={pattern}
+  onbacklink-click={handleCharmLinkClick({})}
+  onbacklink-create={handleNewBacklink({ mentionable })}
+  language="text/markdown"
+  theme="light"
+  wordWrap
+/>
+```
+
+### Required Handlers
+
+```tsx
+const handleCharmLinkClick = handler<
+  { detail: { charm: Cell<MentionableCharm> } },
+  Record<string, never>
+>(({ detail }, _) => {
+  return navigateTo(detail.charm);
+});
+
+const handleNewBacklink = handler<
+  {
+    detail: {
+      text: string;
+      charmId: any;
+      charm: Cell<MentionableCharm>;
+      navigate: boolean;
+    };
+  },
+  { mentionable: Cell<MentionableCharm[]> }
+>(({ detail }, { mentionable }) => {
+  if (detail.navigate) {
+    return navigateTo(detail.charm);
+  } else {
+    mentionable.push(detail.charm as unknown as MentionableCharm);
+  }
+});
+```
+
+### Prerequisites
+
+The `[[` reference system requires:
+1. Default pattern setup in the space (click "Create default pattern" button)
+2. backlinks-index pattern running (auto-created by default pattern)
+3. The `wish("#mentionable")` provides the list of charms to reference
+
+See `note.tsx` in patterns/ for a complete working example.
+

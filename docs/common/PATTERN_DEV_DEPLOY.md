@@ -2,6 +2,26 @@
 
 This guide covers building, debugging, and deploying patterns using the CommonTools framework.
 
+## Initial Space Setup
+
+### Creating Your First Space
+
+When you first visit a new space in the browser (e.g., `http://localhost:8000/my-space`), you'll see a **"Create default pattern?"** prompt with a "Go!" button.
+
+**CRITICAL**: Click "Go!" to set up essential infrastructure:
+- backlinks-index (enables `[[` charm references)
+- Default charm list
+- Chatbot patterns
+
+**Don't skip this step** - many features (especially `[[` references in ct-code-editor) won't work without the default pattern setup.
+
+### Testing Without Default Pattern
+
+If you're using `ct charm new` to create charms directly:
+- `[[` references won't work until you set up the default pattern
+- `wish("#mentionable")` will return empty array
+- Navigate to the space in browser and click "Go!" to fix
+
 ## Pattern Development
 
 ### Building a New Pattern

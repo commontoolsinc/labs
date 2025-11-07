@@ -1337,3 +1337,130 @@ export default recipe<Input, Output>(
   }
 );
 ```
+
+## Pattern Discovery with wish()
+
+Patterns can discover and interact with other charms in the space using `wish()`.
+
+### Auto-Discovering All Charms
+
+```tsx
+import { wish, derive } from "commontools";
+
+// Get all charms in the space
+const allCharms = derive<any[], any[]>(
+  wish<any[]>("#allCharms", []),
+  (c) => c,
+);
+
+// Filter for specific pattern types
+const personCharms = derive(allCharms, (charms) =>
+  charms.filter((charm: any) =>
+    charm && typeof charm === "object" && "profile" in charm
+  )
+);
+
+// Use in your UI
+const personCount = derive(personCharms, (list) => list.length);
+```
+
+### Common Wish Patterns
+
+| Wish | Purpose | Example Use Case |
+|------|---------|------------------|
+| `wish("#allCharms", [])` | All charms in space | Meta-analysis, aggregation |
+| `wish("#mentionable", [])` | Charms available for `[[` refs | Autocomplete lists |
+| `wish("#recentCharms", [])` | Recently viewed | Navigation helpers |
+
+### When to Use wish vs Manual Linking
+
+**Use wish when:**
+- You want to find all charms of a certain type
+- The list of charms changes dynamically
+- You're building meta-patterns (analyzers, dashboards)
+
+**Use manual linking when:**
+- You need a specific charm reference that doesn't change
+- You're connecting exactly two patterns
+- The relationship is one-to-one
+
+Example: A meta-analyzer that finds all Person charms should use `wish("#allCharms")` and filter. A single Person linked to their Company record should use explicit linking.
+
+## Exporting Tools with patternTool
+
+Patterns can export functions that chatbots and other patterns can call programmatically using `patternTool`.
+
+### Basic Pattern Tool
+
+```tsx
+import { patternTool, derive } from "commontools";
+
+return {
+  [UI]: <MyUI />,
+  content,
+  // Export a tool for searching content
+  searchContent: patternTool(
+    ({ query, content }: { query: string; content: string }) => {
+      return derive({ query, content }, ({ query, content }) => {
+        if (!query) return [];
+        return content.split("\n").filter((line) =>
+          line.toLowerCase().includes(query.toLowerCase())
+        );
+      });
+    },
+    { content } // Bind to pattern fields
+  ),
+};
+```
+
+### Pattern Tool Best Practices
+
+1. **Return derived values**: patternTool functions should return `derive()` results
+2. **Bind to pattern fields**: Second argument connects to your pattern's data
+3. **Clear function signatures**: Type your inputs for better tool calling
+4. **Useful operations**: Export things chatbots would want to do (search, summarize, extract)
+
+### Example: Person Pattern Tools
+
+```tsx
+return {
+  [UI]: <PersonUI />,
+  displayName,
+  emails,
+  notes,
+  // Tools for omnibot/chatbot
+  getContactInfo: patternTool(
+    ({ displayName, emails }: { displayName: string; emails: EmailEntry[] }) => {
+      return derive({ displayName, emails }, ({ displayName, emails }) => {
+        const parts = [`Name: ${displayName || "Not provided"}`];
+        if (emails && emails.length > 0) {
+          parts.push(`Email: ${emails[0].value}`);
+        }
+        return parts.join("\n");
+      });
+    },
+    { displayName, emails }
+  ),
+  searchNotes: patternTool(
+    ({ query, notes }: { query: string; notes: string }) => {
+      return derive({ query, notes }, ({ query, notes }) => {
+        if (!query || !notes) return [];
+        return notes.split("\n").filter((line) =>
+          line.toLowerCase().includes(query.toLowerCase())
+        );
+      });
+    },
+    { notes }
+  ),
+};
+```
+
+### How Chatbots Use Pattern Tools
+
+When a charm with patternTool exports is attached to a chatbot:
+1. The tools appear in the chatbot's available tools list
+2. The LLM can call them like: `PersonCharm_searchNotes({ query: "MIT" })`
+3. Results are returned to the LLM for further processing
+
+This enables rich AI interactions where the chatbot can programmatically query and extract information from attached charms.
+
