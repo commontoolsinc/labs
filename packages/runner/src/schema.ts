@@ -472,6 +472,19 @@ export function validateAndTransform(
     return result; // processDefaultValue already annotates with back to cell
   }
 
+  // If no explicit default but schema has a type, use type-appropriate default
+  // to prevent undefined from causing issues (like NaN from undefined + 1)
+  if (resolvedSchema.type === 'number' || resolvedSchema.type === 'integer') {
+    const result = processDefaultValue(
+      runtime,
+      tx,
+      { ...link, schema: resolvedSchema },
+      0,
+    );
+    seen.push([seenKey, result]);
+    return result;
+  }
+
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
   if (
