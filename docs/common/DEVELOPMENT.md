@@ -316,6 +316,42 @@ export const set = (cache: Cache, key: string, value: string) =>
 
 ## Build & Test
 
+### Environment Setup
+
+#### Installing Deno
+
+If Deno is not installed, install it using the official installer:
+
+```bash
+curl -fsSL https://deno.land/install.sh | sh
+```
+
+This installs Deno to `~/.deno/bin/deno`. Add it to your PATH:
+
+```bash
+export PATH="$HOME/.deno/bin:$PATH"
+```
+
+For persistent configuration, add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+
+#### SSL Certificate Issues
+
+In some CI/test environments, you may encounter SSL certificate errors when Deno downloads npm packages:
+
+```
+error: Failed caching npm package: invalid peer certificate: UnknownIssuer
+```
+
+For **testing/development only**, you can bypass certificate validation:
+
+```bash
+deno test --unsafely-ignore-certificate-errors
+```
+
+**⚠️ Warning**: Only use this flag in trusted development/CI environments. Never use in production.
+
+### Running Tests
+
 - Check typings with `deno task check`.
 - Run linter with `deno lint`.
 - Run all tests using `deno task test` (NOT `deno test`)
