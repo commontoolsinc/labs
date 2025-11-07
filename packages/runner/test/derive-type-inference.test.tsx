@@ -65,6 +65,32 @@ describe("derive type inference", () => {
       expect(lastMessage).toBeDefined();
     });
 
+    it("should handle primitive types", () => {
+      const number = cell<number>();
+      const boolean = cell<boolean>();
+      const string = cell<string>();
+
+      const derivedNumber = derive(number, (num) => {
+        // Type check: nums should be number[]
+        const _typeCheck: number = num;
+        return num + 1;
+      });
+
+      const derivedBoolean = derive(boolean, (bool) => {
+        const _typeCheck: boolean = bool;
+        return !bool;
+      });
+
+      const derivedString = derive(string, (str) => {
+        const _typeCheck: string = str;
+        return str + "!";
+      });
+
+      expect(derivedNumber).toBeDefined();
+      expect(derivedBoolean).toBeDefined();
+      expect(derivedString).toBeDefined();
+    });
+
     it("should handle primitive array types", () => {
       const numbers = cell<number[]>();
       numbers.set([1, 2, 3, 4, 5]);
@@ -93,6 +119,7 @@ describe("derive type inference", () => {
 
     it("should handle object with nested properties", () => {
       interface User {
+        member: boolean;
         name: string;
         email: string;
         profile: {
@@ -111,6 +138,7 @@ describe("derive type inference", () => {
       const displayName = derive(user, (u) => {
         // Type check: u should be User
         const _typeCheck: User = u;
+        const _member: boolean = u.member;
         return `${u.name} (${u.profile.city})`;
       });
 
@@ -384,6 +412,54 @@ describe("derive type inference", () => {
 
         expect(derived).toBeDefined();
       });
+    });
+
+    it("should honor explicit derive<In, Out> typing", () => {
+      type ExplicitInput = { role: "user"; text: string };
+      const explicitCell = cell<ExplicitInput>();
+      explicitCell.set({ role: "user", text: "hello" });
+
+      const derived = derive<ExplicitInput, number>(
+        explicitCell,
+        (value) => {
+          const _typeCheck: ExplicitInput = value;
+          return value.text.length;
+        },
+      );
+
+      expect(derived).toBeDefined();
+    });
+
+    it("should honor explicit parameter typing", () => {
+      type ExplicitInput = { role: "user"; text: string };
+      const explicitCell = cell<ExplicitInput>();
+      explicitCell.set({ role: "user", text: "hello" });
+
+      const derived = derive(
+        explicitCell,
+        (value: ExplicitInput) => {
+          const _typeCheck: ExplicitInput = value;
+          return value.text.length;
+        },
+      );
+
+      expect(derived).toBeDefined();
+    });
+
+    it("should honor explicit Cell<T> inputs", () => {
+      type ExplicitInput = { role: "user"; text: string };
+      const explicitCell = cell<Cell<ExplicitInput>>();
+      explicitCell.set({ role: "user", text: "hello" });
+
+      const derived = derive(
+        explicitCell,
+        (value: Cell<ExplicitInput>) => {
+          const _typeCheck: Cell<ExplicitInput> = value;
+          return value.get().text.length;
+        },
+      );
+
+      expect(derived).toBeDefined();
     });
   }
 });
