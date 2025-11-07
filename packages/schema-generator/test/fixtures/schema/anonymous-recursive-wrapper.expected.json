@@ -1,21 +1,21 @@
 {
   "$defs": {
     "SchemaRoot": {
-      "type": "object",
       "properties": {
         "field": {
-          "type": "object",
+          "default": {},
           "properties": {
             "self": {
               "$ref": "#/$defs/SchemaRoot"
             }
           },
-          "default": {}
+          "type": "object"
         }
       },
       "required": [
         "field"
-      ]
+      ],
+      "type": "object"
     }
   },
   "$ref": "#/$defs/SchemaRoot"

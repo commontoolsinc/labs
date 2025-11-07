@@ -1,8 +1,8 @@
 {
   "$defs": {
     "MyCell": {
-      "asCell": true,
-      "type": "number"
+      "properties": {},
+      "type": "object"
     },
     "NullableCell": {
       "anyOf": [

@@ -376,7 +376,10 @@ export function getNamedTypeKey(
   }
   // Avoid promoting wrappers/containers into definitions
   if (name === "Array" || name === "ReadonlyArray") return undefined;
-  if (name === "Cell" || name === "Stream" || name === "Default") {
+  if (
+    name === "Cell" || name === "Stream" || name === "Default" ||
+    name === "OpaqueCell"
+  ) {
     return undefined;
   }
   if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;

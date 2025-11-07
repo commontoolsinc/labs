@@ -1,51 +1,11 @@
 {
-  "type": "object",
   "properties": {
-    "settings": {
-      "type": "object",
-      "properties": {
-        "theme": {
-          "type": "string"
-        },
-        "language": {
-          "type": "string"
-        },
-        "timezone": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "theme",
-        "language",
-        "timezone"
-      ]
-    },
-    "limits": {
-      "type": "object",
-      "properties": {
-        "cpu": {
-          "type": "number"
-        },
-        "memory": {
-          "type": "number"
-        },
-        "disk": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "cpu",
-        "memory",
-        "disk"
-      ]
-    },
     "features": {
-      "type": "object",
       "properties": {
-        "auth": {
+        "api": {
           "type": "boolean"
         },
-        "api": {
+        "auth": {
           "type": "boolean"
         },
         "ui": {
@@ -53,15 +13,55 @@
         }
       },
       "required": [
-        "auth",
         "api",
+        "auth",
         "ui"
-      ]
+      ],
+      "type": "object"
+    },
+    "limits": {
+      "properties": {
+        "cpu": {
+          "type": "number"
+        },
+        "disk": {
+          "type": "number"
+        },
+        "memory": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "cpu",
+        "disk",
+        "memory"
+      ],
+      "type": "object"
+    },
+    "settings": {
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "theme": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "theme",
+        "timezone"
+      ],
+      "type": "object"
     }
   },
   "required": [
-    "settings",
+    "features",
     "limits",
-    "features"
-  ]
+    "settings"
+  ],
+  "type": "object"
 }

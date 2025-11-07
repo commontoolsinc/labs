@@ -1,30 +1,8 @@
 {
-  "$defs": {
-    "LLMState": {
-      "properties": {
-        "cancelGeneration": {
-          "asStream": true
-        },
-        "error": true,
-        "pending": {
-          "type": "boolean"
-        },
-        "result": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "cancelGeneration",
-        "error",
-        "pending"
-      ],
-      "type": "object"
-    }
-  },
   "properties": {
     "state": {
-      "$ref": "#/$defs/LLMState",
-      "asOpaque": true
+      "properties": {},
+      "type": "object"
     }
   },
   "required": [
