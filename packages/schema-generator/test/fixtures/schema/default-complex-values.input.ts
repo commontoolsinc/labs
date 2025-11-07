@@ -19,5 +19,5 @@ interface SchemaRoot {
   items: Default<{ id: number; name: string }[], []>;
 
   // Record/map type
-  metadata: Default<Record<string, number>, {}>;
+  metadata: Default<Record<string, number>, Record<string, never>>;
 }

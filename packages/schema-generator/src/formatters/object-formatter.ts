@@ -145,8 +145,12 @@ export class ObjectFormatter implements TypeFormatter {
       // In all cases, the property may be omitted at runtime (JSON-like semantics).
       const hasOptionalFlag = (prop.flags & ts.SymbolFlags.Optional) !== 0;
       const hasUndefinedUnion = isUnionWithUndefined(resolvedPropType);
-      const isDefaultWithUndefinedInner = isDefaultNodeWithUndefined(propTypeNode, checker);
-      const isOptional = hasOptionalFlag || hasUndefinedUnion || isDefaultWithUndefinedInner;
+      const isDefaultWithUndefinedInner = isDefaultNodeWithUndefined(
+        propTypeNode,
+        checker,
+      );
+      const isOptional = hasOptionalFlag || hasUndefinedUnion ||
+        isDefaultWithUndefinedInner;
 
       if (!isOptional) required.push(propName);
 

@@ -62,18 +62,20 @@ export class UnionFormatter implements TypeFormatter {
       );
 
     if (allLiteral) {
-      const values: Array<string | number | boolean | null> = nonNull.map((m) => {
-        if (m.flags & ts.TypeFlags.StringLiteral) {
-          return (m as ts.StringLiteralType).value;
-        }
-        if (m.flags & ts.TypeFlags.NumberLiteral) {
-          return (m as ts.NumberLiteralType).value;
-        }
-        if (m.flags & ts.TypeFlags.BooleanLiteral) {
-          return (m as TypeWithInternals).intrinsicName === "true";
-        }
-        return undefined;
-      }).filter((v) => v !== undefined) as Array<string | number | boolean>;
+      const values: Array<string | number | boolean | null> = nonNull.map(
+        (m) => {
+          if (m.flags & ts.TypeFlags.StringLiteral) {
+            return (m as ts.StringLiteralType).value;
+          }
+          if (m.flags & ts.TypeFlags.NumberLiteral) {
+            return (m as ts.NumberLiteralType).value;
+          }
+          if (m.flags & ts.TypeFlags.BooleanLiteral) {
+            return (m as TypeWithInternals).intrinsicName === "true";
+          }
+          return undefined;
+        },
+      ).filter((v) => v !== undefined) as Array<string | number | boolean>;
 
       // Special case: union of both boolean literals {true, false} becomes type: "boolean"
       const boolValues = values.filter((v) => typeof v === "boolean");
