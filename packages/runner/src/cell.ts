@@ -180,6 +180,9 @@ declare module "@commontools/api" {
     sourceURI: URI;
     path: readonly PropertyKey[];
     copyTrap: boolean;
+
+    // TODO(seefeld): Remove once default schemas are properly propagated
+    setInitialValue(value: T): void;
   }
 
   interface ICreatable<C extends AnyBrandedCell<any>> {
@@ -950,6 +953,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     cellNodes.get(top)!.add(node);
   }
 
+  // TODO(seefeld): Remove once default schemas are properly propagated
+  private _initialValue?: T;
+  setInitialValue(value: T): void {
+    this._initialValue = value;
+  }
+
   /**
    * Export cell metadata for introspection, similar to OpaqueRef's export method.
    * If the cell has a link, it's included as 'external'.
@@ -975,7 +984,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       rootSchema: this.rootSchema ?? this.schema,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
-      value: this._kind === "stream" ? { $stream: true } as T : undefined,
+      value: this._kind === "stream"
+        ? { $stream: true } as T
+        : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
         ? this.getAsWriteRedirectLink({

@@ -51,6 +51,11 @@ function opaqueRefWithCell<T>(
     kind,
   );
 
+  // TODO(seefeld): Remove once default schemas are properly propagated
+  if (value !== undefined) {
+    cell.setInitialValue(value as T);
+  }
+
   // Use the cell's built-in method to get a proxied OpaqueRef
   return cell.getAsOpaqueRefProxy();
 }
