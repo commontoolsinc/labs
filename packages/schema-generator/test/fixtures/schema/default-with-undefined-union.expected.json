@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "maybeCount": {
+      "default": 42,
+      "type": "number"
+    },
+    "maybeTitle": {
+      "default": "untitled",
+      "type": "string"
+    },
+    "requiredTitle": {
+      "default": "required",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requiredTitle"
+  ],
+  "type": "object"
+}

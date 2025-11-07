@@ -15,7 +15,10 @@ import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 
-const logger = getLogger("schema-generator.object");
+const logger = getLogger("schema-generator.object", {
+  enabled: true,
+  level: "warn",
+});
 
 /**
  * Check if a type is a union that includes undefined.
