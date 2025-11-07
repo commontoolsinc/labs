@@ -15,6 +15,7 @@ import {
   emitElementAccessExpression,
   emitPrefixUnaryExpression,
   emitPropertyAccess,
+  emitTaggedTemplateExpression,
   emitTemplateExpression,
 } from "./emitters/mod.ts";
 
@@ -22,6 +23,7 @@ const EMITTERS: readonly Emitter[] = [
   emitPropertyAccess,
   emitBinaryExpression,
   emitCallExpression,
+  emitTaggedTemplateExpression,
   emitTemplateExpression,
   emitConditionalExpression,
   emitElementAccessExpression,

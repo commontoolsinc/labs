@@ -5,4 +5,5 @@ export * from "./container-expression.ts";
 export * from "./element-access-expression.ts";
 export * from "./prefix-unary-expression.ts";
 export * from "./property-access.ts";
+export * from "./tagged-template-expression.ts";
 export * from "./template-expression.ts";
