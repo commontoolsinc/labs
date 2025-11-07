@@ -36,7 +36,7 @@ export const minimalLeadScoringScenario: PatternIntegrationScenario<
 
 export const scenarios = [minimalLeadScoringScenario];
 
-describe("lead-scoring-minimal", () => {
+describe("minimal conflict repro", () => {
   for (const scenario of scenarios) {
     it(scenario.name, async () => {
       await runPatternScenario(scenario);
