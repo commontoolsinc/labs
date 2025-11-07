@@ -141,6 +141,7 @@ export class Chronicle {
 
     // Validate against current state (replica + any overlapping novelty)
     const rebase = this.rebase(loaded);
+
     if (rebase.error) {
       return rebase;
     }
@@ -298,10 +299,18 @@ export class Chronicle {
         // If the merged value is neither `undefined` nor the existing value,
         // create an assertion referring to the loaded fact in a causal
         // reference.
+        const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
+        const causeRef = refer(factToRefer);
+
+        // Normalize the value to handle NaN and other non-JSON values
+        // NaN gets serialized to null in JSON, so we normalize it here to ensure
+        // consistent hashing between client and server
+        const normalizedValue = JSON.parse(JSON.stringify(merged.value));
+
         edit.assert({
           ...loaded,
-          is: merged.value,
-          cause: refer(loaded.cause ? normalizeFact(loaded) : loaded),
+          is: normalizedValue,
+          cause: causeRef,
         });
       }
     }
