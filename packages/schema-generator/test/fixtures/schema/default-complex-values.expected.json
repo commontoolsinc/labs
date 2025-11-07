@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "Config": {
+      "properties": {
+        "retries": {
+          "type": "number"
+        },
+        "timeout": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "retries",
+        "timeout"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/Config",
+      "default": {
+        "retries": 3,
+        "timeout": 30
+      }
+    },
+    "items": {
+      "default": [],
+      "items": {
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "default": {},
+      "properties": {},
+      "type": "object"
+    },
+    "tags": {
+      "default": [
+        "default",
+        "tags"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "config",
+    "items",
+    "metadata",
+    "tags"
+  ],
+  "type": "object"
+}
