@@ -6,7 +6,10 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type StorageNotification,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test conflict");
 const space = signer.did();
@@ -23,9 +26,22 @@ describe("Conflict Reproduction", () => {
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
+  let conflictErrors: Error[];
 
   beforeEach(() => {
+    conflictErrors = [];
     storageManager = StorageManager.emulate({ as: signer });
+
+    // Subscribe to storage notifications to capture conflicts
+    storageManager.subscribe({
+      next: (notification: StorageNotification) => {
+        if (notification.type === "revert" && notification.reason.name === "ConflictError") {
+          conflictErrors.push(notification.reason);
+        }
+        return undefined;
+      },
+    });
+
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
@@ -99,5 +115,13 @@ describe("Conflict Reproduction", () => {
     await runtime.idle();
 
     expect(result.get()).toMatchObject({ action: expect.anything() });
+
+    // Give time for async conflict notifications to be processed
+    // The conflict happens during the optimistic transaction retry,
+    // which completes asynchronously after runtime.idle()
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Verify that conflicts were captured
+    expect(conflictErrors.length).toBeGreaterThan(0);
   });
 });
