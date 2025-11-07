@@ -35,7 +35,10 @@ describe("Conflict Reproduction", () => {
     // Subscribe to storage notifications to capture conflicts
     storageManager.subscribe({
       next: (notification: StorageNotification) => {
-        if (notification.type === "revert" && notification.reason.name === "ConflictError") {
+        if (
+          notification.type === "revert" &&
+          notification.reason.name === "ConflictError"
+        ) {
           conflictErrors.push(notification.reason);
         }
         return undefined;
