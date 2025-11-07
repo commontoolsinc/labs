@@ -1,92 +1,13 @@
 {
+  "type": "object",
   "properties": {
-    "booleanFeatures": {
-      "properties": {
-        "api": {
-          "type": "boolean"
-        },
-        "auth": {
-          "type": "boolean"
-        },
-        "ui": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "api",
-        "auth",
-        "ui"
-      ],
-      "type": "object"
-    },
-    "numberLimits": {
-      "properties": {
-        "cpu": {
-          "type": "number"
-        },
-        "disk": {
-          "type": "number"
-        },
-        "memory": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "cpu",
-        "disk",
-        "memory"
-      ],
-      "type": "object"
-    },
-    "objectHandlers": {
-      "properties": {
-        "create": {
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        },
-        "delete": {
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        },
-        "update": {
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "create",
-        "delete",
-        "update"
-      ],
-      "type": "object"
-    },
     "stringConfig": {
+      "type": "object",
       "properties": {
-        "language": {
+        "theme": {
           "type": "string"
         },
-        "theme": {
+        "language": {
           "type": "string"
         },
         "timezone": {
@@ -94,18 +15,97 @@
         }
       },
       "required": [
-        "language",
         "theme",
+        "language",
         "timezone"
-      ],
-      "type": "object"
+      ]
+    },
+    "numberLimits": {
+      "type": "object",
+      "properties": {
+        "cpu": {
+          "type": "number"
+        },
+        "memory": {
+          "type": "number"
+        },
+        "disk": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "cpu",
+        "memory",
+        "disk"
+      ]
+    },
+    "booleanFeatures": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "type": "boolean"
+        },
+        "api": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "auth",
+        "api",
+        "ui"
+      ]
+    },
+    "objectHandlers": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "update": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "delete": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        }
+      },
+      "required": [
+        "create",
+        "update",
+        "delete"
+      ]
     }
   },
   "required": [
-    "booleanFeatures",
+    "stringConfig",
     "numberLimits",
-    "objectHandlers",
-    "stringConfig"
-  ],
-  "type": "object"
+    "booleanFeatures",
+    "objectHandlers"
+  ]
 }

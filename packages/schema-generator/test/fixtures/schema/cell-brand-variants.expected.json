@@ -1,24 +1,24 @@
 {
   "$defs": {
     "MyComparableCell": {
-      "properties": {},
-      "type": "object"
+      "asCell": true,
+      "type": "number"
     },
     "MyOpaque": {
-      "properties": {},
-      "type": "object"
+      "asOpaque": true,
+      "type": "boolean"
     },
     "MyReadonlyCell": {
-      "properties": {},
-      "type": "object"
+      "asCell": true,
+      "type": "string"
     },
     "MyStream": {
-      "properties": {},
-      "type": "object"
+      "asStream": true,
+      "type": "number"
     },
     "MyWriteonlyCell": {
-      "properties": {},
-      "type": "object"
+      "asCell": true,
+      "type": "boolean"
     }
   },
   "properties": {

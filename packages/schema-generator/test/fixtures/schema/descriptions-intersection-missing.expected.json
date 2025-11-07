@@ -1,17 +1,17 @@
 {
-  "$comment": "Docs inherited from intersection constituents. Missing docs for: { bar: number; }.",
-  "description": "Doc A",
+  "type": "object",
   "properties": {
-    "bar": {
-      "type": "number"
-    },
     "foo": {
       "type": "string"
+    },
+    "bar": {
+      "type": "number"
     }
   },
   "required": [
-    "bar",
-    "foo"
+    "foo",
+    "bar"
   ],
-  "type": "object"
+  "description": "Doc A",
+  "$comment": "Docs inherited from intersection constituents. Missing docs for: { bar: number; }."
 }

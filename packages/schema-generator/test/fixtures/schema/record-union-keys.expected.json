@@ -1,49 +1,13 @@
 {
+  "type": "object",
   "properties": {
-    "features": {
-      "properties": {
-        "api": {
-          "type": "boolean"
-        },
-        "auth": {
-          "type": "boolean"
-        },
-        "ui": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "api",
-        "auth",
-        "ui"
-      ],
-      "type": "object"
-    },
-    "limits": {
-      "properties": {
-        "cpu": {
-          "type": "number"
-        },
-        "disk": {
-          "type": "number"
-        },
-        "memory": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "cpu",
-        "disk",
-        "memory"
-      ],
-      "type": "object"
-    },
     "settings": {
+      "type": "object",
       "properties": {
-        "language": {
+        "theme": {
           "type": "string"
         },
-        "theme": {
+        "language": {
           "type": "string"
         },
         "timezone": {
@@ -51,17 +15,53 @@
         }
       },
       "required": [
-        "language",
         "theme",
+        "language",
         "timezone"
-      ],
-      "type": "object"
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "cpu": {
+          "type": "number"
+        },
+        "memory": {
+          "type": "number"
+        },
+        "disk": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "cpu",
+        "memory",
+        "disk"
+      ]
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "type": "boolean"
+        },
+        "api": {
+          "type": "boolean"
+        },
+        "ui": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "auth",
+        "api",
+        "ui"
+      ]
     }
   },
   "required": [
-    "features",
+    "settings",
     "limits",
-    "settings"
-  ],
-  "type": "object"
+    "features"
+  ]
 }

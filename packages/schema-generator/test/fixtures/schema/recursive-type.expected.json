@@ -1,4 +1,5 @@
 {
+  "$ref": "#/$defs/LinkedList",
   "$defs": {
     "LinkedList": {
       "properties": {
@@ -14,6 +15,5 @@
       ],
       "type": "object"
     }
-  },
-  "$ref": "#/$defs/LinkedList"
+  }
 }

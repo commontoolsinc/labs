@@ -1,4 +1,5 @@
 {
+  "$ref": "#/$defs/A",
   "$defs": {
     "A": {
       "properties": {
@@ -33,6 +34,5 @@
       ],
       "type": "object"
     }
-  },
-  "$ref": "#/$defs/A"
+  }
 }

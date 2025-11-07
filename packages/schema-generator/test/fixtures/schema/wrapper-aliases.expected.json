@@ -1,48 +1,49 @@
 {
   "$defs": {
     "AnonymousType_1": {
+      "type": "array",
       "items": {
         "$ref": "#/$defs/RecursiveItem"
-      },
-      "type": "array"
+      }
     },
     "RecursiveItem": {
+      "type": "object",
       "properties": {
-        "children": {
-          "$ref": "#/$defs/AnonymousType_1"
-        },
         "name": {
           "type": "string"
+        },
+        "children": {
+          "$ref": "#/$defs/AnonymousType_1"
         }
       },
       "required": [
         "name"
-      ],
-      "type": "object"
+      ]
     }
   },
+  "type": "object",
   "properties": {
-    "aliasedCell": {
-      "$ref": "#/$defs/AnonymousType_1",
-      "asCell": true
-    },
-    "aliasedDefault": {
+    "directDefault": {
       "$ref": "#/$defs/AnonymousType_1",
       "default": []
-    },
-    "aliasedStream": {
-      "$ref": "#/$defs/AnonymousType_1",
-      "asStream": true
     },
     "directCell": {
       "$ref": "#/$defs/AnonymousType_1",
       "asCell": true
     },
-    "directDefault": {
+    "directStream": {
+      "$ref": "#/$defs/AnonymousType_1",
+      "asStream": true
+    },
+    "aliasedDefault": {
       "$ref": "#/$defs/AnonymousType_1",
       "default": []
     },
-    "directStream": {
+    "aliasedCell": {
+      "$ref": "#/$defs/AnonymousType_1",
+      "asCell": true
+    },
+    "aliasedStream": {
       "$ref": "#/$defs/AnonymousType_1",
       "asStream": true
     }
@@ -54,6 +55,5 @@
     "directCell",
     "directDefault",
     "directStream"
-  ],
-  "type": "object"
+  ]
 }

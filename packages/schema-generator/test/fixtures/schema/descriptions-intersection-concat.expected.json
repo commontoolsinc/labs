@@ -1,17 +1,17 @@
 {
-  "$comment": "Docs inherited from intersection constituents. Sources: TypeA, TypeB.",
-  "description": "Doc A\n\nDoc B",
+  "type": "object",
   "properties": {
-    "bar": {
-      "type": "number"
-    },
     "foo": {
       "type": "string"
+    },
+    "bar": {
+      "type": "number"
     }
   },
   "required": [
-    "bar",
-    "foo"
+    "foo",
+    "bar"
   ],
-  "type": "object"
+  "description": "Doc A\n\nDoc B",
+  "$comment": "Docs inherited from intersection constituents. Sources: TypeA, TypeB."
 }

@@ -147,30 +147,10 @@ function extractWrapperTypeReference(
         const objectType = t as ts.ObjectType;
         if (objectType.objectFlags & ts.ObjectFlags.Reference) {
           const typeRef = objectType as ts.TypeReference;
-          const symbol = typeRef.target?.symbol;
-          // Only consider wrapper type references that extend BrandedCell
-          // This prevents Array<T> from being mistaken for a wrapper in intersections
-          // like: T[] & OpaqueCell<T[]> & Array<OpaqueRef<T>>
-          // These are the wrapper types defined in @commontools/common-builder that extend BrandedCell:
-          // - OpaqueCell<T>: Base opaque wrapper
-          // - Cell<T>: Full-featured cell with read/write/stream capabilities
-          // - Stream<T>: Stream-only cell (send events only)
-          // - ComparableCell<T>: Equality and keying only
-          // - ReadonlyCell<T>: Read-only cell variant
-          // - WriteonlyCell<T>: Write-only cell variant
-          // Note: If new wrapper types extending BrandedCell are added to the API,
-          // they should be added to this list.
-          if (
-            symbol &&
-            (symbol.name === "OpaqueCell" || symbol.name === "Cell" ||
-              symbol.name === "Stream" || symbol.name === "ComparableCell" ||
-              symbol.name === "ReadonlyCell" || symbol.name === "WriteonlyCell")
-          ) {
-            const typeArgs = typeRef.typeArguments ??
-              checker.getTypeArguments(typeRef);
-            if (typeArgs && typeArgs.length > 0) {
-              return typeRef;
-            }
+          const typeArgs = typeRef.typeArguments ??
+            checker.getTypeArguments(typeRef);
+          if (typeArgs && typeArgs.length > 0) {
+            return typeRef;
           }
         }
       }
