@@ -33,7 +33,8 @@
       "default": "active",
       "enum": [
         "active",
-        "inactive"
+        "inactive",
+        null
       ]
     },
     "value": {

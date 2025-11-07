@@ -102,7 +102,8 @@ describe("Schema: Complex defaults", () => {
     );
 
     // Validate root schema required fields
-    expect(s.required).toEqual(["nullable", "undefinable"]);
+    // undefinable has Default<T | undefined, V> so undefined makes it optional
+    expect(s.required).toEqual(["nullable"]);
 
     const n = s.properties?.nullable as any;
     expect(n.default).toBe(null);

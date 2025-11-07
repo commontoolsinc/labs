@@ -52,7 +52,8 @@ export class UnionFormatter implements TypeFormatter {
       return { anyOf: [item, { type: "null" }] };
     }
 
-    // Case: all members are string/number/boolean literals -> enum
+    // Case: all non-null members are string/number/boolean literals -> enum
+    // Include null in the enum if present (unlike undefined which is handled via required array)
     const allLiteral = nonNull.length > 0 &&
       nonNull.every((m) =>
         (m.flags & ts.TypeFlags.StringLiteral) !== 0 ||
@@ -61,7 +62,7 @@ export class UnionFormatter implements TypeFormatter {
       );
 
     if (allLiteral) {
-      const values = nonNull.map((m) => {
+      const values: Array<string | number | boolean | null> = nonNull.map((m) => {
         if (m.flags & ts.TypeFlags.StringLiteral) {
           return (m as ts.StringLiteralType).value;
         }
@@ -72,7 +73,7 @@ export class UnionFormatter implements TypeFormatter {
           return (m as TypeWithInternals).intrinsicName === "true";
         }
         return undefined;
-      }).filter((v) => v !== undefined);
+      }).filter((v) => v !== undefined) as Array<string | number | boolean>;
 
       // Special case: union of both boolean literals {true, false} becomes type: "boolean"
       const boolValues = values.filter((v) => typeof v === "boolean");
@@ -81,6 +82,11 @@ export class UnionFormatter implements TypeFormatter {
       if (boolValues.length === 2 && nonBoolValues.length === 0) {
         // Union of true | false becomes regular boolean type
         return { type: "boolean" };
+      }
+
+      // Include null in enum values if present (null can be a runtime value, unlike undefined)
+      if (hasNull) {
+        values.push(null);
       }
 
       return { enum: values };
