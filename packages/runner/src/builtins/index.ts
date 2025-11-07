@@ -37,7 +37,15 @@ export function registerBuiltins(runtime: IRuntime) {
       requestHash: Cell<string | undefined>;
     }>(generateObject),
   );
-  moduleRegistry.addModuleByRef("generateText", raw(generateText));
+  moduleRegistry.addModuleByRef(
+    "generateText",
+    raw<BuiltInGenerateTextParams, {
+      pending: Cell<boolean>;
+      result: Cell<string | undefined>;
+      partial: Cell<string | undefined>;
+      requestHash: Cell<string | undefined>;
+    }>(generateText),
+  );
   moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
   moduleRegistry.addModuleByRef("wish", raw(wish));
 }

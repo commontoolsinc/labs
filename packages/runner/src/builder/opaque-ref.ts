@@ -1,14 +1,12 @@
 import {
   type CellKind,
   type JSONSchema,
-  type JSONValue,
   type Opaque,
   type OpaqueRef,
   type SchemaWithoutCell,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
 import { createCell } from "../cell.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 
 /**
  * Implementation of opaqueRef that creates actual Cells.

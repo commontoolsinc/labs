@@ -18,7 +18,6 @@ import {
   UI,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
-  type UnsafeBinding,
 } from "./builder/types.ts";
 import {
   popFrame,
