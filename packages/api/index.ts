@@ -380,12 +380,6 @@ export interface WriteonlyCell<T>
 // OpaqueRef - Proxy-based variant of OpaqueCell
 // ============================================================================
 
-declare const OPAQUE_REF_VALUE: unique symbol;
-
-type OpaqueRefMarker<T> = {
-  readonly [OPAQUE_REF_VALUE]?: T;
-};
-
 /**
  * OpaqueRef is a variant of OpaqueCell with recursive proxy behavior.
  * Each key access returns another OpaqueRef, allowing chained property access.
@@ -396,7 +390,6 @@ type OpaqueRefMarker<T> = {
 export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
   :
     & T
-    & OpaqueRefMarker<T>
     & OpaqueCell<T>
     & (T extends Array<infer U> ? Array<OpaqueRef<U>>
       : T extends AnyBrandedCell<any> ? T
