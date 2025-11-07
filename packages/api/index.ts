@@ -390,7 +390,8 @@ export interface WriteonlyCell<T>
 export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
   :
     & OpaqueCell<T>
-    & (T extends Array<infer U> ? Array<OpaqueRef<U>>
+    & (T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
+      : T extends Array<infer U> ? Array<OpaqueRef<U>>
       : T extends AnyBrandedCell<any> ? T
       : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
       : T);
