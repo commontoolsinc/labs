@@ -965,14 +965,18 @@ export class Runner implements IRunner {
         const frame = pushFrameFromCause(
           cause,
           {
-            recipe,
-            materialize: (path: readonly PropertyKey[]) =>
-              processCell.getAsQueryResult(path),
+            unsafe_binding: {
+              recipe,
+              materialize: (path: readonly PropertyKey[]) =>
+                processCell.getAsQueryResult(path),
+              space: processCell.space,
+              tx,
+            },
+            inHandler: true,
+            runtime: this.runtime,
             space: processCell.space,
             tx,
           },
-          true, // Set the event on the frame
-          this.runtime, // Pass runtime to frame
         );
 
         try {
@@ -1058,14 +1062,18 @@ export class Runner implements IRunner {
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
           {
-            recipe,
-            materialize: (path: readonly PropertyKey[]) =>
-              processCell.getAsQueryResult(path, tx),
+            unsafe_binding: {
+              recipe,
+              materialize: (path: readonly PropertyKey[]) =>
+                processCell.getAsQueryResult(path, tx),
+              space: processCell.space,
+              tx,
+            },
+            inHandler: false,
+            runtime: this.runtime,
             space: processCell.space,
             tx,
-          } satisfies UnsafeBinding,
-          false, // not in handler
-          this.runtime, // Pass runtime to frame
+          },
         );
 
         try {

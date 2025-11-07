@@ -46,6 +46,7 @@ import {
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type RuntimeProgram } from "../harness/types.ts";
+import { type IRuntime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -211,7 +212,7 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
-  runtime?: import("../runtime.ts").IRuntime;
+  runtime?: IRuntime;
   tx?: IExtendedStorageTransaction;
   space?: MemorySpace;
   inHandler?: boolean;

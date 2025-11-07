@@ -35,6 +35,11 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { IRuntime } from "../runtime.ts";
+import {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
 
 /** Declare a recipe
  *
@@ -345,37 +350,40 @@ function factoryFromRecipe<T, R>(
 
 const frames: Frame[] = [];
 
-export function pushFrame(
-  frame?: Frame,
-  runtime?: import("../runtime.ts").IRuntime,
-  tx?: import("../storage/interface.ts").IExtendedStorageTransaction,
-): Frame {
-  if (!frame) {
-    const parent = getTopFrame();
-    // If no runtime provided, try to inherit from parent (may be undefined during construction)
-    const frameRuntime = runtime || parent?.runtime;
-    const frameTx = tx || parent?.tx;
-    frame = {
-      parent,
-      opaqueRefs: new Set(),
-      generatedIdCounter: 0,
-      ...(frameRuntime && { runtime: frameRuntime }),
-      ...(frameTx && { tx: frameTx }),
-    };
-  }
-  frames.push(frame);
-  return frame;
+export function pushFrame(frame: Partial<Frame> = {}): Frame {
+  const parent = getTopFrame();
+
+  const result = {
+    parent,
+    opaqueRefs: new Set(),
+    generatedIdCounter: 0,
+    ...(parent?.runtime && { runtime: parent.runtime }),
+    ...(parent?.tx && { tx: parent.tx }),
+    ...(parent?.space && { space: parent.space }),
+    ...frame,
+  };
+
+  frames.push(result);
+  return result;
 }
 
 export function pushFrameFromCause(
   cause: any,
-  unsafe_binding?: UnsafeBinding,
-  inHandler: boolean = false,
-  runtime?: import("../runtime.ts").IRuntime,
+  props: {
+    unsafe_binding?: UnsafeBinding;
+    inHandler?: boolean;
+    runtime?: IRuntime;
+    tx?: IExtendedStorageTransaction;
+    space?: MemorySpace;
+  },
 ): Frame {
   const parent = getTopFrame();
+  const { unsafe_binding, inHandler, runtime, tx, space } = props;
+
   // If no runtime provided, try to inherit from parent (may be undefined during construction)
-  const frameRuntime = runtime || parent?.runtime;
+  const frameRuntime = runtime ?? parent?.runtime;
+  const frameTx = tx ?? unsafe_binding?.tx ?? parent?.tx;
+  const frameSpace = space ?? unsafe_binding?.space ?? parent?.space;
 
   const frame = {
     parent,
@@ -383,11 +391,10 @@ export function pushFrameFromCause(
     generatedIdCounter: 0,
     opaqueRefs: new Set(),
     ...(frameRuntime && { runtime: frameRuntime }),
-    // Extract space and tx from unsafe_binding if available and set on frame
-    ...(unsafe_binding?.space && { space: unsafe_binding.space }),
-    ...(unsafe_binding?.tx && { tx: unsafe_binding.tx }),
+    ...(frameSpace && { space: frameSpace }),
+    ...(frameTx && { tx: frameTx }),
+    ...(inHandler && { inHandler: true }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
-    ...(inHandler && { inHandler }),
   };
   frames.push(frame);
   return frame;

@@ -388,7 +388,7 @@ export class Runtime implements IRuntime {
     }
 
     // Push a default frame with this runtime so builder functions can access it
-    this.defaultFrame = pushFrame(undefined, this);
+    this.defaultFrame = pushFrame({ runtime: this });
   }
 
   /**
