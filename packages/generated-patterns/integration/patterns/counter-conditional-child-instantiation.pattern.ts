@@ -57,7 +57,7 @@ interface ChildCounterState {
   increment: { amount?: number };
 }
 
-const conditionalChild = recipe<
+const _conditionalChild = recipe<
   { value: Default<number, 0> },
   ChildCounterState
 >(

@@ -127,7 +127,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   if (runtimeErrors.length > 0) {
     const errorMessages = runtimeErrors.map((e) => e.message).join("\n");
     throw new Error(
-      `Test passed but runtime errors occurred:\n${errorMessages}`
+      `Test passed but runtime errors occurred:\n${errorMessages}`,
     );
   }
 }

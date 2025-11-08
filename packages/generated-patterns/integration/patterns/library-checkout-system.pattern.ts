@@ -524,7 +524,7 @@ const cancelHold = handler(
 
 export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
   "Library Checkout System",
-  ({ catalog, loans, holds }) => {
+  ({ catalog }) => {
     const eventSequence = cell(1);
     const lastChange = cell<CirculationChange | null>(null);
     const loanState = cell<LoanRecord[]>(cloneLoans(defaultLoans));

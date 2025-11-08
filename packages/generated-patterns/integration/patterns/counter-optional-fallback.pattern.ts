@@ -37,7 +37,7 @@ export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
     const fallbackEffect = compute(() => {
       const fallback = defaultValue.get() ?? 10;
       const current = value.get();
-      return fallback;
+      return current ?? fallback;
     });
 
     const safeDefault = lift((fallback: number | undefined) =>

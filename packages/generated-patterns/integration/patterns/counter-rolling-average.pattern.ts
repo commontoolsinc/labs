@@ -48,7 +48,11 @@ export const counterWithRollingAverage = recipe<RollingAverageArgs>(
       const currentValue = value.get();
       const currentHistory = history.get();
       const windowValue = window.get();
-      return { value: currentValue, history: currentHistory, window: windowValue };
+      return {
+        value: currentValue,
+        history: currentHistory,
+        window: windowValue,
+      };
     });
 
     const average = lift((entries: number[] | undefined) => {
