@@ -545,10 +545,6 @@ export const assignmentGradingMatrix = recipe<AssignmentGradingMatrixArgs>(
       students: sanitizedStudents,
       assignments: sanitizedAssignments,
     });
-    lift((entries: GradeRecord[]) => {
-      grades.set(entries.map((entry) => ({ ...entry })));
-      return entries;
-    })(gradeEntries);
     const gradeMatrix = lift((input: {
       entries: GradeRecord[];
       students: StudentRecord[];

@@ -43,9 +43,8 @@ export const counterWithMutableTuple = recipe<MutableTupleArgs>(
   "Counter With Mutable Tuple",
   ({ pair }) => {
     const initialize = compute(() => {
-      if (!Array.isArray(pair.get())) {
-        pair.set([0, 0]);
-      }
+      const current = pair.get();
+      return Array.isArray(current) ? current : [0, 0];
     });
 
     const tuple = lift((values: [number, number] | undefined) => {

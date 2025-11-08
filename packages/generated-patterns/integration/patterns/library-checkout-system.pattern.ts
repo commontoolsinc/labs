@@ -532,30 +532,6 @@ export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
 
     const catalogView = lift(sanitizeCatalogList)(catalog);
 
-    const _loanSeed = lift((input: {
-      catalog: LibraryItem[];
-      loans: LoanRecord[];
-    }) => {
-      const sanitized = sanitizeLoanList(input.catalog, input.loans);
-      loanState.set(sanitized);
-      return sanitized;
-    })({
-      catalog: catalogView,
-      loans,
-    });
-
-    const _holdSeed = lift((input: {
-      catalog: LibraryItem[];
-      holds: HoldRecord[];
-    }) => {
-      const sanitized = sanitizeHoldList(input.catalog, input.holds);
-      holdState.set(sanitized);
-      return sanitized;
-    })({
-      catalog: catalogView,
-      holds,
-    });
-
     const loanEntries = lift(cloneLoans)(loanState);
     const holdEntries = lift(cloneHolds)(holdState);
 

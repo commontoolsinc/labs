@@ -31,7 +31,6 @@ export const boundedCounter = recipe<BoundedCounterArgs>(
       const minValue = min.get() ?? 0;
       const maxValue = max.get() ?? minValue;
       const normalized = Math.min(Math.max(current, minValue), maxValue);
-      if (normalized !== current) value.set(normalized);
       return normalized;
     });
 

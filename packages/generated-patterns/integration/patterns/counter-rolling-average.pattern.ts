@@ -45,16 +45,10 @@ export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
     const initialize = compute(() => {
-      if (typeof value.get() !== "number") {
-        value.set(0);
-      }
-      if (!Array.isArray(history.get())) {
-        history.set([]);
-      }
+      const currentValue = value.get();
+      const currentHistory = history.get();
       const windowValue = window.get();
-      if (typeof windowValue !== "number" || windowValue <= 0) {
-        window.set(5);
-      }
+      return { value: currentValue, history: currentHistory, window: windowValue };
     });
 
     const average = lift((entries: number[] | undefined) => {
