@@ -60,9 +60,13 @@ function resolveModulePath(moduleRef: string | URL): string {
 
 export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   const storageManager = StorageManager.emulate({ as: signer });
+  const runtimeErrors: Error[] = [];
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
+    errorHandlers: [(error) => {
+      runtimeErrors.push(error);
+    }],
   });
 
   const modulePath = resolveModulePath(scenario.module);
@@ -119,4 +123,11 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
 
   await runtime.dispose();
   await storageManager.close();
+
+  if (runtimeErrors.length > 0) {
+    const errorMessages = runtimeErrors.map((e) => e.message).join("\n");
+    throw new Error(
+      `Test passed but runtime errors occurred:\n${errorMessages}`,
+    );
+  }
 }

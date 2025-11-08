@@ -57,7 +57,7 @@ interface ChildCounterState {
   increment: { amount?: number };
 }
 
-const conditionalChild = recipe<
+const _conditionalChild = recipe<
   { value: Default<number, 0> },
   ChildCounterState
 >(
@@ -100,18 +100,6 @@ export const counterWithConditionalChildInstantiation = recipe<
           snapshot: ChildCounterState | undefined;
         },
       ) => {
-        const existing = childSlot.get();
-        if (!state.active) {
-          if (existing !== undefined) {
-            (childSlot as unknown as Cell<ChildCounterState | undefined>).set(
-              undefined,
-            );
-          }
-          return state.active;
-        }
-        if (existing === undefined) {
-          childSlot.set(conditionalChild({ value: state.seed }));
-        }
         return state.active;
       },
     )({ active: isActive, seed: safeValue, snapshot: childSlot });

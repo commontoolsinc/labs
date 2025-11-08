@@ -287,7 +287,7 @@ function factoryFromRecipe<T, R>(
     if (path.length > 0 || external) return;
 
     const cellPath = paths.get(cell)!;
-    if (value) setValueAtPath(initial, cellPath, value);
+    if (value !== undefined) setValueAtPath(initial, cellPath, value);
   });
 
   let argumentSchema: JSONSchema;

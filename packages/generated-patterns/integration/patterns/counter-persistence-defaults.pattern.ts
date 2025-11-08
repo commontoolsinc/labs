@@ -31,12 +31,9 @@ export const counterWithPersistenceDefaults = recipe<PersistenceDefaultsArgs>(
   "Counter With Persistence Defaults",
   ({ value, step }) => {
     const initialize = compute(() => {
-      if (typeof value.get() !== "number") {
-        value.set(0);
-      }
-      if (typeof step.get() !== "number") {
-        step.set(1);
-      }
+      const currentValue = value.get();
+      const currentStep = step.get();
+      return { value: currentValue, step: currentStep };
     });
 
     const safeStep = lift((input: number | undefined) =>

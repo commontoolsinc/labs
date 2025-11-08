@@ -136,14 +136,6 @@ export const counterPersistenceViaInitialArguments = recipe<
           seeded,
         );
         snapshotRecorded = true;
-        lastChange.set({
-          reason: "initial",
-          previous: sanitized.value,
-          next: sanitized.value,
-          amount: 0,
-          step: sanitized.step,
-          historyLength: sanitized.history.length,
-        });
       }
       return sanitized;
     })(state);

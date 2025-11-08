@@ -37,13 +37,9 @@ export const counterWithConditionalBranch = recipe<ConditionalBranchArgs>(
   "Counter With Conditional Branch",
   ({ value, enabled }) => {
     const initialize = compute(() => {
-      if (value.get() === undefined) {
-        value.set(0);
-      }
+      const currentValue = value.get();
       const currentFlag = enabled.get();
-      if (typeof currentFlag !== "boolean") {
-        enabled.set(false);
-      }
+      return { value: currentValue, enabled: currentFlag };
     });
 
     const safeValue = lift((count: number | undefined) =>

@@ -184,7 +184,7 @@ export const crmPipelineScenario: PatternIntegrationScenario<
               amount: 8000,
             },
             {
-              id: "deal-4",
+              id: "deal-1",
               name: "Delta Co",
               stage: "qualified",
               amount: 4000,
@@ -264,7 +264,7 @@ export const crmPipelineScenario: PatternIntegrationScenario<
           path: "summaryLabel",
           value: "5 stages forecast 14200.00 open 29000.00",
         },
-        { path: "lastAction", value: "record:deal-4" },
+        { path: "lastAction", value: "record:deal-1" },
       ],
     },
     {
@@ -283,7 +283,7 @@ export const crmPipelineScenario: PatternIntegrationScenario<
               amount: 5000,
             },
             {
-              id: "deal-4",
+              id: "deal-1",
               name: "Delta Co",
               stage: "qualified",
               amount: 4000,

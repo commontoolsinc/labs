@@ -413,7 +413,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!space) {
       throw new Error(
         "Cannot create cell link: space is required.\n" +
-          "When creating cells without links, you must provide a space in the frame.\n",
+          "This can happen when closing over (opaque) cells in a lift or derive.\n" +
+          "Instead pass those cells into the lift or derive directly as Cell<> inputs.\n",
       );
     }
 
