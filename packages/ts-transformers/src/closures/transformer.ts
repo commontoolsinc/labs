@@ -123,6 +123,25 @@ function shouldCaptureIdentifier(
     return undefined;
   }
 
+  // For shorthand property assignments (e.g., {id} instead of {id: id}), we need special handling
+  // because getSymbolAtLocation returns the property symbol, not the variable being referenced
+  if (ts.isShorthandPropertyAssignment(node.parent)) {
+    // For shorthand properties, we need to resolve to the actual variable/value being referenced
+    // Use the type checker to get the actual symbol of the referenced value
+    const propSymbol = checker.getShorthandAssignmentValueSymbol(node.parent);
+    if (propSymbol) {
+      const propDeclarations = propSymbol.getDeclarations() || [];
+      const allDeclaredInside = propDeclarations.every((decl) =>
+        isDeclaredWithinFunction(decl, func)
+      );
+      if (allDeclaredInside) {
+        return undefined;
+      }
+      return node;
+    }
+    // If we can't resolve the shorthand symbol, fall through to normal handling
+  }
+
   // Skip JSX element tag names (e.g., <li>, <div>)
   if (
     ts.isJsxOpeningElement(node.parent) ||
@@ -290,7 +309,12 @@ function shouldAddNestedCapture(
   checker: ts.TypeChecker,
 ): boolean {
   if (ts.isIdentifier(capture)) {
-    return !isParameterOrLocalVariable(capture, outerFunc, funcParams, checker);
+    return !isParameterOrLocalVariable(
+      capture,
+      outerFunc,
+      funcParams,
+      checker,
+    );
   }
 
   if (ts.isPropertyAccessExpression(capture)) {
