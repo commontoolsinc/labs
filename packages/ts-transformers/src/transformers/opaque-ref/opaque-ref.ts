@@ -28,7 +28,7 @@ export function isOpaqueRefType(
     );
   }
 
-  // Primary method: look for the CELL_BRAND unique symbol on the type.
+  // Look for the CELL_BRAND unique symbol on the type.
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
     // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
