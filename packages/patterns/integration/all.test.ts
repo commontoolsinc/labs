@@ -28,6 +28,7 @@ describe("Compile all recipes", () => {
   const skippedPatterns = [
     "chatbot-list-view.tsx",
     "chatbot-note-composed.tsx",
+    "link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
   // Add a test for each pattern, but skip ones that have issues
   for (const file of Deno.readDirSync(join(import.meta.dirname!, ".."))) {
