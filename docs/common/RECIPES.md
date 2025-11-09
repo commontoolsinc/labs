@@ -1390,6 +1390,16 @@ Example: A meta-analyzer that finds all Person charms should use `wish("#allChar
 
 Patterns can export functions that chatbots and other patterns can call programmatically using `patternTool`.
 
+### When to Use patternTool
+
+**Use `patternTool` when:**
+- You need to parametrize the operation (e.g., supply a search term, filter criteria)
+- The operation requires input from the caller beyond what's in the pattern's state
+
+**Don't use `patternTool` when:**
+- The chatbot just needs to read data - simply return the data alongside your UI
+- Example: `return { [UI]: <MyUI />, items }` - chatbot can read `items` directly
+
 ### Basic Pattern Tool
 
 ```tsx
@@ -1413,12 +1423,33 @@ return {
 };
 ```
 
+### How Parameter Splitting Works
+
+The second argument to `patternTool` determines which parameters are pre-filled vs. callable:
+
+```tsx
+// Function signature has: { items: Item[], query: string }
+// Second argument supplies: { items }
+// Result: query becomes the tool parameter
+searchItems: patternTool(
+  ({ items, query }: { items: Item[], query: string }) => {
+    return derive({ items, query }, ({ items, query }) =>
+      items.filter(item => item.text.includes(query))
+    );
+  },
+  { items }  // Pre-fill items, query is left as a parameter
+)
+```
+
+**Key insight:** Only supply **some** of the function's inputs in the second argument. The remainder become tool parameters that the caller (chatbot/pattern) must provide.
+
 ### Pattern Tool Best Practices
 
 1. **Return derived values**: patternTool functions should return `derive()` results
 2. **Bind to pattern fields**: Second argument connects to your pattern's data
 3. **Clear function signatures**: Type your inputs for better tool calling
 4. **Useful operations**: Export things chatbots would want to do (search, summarize, extract)
+5. **Parameter splitting**: Use the second argument to pre-fill pattern data, leaving caller-specific params open
 
 ### Example: Person Pattern Tools
 
