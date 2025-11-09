@@ -177,6 +177,65 @@ See `note.tsx` for grep and translate examples.
 
 See `space-setup.tsx` for an example of handling this with prompts and cache busting.
 
+## JSX in Utility Files
+
+### Issue: Cannot Export JSX Components from Utility Files
+
+**Symptom**: When trying to create reusable JSX components in utility files (e.g., `lib/my-utils.tsx`), you get compilation errors like:
+```
+[ERROR] This JSX tag requires 'h' to be in scope, but it could not be found.
+[ERROR] Module '"commontools"' has no exported member 'h'.
+```
+
+**Cause**: JSX compilation requires `h` to be in scope, which is only available within recipe contexts. Utility files can't import or use JSX because they're not recipes.
+
+**Solution**: Share utility functions instead of JSX components:
+
+**✅ DO THIS** - Export pure functions from utility files:
+```typescript
+/// <cts-enable />
+
+// lib/diff-utils.tsx
+export function computeWordDiff(from: string, to: string): DiffChunk[] {
+  // Pure function logic - no JSX
+  return [...];
+}
+```
+
+Then use the function with inline JSX in your recipe:
+```typescript
+// my-pattern.tsx
+import { computeWordDiff } from "./lib/diff-utils.tsx";
+
+export default recipe("MyPattern", ({ data }) => {
+  return {
+    [UI]: (
+      <div>
+        {computeWordDiff(data.from, data.to).map((part) => {
+          if (part.type === "added") {
+            return <span style={{ color: "green" }}>{part.word}</span>;
+          }
+          // ... more rendering
+        })}
+      </div>
+    )
+  };
+});
+```
+
+**❌ DON'T DO THIS** - Try to export JSX components from utilities:
+```typescript
+// lib/diff-utils.tsx
+export function DiffText({ from, to }) {  // Won't compile!
+  return <div>{from} → {to}</div>;  // Error: h not in scope
+}
+```
+
+**Key Principles**:
+- Utility files: Export pure functions, types, and non-JSX logic
+- Recipe files: Use JSX and compose with utility functions
+- Use `/// <cts-enable />` directive at the top of utility files
+
 ## Transaction Conflicts and Retry Storms
 
 If you see `ConflictError` messages in console, this is normal - the system retries transactions automatically. These warnings don't indicate a problem unless they occur continuously (retry storm).
