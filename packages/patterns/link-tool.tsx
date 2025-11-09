@@ -1,53 +1,16 @@
 /// <cts-enable />
-import {
-  link,
-  NAME,
-  patternTool,
-  recipe,
-  UI,
-  handler
-} from "commontools";
+import { handler, link } from "commontools";
 
 /**
- * Pattern tool for creating links between charm cells
- * Exported for use in chatbot.tsx
+ * Handler for creating links between charm cells.
+ * Used by chatbot.tsx to enable LLM-driven cell linking.
+ *
+ * Usage:
+ *   createLink({
+ *     source: "SourceCharm/result/value",
+ *     target: "TargetCharm/input/field"
+ *   })
  */
-export const createLinkTool = patternTool(
-  ({ source, target }: { source: string; target: string }) => {
-    return link(source, target);
-  },
-);
-
-export const linkTool = handler<{ source: string, target: string }, {}>(({ source, target }) => {
-  return link(source, target);
-});
-
-type LinkToolInput = Record<string, never>;
-type LinkToolOutput = {
-  [NAME]: string;
-  [UI]: any;
-};
-
-export default recipe<LinkToolInput, LinkToolOutput>(
-  "Link Tool",
-  (_input) => {
-    return {
-      [NAME]: "Link Tool",
-      [UI]: (
-        <div>
-          <h3>Link Tool</h3>
-          <p>Create links between charm cells</p>
-          <details>
-            <summary>Usage</summary>
-            <pre>
-              {`{
-  source: "SourceCharm/result/value",
-  target: "TargetCharm/input/field"
-}`}
-            </pre>
-          </details>
-        </div>
-      ),
-    };
-  },
+export const linkTool = handler<{ source: string; target: string }, {}>(
+  ({ source, target }) => link(source, target),
 );
