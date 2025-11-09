@@ -688,17 +688,29 @@ async function executeToolCalls(
 function createToolResultMessages(
   results: ToolCallExecutionResult[],
 ): BuiltInLLMMessage[] {
-  return results.map((toolResult) => ({
-    role: "tool",
-    content: [{
-      type: "tool-result",
-      toolCallId: toolResult.id,
-      toolName: toolResult.toolName || "unknown",
-      output: toolResult.error
-        ? { type: "error-text", value: toolResult.error }
-        : toolResult.result,
-    }],
-  }));
+  return results.map((toolResult) => {
+    // Ensure output is never undefined/null - Anthropic API requires valid tool_result
+    // for every tool_use, even if the tool returns nothing
+    let output: any;
+    if (toolResult.error) {
+      output = { type: "error-text", value: toolResult.error };
+    } else if (toolResult.result === undefined || toolResult.result === null) {
+      // Tool returned nothing - use explicit null value
+      output = { type: "json", value: null };
+    } else {
+      output = toolResult.result;
+    }
+
+    return {
+      role: "tool",
+      content: [{
+        type: "tool-result",
+        toolCallId: toolResult.id,
+        toolName: toolResult.toolName || "unknown",
+        output,
+      }],
+    };
+  });
 }
 
 export const llmDialogTestHelpers = {
@@ -1106,6 +1118,9 @@ async function startRequest(
       return msg;
     })
     .filter((msg, index, array) => {
+      // NEVER filter out tool result messages - API requires tool_result for every tool_use
+      if (msg.role === "tool") return true;
+
       // Remove messages that would have empty content arrays after filtering,
       // unless it's the final assistant message (which can be empty per Anthropic API).
       if (!Array.isArray(msg.content)) return true;
@@ -1175,6 +1190,39 @@ async function startRequest(
             toolCatalog,
             toolCallParts,
           );
+
+          // Validate that we have a result for every tool call with matching IDs
+          const toolCallIds = new Set(toolCallParts.map(p => p.toolCallId));
+          const resultIds = new Set(toolResults.map(r => r.id));
+          const mismatch = toolResults.length !== toolCallParts.length ||
+            !toolCallParts.every(p => resultIds.has(p.toolCallId));
+
+          if (mismatch) {
+            logger.error(
+              `Tool execution mismatch: ${toolCallParts.length} calls [${Array.from(toolCallIds)}] but ${toolResults.length} results [${Array.from(resultIds)}]`
+            );
+            // Add error message instead of invalid partial results
+            const errorMessage = {
+              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              role: "assistant",
+              content: "Some tool calls failed to execute. Please try again.",
+            } satisfies BuiltInLLMMessage & { [ID]: unknown };
+
+            await safelyPerformUpdate(
+              runtime,
+              pending,
+              internal,
+              requestId,
+              (tx) => {
+                messagesCell.withTx(tx).push(
+                  errorMessage as Schema<typeof LLMMessageSchema>,
+                );
+                pending.withTx(tx).set(false);
+              },
+            );
+            return;
+          }
+
           const newMessages: BuiltInLLMMessage[] = [
             assistantMessage,
             ...createToolResultMessages(toolResults),

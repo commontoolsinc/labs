@@ -9,6 +9,7 @@ const {
   extractToolCallParts,
   buildAssistantMessage,
   createToolResultMessages,
+  hasValidContent,
 } = llmDialogTestHelpers;
 
 Deno.test("createCharmToolDefinitions slugifies charm names and returns tool metadata", () => {
@@ -111,4 +112,68 @@ Deno.test("createToolResultMessages converts execution results into tool message
   assertEquals(failurePart.toolCallId, "call-2");
   assertEquals(failurePart.toolName, "failing");
   assertEquals(failurePart.output, { type: "error-text", value: "boom" });
+});
+
+Deno.test("hasValidContent returns true for non-empty text", () => {
+  assert(hasValidContent("Hello"));
+  assert(hasValidContent([{ type: "text", text: "Hello" }]));
+});
+
+Deno.test("hasValidContent returns false for empty text", () => {
+  assert(!hasValidContent(""));
+  assert(!hasValidContent("   \n  "));
+  assert(!hasValidContent([{ type: "text", text: "" }]));
+  assert(!hasValidContent([{ type: "text", text: "  " }]));
+});
+
+Deno.test("hasValidContent returns true for tool calls", () => {
+  const content: BuiltInLLMMessage["content"] = [
+    { type: "text", text: "" },
+    { type: "tool-call", toolCallId: "1", toolName: "test", input: {} },
+  ];
+  assert(hasValidContent(content));
+});
+
+Deno.test("hasValidContent returns true for tool results", () => {
+  const content: BuiltInLLMMessage["content"] = [
+    { type: "tool-result", toolCallId: "1", toolName: "test", output: { type: "json", value: null } },
+  ];
+  assert(hasValidContent(content));
+});
+
+Deno.test("hasValidContent returns false for only empty text parts", () => {
+  const content: BuiltInLLMMessage["content"] = [
+    { type: "text", text: "" },
+    { type: "text", text: "  " },
+  ];
+  assert(!hasValidContent(content));
+});
+
+Deno.test("createToolResultMessages handles undefined result with explicit null", () => {
+  const messages = createToolResultMessages([{
+    id: "call-1",
+    toolName: "empty",
+    result: undefined,
+  }]);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].role, "tool");
+  assertEquals(messages[0].content?.[0], {
+    type: "tool-result",
+    toolCallId: "call-1",
+    toolName: "empty",
+    output: { type: "json", value: null },
+  });
+});
+
+Deno.test("createToolResultMessages handles null result with explicit null", () => {
+  const messages = createToolResultMessages([{
+    id: "call-1",
+    toolName: "empty",
+    result: null,
+  }]);
+
+  assertEquals(messages.length, 1);
+  const outputPart = messages[0].content?.[0] as any;
+  assertEquals(outputPart.output, { type: "json", value: null });
 });
