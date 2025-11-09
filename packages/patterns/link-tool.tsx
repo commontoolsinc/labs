@@ -11,6 +11,7 @@ import { handler, link } from "commontools";
  *     target: "TargetCharm/input/field"
  *   })
  */
-export const linkTool = handler<{ source: string; target: string }, {}>(
-  ({ source, target }) => link(source, target),
-);
+export const linkTool = handler<
+  { source: string; target: string },
+  Record<PropertyKey, never>
+>(({ source, target }) => link(source, target));

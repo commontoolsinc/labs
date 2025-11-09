@@ -193,7 +193,9 @@ export function link(
           .filter(Boolean)
           .join(", ");
         const errorMsg =
-          `Source charm "${sourceParsed.charmName}" not found. Available charms: ${charmNames || "none"}`;
+          `Source charm "${sourceParsed.charmName}" not found. Available charms: ${
+            charmNames || "none"
+          }`;
         console.error("Link error:", errorMsg);
         errorCell.withTx(tx).set(errorMsg);
         successCell.withTx(tx).set(undefined);
@@ -209,7 +211,9 @@ export function link(
           .filter(Boolean)
           .join(", ");
         const errorMsg =
-          `Target charm "${targetParsed.charmName}" not found. Available charms: ${charmNames || "none"}`;
+          `Target charm "${targetParsed.charmName}" not found. Available charms: ${
+            charmNames || "none"
+          }`;
         console.error("Link error:", errorMsg);
         errorCell.withTx(tx).set(errorMsg);
         successCell.withTx(tx).set(undefined);
@@ -234,9 +238,10 @@ export function link(
       }
 
       // Navigate to the parent of where we want to set the link
-      const targetParentCell = navigateToCell(targetCharm, targetFullPath).withTx(
-        tx,
-      );
+      const targetParentCell = navigateToCell(targetCharm, targetFullPath)
+        .withTx(
+          tx,
+        );
 
       // Create link by setting the source cell as the value
       // This is the same approach used in CharmManager.link()
