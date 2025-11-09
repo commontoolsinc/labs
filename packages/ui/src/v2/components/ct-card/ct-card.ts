@@ -65,9 +65,15 @@ export class CTCard extends BaseElement {
       }
 
       /* Header section */
-      .card-header:not(:empty) {
+      .card-header {
         padding: 1.5rem;
         padding-bottom: 0;
+      }
+
+      /* Hide header if it has no slotted content */
+      .card-header:not(:has(*)) {
+        display: none;
+        padding: 0;
       }
 
       /* Title wrapper for title and action slots */
@@ -100,14 +106,26 @@ export class CTCard extends BaseElement {
       }
 
       /* Content section */
-      .card-content:not(:empty) {
+      .card-content {
         padding: 1.5rem;
       }
 
+      /* Hide content if it has no slotted content */
+      .card-content:not(:has(*)) {
+        display: none;
+        padding: 0;
+      }
+
       /* Footer section */
-      .card-footer:not(:empty) {
+      .card-footer {
         padding: 1.5rem;
         padding-top: 0;
+      }
+
+      /* Hide footer if it has no slotted content */
+      .card-footer:not(:has(*)) {
+        display: none;
+        padding: 0;
       }
 
       /* Adjust spacing when sections are used together */
