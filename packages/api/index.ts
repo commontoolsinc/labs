@@ -1052,7 +1052,7 @@ export type WishFunction = {
 export type LinkFunction = (
   source: Opaque<string>,
   target: Opaque<string>,
-) => OpaqueRef<{ success?: string; error?: string }>;
+) => OpaqueRef<{ success: string | undefined; error: string | undefined }>;
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,

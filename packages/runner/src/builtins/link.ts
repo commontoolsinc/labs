@@ -189,7 +189,7 @@ export function link(
       if (!sourceCharm) {
         const allCharms = charmsCell.get() || [];
         const charmNames = allCharms
-          .map((c: any) => c?.["[NAME]"])
+          .map((c: any) => c?.[NAME])
           .filter(Boolean)
           .join(", ");
         const errorMsg =
@@ -207,7 +207,7 @@ export function link(
       if (!targetCharm) {
         const allCharms = charmsCell.get() || [];
         const charmNames = allCharms
-          .map((c: any) => c?.["[NAME]"])
+          .map((c: any) => c?.[NAME])
           .filter(Boolean)
           .join(", ");
         const errorMsg =

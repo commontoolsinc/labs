@@ -129,9 +129,9 @@ keywords/features.
     structure
 
 - link-tool.tsx: Tool for creating data links between charm cells
-  - **Data types**: array of charms, string (path specifications)
-  - **Keywords**: wish, handler, getAsWriteRedirectLink, charm navigation, write
-    redirects, path parsing
+  - **Data types**: string (source path), string (target path)
+  - **Keywords**: link built-in, handler, charm navigation, cell linking, path
+    parsing
 
 - list-operations.tsx: Advanced array operations with ID-based tracking
   - **Data types**: array of objects with [ID] property
