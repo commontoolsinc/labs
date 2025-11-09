@@ -593,6 +593,30 @@ function extractToolCallParts(
   );
 }
 
+/**
+ * Validates whether message content is non-empty and valid for the Anthropic API.
+ * Returns true if the content contains at least one non-empty text block or tool call.
+ */
+function hasValidContent(content: BuiltInLLMMessage["content"]): boolean {
+  if (typeof content === "string") {
+    return content.trim().length > 0;
+  }
+
+  if (Array.isArray(content)) {
+    return content.some(part => {
+      if (part.type === "tool-call" || part.type === "tool-result") {
+        return true;
+      }
+      if (part.type === "text") {
+        return (part as BuiltInLLMTextPart).text?.trim().length > 0;
+      }
+      return false;
+    });
+  }
+
+  return false;
+}
+
 function buildAssistantMessage(
   content: BuiltInLLMMessage["content"],
   toolCallParts: BuiltInLLMToolCallPart[],
@@ -608,9 +632,7 @@ function buildAssistantMessage(
     });
   } else if (Array.isArray(content)) {
     assistantContentParts.push(
-      ...content.filter((part) =>
-        part.type === "text" && (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== ""
-      ) as BuiltInLLMTextPart[],
+      ...content.filter((part) => part.type === "text") as BuiltInLLMTextPart[],
     );
   }
 
@@ -686,6 +708,7 @@ export const llmDialogTestHelpers = {
   extractToolCallParts,
   buildAssistantMessage,
   createToolResultMessages,
+  hasValidContent,
 };
 
 /**
@@ -1066,20 +1089,30 @@ async function startRequest(
 
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
-  // Filter out messages with empty text content to prevent API errors
+  // Filter out empty text blocks from cached messages to handle ones that were
+  // stored before this fix. This prevents sending empty text blocks to the API.
   const rawMessages = messagesCell.withTx(tx).get() as BuiltInLLMMessage[];
-  const filteredMessages = rawMessages.map((msg) => {
-    if (Array.isArray(msg.content)) {
-      const filteredContent = msg.content.filter((part) => {
-        if (part.type === "text") {
-          return (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== "";
-        }
-        return true; // Keep non-text parts (tool-call, tool-result, etc.)
-      });
-      return { ...msg, content: filteredContent };
-    }
-    return msg;
-  });
+  const filteredMessages = rawMessages
+    .map((msg, index) => {
+      if (Array.isArray(msg.content)) {
+        const filteredContent = msg.content.filter((part) => {
+          if (part.type === "text") {
+            return (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== "";
+          }
+          return true; // Keep non-text parts (tool-call, tool-result, etc.)
+        });
+        return { ...msg, content: filteredContent };
+      }
+      return msg;
+    })
+    .filter((msg, index, array) => {
+      // Remove messages that would have empty content arrays after filtering,
+      // unless it's the final assistant message (which can be empty per Anthropic API).
+      if (!Array.isArray(msg.content)) return true;
+      const isFinalMessage = index === array.length - 1;
+      const isAssistant = msg.role === "assistant";
+      return msg.content.length > 0 || (isFinalMessage && isAssistant);
+    });
 
   const llmParams: LLMRequest = {
     system: system ?? "",
@@ -1097,6 +1130,33 @@ async function startRequest(
 
   resultPromise
     .then(async (llmResult) => {
+      // Validate that the response has valid content
+      if (!hasValidContent(llmResult.content)) {
+        // LLM returned empty or invalid content (e.g., stream aborted mid-flight,
+        // or AI SDK bug with empty text blocks). Insert a proper error message
+        // instead of storing invalid content.
+        logger.warn("LLM returned invalid/empty content, adding error message");
+        const errorMessage = {
+          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
+          role: "assistant",
+          content: "I encountered an error generating a response. Please try again.",
+        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+
+        await safelyPerformUpdate(
+          runtime,
+          pending,
+          internal,
+          requestId,
+          (tx) => {
+            messagesCell.withTx(tx).push(
+              errorMessage as Schema<typeof LLMMessageSchema>,
+            );
+            pending.withTx(tx).set(false);
+          },
+        );
+        return;
+      }
+
       // Extract tool calls from content if it's an array
       const hasToolCalls = Array.isArray(llmResult.content) &&
         llmResult.content.some((part) => part.type === "tool-call");
