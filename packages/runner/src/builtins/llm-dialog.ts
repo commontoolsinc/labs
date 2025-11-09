@@ -1101,38 +1101,34 @@ async function startRequest(
 
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
-  // Filter out empty text blocks from cached messages to handle ones that were
-  // stored before this fix. This prevents sending empty text blocks to the API.
+  // Validate message history - remove any invalid messages that were stored
+  // before this fix (e.g., messages with only empty text blocks).
+  // Use the same validation logic as fresh responses.
   const rawMessages = messagesCell.withTx(tx).get() as BuiltInLLMMessage[];
-  const filteredMessages = rawMessages
-    .map((msg) => {
-      if (Array.isArray(msg.content)) {
-        const filteredContent = msg.content.filter((part) => {
-          if (part.type === "text") {
-            return (part as BuiltInLLMTextPart).text &&
-              (part as BuiltInLLMTextPart).text.trim() !== "";
-          }
-          return true; // Keep non-text parts (tool-call, tool-result, etc.)
-        });
-        return { ...msg, content: filteredContent };
-      }
-      return msg;
-    })
-    .filter((msg, index, array) => {
-      // NEVER filter out tool result messages - API requires tool_result for every tool_use
-      if (msg.role === "tool") return true;
+  const validMessages = rawMessages.filter((msg, index, array) => {
+    // NEVER filter out tool result messages - API requires tool_result for every tool_use
+    if (msg.role === "tool") return true;
 
-      // Remove messages that would have empty content arrays after filtering,
-      // unless it's the final assistant message (which can be empty per Anthropic API).
-      if (!Array.isArray(msg.content)) return true;
-      const isFinalMessage = index === array.length - 1;
-      const isAssistant = msg.role === "assistant";
-      return msg.content.length > 0 || (isFinalMessage && isAssistant);
-    });
+    // Validate using same logic as fresh responses
+    // Exception: final assistant message can be empty per Anthropic API
+    const isFinalMessage = index === array.length - 1;
+    const isAssistant = msg.role === "assistant";
+    const canBeEmpty = isFinalMessage && isAssistant;
+
+    return hasValidContent(msg.content) || canBeEmpty;
+  });
+
+  if (validMessages.length !== rawMessages.length) {
+    logger.warn(
+      `Removed ${
+        rawMessages.length - validMessages.length
+      } invalid messages from history`,
+    );
+  }
 
   const llmParams: LLMRequest = {
     system: system ?? "",
-    messages: filteredMessages,
+    messages: validMessages,
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
