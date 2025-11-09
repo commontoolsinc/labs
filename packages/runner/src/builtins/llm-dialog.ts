@@ -1101,34 +1101,9 @@ async function startRequest(
 
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
-  // Validate message history - remove any invalid messages that were stored
-  // before this fix (e.g., messages with only empty text blocks).
-  // Use the same validation logic as fresh responses.
-  const rawMessages = messagesCell.withTx(tx).get() as BuiltInLLMMessage[];
-  const validMessages = rawMessages.filter((msg, index, array) => {
-    // NEVER filter out tool result messages - API requires tool_result for every tool_use
-    if (msg.role === "tool") return true;
-
-    // Validate using same logic as fresh responses
-    // Exception: final assistant message can be empty per Anthropic API
-    const isFinalMessage = index === array.length - 1;
-    const isAssistant = msg.role === "assistant";
-    const canBeEmpty = isFinalMessage && isAssistant;
-
-    return hasValidContent(msg.content) || canBeEmpty;
-  });
-
-  if (validMessages.length !== rawMessages.length) {
-    logger.warn(
-      `Removed ${
-        rawMessages.length - validMessages.length
-      } invalid messages from history`,
-    );
-  }
-
   const llmParams: LLMRequest = {
     system: system ?? "",
-    messages: validMessages,
+    messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
