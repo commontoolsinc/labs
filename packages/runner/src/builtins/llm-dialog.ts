@@ -1105,7 +1105,7 @@ async function startRequest(
   // stored before this fix. This prevents sending empty text blocks to the API.
   const rawMessages = messagesCell.withTx(tx).get() as BuiltInLLMMessage[];
   const filteredMessages = rawMessages
-    .map((msg, index) => {
+    .map((msg) => {
       if (Array.isArray(msg.content)) {
         const filteredContent = msg.content.filter((part) => {
           if (part.type === "text") {
