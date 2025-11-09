@@ -28,25 +28,28 @@ const updateCode = handler<
 );
 
 const visit = handler<
-  { detail: { value: string } },
-  { code: string }
+  unknown,
+  { result: Cell<any> }
 >(
-  (_, state) => {
-    const { result } = compileAndRun({
-      files: [{ name: "/main.tsx", contents: state.code }],
-      main: "/main.tsx",
-    });
-
-    console.log("result", result);
-
+  (_, { result }) => {
+    console.log("visit: navigating to compiled result", result);
     return navigateTo(result);
+  },
+);
+
+const handleEditContent = handler<
+  { code: string },
+  { code: Cell<string> }
+>(
+  (event, { code }) => {
+    code.set(event.code);
   },
 );
 
 export default recipe<Input>(
   "Compiler",
   ({ code }) => {
-    const { error, errors } = compileAndRun({
+    const { result, error, errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
@@ -63,9 +66,9 @@ export default recipe<Input>(
           />
           {ifElse(
             error,
-            <b>fix the errors</b>,
+            <b>fix the error: {error}</b>,
             <ct-button
-              onClick={visit({ code })}
+              onClick={visit({ result })}
             >
               Navigate To Charm
             </ct-button>,
@@ -73,6 +76,8 @@ export default recipe<Input>(
         </div>
       ),
       code,
+      updateCode: handleEditContent({ code }),
+      visit: visit({ result }),
     };
   },
 );
