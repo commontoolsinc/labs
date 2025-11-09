@@ -603,7 +603,7 @@ function hasValidContent(content: BuiltInLLMMessage["content"]): boolean {
   }
 
   if (Array.isArray(content)) {
-    return content.some(part => {
+    return content.some((part) => {
       if (part.type === "tool-call" || part.type === "tool-result") {
         return true;
       }
@@ -1109,7 +1109,8 @@ async function startRequest(
       if (Array.isArray(msg.content)) {
         const filteredContent = msg.content.filter((part) => {
           if (part.type === "text") {
-            return (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== "";
+            return (part as BuiltInLLMTextPart).text &&
+              (part as BuiltInLLMTextPart).text.trim() !== "";
           }
           return true; // Keep non-text parts (tool-call, tool-result, etc.)
         });
@@ -1154,7 +1155,8 @@ async function startRequest(
         const errorMessage = {
           [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
-          content: "I encountered an error generating a response. Please try again.",
+          content:
+            "I encountered an error generating a response. Please try again.",
         } satisfies BuiltInLLMMessage & { [ID]: unknown };
 
         await safelyPerformUpdate(
@@ -1192,14 +1194,16 @@ async function startRequest(
           );
 
           // Validate that we have a result for every tool call with matching IDs
-          const toolCallIds = new Set(toolCallParts.map(p => p.toolCallId));
-          const resultIds = new Set(toolResults.map(r => r.id));
+          const toolCallIds = new Set(toolCallParts.map((p) => p.toolCallId));
+          const resultIds = new Set(toolResults.map((r) => r.id));
           const mismatch = toolResults.length !== toolCallParts.length ||
-            !toolCallParts.every(p => resultIds.has(p.toolCallId));
+            !toolCallParts.every((p) => resultIds.has(p.toolCallId));
 
           if (mismatch) {
             logger.error(
-              `Tool execution mismatch: ${toolCallParts.length} calls [${Array.from(toolCallIds)}] but ${toolResults.length} results [${Array.from(resultIds)}]`
+              `Tool execution mismatch: ${toolCallParts.length} calls [${
+                Array.from(toolCallIds)
+              }] but ${toolResults.length} results [${Array.from(resultIds)}]`,
             );
             // Add error message instead of invalid partial results
             const errorMessage = {

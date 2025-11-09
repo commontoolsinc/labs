@@ -136,7 +136,12 @@ Deno.test("hasValidContent returns true for tool calls", () => {
 
 Deno.test("hasValidContent returns true for tool results", () => {
   const content: BuiltInLLMMessage["content"] = [
-    { type: "tool-result", toolCallId: "1", toolName: "test", output: { type: "json", value: null } },
+    {
+      type: "tool-result",
+      toolCallId: "1",
+      toolName: "test",
+      output: { type: "json", value: null },
+    },
   ];
   assert(hasValidContent(content));
 });
