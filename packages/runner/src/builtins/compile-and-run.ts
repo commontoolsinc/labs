@@ -199,7 +199,7 @@ export function compileAndRun(
       ).finally(() => {
         // Only update pending if this is still the current request
         if (requestId !== thisRequestId) return;
-        if (abortController?.signal.aborted) return;
+        // Always clear pending state, even if cancelled, to avoid stuck state
 
         runtime.editWithRetry((asyncTx) => {
           pending.withTx(asyncTx).set(false);
