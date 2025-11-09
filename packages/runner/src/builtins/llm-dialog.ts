@@ -608,7 +608,9 @@ function buildAssistantMessage(
     });
   } else if (Array.isArray(content)) {
     assistantContentParts.push(
-      ...content.filter((part) => part.type === "text") as BuiltInLLMTextPart[],
+      ...content.filter((part) =>
+        part.type === "text" && (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== ""
+      ) as BuiltInLLMTextPart[],
     );
   }
 
@@ -1064,9 +1066,24 @@ async function startRequest(
 
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
+  // Filter out messages with empty text content to prevent API errors
+  const rawMessages = messagesCell.withTx(tx).get() as BuiltInLLMMessage[];
+  const filteredMessages = rawMessages.map((msg) => {
+    if (Array.isArray(msg.content)) {
+      const filteredContent = msg.content.filter((part) => {
+        if (part.type === "text") {
+          return (part as BuiltInLLMTextPart).text && (part as BuiltInLLMTextPart).text.trim() !== "";
+        }
+        return true; // Keep non-text parts (tool-call, tool-result, etc.)
+      });
+      return { ...msg, content: filteredContent };
+    }
+    return msg;
+  });
+
   const llmParams: LLMRequest = {
     system: system ?? "",
-    messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
+    messages: filteredMessages,
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
