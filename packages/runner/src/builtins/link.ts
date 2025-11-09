@@ -134,27 +134,29 @@ export function link(
     },
   ) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
+  cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  // Create result cells outside the action
-  const successCell = runtime.getCell<string | undefined>(
-    parentCell.space,
-    cause,
-    undefined,
-  );
-  const errorCell = runtime.getCell<string | undefined>(
-    parentCell.space,
-    cause,
-    undefined,
-  );
-
   let cellsInitialized = false;
+  let successCell: Cell<string | undefined>;
+  let errorCell: Cell<string | undefined>;
 
   return (tx: IExtendedStorageTransaction) => {
-    // Initialize cells on first run
+    // Initialize cells on first run - INSIDE the transaction for concurrency safety
     if (!cellsInitialized) {
+      successCell = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { link: { success: cause } },
+        undefined,
+        tx,
+      );
+      errorCell = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { link: { error: cause } },
+        undefined,
+        tx,
+      );
       sendResult(tx, { success: successCell, error: errorCell });
       cellsInitialized = true;
     }
