@@ -60,7 +60,7 @@ export default recipe({
                             asCell: true
                         }
                     },
-                    required: ["user", "metrics"]
+                    required: ["metrics"]
                 }
             },
             required: ["state"]

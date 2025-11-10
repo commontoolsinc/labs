@@ -345,13 +345,29 @@ export function getNamedTypeKey(
     const ref = type as unknown as ts.TypeReference;
     name = ref.target?.symbol?.name ?? name;
   }
+  // Known compiler-internal anonymous type names
+  // Using a minimal whitelist - only block the most common cases we know are problematic.
+  // Fail open: if uncertain, let it through rather than break user code (like GraphQL __Schema types).
+  const compilerInternalNames = new Set([
+    "__type", // Anonymous object literals
+    "__object", // Anonymous object types
+  ]);
+
+  // Helper to check if a name is compiler-internal/anonymous
+  // vs. user-defined types that happen to start with __ (e.g., GraphQL introspection types like __Schema)
+  const isAnonymousName = (n: string | undefined) => {
+    if (!n) return true; // No name = anonymous
+    return compilerInternalNames.has(n); // Check against whitelist
+  };
+
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
   // but the type has an explicit alias name
-  if ((!name || name === "__type") && aliasName) {
+  if (isAnonymousName(name) && aliasName) {
     name = aliasName;
   }
-  if (!name || name === "__type") {
+  // Filter out compiler-internal anonymous type names
+  if (isAnonymousName(name)) {
     return undefined;
   }
   // Exclude property/method-like symbols (member names), which are not real named types
@@ -438,11 +454,9 @@ export function getArrayElementInfo(
   if (typeNode) {
     // Direct syntax T[]
     if (ts.isArrayTypeNode(typeNode)) {
-      const elementType = safeGetTypeFromTypeNode(
-        checker,
-        typeNode.elementType,
-        "array element type",
-      );
+      // For array types, get the element type from the parent array Type
+      // instead of from the element TypeNode (which would widen to any for synthetic nodes)
+      const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
       if (elementType) {
         return {
           elementType,

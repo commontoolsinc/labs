@@ -3,8 +3,12 @@ import { TransformationContext, Transformer } from "../core/mod.ts";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   createDataFlowAnalyzer,
+  detectCallKind,
   getMethodCallTarget,
   isEventHandlerJsxAttribute,
+  isFunctionLikeExpression,
+  isMethodCall,
+  isOptionalPropertyAccess,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
@@ -17,7 +21,10 @@ import {
   isFunctionDeclaration,
   isModuleScopedDeclaration,
 } from "../ast/scope-analysis.ts";
-import { buildTypeElementsFromCaptureTree } from "../ast/type-building.ts";
+import {
+  buildTypeElementsFromCaptureTree,
+  expressionToTypeNode,
+} from "../ast/type-building.ts";
 import {
   buildHierarchicalParamsValue,
   groupCapturesByRoot,
@@ -79,7 +86,7 @@ function shouldCapturePropertyAccess(
   }
 
   // Skip function declarations
-  if (declarations.some((decl) => isFunctionDeclaration(decl))) {
+  if (declarations.some((decl) => isFunctionDeclaration(decl, checker))) {
     return undefined;
   }
 
@@ -117,6 +124,25 @@ function shouldCaptureIdentifier(
     return undefined;
   }
 
+  // For shorthand property assignments (e.g., {id} instead of {id: id}), we need special handling
+  // because getSymbolAtLocation returns the property symbol, not the variable being referenced
+  if (ts.isShorthandPropertyAssignment(node.parent)) {
+    // For shorthand properties, we need to resolve to the actual variable/value being referenced
+    // Use the type checker to get the actual symbol of the referenced value
+    const propSymbol = checker.getShorthandAssignmentValueSymbol(node.parent);
+    if (propSymbol) {
+      const propDeclarations = propSymbol.getDeclarations() || [];
+      const allDeclaredInside = propDeclarations.every((decl) =>
+        isDeclaredWithinFunction(decl, func)
+      );
+      if (allDeclaredInside) {
+        return undefined;
+      }
+      return node;
+    }
+    // If we can't resolve the shorthand symbol, fall through to normal handling
+  }
+
   // Skip JSX element tag names (e.g., <li>, <div>)
   if (
     ts.isJsxOpeningElement(node.parent) ||
@@ -146,28 +172,10 @@ function shouldCaptureIdentifier(
   // is actually a parameter of the callback itself
   if (realDeclarations.length === 0) {
     // Check if there's a parameter with this name in the callback
-    const isCallbackParam = func.parameters.some((param) => {
-      if (ts.isIdentifier(param.name) && param.name.text === node.text) {
-        return true;
-      }
-      // Also check destructured parameters
-      if (ts.isObjectBindingPattern(param.name)) {
-        return param.name.elements.some((element) =>
-          ts.isBindingElement(element) &&
-          ts.isIdentifier(element.name) &&
-          element.name.text === node.text
-        );
-      }
-      // Also check array binding patterns (e.g., ([item]) => ...)
-      if (ts.isArrayBindingPattern(param.name)) {
-        return param.name.elements.some((element) =>
-          ts.isBindingElement(element) &&
-          ts.isIdentifier(element.name) &&
-          element.name.text === node.text
-        );
-      }
-      return false;
-    });
+    // Use extractBindingNames to handle nested destructuring patterns
+    const isCallbackParam = func.parameters.some((param) =>
+      extractBindingNames(param.name).includes(node.text)
+    );
 
     if (isCallbackParam) {
       return undefined; // Don't capture - it's just referencing a callback parameter
@@ -211,7 +219,9 @@ function shouldCaptureIdentifier(
   }
 
   // Skip function declarations (can't serialize functions)
-  const isFunction = declarations.some((decl) => isFunctionDeclaration(decl));
+  const isFunction = declarations.some((decl) =>
+    isFunctionDeclaration(decl, checker)
+  );
   if (isFunction) {
     return undefined;
   }
@@ -219,6 +229,125 @@ function shouldCaptureIdentifier(
   // If we got here, at least one declaration is outside the callback
   // So it's a captured variable
   return node;
+}
+
+/**
+ * Type guard for function-like declarations (excludes signature declarations).
+ * Used to identify nested functions that can have their own captures.
+ * Naming matches pattern: isFunctionLikeExpression (for callbacks), isFunctionLikeDeclaration (for nested functions).
+ */
+function isFunctionLikeDeclaration(
+  node: ts.Node,
+): node is ts.FunctionLikeDeclaration {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node) ||
+    ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node);
+}
+
+/**
+ * Helper function to check if an identifier is a parameter or local variable of a function.
+ * Used by both shouldCaptureIdentifier and shouldAddNestedCapture to determine if an
+ * identifier should be filtered out from captures.
+ */
+/**
+ * Recursively extract all binding names from a parameter binding pattern.
+ * Handles identifiers, object destructuring, array destructuring, and nested patterns.
+ */
+function extractBindingNames(binding: ts.BindingName): string[] {
+  if (ts.isIdentifier(binding)) {
+    return [binding.text];
+  }
+
+  const names: string[] = [];
+
+  if (ts.isObjectBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      names.push(...extractBindingNames(element.name));
+    }
+  } else if (ts.isArrayBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      if (ts.isOmittedExpression(element)) {
+        continue; // Skip holes in array patterns like [a, , c]
+      }
+      names.push(...extractBindingNames(element.name));
+    }
+  }
+
+  return names;
+}
+
+function isParameterOrLocalVariable(
+  identifier: ts.Identifier,
+  func: ts.FunctionLikeDeclaration,
+  funcParams: Set<string>,
+  checker: ts.TypeChecker,
+): boolean {
+  // Check if it's a function parameter
+  if (funcParams.has(identifier.text)) {
+    return true;
+  }
+
+  // Check if it's a local variable declared within the function
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (symbol) {
+    const declarations = symbol.getDeclarations() || [];
+    for (const decl of declarations) {
+      if (isDeclaredWithinFunction(decl, func)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Determines if a capture from a nested function should be added to the outer function's captures.
+ * Filters out captures that are parameters or local variables of the outer function.
+ *
+ * For identifiers: Check if the identifier is a parameter or local variable of the outer function.
+ * For property accesses: Check if the root identifier is a parameter or local variable.
+ *   Example: If outer function has parameter `item` or local `const item = ...`, then inner
+ *   function's capture of `item.name` should NOT be added to outer function's captures (since
+ *   `item` belongs to the outer function's scope, not from further out).
+ */
+function shouldAddNestedCapture(
+  capture: ts.Expression,
+  outerFunc: ts.FunctionLikeDeclaration,
+  funcParams: Set<string>,
+  checker: ts.TypeChecker,
+): boolean {
+  if (ts.isIdentifier(capture)) {
+    return !isParameterOrLocalVariable(
+      capture,
+      outerFunc,
+      funcParams,
+      checker,
+    );
+  }
+
+  if (ts.isPropertyAccessExpression(capture)) {
+    // Property access: check if root identifier is a parameter or local variable
+    // Walk down the chain to find the root: a.b.c -> a
+    let rootExpr: ts.Expression = capture;
+    while (ts.isPropertyAccessExpression(rootExpr)) {
+      rootExpr = rootExpr.expression;
+    }
+    if (ts.isIdentifier(rootExpr)) {
+      return !isParameterOrLocalVariable(
+        rootExpr,
+        outerFunc,
+        funcParams,
+        checker,
+      );
+    }
+    // Root is not an identifier (e.g., computed property access) - include it
+    return true;
+  }
+
+  // Other types of captures (e.g., element access, call expressions) - include them
+  return true;
 }
 
 /**
@@ -232,8 +361,29 @@ function collectCaptures(
   const captures = new Set<ts.Expression>();
 
   function visit(node: ts.Node) {
-    // Don't visit inside nested functions - their scope is separate
-    if (node !== func && ts.isFunctionLike(node)) {
+    // For nested functions, recursively collect their captures too
+    // Even though they have their own scope for parameters, they still
+    // close over variables from outer scopes, and we need to know about
+    // all such captures for the derive/handler transformation
+    if (node !== func && isFunctionLikeDeclaration(node)) {
+      const nestedCaptures = collectCaptures(node, checker);
+      // Filter out captures that are parameters of the current function
+      //
+      // CRITICAL: We must filter based on root identifiers for property accesses.
+      // Example: Outer map has parameter `item`, inner map uses `item.name`
+      //   - Without this filtering: `item.name` gets added to outer params → collision with `element: item` → generates `item_1`
+      //   - With this filtering: Recognizes `item` is outer param → filters out `item.name` → only `state` in outer params
+      // This prevents spurious name collisions when nested callbacks reference outer parameters.
+      const funcParams = new Set(
+        func.parameters.flatMap((p) => extractBindingNames(p.name)),
+      );
+
+      for (const capture of nestedCaptures) {
+        if (shouldAddNestedCapture(capture, func, funcParams, checker)) {
+          captures.add(capture);
+        }
+      }
+      // Don't visit children since we just recursively processed them
       return;
     }
 
@@ -241,15 +391,32 @@ function collectCaptures(
     if (ts.isPropertyAccessExpression(node)) {
       // If this is a method call, try to capture the object instead of the method
       // Example: state.counter.set() -> capture state.counter, not state.counter.set
+      // But if the object is just an identifier (multiplier.get()), skip this and
+      // let the identifier visitor handle it
       const methodTarget = getMethodCallTarget(node);
-      const captureNode = methodTarget || node;
-
-      const captured = shouldCapturePropertyAccess(captureNode, func, checker);
-      if (captured) {
-        captures.add(captured);
-        // Don't visit children of this property access
-        return;
+      if (methodTarget) {
+        // Method call on a property access (e.g., state.counter.set())
+        const captured = shouldCapturePropertyAccess(
+          methodTarget,
+          func,
+          checker,
+        );
+        if (captured) {
+          captures.add(captured);
+          // Don't visit children
+          return;
+        }
+      } else if (!isMethodCall(node)) {
+        // Not a method call, capture the property access normally
+        const captured = shouldCapturePropertyAccess(node, func, checker);
+        if (captured) {
+          captures.add(captured);
+          // Don't visit children
+          return;
+        }
       }
+      // For method calls on identifiers (multiplier.get()), don't capture the property access
+      // The identifier will be captured separately
     }
 
     // For plain identifiers
@@ -404,6 +571,26 @@ function determineElementType(
     typeNode: registerTypeForNode(typeNode, type, typeRegistry),
     type,
   };
+}
+
+/**
+ * Build property assignments for captured variables from a capture tree.
+ * Used by map, handler, and derive transformations to build params/input objects.
+ */
+function buildCapturePropertyAssignments(
+  captureTree: Map<string, CaptureTreeNode>,
+  factory: ts.NodeFactory,
+): ts.PropertyAssignment[] {
+  const properties: ts.PropertyAssignment[] = [];
+  for (const [rootName, node] of captureTree) {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
+  }
+  return properties;
 }
 
 /**
@@ -653,13 +840,18 @@ function createClosureTransformVisitor(
     if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
       const callback = node.arguments[0];
 
-      if (
-        callback &&
-        (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
-      ) {
+      if (callback && isFunctionLikeExpression(callback)) {
         if (shouldTransformMap(node, context)) {
           return transformMapCallback(node, callback, context, visit);
         }
+      }
+    }
+
+    // Derive closure transformation
+    if (ts.isCallExpression(node) && isDeriveCall(node, context)) {
+      const transformed = transformDeriveCall(node, context, visit);
+      if (transformed) {
+        return transformed;
       }
     }
 
@@ -721,15 +913,7 @@ function transformHandlerJsxAttribute(
     [handlerCallback],
   );
 
-  const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [rootName, rootNode] of captureTree) {
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(rootNode, rootName, factory),
-      ),
-    );
-  }
+  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
@@ -1023,15 +1207,7 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
-  const paramProperties: ts.PropertyAssignment[] = [];
-  for (const [rootName, rootNode] of captureTree) {
-    paramProperties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(rootName, factory),
-        buildHierarchicalParamsValue(rootNode, rootName, factory),
-      ),
-    );
-  }
+  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
@@ -1098,6 +1274,362 @@ function transformMapCallback(
     context,
     visitor,
   );
+}
+
+// ============================================================================
+// DERIVE CLOSURE TRANSFORMATION
+// ============================================================================
+
+/**
+ * Check if a call expression is a derive() call from commontools
+ */
+function isDeriveCall(
+  node: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const callKind = detectCallKind(node, context.checker);
+  return callKind?.kind === "derive";
+}
+
+/**
+ * Extract the callback function from a derive call.
+ * Derive has two signatures:
+ * - 2-arg: derive(input, callback)
+ * - 4-arg: derive(inputSchema, resultSchema, input, callback)
+ */
+function extractDeriveCallback(
+  deriveCall: ts.CallExpression,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const args = deriveCall.arguments;
+
+  // 2-arg form: callback is at index 1
+  if (args.length === 2) {
+    const callback = args[1];
+    if (callback && isFunctionLikeExpression(callback)) {
+      return callback;
+    }
+  }
+
+  // 4-arg form: callback is at index 3
+  if (args.length === 4) {
+    const callback = args[3];
+    if (callback && isFunctionLikeExpression(callback)) {
+      return callback;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Build the merged input object containing both the original input and captures.
+ * Example: {value, multiplier} where value is the original input and multiplier is a capture.
+ */
+function buildDeriveInputObject(
+  originalInput: ts.Expression,
+  originalInputParamName: string,
+  captureTree: Map<string, CaptureTreeNode>,
+  factory: ts.NodeFactory,
+): ts.ObjectLiteralExpression {
+  const properties: ts.ObjectLiteralElementLike[] = [];
+
+  // Add the original input as a property
+  // Use shorthand if the original input is a simple identifier matching the param name
+  if (
+    ts.isIdentifier(originalInput) &&
+    originalInput.text === originalInputParamName
+  ) {
+    properties.push(
+      factory.createShorthandPropertyAssignment(originalInput, undefined),
+    );
+  } else {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(originalInputParamName, factory),
+        originalInput,
+      ),
+    );
+  }
+
+  // Add captures
+  properties.push(...buildCapturePropertyAssignments(captureTree, factory));
+
+  return factory.createObjectLiteralExpression(
+    properties,
+    properties.length > 1,
+  );
+}
+
+/**
+ * Create the derive callback with parameter aliasing to preserve user's parameter name.
+ * Example: ({value: v, multiplier}) => v * multiplier
+ */
+function createDeriveCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  transformedBody: ts.ConciseBody,
+  originalInputParamName: string,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.ArrowFunction | ts.FunctionExpression {
+  const { factory } = context;
+  const usedBindingNames = new Set<string>();
+
+  // Get the original parameter
+  const originalParam = callback.parameters[0];
+  if (!originalParam) {
+    // No parameter - shouldn't happen for derive, but handle gracefully
+    return ts.isArrowFunction(callback)
+      ? factory.createArrowFunction(
+        callback.modifiers,
+        callback.typeParameters,
+        [],
+        callback.type,
+        callback.equalsGreaterThanToken,
+        transformedBody,
+      )
+      : factory.createFunctionExpression(
+        callback.modifiers,
+        callback.asteriskToken,
+        callback.name,
+        callback.typeParameters,
+        [],
+        callback.type,
+        transformedBody as ts.Block,
+      );
+  }
+
+  // Build the binding elements for the destructured parameter
+  const bindingElements: ts.BindingElement[] = [];
+
+  // Create binding for original input with alias to preserve user's parameter name
+  const originalParamBinding = normalizeBindingName(
+    originalParam.name,
+    factory,
+    usedBindingNames,
+  );
+
+  bindingElements.push(
+    factory.createBindingElement(
+      undefined,
+      factory.createIdentifier(originalInputParamName), // Property name
+      originalParamBinding, // Binding name (what it's called in the function body)
+      originalParam.initializer, // Preserve default value if present
+    ),
+  );
+
+  // Add bindings for captures
+  const createBindingIdentifier = (name: string): ts.Identifier => {
+    return reserveIdentifier(name, usedBindingNames, factory);
+  };
+
+  bindingElements.push(
+    ...createBindingElementsFromNames(
+      captureTree.keys(),
+      factory,
+      createBindingIdentifier,
+    ),
+  );
+
+  // Create the parameter with object binding pattern
+  const parameter = factory.createParameterDeclaration(
+    undefined,
+    undefined,
+    factory.createObjectBindingPattern(bindingElements),
+    undefined,
+    undefined, // No type annotation - rely on inference
+    undefined,
+  );
+
+  // Create the new callback
+  if (ts.isArrowFunction(callback)) {
+    return factory.createArrowFunction(
+      callback.modifiers,
+      callback.typeParameters,
+      [parameter],
+      undefined, // No return type - rely on inference
+      callback.equalsGreaterThanToken,
+      transformedBody,
+    );
+  } else {
+    return factory.createFunctionExpression(
+      callback.modifiers,
+      callback.asteriskToken,
+      callback.name,
+      callback.typeParameters,
+      [parameter],
+      undefined, // No return type - rely on inference
+      transformedBody as ts.Block,
+    );
+  }
+}
+
+/**
+ * Build schema TypeNode for the merged input object.
+ * Creates an object schema with properties for input and all captures.
+ */
+function buildDeriveInputSchema(
+  originalInputParamName: string,
+  originalInput: ts.Expression,
+  captureTree: Map<string, CaptureTreeNode>,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+
+  // Build type elements for the object schema
+  const typeElements: ts.TypeElement[] = [];
+
+  // Add type element for original input using the helper function
+  const inputTypeNode = expressionToTypeNode(originalInput, context);
+
+  // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
+  let questionToken: ts.QuestionToken | undefined = undefined;
+  if (ts.isPropertyAccessExpression(originalInput)) {
+    if (isOptionalPropertyAccess(originalInput, checker)) {
+      questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+    }
+  }
+
+  typeElements.push(
+    factory.createPropertySignature(
+      undefined,
+      factory.createIdentifier(originalInputParamName),
+      questionToken,
+      inputTypeNode,
+    ),
+  );
+
+  // Add type elements for captures
+  typeElements.push(
+    ...buildTypeElementsFromCaptureTree(captureTree, context),
+  );
+
+  // Create object type literal
+  return factory.createTypeLiteralNode(typeElements);
+}
+
+/**
+ * Transform a derive call that has closures in its callback.
+ * Converts: derive(value, (v) => v * multiplier.get())
+ * To: derive(inputSchema, resultSchema, {value, multiplier}, ({value: v, multiplier}) => v * multiplier)
+ */
+function transformDeriveCall(
+  deriveCall: ts.CallExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.CallExpression | undefined {
+  const { factory, checker } = context;
+
+  // Extract callback
+  const callback = extractDeriveCallback(deriveCall);
+  if (!callback) {
+    return undefined;
+  }
+
+  // Collect captures
+  const captureExpressions = collectCaptures(callback, checker);
+  if (captureExpressions.size === 0) {
+    // No captures - no transformation needed
+    return undefined;
+  }
+
+  const captureTree = groupCapturesByRoot(captureExpressions);
+
+  // Recursively transform the callback body first
+  const transformedBody = ts.visitNode(
+    callback.body,
+    visitor,
+  ) as ts.ConciseBody;
+
+  // Determine original input and parameter name
+  const args = deriveCall.arguments;
+  let originalInput: ts.Expression | undefined;
+
+  if (args.length === 2) {
+    // 2-arg form: derive(input, callback)
+    originalInput = args[0];
+  } else if (args.length === 4) {
+    // 4-arg form: derive(inputSchema, resultSchema, input, callback)
+    originalInput = args[2];
+  } else {
+    // Invalid number of arguments
+    return undefined;
+  }
+
+  // Ensure we have a valid input expression
+  if (!originalInput) {
+    return undefined;
+  }
+
+  // Determine parameter name for the original input
+  // Extract the identifier name from the input expression (e.g., "value" from `value`)
+  // This becomes the property name in the merged object
+  let originalInputParamName = "input"; // Fallback for complex expressions
+
+  if (ts.isIdentifier(originalInput)) {
+    // Simple identifier input like `value` - use its name
+    originalInputParamName = originalInput.text;
+  } else if (ts.isPropertyAccessExpression(originalInput)) {
+    // Property access like `state.value` - use the property name
+    originalInputParamName = originalInput.name.text;
+  }
+  // For other expressions (object literals, etc.), use "input" fallback
+
+  // Build merged input object
+  const mergedInput = buildDeriveInputObject(
+    originalInput,
+    originalInputParamName,
+    captureTree,
+    factory,
+  );
+
+  // Create new callback with parameter aliasing
+  const newCallback = createDeriveCallback(
+    callback,
+    transformedBody,
+    originalInputParamName,
+    captureTree,
+    context,
+  );
+
+  // Build TypeNodes for schema generation (similar to handlers/maps pattern)
+  // These will be registered in typeRegistry for SchemaInjectionTransformer to use
+  const inputTypeNode = buildDeriveInputSchema(
+    originalInputParamName,
+    originalInput,
+    captureTree,
+    context,
+  );
+
+  // Infer result type from callback
+  // SchemaInjectionTransformer will use this to generate the result schema
+  const signature = context.checker.getSignatureFromDeclaration(callback);
+  let resultTypeNode: ts.TypeNode | undefined;
+
+  if (callback.type) {
+    // Explicit return type annotation - use it
+    resultTypeNode = callback.type;
+  } else if (signature) {
+    // Infer from callback signature
+    const returnType = signature.getReturnType();
+    resultTypeNode = context.checker.typeToTypeNode(
+      returnType,
+      context.sourceFile,
+      ts.NodeBuilderFlags.NoTruncation |
+        ts.NodeBuilderFlags.UseStructuralFallback,
+    );
+  }
+
+  // Build the derive call expression
+  // Output 2-arg form with type arguments - SchemaInjectionTransformer will convert to 4-arg form with schemas
+  const deriveExpr = context.ctHelpers.getHelperExpr("derive");
+
+  const newDeriveCall = factory.createCallExpression(
+    deriveExpr,
+    resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode], // Type arguments
+    [mergedInput, newCallback], // Runtime arguments
+  );
+
+  return newDeriveCall;
 }
 
 function transformClosures(context: TransformationContext): ts.SourceFile {

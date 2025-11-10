@@ -1,0 +1,38 @@
+{
+  "properties": {
+    "counter": {
+      "asCell": true,
+      "type": "number"
+    },
+    "events": {
+      "asStream": true,
+      "type": "string"
+    },
+    "maybeCell": {
+      "asCell": true,
+      "type": "string"
+    },
+    "user": {
+      "asCell": true,
+      "properties": {
+        "age": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "age",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "counter",
+    "events",
+    "user"
+  ],
+  "type": "object"
+}

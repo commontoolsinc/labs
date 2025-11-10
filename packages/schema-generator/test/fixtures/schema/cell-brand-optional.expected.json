@@ -15,11 +15,7 @@
       ]
     },
     "OptionalCell": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/MyCell"
-        }
-      ]
+      "$ref": "#/$defs/MyCell"
     }
   },
   "properties": {
@@ -31,7 +27,6 @@
     }
   },
   "required": [
-    "maybeCell",
     "nullableCell"
   ],
   "type": "object"

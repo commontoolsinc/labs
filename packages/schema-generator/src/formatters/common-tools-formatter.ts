@@ -474,6 +474,28 @@ export class CommonToolsFormatter implements TypeFormatter {
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): unknown {
+    // Handle typeof expressions (TypeQuery nodes)
+    // These reference a variable's value, like: typeof defaultRoutes
+    if (ts.isTypeQueryNode(typeNode)) {
+      return this.extractValueFromTypeQuery(typeNode, context);
+    }
+
+    // Handle type references that represent empty objects
+    // This includes Record<string, never>, Record<K, never>, and similar mapped types
+    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
+      // For mapped types like Record<K, V>, if V is never, the result is an empty object
+      // Check the last type argument (the value type in mapped types)
+      const lastTypeArg =
+        typeNode.typeArguments[typeNode.typeArguments.length - 1];
+      if (lastTypeArg) {
+        const lastType = context.typeChecker.getTypeFromTypeNode(lastTypeArg);
+        // If the value type is never, this represents an empty object
+        if (lastType.flags & ts.TypeFlags.Never) {
+          return {};
+        }
+      }
+    }
+
     // Handle literal types
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;
@@ -549,102 +571,131 @@ export class CommonToolsFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private extractComplexDefaultFromTypeSymbol(
-    type: ts.Type,
-    _symbol: ts.Symbol,
+  private extractValueFromTypeQuery(
+    typeQueryNode: ts.TypeQueryNode,
     context: GenerationContext,
   ): unknown {
-    // For now, try to extract from type string - this is a fallback approach
-    const typeString = context.typeChecker.typeToString(type);
+    // Get the entity name being queried (e.g., "defaultRoutes" in "typeof defaultRoutes")
+    const exprName = typeQueryNode.exprName;
 
-    // Handle array literals like ["item1", "item2"]
-    if (typeString.startsWith("[") && typeString.endsWith("]")) {
-      try {
-        return JSON.parse(typeString);
-      } catch {
-        // If JSON parsing fails, try simpler extraction
-        return this.parseArrayLiteral(typeString);
-      }
+    // Get the symbol for the referenced entity
+    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    if (!symbol) {
+      return undefined;
     }
 
-    // Handle object literals like { theme: "dark", count: 10 }
-    if (typeString.startsWith("{") && typeString.endsWith("}")) {
-      try {
-        // Convert TS object syntax to JSON syntax
-        const jsonString = typeString
-          .replace(/(\w+):/g, '"$1":') // Quote property names
-          .replace(/'/g, '"'); // Convert single quotes to double quotes
-        return JSON.parse(jsonString);
-      } catch {
-        // If JSON parsing fails, return a simpler fallback
-        return this.parseObjectLiteral(typeString);
-      }
+    return this.extractValueFromSymbol(symbol, context);
+  }
+
+  /**
+   * Extract a runtime value from a symbol's value declaration.
+   * Works for variables with initializers like: const foo = [1, 2, 3]
+   */
+  private extractValueFromSymbol(
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    const valueDeclaration = symbol.valueDeclaration;
+    if (!valueDeclaration) {
+      return undefined;
+    }
+
+    // Check if it's a variable declaration with an initializer
+    if (
+      ts.isVariableDeclaration(valueDeclaration) &&
+      valueDeclaration.initializer
+    ) {
+      return this.extractValueFromExpression(
+        valueDeclaration.initializer,
+        context,
+      );
     }
 
     return undefined;
   }
 
-  private parseArrayLiteral(str: string): unknown[] {
-    // Simple array parsing for basic cases
-    if (str === "[]") return [];
-
-    // Remove brackets and split by comma
-    const inner = str.slice(1, -1);
-    if (!inner.trim()) return [];
-
-    const items = inner.split(",").map((item) => {
-      const trimmed = item.trim();
-      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-        return trimmed.slice(1, -1); // String literal
-      }
-      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
-        return trimmed.slice(1, -1); // String literal
-      }
-      if (!isNaN(Number(trimmed))) {
-        return Number(trimmed); // Number literal
-      }
-      if (trimmed === "true") return true;
-      if (trimmed === "false") return false;
-      if (trimmed === "null") return null;
-      return trimmed; // Fallback
-    });
-
-    return items;
-  }
-
-  private parseObjectLiteral(str: string): Record<string, unknown> {
-    // Very basic object parsing - this is a fallback
-    const obj: Record<string, unknown> = {};
-
-    // Remove braces
-    const inner = str.slice(1, -1).trim();
-    if (!inner) return obj;
-
-    // This is a simplified parser - for more complex cases we'd need proper AST parsing
-    const pairs = inner.split(",");
-    for (const pair of pairs) {
-      const [key, ...valueParts] = pair.split(":");
-      if (key && valueParts.length > 0) {
-        const keyTrimmed = key.trim().replace(/"/g, "");
-        const valueStr = valueParts.join(":").trim();
-
-        // Parse simple values
-        if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
-          obj[keyTrimmed] = valueStr.slice(1, -1);
-        } else if (!isNaN(Number(valueStr))) {
-          obj[keyTrimmed] = Number(valueStr);
-        } else if (valueStr === "true") {
-          obj[keyTrimmed] = true;
-        } else if (valueStr === "false") {
-          obj[keyTrimmed] = false;
-        } else if (valueStr === "null") {
-          obj[keyTrimmed] = null;
-        } else {
-          obj[keyTrimmed] = valueStr;
-        }
-      }
+  private extractValueFromExpression(
+    expr: ts.Expression,
+    context: GenerationContext,
+  ): unknown {
+    // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
+    if (ts.isArrayLiteralExpression(expr)) {
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
     }
 
-    return obj;
+    // Handle object literals like { id: "a", name: "test" }
+    if (ts.isObjectLiteralExpression(expr)) {
+      const obj: Record<string, unknown> = {};
+      for (const property of expr.properties) {
+        if (
+          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+        ) {
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.initializer,
+            context,
+          );
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          // Handle shorthand like { id } where id is a variable
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.name,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    // Handle string literals
+    if (ts.isStringLiteral(expr)) {
+      return expr.text;
+    }
+
+    // Handle numeric literals
+    if (ts.isNumericLiteral(expr)) {
+      return Number(expr.text);
+    }
+
+    // Handle boolean literals
+    if (expr.kind === ts.SyntaxKind.TrueKeyword) {
+      return true;
+    }
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) {
+      return false;
+    }
+
+    // Handle null
+    if (expr.kind === ts.SyntaxKind.NullKeyword) {
+      return null;
+    }
+
+    // For more complex expressions, return undefined
+    return undefined;
+  }
+
+  private extractComplexDefaultFromTypeSymbol(
+    type: ts.Type,
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    // Try to extract from the symbol's value declaration initializer (AST-based)
+    const extracted = this.extractValueFromSymbol(symbol, context);
+    if (extracted !== undefined) {
+      return extracted;
+    }
+
+    // Check if this is an empty object type (no properties, object type)
+    // This handles cases like Record<string, never>
+    if (
+      (type.flags & ts.TypeFlags.Object) !== 0 &&
+      context.typeChecker.getPropertiesOfType(type).length === 0
+    ) {
+      return {};
+    }
+
+    return undefined;
   }
 }

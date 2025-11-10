@@ -1,0 +1,58 @@
+{
+  "properties": {
+    "data": {
+      "anyOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "count": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "count"
+          ],
+          "type": "object"
+        }
+      ],
+      "default": {
+        "text": "default"
+      }
+    },
+    "status": {
+      "default": "active",
+      "enum": [
+        "active",
+        "inactive",
+        null
+      ]
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "default": 42
+    }
+  },
+  "required": [
+    "data",
+    "status",
+    "value"
+  ],
+  "type": "object"
+}

@@ -14,7 +14,12 @@ export default recipe("MapWithArrayParam", (_state) => {
                     index: {
                         type: "number"
                     },
-                    array: true,
+                    array: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    },
                     params: {
                         type: "object",
                         properties: {}
