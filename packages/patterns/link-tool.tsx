@@ -1,5 +1,6 @@
 /// <cts-enable />
 import { type Cell, handler, NAME, wish } from "commontools";
+import { MentionableCharm } from "./backlinks-index.tsx";
 
 /**
  * Parse a path like "CharmName/result/field" or "CharmName/input/field"
@@ -33,17 +34,17 @@ function parsePath(path: string): {
  * Find a charm by name from the mentionable list
  */
 function findCharmByName(
-  charms: readonly Cell<unknown>[],
+  mentionable: Cell<MentionableCharm[]>,
   name: string,
-): Cell<unknown> | undefined {
-  return charms.find((charm) => {
-    try {
-      const val = charm.get() as any;
-      return val?.[NAME] === name;
-    } catch {
-      return false;
+): Cell<MentionableCharm> | undefined {
+  for (let i = 0; i < mentionable.get().length; i++) {
+    const c = mentionable.key(i);
+    if (c.get()[NAME] === name) {
+      return c;
     }
-  });
+  }
+
+  return undefined;
 }
 
 /**
@@ -71,22 +72,16 @@ function navigateToCell(
  */
 export const linkTool = handler<
   { source: string; target: string },
-  Record<PropertyKey, never>
->(({ source, target }) => {
+  { mentionable: Cell<MentionableCharm[]> }
+>(({ source, target }, { mentionable }) => {
   const sourceParsed = parsePath(source);
   const targetParsed = parsePath(target);
 
-  // Get all mentionable charms
-  const allCharms = wish<readonly Cell<unknown>[]>("#mentionable", []);
-
   // Find source and target charms
-  const sourceCharm = findCharmByName(allCharms, sourceParsed.charmName);
+  const sourceCharm = findCharmByName(mentionable, sourceParsed.charmName);
   if (!sourceCharm) {
-    const names = allCharms
-      .map((c) => {
-        const val = c.get() as any;
-        return val?.[NAME];
-      })
+    const names = mentionable
+      .map((c) => c[NAME])
       .filter(Boolean)
       .join(", ");
     throw new Error(
@@ -94,13 +89,10 @@ export const linkTool = handler<
     );
   }
 
-  const targetCharm = findCharmByName(allCharms, targetParsed.charmName);
+  const targetCharm = findCharmByName(mentionable, targetParsed.charmName);
   if (!targetCharm) {
-    const names = allCharms
-      .map((c) => {
-        const val = c.get() as any;
-        return val?.[NAME];
-      })
+    const names = mentionable
+      .map((c) => c[NAME])
       .filter(Boolean)
       .join(", ");
     throw new Error(
@@ -111,7 +103,7 @@ export const linkTool = handler<
   // Navigate to source cell
   let sourceCell: Cell<any> = sourceCharm;
   if (sourceParsed.cellType === "input") {
-    const argCell = sourceCharm.getArgumentCell();
+    const argCell = sourceCharm.resolveAsCell().getArgumentCell();
     if (!argCell) throw new Error("Source charm has no argument cell");
     sourceCell = argCell;
   }
@@ -121,7 +113,7 @@ export const linkTool = handler<
   let targetCell: Cell<any> = targetCharm;
   if (targetParsed.cellType === "input" || targetParsed.path.length > 0) {
     // For any path or explicit "input", navigate to argument cell
-    const argCell = targetCharm.getArgumentCell();
+    const argCell = targetCharm.resolveAsCell().getArgumentCell();
     if (!argCell) throw new Error("Target charm has no argument cell");
     targetCell = argCell;
   }

@@ -386,7 +386,7 @@ export default recipe<ChatInput, ChatOutput>(
       createLink: {
         description:
           "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
-        handler: linkTool({}),
+        handler: linkTool({ mentionable }),
       },
     };
 
