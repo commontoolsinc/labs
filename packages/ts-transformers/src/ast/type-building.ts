@@ -112,9 +112,13 @@ export function buildTypeElementsFromCaptureTree(
           const declarations = propSymbol.getDeclarations();
           if (declarations && declarations.length > 0) {
             for (const decl of declarations) {
-              if (ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)) {
+              if (
+                ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)
+              ) {
                 if (decl.questionToken) {
-                  questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+                  questionToken = factory.createToken(
+                    ts.SyntaxKind.QuestionToken,
+                  );
                   break;
                 }
               }
@@ -132,7 +136,9 @@ export function buildTypeElementsFromCaptureTree(
       } else {
         // Root level - try to get type from the identifier
         // Look for a descendant expression to get the type context
-        const findDescendantExpression = (node: CaptureTreeNode): ts.Expression | undefined => {
+        const findDescendantExpression = (
+          node: CaptureTreeNode,
+        ): ts.Expression | undefined => {
           if (node.expression) return node.expression;
           for (const child of node.properties.values()) {
             const found = findDescendantExpression(child);

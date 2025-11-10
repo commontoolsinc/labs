@@ -620,20 +620,30 @@ export class CommonToolsFormatter implements TypeFormatter {
   ): unknown {
     // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
     if (ts.isArrayLiteralExpression(expr)) {
-      return expr.elements.map(element => this.extractValueFromExpression(element, context));
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
     }
 
     // Handle object literals like { id: "a", name: "test" }
     if (ts.isObjectLiteralExpression(expr)) {
       const obj: Record<string, unknown> = {};
       for (const property of expr.properties) {
-        if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)) {
+        if (
+          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+        ) {
           const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(property.initializer, context);
+          obj[propName] = this.extractValueFromExpression(
+            property.initializer,
+            context,
+          );
         } else if (ts.isShorthandPropertyAssignment(property)) {
           // Handle shorthand like { id } where id is a variable
           const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(property.name, context);
+          obj[propName] = this.extractValueFromExpression(
+            property.name,
+            context,
+          );
         }
       }
       return obj;
@@ -688,5 +698,4 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     return undefined;
   }
-
 }
