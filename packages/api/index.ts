@@ -218,6 +218,10 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
  */
 export interface IResolvable<T, C extends AnyBrandedCell<T>> {
   resolveAsCell(): C;
+  getArgumentCell<S extends JSONSchema = JSONSchema>(
+    schema?: S,
+  ): Cell<Schema<S>> | undefined;
+  getArgumentCell<U>(): Cell<U> | undefined;
 }
 
 /**

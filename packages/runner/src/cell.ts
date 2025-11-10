@@ -225,6 +225,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "setRaw",
   "getSourceCell",
   "setSourceCell",
+  "getArgumentCell",
   "freeze",
   "isFrozen",
   "setSchema",
@@ -914,6 +915,18 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       // TODO(@ubik2): Transition source links to sigil links?
       { "/": fromURI(sourceLink.id) },
     );
+  }
+
+  getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
+    const sourceCell = this.getSourceCell();
+    if (!sourceCell) return undefined;
+    // Kick off sync, since when used in a pattern, this wasn't automatically
+    // subscribed to yet. So we might still get a conflict on first write, but will
+    // get the correct version on retry.
+    sourceCell.sync();
+    // TODO(seefeld): Ideally we intersect this schema with the actual argument
+    // schema, so that get isn't for any.
+    return sourceCell.key("argument").asSchema<U>(schema);
   }
 
   freeze(reason: string): void {
