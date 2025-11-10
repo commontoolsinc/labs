@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, handler, NAME, wish } from "commontools";
+import { type Cell, handler, NAME } from "commontools";
 import { MentionableCharm } from "./backlinks-index.tsx";
 
 /**
@@ -85,7 +85,9 @@ export const linkTool = handler<
       .filter(Boolean)
       .join(", ");
     throw new Error(
-      `Source charm "${sourceParsed.charmName}" not found. Available: ${names || "none"}`,
+      `Source charm "${sourceParsed.charmName}" not found. Available: ${
+        names || "none"
+      }`,
     );
   }
 
@@ -96,7 +98,9 @@ export const linkTool = handler<
       .filter(Boolean)
       .join(", ");
     throw new Error(
-      `Target charm "${targetParsed.charmName}" not found. Available: ${names || "none"}`,
+      `Target charm "${targetParsed.charmName}" not found. Available: ${
+        names || "none"
+      }`,
     );
   }
 

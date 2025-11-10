@@ -1049,7 +1049,6 @@ export type WishFunction = {
   ): OpaqueRef<T>;
 };
 
-
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
