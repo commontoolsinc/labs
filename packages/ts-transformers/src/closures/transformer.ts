@@ -172,28 +172,10 @@ function shouldCaptureIdentifier(
   // is actually a parameter of the callback itself
   if (realDeclarations.length === 0) {
     // Check if there's a parameter with this name in the callback
-    const isCallbackParam = func.parameters.some((param) => {
-      if (ts.isIdentifier(param.name) && param.name.text === node.text) {
-        return true;
-      }
-      // Also check destructured parameters
-      if (ts.isObjectBindingPattern(param.name)) {
-        return param.name.elements.some((element) =>
-          ts.isBindingElement(element) &&
-          ts.isIdentifier(element.name) &&
-          element.name.text === node.text
-        );
-      }
-      // Also check array binding patterns (e.g., ([item]) => ...)
-      if (ts.isArrayBindingPattern(param.name)) {
-        return param.name.elements.some((element) =>
-          ts.isBindingElement(element) &&
-          ts.isIdentifier(element.name) &&
-          element.name.text === node.text
-        );
-      }
-      return false;
-    });
+    // Use extractBindingNames to handle nested destructuring patterns
+    const isCallbackParam = func.parameters.some((param) =>
+      extractBindingNames(param.name).includes(node.text)
+    );
 
     if (isCallbackParam) {
       return undefined; // Don't capture - it's just referencing a callback parameter
@@ -268,6 +250,33 @@ function isFunctionLikeDeclaration(
  * Used by both shouldCaptureIdentifier and shouldAddNestedCapture to determine if an
  * identifier should be filtered out from captures.
  */
+/**
+ * Recursively extract all binding names from a parameter binding pattern.
+ * Handles identifiers, object destructuring, array destructuring, and nested patterns.
+ */
+function extractBindingNames(binding: ts.BindingName): string[] {
+  if (ts.isIdentifier(binding)) {
+    return [binding.text];
+  }
+
+  const names: string[] = [];
+
+  if (ts.isObjectBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      names.push(...extractBindingNames(element.name));
+    }
+  } else if (ts.isArrayBindingPattern(binding)) {
+    for (const element of binding.elements) {
+      if (ts.isOmittedExpression(element)) {
+        continue; // Skip holes in array patterns like [a, , c]
+      }
+      names.push(...extractBindingNames(element.name));
+    }
+  }
+
+  return names;
+}
+
 function isParameterOrLocalVariable(
   identifier: ts.Identifier,
   func: ts.FunctionLikeDeclaration,
@@ -366,9 +375,7 @@ function collectCaptures(
       //   - With this filtering: Recognizes `item` is outer param → filters out `item.name` → only `state` in outer params
       // This prevents spurious name collisions when nested callbacks reference outer parameters.
       const funcParams = new Set(
-        func.parameters.map((p) => p.name).filter(ts.isIdentifier).map((id) =>
-          id.text
-        ),
+        func.parameters.flatMap((p) => extractBindingNames(p.name)),
       );
 
       for (const capture of nestedCaptures) {
