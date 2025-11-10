@@ -7,12 +7,13 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { isFrameAccessible } from "./recipe.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isCell(value)) {
-      if (value.export().frame !== node.frame) {
+      if (!isFrameAccessible(value.export().frame, node.frame)) {
         throw new Error(
           "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
         );

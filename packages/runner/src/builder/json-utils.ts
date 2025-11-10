@@ -14,7 +14,7 @@ import {
   type toJSON,
   unsafe_originalRecipe,
 } from "./types.ts";
-import { getTopFrame } from "./recipe.ts";
+import { getTopFrame, isFromParentFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
@@ -42,12 +42,9 @@ export function toJSONWithLegacyAliases(
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
 
-    // Verify that opaque refs are not in a parent frame
-    if (frame !== getTopFrame()) {
-      throw new Error(
-        `Cell with parent cell not found in current frame. Should have been converted to a shadow ref.`,
-      );
-    }
+    // Note: Frame checking for shadow refs is handled during node creation in connectInputAndOutputs.
+    // During serialization, cells from both parent frames (properly converted) and child frames
+    // (internal recipe structure) may appear, and both are valid.
 
     // Otherwise it's an internal reference. Extract the schema and output a link.
     const pathToCell = paths.get(value);

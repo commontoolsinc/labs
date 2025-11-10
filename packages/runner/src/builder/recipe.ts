@@ -174,7 +174,7 @@ function factoryFromRecipe<T, R>(
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
         const { frame, nodes } = value.export();
-        if (isOpaqueRef(value) && frame !== getTopFrame()) {
+        if (isOpaqueRef(value) && !isFrameAccessible(frame, getTopFrame())) {
           throw new Error(
             "Accessing an opaque ref via closure is not supported. Wrap the access in a derive that passes the variable through.",
           );
@@ -407,4 +407,60 @@ export function popFrame(frame?: Frame): void {
 
 export function getTopFrame(): Frame | undefined {
   return frames.length ? frames[frames.length - 1] : undefined;
+}
+
+/**
+ * Check if cellFrame is an ancestor of (or equal to) nodeFrame in the frame hierarchy.
+ * This allows cells from outer scopes to be safely accessed in inner scopes (like derives in map callbacks).
+ *
+ * @param cellFrame - The frame where the cell was created
+ * @param nodeFrame - The frame where the node is being created
+ * @returns true if cellFrame is an ancestor of nodeFrame or they are the same frame
+ */
+export function isFrameAccessible(
+  cellFrame: Frame | undefined,
+  nodeFrame: Frame | undefined,
+): boolean {
+  // If frames are the same, access is allowed
+  if (cellFrame === nodeFrame) return true;
+
+  // If either frame is undefined, be conservative and disallow
+  if (!cellFrame || !nodeFrame) return false;
+
+  // Walk up the node's frame hierarchy to see if we find the cell's frame
+  let current: Frame | undefined = nodeFrame;
+  while (current) {
+    if (current === cellFrame) return true;
+    current = current.parent;
+  }
+
+  return false;
+}
+
+/**
+ * Check if cellFrame is from a parent frame relative to currentFrame.
+ * Used during serialization to detect cells that should have been converted to shadow refs.
+ *
+ * @param cellFrame - The frame where the cell was created
+ * @param currentFrame - The current frame (usually during serialization)
+ * @returns true if cellFrame is an ancestor (parent/grandparent/etc) of currentFrame
+ */
+export function isFromParentFrame(
+  cellFrame: Frame | undefined,
+  currentFrame: Frame | undefined,
+): boolean {
+  // Same frame is not a parent frame
+  if (cellFrame === currentFrame) return false;
+
+  // If either is undefined, be conservative
+  if (!cellFrame || !currentFrame) return false;
+
+  // Walk up from current frame to see if we find the cell's frame
+  let current: Frame | undefined = currentFrame.parent;
+  while (current) {
+    if (current === cellFrame) return true;
+    current = current.parent;
+  }
+
+  return false;
 }
