@@ -236,6 +236,32 @@ export function DiffText({ from, to }) {  // Won't compile!
 - Recipe files: Use JSX and compose with utility functions
 - Use `/// <cts-enable />` directive at the top of utility files
 
+## Frame Mismatch Errors
+
+### Issue: Console Shows "Error: Frame mismatch" During Pattern Execution
+
+**Symptom**: Browser console displays `Error: Frame mismatch at popFrame(...)` errors during pattern interactions.
+
+**Cause**: The reactive execution graph encountered unexpected frame state. Can happen with complex reactive dependencies, rapid state updates, or certain cell access patterns.
+
+**When to worry:**
+- ❌ Feature actually broken or not working
+- ❌ Errors continuously flood console (hundreds per second)
+- ❌ Pattern crashes or becomes unresponsive
+
+**When it's okay:**
+- ✅ Isolated errors that don't continuously repeat
+- ✅ Feature works correctly despite the errors
+- ✅ Errors occur during interaction but functionality is fine
+
+**Action**:
+1. Test if your feature actually works
+2. If feature works: Errors can often be ignored
+3. If feature broken: Check for closure issues or simplify dependencies
+4. If persistent and problematic: Report to framework team
+
+**Example**: Store mapper pattern showed Frame mismatch on every interaction but all features worked correctly.
+
 ## Transaction Conflicts and Retry Storms
 
 If you see `ConflictError` messages in console, this is normal - the system retries transactions automatically. These warnings don't indicate a problem unless they occur continuously (retry storm).

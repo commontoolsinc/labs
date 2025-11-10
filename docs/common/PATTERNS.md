@@ -607,6 +607,54 @@ const activeItems = derive(items, (list) => list.filter(item => !item.done));
 {activeItems.map(...)}
 ```
 
+**Issue: Sorting cell arrays while preserving reactivity**
+
+When you need to sort items based on derived values (like LLM results) while maintaining cell references for bidirectional binding, use the **boxing pattern**:
+
+```typescript
+// ❌ BROKEN - Sorting derived array loses cell references
+const sortedItems = derive(itemsWithAisles, (assignments) => {
+  return assignments.slice().sort((a, b) => compare(a.aisle, b.aisle));
+});
+
+{sortedItems.map(({ item }) => (
+  <ct-checkbox $checked={item.done} />  // ✗ Doesn't work - items are read-only
+))}
+
+// ✅ CORRECT - Boxing pattern preserves cell references
+// 1. Box: Wrap items in objects
+const boxedItems = itemsWithAisles.map(assignment => ({ assignment }));
+
+// 2. Sort: Perform sort on boxed items
+const sortedBoxedItems = derive(boxedItems, (boxed) => {
+  return boxed.slice().sort((a, b) => {
+    // Access properties via .assignment prefix
+    const aValue = a.assignment.aisle;
+    const bValue = b.assignment.aisle;
+    return aValue.localeCompare(bValue);
+  });
+});
+
+// 3. Unbox: Map over sorted items, extract original cell reference
+{sortedBoxedItems.map(({ assignment }) => (
+  <ct-checkbox $checked={assignment.item.done} />  // ✓ Works! Cell preserved
+))}
+```
+
+**Why this works:**
+- Boxing wraps the cell reference in a plain object `{ assignment }`
+- Sorting rearranges the wrapper objects, not the cells themselves
+- The original cell reference (`assignment.item`) remains intact
+- Bidirectional binding works because we're accessing the original cell
+
+**When to use:**
+- Sorting items by derived/computed values (LLM results, calculations)
+- Reordering while maintaining reactivity
+- Any transformation that needs to preserve cell references
+
+**Real-world example:**
+Shopping list sorted by grocery store aisle (from LLM categorization) while keeping checkboxes reactive.
+
 **Issue: Can't access variable from outer map**
 
 ```typescript
