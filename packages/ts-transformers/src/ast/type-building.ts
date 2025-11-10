@@ -2,7 +2,11 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import { isOptionalProperty, isOptionalPropertyAccess, setParentPointers } from "./utils.ts";
+import {
+  isOptionalProperty,
+  isOptionalPropertyAccess,
+  setParentPointers,
+} from "./utils.ts";
 
 /**
  * Common flags for type-to-typenode conversion.
