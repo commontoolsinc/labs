@@ -1,17 +1,139 @@
 /// <cts-enable />
-import { handler, link } from "commontools";
+import { type Cell, handler, NAME, wish } from "commontools";
+
+/**
+ * Parse a path like "CharmName/result/field" or "CharmName/input/field"
+ */
+function parsePath(path: string): {
+  charmName: string;
+  cellType?: "result" | "input";
+  path: (string | number)[];
+} {
+  const segments = path.split("/").filter((s) => s.length > 0);
+  if (segments.length === 0) {
+    throw new Error(`Invalid path: "${path}"`);
+  }
+
+  const charmName = segments[0];
+  const rest = segments.slice(1);
+
+  // Check if second segment is "result" or "input"
+  if (rest.length > 0 && (rest[0] === "result" || rest[0] === "input")) {
+    return {
+      charmName,
+      cellType: rest[0],
+      path: rest.slice(1),
+    };
+  }
+
+  return { charmName, path: rest };
+}
+
+/**
+ * Find a charm by name from the mentionable list
+ */
+function findCharmByName(
+  charms: readonly Cell<unknown>[],
+  name: string,
+): Cell<unknown> | undefined {
+  return charms.find((charm) => {
+    try {
+      const val = charm.get() as any;
+      return val?.[NAME] === name;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Navigate through a path of keys/indices on a cell
+ */
+function navigateToCell(
+  cell: Cell<any>,
+  path: readonly (string | number)[],
+): Cell<any> {
+  let current = cell;
+  for (const segment of path) {
+    current = current.key(segment);
+  }
+  return current;
+}
 
 /**
  * Handler for creating links between charm cells.
  * Used by chatbot.tsx to enable LLM-driven cell linking.
  *
- * Usage:
- *   createLink({
- *     source: "SourceCharm/result/value",
- *     target: "TargetCharm/input/field"
- *   })
+ * Supports paths like:
+ *   - "CharmName/result/field" - link from charm result
+ *   - "CharmName/input/field"  - link to/from charm input
+ *   - "CharmName/field"        - defaults to result
  */
 export const linkTool = handler<
   { source: string; target: string },
   Record<PropertyKey, never>
->(({ source, target }) => link(source, target));
+>(({ source, target }) => {
+  const sourceParsed = parsePath(source);
+  const targetParsed = parsePath(target);
+
+  // Get all mentionable charms
+  const allCharms = wish<readonly Cell<unknown>[]>("#mentionable", []);
+
+  // Find source and target charms
+  const sourceCharm = findCharmByName(allCharms, sourceParsed.charmName);
+  if (!sourceCharm) {
+    const names = allCharms
+      .map((c) => {
+        const val = c.get() as any;
+        return val?.[NAME];
+      })
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(
+      `Source charm "${sourceParsed.charmName}" not found. Available: ${names || "none"}`,
+    );
+  }
+
+  const targetCharm = findCharmByName(allCharms, targetParsed.charmName);
+  if (!targetCharm) {
+    const names = allCharms
+      .map((c) => {
+        const val = c.get() as any;
+        return val?.[NAME];
+      })
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(
+      `Target charm "${targetParsed.charmName}" not found. Available: ${names || "none"}`,
+    );
+  }
+
+  // Navigate to source cell
+  let sourceCell: Cell<any> = sourceCharm;
+  if (sourceParsed.cellType === "input") {
+    const argCell = sourceCharm.getArgumentCell();
+    if (!argCell) throw new Error("Source charm has no argument cell");
+    sourceCell = argCell;
+  }
+  sourceCell = navigateToCell(sourceCell, sourceParsed.path);
+
+  // Navigate to target cell
+  let targetCell: Cell<any> = targetCharm;
+  if (targetParsed.cellType === "input" || targetParsed.path.length > 0) {
+    // For any path or explicit "input", navigate to argument cell
+    const argCell = targetCharm.getArgumentCell();
+    if (!argCell) throw new Error("Target charm has no argument cell");
+    targetCell = argCell;
+  }
+
+  // Pop last segment as the key to set
+  const targetPath = [...targetParsed.path];
+  const targetKey = targetPath.pop();
+  if (targetKey === undefined) {
+    throw new Error("Target path cannot be empty");
+  }
+
+  // Navigate to parent and set link
+  const targetParent = navigateToCell(targetCell, targetPath);
+  targetParent.key(targetKey).set(sourceCell);
+});

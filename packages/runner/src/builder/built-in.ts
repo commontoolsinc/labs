@@ -121,22 +121,6 @@ export function wish<T = unknown>(
   return wishFactory([target, defaultValue]) as OpaqueRef<T | undefined>;
 }
 
-let linkFactory: NodeFactory<[unknown, unknown], any> | undefined;
-
-export function link(
-  source: Opaque<string>,
-  target: Opaque<string>,
-): OpaqueRef<{ success: string | undefined; error: string | undefined }> {
-  linkFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "link",
-  });
-  return linkFactory([source, target]) as OpaqueRef<{
-    success: string | undefined;
-    error: string | undefined;
-  }>;
-}
-
 // Example:
 // str`Hello, ${name}!`
 //
