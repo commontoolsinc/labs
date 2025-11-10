@@ -349,8 +349,8 @@ export function getNamedTypeKey(
   // Using a minimal whitelist - only block the most common cases we know are problematic.
   // Fail open: if uncertain, let it through rather than break user code (like GraphQL __Schema types).
   const compilerInternalNames = new Set([
-    '__type',     // Anonymous object literals
-    '__object',   // Anonymous object types
+    "__type", // Anonymous object literals
+    "__object", // Anonymous object types
   ]);
 
   // Helper to check if a name is compiler-internal/anonymous
