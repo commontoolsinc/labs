@@ -46,7 +46,7 @@ setLLMUrl(apiUrl);
 const identity = await Identity.fromPassphrase("common user");
 const session = await createSession({
   identity,
-  name,
+  spaceName: name,
 });
 
 const runtime = new Runtime({

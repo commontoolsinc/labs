@@ -10,7 +10,7 @@ import {
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
-  createAdminSession,
+  createSessionFromDid,
   type DID,
   Identity,
   type Session,
@@ -85,10 +85,10 @@ async function main() {
 
   const space: DID = spaceDID as DID ?? identity.did();
 
-  const session = await createAdminSession({
+  const session = await createSessionFromDid({
     identity,
     space,
-    name: spaceName ?? "unknown",
+    spaceName: spaceName ?? "unknown",
   }) satisfies Session;
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?

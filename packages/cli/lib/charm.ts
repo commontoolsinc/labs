@@ -1,4 +1,4 @@
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { createSession, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
@@ -35,17 +35,8 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   if (config.space.startsWith("did:key")) {
     throw new Error("DID key spaces not yet supported.");
   }
-  const root = await loadIdentity(config.identity);
-  const account = config.space.startsWith("~")
-    ? root
-    : await Identity.fromPassphrase(ANYONE);
-  const user = await account.derive(config.space);
-  return {
-    private: account.did() === root.did(),
-    name: config.space,
-    space: user.did(),
-    as: user,
-  };
+  const identity = await loadIdentity(config.identity);
+  return createSession({ identity, spaceName: config.space });
 }
 
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
