@@ -177,7 +177,7 @@ export default recipe<CharmsListInput, CharmsListOutput>(
                 }
               `}
               </style>
-              <h2>Patterns</h2>
+              <h2>Pages</h2>
 
               <ct-table full-width hover>
                 <tbody>
