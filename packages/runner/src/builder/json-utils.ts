@@ -14,7 +14,6 @@ import {
   type toJSON,
   unsafe_originalRecipe,
 } from "./types.ts";
-import { getTopFrame, isFromParentFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
@@ -37,7 +36,7 @@ export function toJSONWithLegacyAliases(
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) {
-    const { external, frame, schema, rootSchema } = value.export();
+    const { external, schema, rootSchema } = value.export();
 
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
