@@ -8,7 +8,7 @@ export { KeyStore } from "./key-store.ts";
 export * from "./interface.ts";
 export {
   ANYONE,
-  createAdminSession,
   createSession,
+  createSessionFromDid,
   type Session,
 } from "./session.ts";

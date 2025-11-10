@@ -8,7 +8,7 @@ import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
-import { ANYONE, Identity } from "@commontools/identity";
+import { createSession, Identity } from "@commontools/identity";
 
 export interface CreateCharmOptions {
   input?: object;
@@ -114,17 +114,7 @@ export class CharmsController<T = unknown> {
     identity: Identity;
     spaceName: string;
   }): Promise<CharmsController> {
-    const account = spaceName.startsWith("~")
-      ? identity
-      : await Identity.fromPassphrase(ANYONE);
-    const user = await account.derive(spaceName);
-    const session = {
-      private: account.did() === identity.did(),
-      name: spaceName,
-      space: user.did(),
-      as: user,
-    };
-
+    const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({

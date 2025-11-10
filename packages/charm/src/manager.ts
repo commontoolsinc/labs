@@ -226,7 +226,7 @@ export class CharmManager {
   }
 
   getSpaceName(): string {
-    return this.session.name;
+    return this.session.spaceName;
   }
 
   async synced(): Promise<void> {

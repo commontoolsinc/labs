@@ -33,8 +33,8 @@ async function runTest() {
   const space_thingy = await account.derive(SPACE_NAME);
   const space_thingy_space = space_thingy.did();
   const session = {
-    private: false,
-    name: SPACE_NAME,
+    isPrivate: false,
+    spaceName: SPACE_NAME,
     space: space_thingy_space,
     as: space_thingy,
   } as Session;
