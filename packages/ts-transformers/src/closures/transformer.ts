@@ -1406,7 +1406,7 @@ function createDeriveCallback(
       undefined,
       factory.createIdentifier(originalInputParamName), // Property name
       originalParamBinding, // Binding name (what it's called in the function body)
-      undefined,
+      originalParam.initializer, // Preserve default value if present
     ),
   );
 
