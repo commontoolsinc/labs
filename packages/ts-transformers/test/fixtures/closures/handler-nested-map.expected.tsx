@@ -47,9 +47,13 @@ export default recipe({
                                 required: ["value"]
                             },
                             asOpaque: true
+                        },
+                        multiplier: {
+                            type: "number",
+                            asOpaque: true
                         }
                     },
-                    required: ["items"]
+                    required: ["items", "multiplier"]
                 }
             },
             required: ["state"]
@@ -93,7 +97,8 @@ export default recipe({
             console.log(scaled);
         })({
             state: {
-                items: state.items
+                items: state.items,
+                multiplier: state.multiplier
             }
         })}>
         Compute

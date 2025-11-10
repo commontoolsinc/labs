@@ -14,7 +14,12 @@ export default recipe(true as const satisfies __ctHelpers.JSONSchema, (_state: a
                     index: {
                         type: "number"
                     },
-                    array: true,
+                    array: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    },
                     params: {
                         type: "object",
                         properties: {}

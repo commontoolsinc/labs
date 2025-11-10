@@ -31,7 +31,9 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ values }) => {
     derive({
         type: "array",
-        items: true
+        items: {
+            type: "string"
+        }
     } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });

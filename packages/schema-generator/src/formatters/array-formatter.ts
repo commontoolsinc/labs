@@ -36,12 +36,13 @@ export class ArrayFormatter implements TypeFormatter {
     // Handle special cases for any[], unknown[], and never[] with JSON Schema shortcuts
     const elementFlags = info.elementType.flags;
 
-    if (elementFlags & ts.TypeFlags.Any) {
+    // Special case: explicit any[] or unknown[] (without concrete node info)
+    if ((elementFlags & ts.TypeFlags.Any) && !info.elementNode) {
       // any[] - allow any item type
       return { type: "array", items: true };
     }
 
-    if (elementFlags & ts.TypeFlags.Unknown) {
+    if ((elementFlags & ts.TypeFlags.Unknown) && !info.elementNode) {
       // unknown[] - allow any item type (type safety at compile time)
       return { type: "array", items: true };
     }
@@ -51,6 +52,8 @@ export class ArrayFormatter implements TypeFormatter {
       return { type: "array", items: false };
     }
 
+    // Use formatChildType - it will auto-detect whether to use type-based
+    // or node-based analysis based on whether the type is reliable
     const items = this.schemaGenerator.formatChildType(
       info.elementType,
       context,

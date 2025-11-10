@@ -5,12 +5,16 @@ export {
   isEventHandlerJsxAttribute,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
+export { isFunctionLikeExpression } from "./function-predicates.ts";
 export {
   getExpressionText,
   getMemberSymbol,
   getMethodCallTarget,
   isFunctionParameter,
   isMethodCall,
+  isOptionalProperty,
+  isOptionalPropertyAccess,
+  setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {

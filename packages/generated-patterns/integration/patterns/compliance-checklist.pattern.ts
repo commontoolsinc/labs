@@ -236,6 +236,13 @@ const formatLabelFromId = (id: string): string =>
 
 const normalizeWord = (value: string): string => {
   if (!value) return value;
+  // Handle hyphenated compound words like "Third-Party"
+  if (value.includes("-")) {
+    return value.split("-").map((part) => {
+      const lower = part.toLowerCase();
+      return lower.slice(0, 1).toUpperCase() + lower.slice(1);
+    }).join("-");
+  }
   const lower = value.toLowerCase();
   return lower.slice(0, 1).toUpperCase() + lower.slice(1);
 };

@@ -5,6 +5,7 @@ import {
   inferParameterType,
   inferReturnType,
   isAnyOrUnknownType,
+  isFunctionLikeExpression,
   typeToSchemaTypeNode,
 } from "../ast/mod.ts";
 import {
@@ -13,15 +14,10 @@ import {
   type TypeRegistry,
 } from "../core/mod.ts";
 
-function isFunctionLikeExpression(
-  expression: ts.Expression,
-): expression is ts.ArrowFunction | ts.FunctionExpression {
-  return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
-}
-
 function collectFunctionSchemaTypeNodes(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
   fallbackArgType?: ts.Type,
 ): {
   argument?: ts.TypeNode;
@@ -52,7 +48,7 @@ function collectFunctionSchemaTypeNodes(
     );
     if (paramType && !isAnyOrUnknownType(paramType)) {
       argumentType = paramType; // Store for registry
-      argumentNode = typeToSchemaTypeNode(paramType, checker, parameter ?? fn);
+      argumentNode = typeToSchemaTypeNode(paramType, checker, sourceFile);
     }
     // If inference failed, leave argumentNode undefined - we'll use unknown below
   }
@@ -71,7 +67,7 @@ function collectFunctionSchemaTypeNodes(
     const returnType = inferReturnType(fn, signature, checker);
     if (returnType && !isAnyOrUnknownType(returnType)) {
       resultType = returnType; // Store for registry
-      resultNode = typeToSchemaTypeNode(returnType, checker, fn);
+      resultNode = typeToSchemaTypeNode(returnType, checker, sourceFile);
     }
     // If inference failed, leave resultNode undefined - we'll use unknown below
   }
@@ -370,6 +366,7 @@ export class SchemaInjectionTransformer extends Transformer {
           const inferred = collectFunctionSchemaTypeNodes(
             callback,
             checker,
+            sourceFile,
             argumentType,
           );
 
@@ -435,6 +432,7 @@ export class SchemaInjectionTransformer extends Transformer {
           const inferred = collectFunctionSchemaTypeNodes(
             callback,
             checker,
+            sourceFile,
           );
 
           // Transform if we got at least one type, filling in unknown for the other

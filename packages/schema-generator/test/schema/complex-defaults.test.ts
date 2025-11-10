@@ -102,7 +102,8 @@ describe("Schema: Complex defaults", () => {
     );
 
     // Validate root schema required fields
-    expect(s.required).toEqual(["nullable", "undefinable"]);
+    // undefinable has Default<T | undefined, V> so undefined makes it optional
+    expect(s.required).toEqual(["nullable"]);
 
     const n = s.properties?.nullable as any;
     expect(n.default).toBe(null);
@@ -118,9 +119,9 @@ describe("Schema: Complex defaults", () => {
     const u = s.properties?.undefinable as any;
     // Typically no default field for undefined
     expect(u.default).toBeUndefined();
-    // For undefined unions, typically generates anyOf with just the non-undefined type
-    expect(u.anyOf).toBeDefined();
-    expect(u.anyOf).toEqual([{ type: "string" }]);
+    // For undefined unions, the undefined is stripped and we get the simplified schema
+    expect(u.type).toBe("string");
+    expect(u.anyOf).toBeUndefined();
   });
 
   it("boolean schema defaults (any/never with Default)", async () => {
