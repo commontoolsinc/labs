@@ -2,7 +2,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import { isOptionalPropertyAccess, setParentPointers } from "./utils.ts";
+import { isOptionalProperty, isOptionalPropertyAccess, setParentPointers } from "./utils.ts";
 
 /**
  * Common flags for type-to-typenode conversion.
@@ -106,32 +106,14 @@ export function buildTypeElementsFromCaptureTree(
         // We have a parent type - look up this property
         const propSymbol = parentType.getProperty(propName);
         if (propSymbol) {
-          // Check optional flag - need to look at the declaration's questionToken
-          // SymbolFlags.Optional is not always set correctly for properties,
-          // so we check the actual declaration node
-          const declarations = propSymbol.getDeclarations();
-          if (declarations && declarations.length > 0) {
-            for (const decl of declarations) {
-              if (
-                ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)
-              ) {
-                if (decl.questionToken) {
-                  questionToken = factory.createToken(
-                    ts.SyntaxKind.QuestionToken,
-                  );
-                  break;
-                }
-              }
-            }
-          }
-
-          // Also check the SymbolFlags.Optional as a fallback
-          if (!questionToken && (propSymbol.flags & ts.SymbolFlags.Optional)) {
-            questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
-          }
-
           // Get Type for this property to pass to children
           currentType = checker.getTypeOfSymbol(propSymbol);
+
+          // Check optionality using centralized logic
+          // This checks both `?` flag AND `T | undefined` union
+          if (isOptionalProperty(propSymbol, currentType)) {
+            questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+          }
         }
       } else {
         // Root level - try to get type from the identifier

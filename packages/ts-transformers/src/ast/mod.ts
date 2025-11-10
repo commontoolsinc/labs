@@ -12,6 +12,7 @@ export {
   getMethodCallTarget,
   isFunctionParameter,
   isMethodCall,
+  isOptionalProperty,
   isOptionalPropertyAccess,
   setParentPointers,
   visitEachChildWithJsx,
