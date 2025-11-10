@@ -5,6 +5,7 @@ import {
   getMemberSymbol,
   isFunctionParameter,
   isMethodCall,
+  setParentPointers,
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
@@ -155,16 +156,6 @@ export function createDataFlowAnalyzer(
       } satisfies DataFlowScopeParameter;
     }),
   });
-
-  // Set parent pointers for synthetic nodes created by transformers.
-  // Synthetic nodes don't have parent pointers set, which breaks logic
-  // that relies on .parent (like method call detection).
-  const setParentPointers = (node: ts.Node, parent?: ts.Node): void => {
-    if (parent && !(node as any).parent) {
-      (node as any).parent = parent;
-    }
-    ts.forEachChild(node, (child) => setParentPointers(child, node));
-  };
 
   // Determine how CallExpressions should be handled based on their call kind.
   // Returns the appropriate InternalAnalysis with correct requiresRewrite logic.

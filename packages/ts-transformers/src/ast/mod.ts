@@ -12,6 +12,8 @@ export {
   getMethodCallTarget,
   isFunctionParameter,
   isMethodCall,
+  isOptionalPropertyAccess,
+  setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";
 export {

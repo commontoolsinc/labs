@@ -74,6 +74,42 @@ export function getMemberSymbol(
   return checker.getSymbolAtLocation(expression) ?? undefined;
 }
 
+/**
+ * Set parent pointers for synthetic nodes created by transformers.
+ * Synthetic nodes don't have parent pointers set, which breaks logic
+ * that relies on .parent (like method call detection).
+ *
+ * This is a common utility used when creating synthetic AST nodes that need
+ * to participate in parent-based navigation.
+ */
+export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
+  if (parent && !(node as any).parent) {
+    (node as any).parent = parent;
+  }
+  ts.forEachChild(node, (child) => setParentPointers(child, node));
+}
+
+/**
+ * Check if a property access expression refers to an optional property.
+ * Returns true if the property has the `?` optional flag in its declaration.
+ *
+ * @example
+ * ```typescript
+ * interface Config {
+ *   multiplier?: number;
+ * }
+ * const expr = // AST node for config.multiplier
+ * isOptionalPropertyAccess(expr, checker) // => true
+ * ```
+ */
+export function isOptionalPropertyAccess(
+  expression: ts.PropertyAccessExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const symbol = getMemberSymbol(expression, checker);
+  return symbol ? (symbol.flags & ts.SymbolFlags.Optional) !== 0 : false;
+}
+
 export function isFunctionParameter(
   node: ts.Identifier,
   checker: ts.TypeChecker,

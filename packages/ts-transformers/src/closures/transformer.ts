@@ -8,6 +8,7 @@ import {
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isMethodCall,
+  isOptionalPropertyAccess,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
@@ -1465,7 +1466,7 @@ function buildDeriveInputSchema(
   captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.TypeNode {
-  const { factory } = context;
+  const { factory, checker } = context;
 
   // Build type elements for the object schema
   const typeElements: ts.TypeElement[] = [];
@@ -1473,11 +1474,19 @@ function buildDeriveInputSchema(
   // Add type element for original input using the helper function
   const inputTypeNode = expressionToTypeNode(originalInput, context);
 
+  // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
+  let questionToken: ts.QuestionToken | undefined = undefined;
+  if (ts.isPropertyAccessExpression(originalInput)) {
+    if (isOptionalPropertyAccess(originalInput, checker)) {
+      questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+    }
+  }
+
   typeElements.push(
     factory.createPropertySignature(
       undefined,
       factory.createIdentifier(originalInputParamName),
-      undefined,
+      questionToken,
       inputTypeNode,
     ),
   );
