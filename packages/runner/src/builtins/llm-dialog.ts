@@ -1067,7 +1067,15 @@ export function llmDialog(
     // Ensure reactivity: register a read of tools with this tx
     toolsCell.withTx(tx).get();
     const flattened = flattenTools(toolsCell, runtime);
-    result.withTx(tx).key("flattenedTools").set(flattened as any);
+
+    // Only write if changed to avoid concurrent write conflicts
+    const currentFlattened = result.withTx(tx).key("flattenedTools").get();
+    const flattenedStr = JSON.stringify(flattened);
+    const currentStr = JSON.stringify(currentFlattened);
+
+    if (flattenedStr !== currentStr) {
+      result.withTx(tx).key("flattenedTools").set(flattened as any);
+    }
 
     if (
       (!result.withTx(tx).key("pending").get() ||
