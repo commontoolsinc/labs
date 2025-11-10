@@ -1,15 +1,30 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
 export default function TestDerive() {
-    const value = cell(10);
-    const _multiplier = cell(2);
-    // Parameter name collides with capture name
-    const result = derive({
-        type: "number",
-        asCell: true
+    const multiplier = cell(2);
+    // Input name collides with capture name
+    // multiplier is both the input AND a captured variable (used via .get())
+    const result = __ctHelpers.derive({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {
+            multiplier: {
+                type: "number",
+                asOpaque: true
+            },
+            multiplier_1: {
+                type: "number",
+                asOpaque: true
+            }
+        },
+        required: ["multiplier", "multiplier_1"]
     } as const satisfies __ctHelpers.JSONSchema, {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, value, (multiplier) => multiplier * 3);
+    } as const satisfies __ctHelpers.JSONSchema, {
+        multiplier,
+        multiplier_1: multiplier
+    }, ({ multiplier: m, multiplier_1 }) => m * 3 + multiplier_1.get());
     return result;
 }
 // @ts-ignore: Internals

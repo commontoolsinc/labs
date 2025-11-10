@@ -1442,6 +1442,39 @@ function extractDeriveCallback(
 }
 
 /**
+ * Resolve capture name collisions with the original input parameter name.
+ * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
+ * Returns a mapping from original capture names to their potentially renamed versions.
+ */
+function resolveDeriveCaptureNameCollisions(
+  originalInputParamName: string,
+  captureTree: Map<string, CaptureTreeNode>,
+): Map<string, string> {
+  const captureNameMap = new Map<string, string>();
+  const usedNames = new Set<string>([originalInputParamName]);
+
+  for (const [captureName] of captureTree) {
+    if (captureName === originalInputParamName) {
+      // Collision detected - rename the capture
+      let renamed = `${captureName}_1`;
+      let suffix = 1;
+      while (usedNames.has(renamed) || captureTree.has(renamed)) {
+        suffix++;
+        renamed = `${captureName}_${suffix}`;
+      }
+      captureNameMap.set(captureName, renamed);
+      usedNames.add(renamed);
+    } else {
+      // No collision - use original name
+      captureNameMap.set(captureName, captureName);
+      usedNames.add(captureName);
+    }
+  }
+
+  return captureNameMap;
+}
+
+/**
  * Build the merged input object containing both the original input and captures.
  * Example: {value, multiplier} where value is the original input and multiplier is a capture.
  *
@@ -1452,6 +1485,7 @@ function buildDeriveInputObject(
   originalInput: ts.Expression,
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
+  captureNameMap: Map<string, string>,
   factory: ts.NodeFactory,
   hadZeroParameters: boolean,
 ): ts.ObjectLiteralExpression {
@@ -1478,13 +1512,59 @@ function buildDeriveInputObject(
     }
   }
 
-  // Add captures
-  properties.push(...buildCapturePropertyAssignments(captureTree, factory));
+  // Add captures with potentially renamed property names
+  for (const [originalName, node] of captureTree) {
+    const propertyName = captureNameMap.get(originalName) ?? originalName;
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(propertyName, factory),
+        buildHierarchicalParamsValue(node, originalName, factory),
+      ),
+    );
+  }
 
   return factory.createObjectLiteralExpression(
     properties,
     properties.length > 1,
   );
+}
+
+/**
+ * Rewrite the callback body to use renamed capture identifiers.
+ * For example, if `multiplier` was renamed to `multiplier_1`, replace all
+ * references to the captured `multiplier` with `multiplier_1`.
+ */
+function rewriteCaptureReferences(
+  body: ts.ConciseBody,
+  captureNameMap: Map<string, string>,
+  factory: ts.NodeFactory,
+): ts.ConciseBody {
+  // Build a reverse map: original capture name -> list of renamed names that should be substituted
+  const substitutions = new Map<string, string>();
+  for (const [originalName, renamedName] of captureNameMap) {
+    if (originalName !== renamedName) {
+      substitutions.set(originalName, renamedName);
+    }
+  }
+
+  if (substitutions.size === 0) {
+    return body; // No substitutions needed
+  }
+
+  const visitor = (node: ts.Node): ts.Node => {
+    // Only substitute root-level identifiers that match captured variable names
+    // Don't substitute property names or nested references
+    if (ts.isIdentifier(node)) {
+      const substituteName = substitutions.get(node.text);
+      if (substituteName) {
+        return factory.createIdentifier(substituteName);
+      }
+    }
+
+    return ts.visitEachChild(node, visitor, undefined);
+  };
+
+  return ts.visitNode(body, visitor) as ts.ConciseBody;
 }
 
 /**
@@ -1499,6 +1579,7 @@ function createDeriveCallback(
   transformedBody: ts.ConciseBody,
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
+  captureNameMap: Map<string, string>,
   context: TransformationContext,
   hadZeroParameters: boolean,
 ): ts.ArrowFunction | ts.FunctionExpression {
@@ -1590,14 +1671,19 @@ function createDeriveCallback(
     ),
   );
 
-  // Add bindings for captures
+  // Add bindings for captures using the potentially renamed property names
   const createBindingIdentifier = (name: string): ts.Identifier => {
     return reserveIdentifier(name, usedBindingNames, factory);
   };
 
+  // Create binding elements using the renamed capture names
+  const renamedCaptureNames = Array.from(captureTree.keys()).map(
+    (originalName) => captureNameMap.get(originalName) ?? originalName,
+  );
+
   bindingElements.push(
     ...createBindingElementsFromNames(
-      captureTree.keys(),
+      renamedCaptureNames,
       factory,
       createBindingIdentifier,
     ),
@@ -1613,6 +1699,13 @@ function createDeriveCallback(
     undefined,
   );
 
+  // Rewrite the body to use renamed capture identifiers
+  const rewrittenBody = rewriteCaptureReferences(
+    transformedBody,
+    captureNameMap,
+    factory,
+  );
+
   // Create the new callback
   if (ts.isArrowFunction(callback)) {
     return factory.createArrowFunction(
@@ -1621,7 +1714,7 @@ function createDeriveCallback(
       [parameter],
       undefined, // No return type - rely on inference
       callback.equalsGreaterThanToken,
-      transformedBody,
+      rewrittenBody,
     );
   } else {
     return factory.createFunctionExpression(
@@ -1631,7 +1724,7 @@ function createDeriveCallback(
       callback.typeParameters,
       [parameter],
       undefined, // No return type - rely on inference
-      transformedBody as ts.Block,
+      rewrittenBody as ts.Block,
     );
   }
 }
@@ -1646,6 +1739,7 @@ function buildDeriveInputSchema(
   originalInputParamName: string,
   originalInput: ts.Expression,
   captureTree: Map<string, CaptureTreeNode>,
+  captureNameMap: Map<string, string>,
   context: TransformationContext,
   hadZeroParameters: boolean,
 ): ts.TypeNode {
@@ -1677,10 +1771,39 @@ function buildDeriveInputSchema(
     );
   }
 
-  // Add type elements for captures
-  typeElements.push(
-    ...buildTypeElementsFromCaptureTree(captureTree, context),
+  // Add type elements for captures using the existing helper
+  const captureTypeElements = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
   );
+
+  // Rename the property signatures if there are collisions
+  for (const typeElement of captureTypeElements) {
+    if (
+      ts.isPropertySignature(typeElement) && ts.isIdentifier(typeElement.name)
+    ) {
+      const originalName = typeElement.name.text;
+      const renamedName = captureNameMap.get(originalName) ?? originalName;
+
+      if (renamedName !== originalName) {
+        // Create a new property signature with the renamed identifier
+        typeElements.push(
+          factory.createPropertySignature(
+            typeElement.modifiers,
+            factory.createIdentifier(renamedName),
+            typeElement.questionToken,
+            typeElement.type,
+          ),
+        );
+      } else {
+        // No renaming needed
+        typeElements.push(typeElement);
+      }
+    } else {
+      // Not a simple property signature, keep as-is
+      typeElements.push(typeElement);
+    }
+  }
 
   // Create object type literal
   return factory.createTypeLiteralNode(typeElements);
@@ -1757,11 +1880,18 @@ function transformDeriveCall(
   // In this case, we don't need to preserve the input - just use captures
   const hadZeroParameters = callback.parameters.length === 0;
 
+  // Resolve capture name collisions with the original input parameter name
+  const captureNameMap = resolveDeriveCaptureNameCollisions(
+    originalInputParamName,
+    captureTree,
+  );
+
   // Build merged input object
   const mergedInput = buildDeriveInputObject(
     originalInput,
     originalInputParamName,
     captureTree,
+    captureNameMap,
     factory,
     hadZeroParameters,
   );
@@ -1772,6 +1902,7 @@ function transformDeriveCall(
     transformedBody,
     originalInputParamName,
     captureTree,
+    captureNameMap,
     context,
     hadZeroParameters,
   );
@@ -1782,6 +1913,7 @@ function transformDeriveCall(
     originalInputParamName,
     originalInput,
     captureTree,
+    captureNameMap,
     context,
     hadZeroParameters,
   );
