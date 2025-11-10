@@ -8,7 +8,7 @@ import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { toCell } from "../src/back-to-cell.ts";
-import { ID, JSONSchema } from "../src/builder/types.ts";
+import { ID, JSONSchema, type Recipe } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
@@ -223,6 +223,63 @@ describe("Cell", () => {
     // Changing the source cell's value should be reflected
     sourceCell.set({ foo: 456 });
     expect(retrievedSource?.get()).toEqual({ foo: 456 });
+  });
+
+  it("should update recipe output when argument is changed via getArgumentCell", async () => {
+    // Create a simple doubling recipe
+    const doubleRecipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+        required: ["input"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: { output: { type: "number" } },
+      },
+      result: { output: { $alias: { path: ["internal", "doubled"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => (args.input * 2),
+          },
+          inputs: { input: { $alias: { path: ["argument", "input"] } } },
+          outputs: { $alias: { path: ["internal", "doubled"] } },
+        },
+      ],
+    };
+
+    // Instantiate the recipe with initial argument
+    const resultCell = runtime.getCell(space, "doubling recipe instance");
+    runtime.setup(undefined, doubleRecipe, { input: 5 }, resultCell);
+    runtime.start(resultCell);
+    await runtime.idle();
+
+    // Verify initial output
+    expect(resultCell.getAsQueryResult().output).toEqual(10);
+
+    // Get the argument cell and update it
+    const argumentCell = resultCell.getArgumentCell<{ input: number }>();
+    expect(argumentCell).toBeDefined();
+    expect(argumentCell?.get()).toEqual({ input: 5 });
+
+    // Update the argument via the argument cell
+    const updateTx = runtime.edit();
+    argumentCell!.withTx(updateTx).set({ input: 7 });
+    updateTx.commit();
+    await runtime.idle();
+
+    // Verify the output has changed
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 14 });
+
+    // Update again to verify reactivity
+    const updateTx2 = runtime.edit();
+    argumentCell!.withTx(updateTx2).set({ input: 100 });
+    updateTx2.commit();
+    await runtime.idle();
+
+    expect(resultCell.getAsQueryResult()).toEqual({ output: 200 });
   });
 
   it("should translate circular references into links", () => {
