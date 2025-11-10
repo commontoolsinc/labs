@@ -345,8 +345,20 @@ export function getNamedTypeKey(
     const ref = type as unknown as ts.TypeReference;
     name = ref.target?.symbol?.name ?? name;
   }
-  // Helper to check if a name is compiler-internal/anonymous (e.g., __type, __object, __computed)
-  const isAnonymousName = (n: string | undefined) => !n || n.startsWith("__");
+  // Known compiler-internal anonymous type names
+  // Using a minimal whitelist - only block the most common cases we know are problematic.
+  // Fail open: if uncertain, let it through rather than break user code (like GraphQL __Schema types).
+  const compilerInternalNames = new Set([
+    '__type',     // Anonymous object literals
+    '__object',   // Anonymous object types
+  ]);
+
+  // Helper to check if a name is compiler-internal/anonymous
+  // vs. user-defined types that happen to start with __ (e.g., GraphQL introspection types like __Schema)
+  const isAnonymousName = (n: string | undefined) => {
+    if (!n) return true; // No name = anonymous
+    return compilerInternalNames.has(n); // Check against whitelist
+  };
 
   // Fall back to alias symbol when present (type aliases) if we haven't used it yet
   // This includes the case where symbol.name is "__type" (anonymous object literal)
