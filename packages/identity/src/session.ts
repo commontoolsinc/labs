@@ -31,13 +31,14 @@ export const createSession = async (
   { identity, spaceName }: { identity: Identity; spaceName: string },
 ): Promise<Session> => {
   const isPrivate = spaceName.startsWith("~");
-  const account = isPrivate ? identity : await Identity.fromPassphrase(ANYONE);
-
-  const user = await account.derive(spaceName);
+  const derivedUser = await identity.derive(spaceName);
+  const spaceIdentity = isPrivate
+    ? derivedUser
+    : await (await Identity.fromPassphrase(ANYONE)).derive(spaceName);
   return {
     isPrivate,
     spaceName,
-    space: user.did(),
-    as: user,
+    space: spaceIdentity.did(),
+    as: derivedUser,
   };
 };
