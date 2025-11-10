@@ -2852,6 +2852,7 @@ interface CTOutlinerElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTImageInputElement extends CTHTMLElement {}
 interface CTInputLegacyElement extends CTHTMLElement {}
 interface CTCheckboxElement extends CTHTMLElement {}
 interface CTSelectElement extends CTHTMLElement {}
@@ -3146,6 +3147,23 @@ interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "appearance"?: string;
   "customStyle"?: string;
+}
+
+interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
+  "multiple"?: boolean;
+  "maxImages"?: number;
+  "capture"?: "user" | "environment" | false;
+  "buttonText"?: string;
+  "variant"?: "default" | "primary" | "secondary" | "outline" | "ghost" | "link" | "destructive";
+  "size"?: "default" | "sm" | "lg" | "icon";
+  "showPreview"?: boolean;
+  "previewSize"?: "sm" | "md" | "lg";
+  "removable"?: boolean;
+  "disabled"?: boolean;
+  "$images"?: any; // CellLike<ImageData[]>
+  "onct-change"?: EventHandler<any>;
+  "onct-remove"?: EventHandler<any>;
+  "onct-error"?: EventHandler<any>;
 }
 
 interface CTCheckboxAttributes<T> extends CTHTMLAttributes<T> {
@@ -3677,6 +3695,10 @@ declare global {
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,
         CTInputElement
+      >;
+      "ct-image-input": CTDOM.DetailedHTMLProps<
+        CTImageInputAttributes<CTImageInputElement>,
+        CTImageInputElement
       >;
       "ct-checkbox": CTDOM.DetailedHTMLProps<
         CTCheckboxAttributes<CTCheckboxElement>,
