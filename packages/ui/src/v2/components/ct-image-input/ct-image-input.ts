@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { classMap } from "lit/directives/class-map.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 import type { ButtonVariant, ButtonSize } from "../ct-button/ct-button.ts";
 
 /**
@@ -407,7 +408,8 @@ export class CTImageInput extends BaseElement {
       [this.size]: true,
     };
 
-    const captureAttr = this.capture || undefined;
+    // Only set capture attribute if explicitly specified (not false)
+    const captureAttr = this.capture !== false ? this.capture : undefined;
 
     return html`
       <div class="container">
@@ -416,7 +418,7 @@ export class CTImageInput extends BaseElement {
           accept="image/*"
           ?multiple="${this.multiple}"
           ?disabled="${this.disabled}"
-          capture="${captureAttr}"
+          capture="${ifDefined(captureAttr)}"
           @change="${this._handleFileChange}"
         />
 
