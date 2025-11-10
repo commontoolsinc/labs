@@ -593,7 +593,13 @@ export class ContextualFlowControl {
       } else if (cursor.type === "array" && cursor.items) {
         const numericKeyValue = new Number(part).valueOf();
         if (Number.isInteger(numericKeyValue) && numericKeyValue >= 0) {
-          cursor = cursor.items;
+          if (
+            cursor.prefixItems && numericKeyValue < cursor.prefixItems.length
+          ) {
+            cursor = cursor.prefixItems[numericKeyValue];
+          } else {
+            cursor = cursor.items;
+          }
         } else {
           return false;
         }
