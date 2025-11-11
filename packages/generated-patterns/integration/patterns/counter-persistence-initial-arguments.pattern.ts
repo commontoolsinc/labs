@@ -1,14 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  cell,
-  createCell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface PersistedState {
   value?: number;
@@ -116,7 +107,6 @@ export const counterPersistenceViaInitialArguments = recipe<
 >(
   "Counter Persistence Via Initial Arguments",
   ({ state, metadata }) => {
-    let snapshotRecorded = false;
     const lastChange = cell<PersistedChange>({
       reason: "initial",
       previous: DEFAULT_NORMALIZED_STATE.value,
@@ -128,15 +118,6 @@ export const counterPersistenceViaInitialArguments = recipe<
 
     const normalizedState = lift((raw: PersistedState | undefined) => {
       const sanitized = normalizeState(raw);
-      if (!snapshotRecorded) {
-        const seeded = cloneNormalizedState(sanitized);
-        createCell<NormalizedState>(
-          undefined,
-          "initial-argument",
-          seeded,
-        );
-        snapshotRecorded = true;
-      }
       return sanitized;
     })(state);
 
