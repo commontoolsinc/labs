@@ -1,7 +1,6 @@
 import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
-import { IRuntime } from "../runtime.ts";
 
 export type RuntimeModuleIdentifier =
   | "commontools"
