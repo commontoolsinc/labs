@@ -4,7 +4,9 @@ import type { SchemaContext } from "@commontools/memory/interface";
 import type {
   ByRefFunction,
   Cell,
+  CellConstructor,
   CellFunction,
+  ComparableCellConstructor,
   CompileAndRunFunction,
   ComputeFunction,
   CreateCellFunction,
@@ -27,17 +29,21 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
+  OpaqueCellConstructor,
   OpaqueRef,
   PatternToolFunction,
+  ReadonlyCellConstructor,
   Recipe,
   RecipeFunction,
   RenderFunction,
   Schema,
   schema as schemaFunction,
+  StreamConstructor,
   StreamDataFunction,
   StreamFunction,
   StrFunction,
   WishFunction,
+  WriteonlyCellConstructor,
 } from "@commontools/api";
 import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
@@ -252,42 +258,12 @@ export interface BuilderFunctionsAndConstants {
   stream: StreamFunction;
 
   // Cell constructors with static methods
-  Cell: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
-  OpaqueCell: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
-  Stream: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
-  ComparableCell: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
-  ReadonlyCell: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
-  WriteonlyCell: {
-    of<T>(value: T, schema?: JSONSchema): Cell<T>;
-    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
-    for<T>(cause: unknown): Cell<T>;
-    equals(a: any, b: any): boolean;
-  };
+  Cell: CellConstructor;
+  OpaqueCell: OpaqueCellConstructor;
+  Stream: StreamConstructor;
+  ComparableCell: ComparableCellConstructor;
+  ReadonlyCell: ReadonlyCellConstructor;
+  WriteonlyCell: WriteonlyCellConstructor;
 
   // Utility
   byRef: ByRefFunction;

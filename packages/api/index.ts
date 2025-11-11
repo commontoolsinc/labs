@@ -448,6 +448,15 @@ export interface WriteonlyCell<T>
 
 export declare const WriteonlyCell: CellTypeConstructor<WriteonlyCell<any>>;
 
+// Type aliases for cell constructors (used in BuilderFunctionsAndConstants)
+// Note: All return Cell<T> at runtime since createCell always returns Cell<T>
+export type CellConstructor = CellTypeConstructor<Cell<any>>;
+export type OpaqueCellConstructor = CellTypeConstructor<Cell<any>>;
+export type StreamConstructor = CellTypeConstructor<Cell<any>>;
+export type ComparableCellConstructor = CellTypeConstructor<Cell<any>>;
+export type ReadonlyCellConstructor = CellTypeConstructor<Cell<any>>;
+export type WriteonlyCellConstructor = CellTypeConstructor<Cell<any>>;
+
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell
 // ============================================================================
