@@ -715,6 +715,51 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
+// Image types from UI components
+export interface ExifData {
+  // Core metadata
+  dateTime?: string;
+  make?: string;
+  model?: string;
+
+  // Orientation
+  orientation?: number;
+
+  // Location (if available)
+  gpsLatitude?: number;
+  gpsLongitude?: number;
+  gpsAltitude?: number;
+
+  // Camera settings
+  fNumber?: number;
+  exposureTime?: string;
+  iso?: number;
+  focalLength?: number;
+
+  // Dimensions
+  pixelXDimension?: number;
+  pixelYDimension?: number;
+
+  // Software
+  software?: string;
+
+  // Raw EXIF tags for advanced use
+  raw?: Record<string, any>;
+}
+
+export interface ImageData {
+  id: string;
+  name: string;
+  url: string;
+  data: string;
+  timestamp: number;
+  width?: number;
+  height?: number;
+  size: number;
+  type: string;
+  exif?: ExifData;
+}
+
 export type BuiltInLLMTool =
   & { description?: string }
   & (

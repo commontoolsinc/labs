@@ -3160,7 +3160,7 @@ interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "previewSize"?: "sm" | "md" | "lg";
   "removable"?: boolean;
   "disabled"?: boolean;
-  "$images"?: any; // CellLike<ImageData[]>
+  "images"?: any[]; // ImageData[]
   "onct-change"?: EventHandler<any>;
   "onct-remove"?: EventHandler<any>;
   "onct-error"?: EventHandler<any>;
