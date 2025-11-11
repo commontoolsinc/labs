@@ -4,15 +4,22 @@ import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
 import {
   type AnyCell,
+  type AnyCellWrapping,
+  type Apply,
+  type AsCell,
   type Cell,
   type CellKind,
   type Frame,
+  type HKT,
+  type ICell,
   ID,
   ID_FIELD,
   type IDFields,
   isStreamValue,
   type IsThisObject,
+  type IStreamable,
   type JSONSchema,
+  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -191,14 +198,6 @@ declare module "@commontools/api" {
 }
 
 export type { AnyCell, Cell, Stream } from "@commontools/api";
-import type {
-  AnyCellWrapping,
-  AsCell,
-  Cell as CellType,
-  ICell,
-  IStreamable,
-  KeyResultType,
-} from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -1384,7 +1383,7 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
-export function CellConstructorFactory(kind: CellKind) {
+export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
   return {
     /**
      * Create a Cell wrapping a value with optional schema.
@@ -1393,7 +1392,7 @@ export function CellConstructorFactory(kind: CellKind) {
      * @param providedSchema - Optional JSON schema for the cell
      * @returns A new Cell wrapping the value
      */
-    of<T>(value: T, providedSchema?: JSONSchema): CellType<T> {
+    of<T>(value: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -1444,7 +1443,7 @@ export function CellConstructorFactory(kind: CellKind) {
      * @param cause - The cause to associate with this cell
      * @returns A new Cell
      */
-    for<T>(cause: unknown): CellType<T> {
+    for<T>(cause: unknown): Apply<Wrap, T> {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -1471,9 +1470,3 @@ export function CellConstructorFactory(kind: CellKind) {
     },
   };
 }
-
-/**
- * Cell constructor for the "cell" kind
- * @deprecated Use the factory from built-in.ts instead
- */
-export const CellConstructor = CellConstructorFactory("cell");

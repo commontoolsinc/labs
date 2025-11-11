@@ -23,7 +23,6 @@ import type {
   FetchOptions,
   PatternToolFunction,
 } from "commontools";
-import { CellConstructorFactory } from "../cell.ts";
 
 export const compileAndRun = createNodeFactory({
   type: "ref",
@@ -216,11 +215,3 @@ export const patternTool = (<
     extraParams: extraParams ?? {},
   } as any as OpaqueRef<Omit<T, keyof E>>;
 }) as PatternToolFunction;
-
-// Create cell constructors with static methods for each cell type
-export const Cell = CellConstructorFactory("cell");
-export const OpaqueCell = CellConstructorFactory("opaque");
-export const Stream = CellConstructorFactory("stream");
-export const ComparableCell = CellConstructorFactory("comparable");
-export const ReadonlyCell = CellConstructorFactory("readonly");
-export const WriteonlyCell = CellConstructorFactory("writeonly");

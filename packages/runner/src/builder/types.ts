@@ -2,11 +2,16 @@ import { isObject, type Mutable } from "@commontools/utils/types";
 import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   ByRefFunction,
   Cell,
-  CellConstructor,
   CellFunction,
-  ComparableCellConstructor,
+  CellTypeConstructor,
   CompileAndRunFunction,
   ComputeFunction,
   DeriveFunction,
@@ -28,21 +33,17 @@ import type {
   Module,
   NavigateToFunction,
   Opaque,
-  OpaqueCellConstructor,
   OpaqueRef,
   PatternToolFunction,
-  ReadonlyCellConstructor,
   Recipe,
   RecipeFunction,
   RenderFunction,
   Schema,
   schema as schemaFunction,
-  StreamConstructor,
   StreamDataFunction,
   StreamFunction,
   StrFunction,
   WishFunction,
-  WriteonlyCellConstructor,
 } from "@commontools/api";
 import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
@@ -71,20 +72,31 @@ export { AuthSchema } from "./schema-lib.ts";
 export type {
   AnyCell,
   AnyCellWrapping,
+  Apply,
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   Cell,
   CellKind,
   Handler,
   HandlerFactory,
+  HKT,
+  ICell,
   IDerivable,
   IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
   IsThisObject,
+  IStreamable,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,
   JSONValue,
+  KeyResultType,
   Module,
   ModuleFactory,
   NodeFactory,
@@ -255,12 +267,12 @@ export interface BuilderFunctionsAndConstants {
   stream: StreamFunction;
 
   // Cell constructors with static methods
-  Cell: CellConstructor;
-  OpaqueCell: OpaqueCellConstructor;
-  Stream: StreamConstructor;
-  ComparableCell: ComparableCellConstructor;
-  ReadonlyCell: ReadonlyCellConstructor;
-  WriteonlyCell: WriteonlyCellConstructor;
+  Cell: CellTypeConstructor<AsCell>;
+  OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
+  Stream: CellTypeConstructor<AsStream>;
+  ComparableCell: CellTypeConstructor<AsComparableCell>;
+  ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
+  WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
   // Utility
   byRef: ByRefFunction;

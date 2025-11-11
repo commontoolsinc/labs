@@ -6,6 +6,12 @@ import type {
   ToSchemaFunction,
 } from "./types.ts";
 import {
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   AuthSchema,
   ID,
   ID_FIELD,
@@ -20,8 +26,6 @@ import { opaqueRef, stream } from "./opaque-ref.ts";
 import { recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
-  Cell as CellConstructor,
-  ComparableCell as ComparableCellConstructor,
   compileAndRun,
   fetchData,
   generateObject,
@@ -30,15 +34,12 @@ import {
   llm,
   llmDialog,
   navigateTo,
-  OpaqueCell as OpaqueCellConstructor,
   patternTool,
-  ReadonlyCell as ReadonlyCellConstructor,
   str,
-  Stream as StreamConstructor,
   streamData,
   wish,
-  WriteonlyCell as WriteonlyCellConstructor,
 } from "./built-in.ts";
+import { cellConstructorFactory } from "../cell.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -106,12 +107,12 @@ export const createBuilder = (
       stream,
 
       // Cell constructors with static methods
-      Cell: CellConstructor,
-      OpaqueCell: OpaqueCellConstructor,
-      Stream: StreamConstructor,
-      ComparableCell: ComparableCellConstructor,
-      ReadonlyCell: ReadonlyCellConstructor,
-      WriteonlyCell: WriteonlyCellConstructor,
+      Cell: cellConstructorFactory<AsCell>("cell"),
+      OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
+      Stream: cellConstructorFactory<AsStream>("stream"),
+      ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
+      ReadonlyCell: cellConstructorFactory<AsReadonlyCell>("readonly"),
+      WriteonlyCell: cellConstructorFactory<AsWriteonlyCell>("writeonly"),
 
       // Utility
       byRef,
