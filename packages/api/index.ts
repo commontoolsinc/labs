@@ -774,6 +774,12 @@ export interface BuiltInGenerateObjectParams {
   cache?: boolean;
   maxTokens?: number;
   metadata?: Record<string, string | undefined | object>;
+  /**
+   * Tools that can be called by the LLM during generation.
+   * Tool calls are executed automatically before returning the final object.
+   * Tool calls are logged for debugging but not exposed in the final result.
+   */
+  tools?: Record<string, BuiltInLLMTool>;
 }
 
 export interface BuiltInGenerateTextParams {
@@ -781,6 +787,12 @@ export interface BuiltInGenerateTextParams {
   system?: string;
   model?: string;
   maxTokens?: number;
+  /**
+   * Tools that can be called by the LLM during generation.
+   * Tool calls are executed automatically before returning the final text.
+   * Tool calls are logged for debugging but not exposed in the final result.
+   */
+  tools?: Record<string, BuiltInLLMTool>;
 }
 
 export interface BuiltInGenerateTextState {

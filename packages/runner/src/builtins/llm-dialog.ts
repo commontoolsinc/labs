@@ -13,18 +13,23 @@ import type {
   Schema,
 } from "commontools";
 import { getLogger } from "@commontools/utils/logger";
-import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isStream } from "../cell.ts";
-import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
+import { ID, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import {
-  debugTransactionWrites,
-  formatTransactionSummary,
-} from "../storage/transaction-summary.ts";
 import { parseLink } from "../link-utils.ts";
+import {
+  buildAssistantMessage,
+  buildToolCatalog,
+  createToolResultMessages,
+  executeToolCalls,
+  extractToolCallParts,
+  invokeToolCall,
+  resolveToolCall,
+  type ToolCatalog,
+  type ToolCallExecutionResult,
+} from "./llm-tool-executor.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
