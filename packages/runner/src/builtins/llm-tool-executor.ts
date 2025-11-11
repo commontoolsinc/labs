@@ -310,6 +310,69 @@ function createCharmToolDefinitions(
   };
 }
 
+type ToolKind = "handler" | "cell" | "pattern";
+
+/**
+ * Flattens tools by extracting handlers from charm-based tools.
+ * Converts { charm: ... } entries into individual handler entries.
+ * Used by llm-dialog for reactive flattenedTools output.
+ *
+ * @param toolsCell - Cell containing the tools
+ * @param runtime - Optional runtime for schema resolution
+ * @returns Flattened tools object with handler/pattern entries
+ */
+export function flattenTools(
+  toolsCell: Cell<any>,
+  runtime?: IRuntime,
+): Record<
+  string,
+  {
+    handler?: any;
+    description: string;
+    inputSchema?: JSONSchema;
+    internal?: { kind: ToolKind; path: string[]; charmName: string };
+  }
+> {
+  const flattened: Record<string, any> = {};
+  const { legacy, charms } = collectToolEntries(toolsCell);
+
+  for (const entry of legacy) {
+    const passThrough: Record<string, unknown> = { ...entry.tool };
+    if (
+      passThrough.inputSchema && typeof passThrough.inputSchema === "object"
+    ) {
+      passThrough.inputSchema = stripInjectedResult(passThrough.inputSchema);
+    }
+    flattened[entry.name] = passThrough;
+  }
+
+  for (const entry of charms) {
+    let schema: JSONSchema | undefined =
+      getLoadedRecipeResultSchema(runtime, entry.charm) ??
+        buildMinimalSchemaFromValue(entry.charm);
+    schema = schema ?? ({} as JSONSchema);
+    const schemaString = stringifySchemaGuarded(schema);
+    const charmTools = createCharmToolDefinitions(
+      entry.charmName,
+      schemaString,
+    );
+
+    flattened[charmTools.read.name] = {
+      description: charmTools.read.description,
+      inputSchema: charmTools.read.inputSchema,
+      internal: { kind: "cell", path: [], charmName: entry.charmName },
+    };
+
+    flattened[charmTools.run.name] = {
+      description: charmTools.run.description,
+      inputSchema: charmTools.run.inputSchema,
+      internal: { kind: "handler", path: [], charmName: entry.charmName },
+    };
+  }
+
+  return flattened;
+}
+
 /**
  * Build a tool catalog from a tools cell
  */
