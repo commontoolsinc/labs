@@ -81,7 +81,7 @@ export default recipe<{ items: Default<Item[], []> }>(
           <div style={{ marginTop: "16px", border: "1px solid #e0e0e0", borderRadius: "4px" }}>
             {ifElse(
               hasView,
-              <div>{currentView}</div>,
+              <ct-render $cell={currentView} />,
               <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>
                 Choose a view above
               </div>
