@@ -290,6 +290,8 @@ export interface IOpaqueCell<T>
 export interface OpaqueCell<T>
   extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
 
+export declare const OpaqueCell: CellTypeConstructor<OpaqueCell<any>>;
+
 /**
  * Full cell with read, write capabilities.
  * Has .get(), .set(), .update(), .push(), .equals(), .key(), .resolveAsCell()
@@ -315,6 +317,64 @@ export interface ICell<T>
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 
 /**
+ * Generic constructor interface for cell types with static methods.
+ */
+export interface CellTypeConstructor<C extends AnyBrandedCell<any>> {
+  /**
+   * Create a cell with a cause.
+   *
+   * Can be chained with .of() or .set():
+   *
+   * const foo = Cell.for(cause).set(value); // sets cell to latest value
+   * const bar = Cell.for(cause).of(value); // sets cell to initial value
+   *
+   * @param cause - The cause to associate with this cell
+   * @returns A new cell
+   */
+  for<T>(cause: unknown): C;
+
+  /**
+   * Create a cell with an initial/default value. In a reactive context, this
+   * value will only be set on first call.
+   *
+   * Can be chained with .for() to set a cause and initial value.
+   * E.g. `const foo = Cell.for(cause).of(value)`.
+   *
+   * AST transformation adds `.for("foo")` in `const foo = Cell.of(value)`.
+   *
+   * Internally it just merges the value into the schema as a default value.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - Optional JSON schema for the cell
+   * @returns A new cell
+   */
+  of<T>(value: T, schema?: JSONSchema): C;
+
+  /**
+   * Create a cell with an initial/default value and a typed schema.
+   * Type is inferred from the schema.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - JSON schema for the cell
+   * @returns A new cell with type derived from schema
+   */
+  of<S extends JSONSchema>(
+    value: Schema<S>,
+    schema: S,
+  ): C;
+
+  /**
+   * Compare two cells or values for equality.
+   * @param a - First cell or value to compare
+   * @param b - Second cell or value to compare
+   * @returns true if the values are equal
+   */
+  equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+}
+
+export declare const Cell: CellTypeConstructor<Cell<any>>;
+
+/**
  * Stream-only cell - can only send events, not read or write.
  * Has .send() only
  * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()
@@ -327,6 +387,8 @@ export interface Stream<T>
     IAnyCell<T>,
     ICreatable<Stream<T>>,
     IStreamable<T> {}
+
+export declare const Stream: CellTypeConstructor<Stream<any>>;
 
 /**
  * Comparable-only cell - just for equality checks and keying.
@@ -344,6 +406,8 @@ export interface ComparableCell<T>
     ICreatable<ComparableCell<T>>,
     IEquatable,
     IKeyable<T, AsComparableCell> {}
+
+export declare const ComparableCell: CellTypeConstructor<ComparableCell<any>>;
 
 /**
  * Read-only cell variant.
@@ -363,6 +427,8 @@ export interface ReadonlyCell<T>
     IEquatable,
     IKeyable<T, AsReadonlyCell> {}
 
+export declare const ReadonlyCell: CellTypeConstructor<ReadonlyCell<any>>;
+
 /**
  * Write-only cell variant.
  * Has .set(), .update(), .push(), .key()
@@ -379,6 +445,8 @@ export interface WriteonlyCell<T>
     ICreatable<WriteonlyCell<T>>,
     IWritable<T>,
     IKeyable<T, AsWriteonlyCell> {}
+
+export declare const WriteonlyCell: CellTypeConstructor<WriteonlyCell<any>>;
 
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell

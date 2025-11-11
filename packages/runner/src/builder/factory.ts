@@ -23,6 +23,8 @@ import { opaqueRef, stream } from "./opaque-ref.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
+  Cell as CellConstructorValue,
+  ComparableCell as ComparableCellConstructor,
   compileAndRun,
   fetchData,
   generateObject,
@@ -31,10 +33,14 @@ import {
   llm,
   llmDialog,
   navigateTo,
+  OpaqueCell as OpaqueCellConstructor,
   patternTool,
+  ReadonlyCell as ReadonlyCellConstructor,
   str,
+  Stream as StreamConstructor,
   streamData,
   wish,
+  WriteonlyCell as WriteonlyCellConstructor,
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
@@ -129,6 +135,14 @@ export const createBuilder = (
       createCell,
       cell: opaqueRef,
       stream,
+
+      // Cell constructors with static methods
+      Cell: CellConstructorValue,
+      OpaqueCell: OpaqueCellConstructor,
+      Stream: StreamConstructor,
+      ComparableCell: ComparableCellConstructor,
+      ReadonlyCell: ReadonlyCellConstructor,
+      WriteonlyCell: WriteonlyCellConstructor,
 
       // Utility
       byRef,

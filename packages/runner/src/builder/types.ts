@@ -251,6 +251,44 @@ export interface BuilderFunctionsAndConstants {
   cell: CellFunction;
   stream: StreamFunction;
 
+  // Cell constructors with static methods
+  Cell: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+  OpaqueCell: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+  Stream: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+  ComparableCell: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+  ReadonlyCell: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+  WriteonlyCell: {
+    of<T>(value: T, schema?: JSONSchema): Cell<T>;
+    of<S extends JSONSchema>(value: Schema<S>, schema: S): Cell<Schema<S>>;
+    for<T>(cause: unknown): Cell<T>;
+    equals(a: any, b: any): boolean;
+  };
+
   // Utility
   byRef: ByRefFunction;
 

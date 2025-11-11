@@ -3,7 +3,6 @@ import { createNodeFactory, lift } from "./module.ts";
 import { recipe } from "./recipe.ts";
 import { isRecipe } from "./types.ts";
 import type {
-  Cell,
   JSONSchema,
   NodeFactory,
   Opaque,
@@ -11,6 +10,7 @@ import type {
   RecipeFactory,
   Schema,
 } from "./types.ts";
+import type { Cell as CellType } from "./types.ts";
 import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
@@ -23,6 +23,7 @@ import type {
   FetchOptions,
   PatternToolFunction,
 } from "commontools";
+import { CellConstructorFactory } from "../cell.ts";
 
 export const compileAndRun = createNodeFactory({
   type: "ref",
@@ -157,12 +158,12 @@ declare function createCell<T>(
   schema?: JSONSchema,
   name?: string,
   value?: T,
-): Cell<T>;
+): CellType<T>;
 declare function createCell<S extends JSONSchema = JSONSchema>(
   schema: S,
   name?: string,
   value?: Schema<S>,
-): Cell<Schema<S>>;
+): CellType<Schema<S>>;
 
 export type { createCell };
 
@@ -215,3 +216,11 @@ export const patternTool = (<
     extraParams: extraParams ?? {},
   } as any as OpaqueRef<Omit<T, keyof E>>;
 }) as PatternToolFunction;
+
+// Create cell constructors with static methods for each cell type
+export const Cell = CellConstructorFactory("cell");
+export const OpaqueCell = CellConstructorFactory("opaque");
+export const Stream = CellConstructorFactory("stream");
+export const ComparableCell = CellConstructorFactory("comparable");
+export const ReadonlyCell = CellConstructorFactory("readonly");
+export const WriteonlyCell = CellConstructorFactory("writeonly");
