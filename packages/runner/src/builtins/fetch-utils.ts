@@ -1,0 +1,105 @@
+import { refer } from "merkle-reference/json";
+import { type Cell } from "../cell.ts";
+import type { IRuntime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { JSONSchema, Schema } from "../builder/types.ts";
+
+export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
+
+export const internalSchema = {
+  type: "object",
+  properties: {
+    requestId: { type: "string", default: "" },
+    lastActivity: { type: "number", default: 0 },
+    inputHash: { type: "string", default: "" },
+  },
+  default: {},
+  required: ["requestId", "lastActivity", "inputHash"],
+} as const satisfies JSONSchema;
+
+/**
+ * Computes a hash of inputs for comparison.
+ */
+export function computeInputHash<T extends Record<string, any>>(
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<T>,
+): string {
+  const inputs = inputsCell.getAsQueryResult([], tx);
+  return refer(inputs).toString();
+}
+
+/**
+ * Attempts to claim the mutex for a request. Only claims if no other
+ * request is active or if the previous request has timed out.
+ */
+export async function tryClaimMutex<T extends Record<string, any>>(
+  runtime: IRuntime,
+  inputsCell: Cell<T>,
+  pending: Cell<boolean>,
+  internal: Cell<Schema<typeof internalSchema>>,
+  requestId: string,
+  timeout: number = REQUEST_TIMEOUT,
+): Promise<{
+  claimed: boolean;
+  inputs: T;
+  inputHash: string;
+}> {
+  let claimed = false;
+  let inputHash = "";
+  let inputs = {} as T;
+
+  await runtime.editWithRetry((tx) => {
+    const currentInternal = internal.withTx(tx).get();
+    const isPending = pending.withTx(tx).get();
+    const now = Date.now();
+
+    inputs = inputsCell.getAsQueryResult([], tx);
+    inputHash = computeInputHash(tx, inputsCell);
+
+    // Can claim if:
+    // 1. Nothing is pending, OR
+    // 2. Previous request timed out, OR
+    // 3. Inputs changed (different hash)
+    const canClaim = !isPending ||
+      (currentInternal.lastActivity < now - timeout) ||
+      (currentInternal.inputHash !== inputHash);
+
+    if (canClaim) {
+      pending.withTx(tx).set(true);
+      internal.withTx(tx).set({
+        requestId,
+        lastActivity: now,
+        inputHash,
+      });
+      claimed = true;
+    } else {
+      claimed = false;
+    }
+  });
+  return { claimed, inputs, inputHash };
+}
+
+/**
+ * Performs a mutation if the inputs haven't changed. This allows any tab
+ * to write the result as long as the inputs are still the same.
+ */
+export async function tryWriteResult<T extends Record<string, any>>(
+  runtime: IRuntime,
+  internal: Cell<Schema<typeof internalSchema>>,
+  inputsCell: Cell<T>,
+  expectedHash: string,
+  action: (tx: IExtendedStorageTransaction) => void,
+): Promise<boolean> {
+  let success = false;
+  await runtime.editWithRetry((tx) => {
+    const currentHash = computeInputHash(tx, inputsCell);
+
+    // Only write if inputs haven't changed since we started the request
+    if (currentHash === expectedHash) {
+      action(tx);
+      internal.withTx(tx).update({ inputHash: currentHash });
+      success = true;
+    }
+  });
+  return success;
+}

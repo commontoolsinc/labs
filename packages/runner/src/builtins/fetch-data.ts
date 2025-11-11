@@ -1,153 +1,15 @@
-import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema, Schema } from "../builder/types.ts";
-
-const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
-
-const internalSchema = {
-  type: "object",
-  properties: {
-    requestId: { type: "string", default: "" },
-    lastActivity: { type: "number", default: 0 },
-    inputHash: { type: "string", default: "" },
-  },
-  default: {},
-  required: ["requestId", "lastActivity", "inputHash"],
-} as const satisfies JSONSchema;
-
-/**
- * Computes a hash of the fetch inputs for comparison.
- */
-function computeInputHash(
-  tx: IExtendedStorageTransaction,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
-): string {
-  const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
-
-  return refer({
-    url: url ?? "",
-    mode: mode ?? "json",
-    options: options ?? {},
-  }).toString();
-}
-
-/**
- * Attempts to claim the mutex for a fetch request. Only claims if no other
- * request is active or if the previous request has timed out.
- *
- * @param runtime - The runtime instance
- * @param pending - Cell containing the pending state
- * @param internal - Cell containing the internal state
- * @param requestId - The request ID to claim with
- * @param inputHash - Hash of the current inputs
- * @returns true if mutex was claimed, false otherwise
- */
-async function tryClaimMutex(
-  runtime: IRuntime,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
-  pending: Cell<boolean>,
-  internal: Cell<Schema<typeof internalSchema>>,
-  requestId: string,
-): Promise<
-  {
-    claimed: boolean;
-    url: string;
-    mode: "text" | "json" | undefined;
-    options:
-      | { body?: any; method?: string; headers?: Record<string, string> }
-      | undefined;
-    inputHash: string;
-  }
-> {
-  let claimed = false;
-  let inputHash = "";
-  let url = "";
-  let mode: "text" | "json" | undefined;
-  let options:
-    | { body?: any; method?: string; headers?: Record<string, string> }
-    | undefined;
-
-  await runtime.editWithRetry((tx) => {
-    const currentInternal = internal.withTx(tx).get();
-    const isPending = pending.withTx(tx).get();
-    const now = Date.now();
-
-    ({ url, mode, options } = inputsCell.getAsQueryResult([], tx));
-    inputHash = computeInputHash(tx, inputsCell);
-
-    // Can claim if:
-    // 1. Nothing is pending, OR
-    // 2. Previous request timed out, OR
-    // 3. Inputs changed (different hash)
-    const canClaim = !isPending ||
-      (currentInternal.lastActivity < now - REQUEST_TIMEOUT) ||
-      (currentInternal.inputHash !== inputHash);
-
-    if (canClaim) {
-      pending.withTx(tx).set(true);
-      internal.withTx(tx).set({
-        requestId,
-        lastActivity: now,
-        inputHash,
-      });
-      claimed = true;
-    } else {
-      // If we got called again after the above failed, set it back to false.
-      claimed = false;
-    }
-  });
-  return { claimed, url, mode, options, inputHash };
-}
-
-/**
- * Performs a mutation if the inputs haven't changed. This allows any tab
- * to write the result as long as the inputs are still the same.
- *
- * @param runtime - The runtime instance
- * @param internal - Cell containing the internal state
- * @param inputsCell - Cell containing the input values
- * @param expectedHash - Hash of the inputs when request started
- * @param action - The mutation action to perform
- * @returns true if the action was performed, false otherwise
- */
-async function tryWriteResult(
-  runtime: IRuntime,
-  internal: Cell<Schema<typeof internalSchema>>,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
-  expectedHash: string,
-  action: (tx: IExtendedStorageTransaction) => void,
-): Promise<boolean> {
-  let success = false;
-  await runtime.editWithRetry((tx) => {
-    // Recompute the hash from current inputs within the transaction
-    const currentHash = computeInputHash(tx, inputsCell);
-
-    // Only write if inputs haven't changed since we started the request
-    if (currentHash === expectedHash) {
-      action(tx);
-      // Also update the internal state to reflect this hash
-      internal.withTx(tx).update({ inputHash: currentHash });
-      success = true;
-    }
-  });
-  return success;
-}
+import type { Schema } from "../builder/types.ts";
+import {
+  computeInputHash,
+  internalSchema,
+  tryClaimMutex,
+  tryWriteResult,
+} from "./fetch-utils.ts";
 
 /**
  * Fetch data from a URL.
@@ -285,11 +147,13 @@ export function fetchData(
 
       // Try to claim mutex - returns immediately if another tab is processing
       tryClaimMutex(runtime, inputsCell, pending, internal, newRequestId).then(
-        ({ claimed, url, mode, options, inputHash }) => {
+        ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
             // Another tab is handling this, we're done
             return;
           }
+
+          const { url, mode, options } = inputs;
 
           // Check if URL became empty while waiting for mutex
           if (!url) {
