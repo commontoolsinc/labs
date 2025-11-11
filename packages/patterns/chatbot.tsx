@@ -67,7 +67,7 @@ const sendMessage = handler<
     addMessage: Stream<BuiltInLLMMessage>;
     allAttachments: Cell<Array<PromptAttachment>>;
   }
->(async (event, { addMessage, allAttachments }) => {
+>((event, { addMessage, allAttachments }) => {
   const { text } = event.detail;
 
   // Build content array from text and attachments
@@ -84,32 +84,11 @@ const sendMessage = handler<
   // Process attachments
   for (const attachment of attachments) {
     if (attachment.type === "file" && attachment.data) {
-      // Check if it's an image file
-      const isImage = attachment.data instanceof File &&
-        attachment.data.type.startsWith("image/");
-
-      if (isImage) {
-        // Convert image File to base64 data URL
-        try {
-          const base64 = await fileToBase64(attachment.data as File);
-          contentParts.push({
-            type: "image" as const,
-            image: base64,
-          });
-        } catch (error) {
-          console.error("Failed to convert image to base64:", error);
-          contentParts.push({
-            type: "text" as const,
-            text: `[Failed to load image: ${attachment.name}]`,
-          });
-        }
-      } else {
-        // Non-image files: add as text reference
-        contentParts.push({
-          type: "text" as const,
-          text: `[Attached file: ${attachment.name}]`,
-        });
-      }
+      // For now, add a text reference
+      contentParts.push({
+        type: "text" as const,
+        text: `[Attached file: ${attachment.name}]`,
+      });
     } else if (attachment.type === "clipboard" && attachment.data) {
       // Append clipboard content as additional context
       contentParts.push({
@@ -126,16 +105,6 @@ const sendMessage = handler<
     content: contentParts,
   });
 });
-
-// Helper function to convert File to base64 data URL
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 const clearChat = handler(
   (
