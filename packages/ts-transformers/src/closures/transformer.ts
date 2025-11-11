@@ -1552,6 +1552,21 @@ function rewriteCaptureReferences(
   }
 
   const visitor = (node: ts.Node, parent?: ts.Node): ts.Node => {
+    // Handle shorthand property assignments specially
+    // { multiplier } needs to become { multiplier: multiplier_1 } if multiplier is renamed
+    if (ts.isShorthandPropertyAssignment(node)) {
+      const substituteName = substitutions.get(node.name.text);
+      if (substituteName) {
+        // Expand shorthand into full property assignment
+        return factory.createPropertyAssignment(
+          node.name, // Property name stays the same
+          factory.createIdentifier(substituteName), // Value uses renamed identifier
+        );
+      }
+      // No substitution needed, keep as shorthand
+      return node;
+    }
+
     // Don't substitute identifiers that are property names
     if (ts.isIdentifier(node)) {
       // Skip if this identifier is the property name in a property access (e.g., '.get' in 'obj.get')
@@ -1563,14 +1578,6 @@ function rewriteCaptureReferences(
 
       // Skip if this identifier is a property name in an object literal (e.g., 'foo' in '{ foo: value }')
       if (parent && ts.isPropertyAssignment(parent) && parent.name === node) {
-        return node;
-      }
-
-      // Skip if this identifier is a shorthand property name (e.g., 'foo' in '{ foo }')
-      if (
-        parent && ts.isShorthandPropertyAssignment(parent) &&
-        parent.name === node
-      ) {
         return node;
       }
 
