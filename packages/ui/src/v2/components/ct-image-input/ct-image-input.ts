@@ -294,7 +294,10 @@ export class CTImageInput extends BaseElement {
         }
       }
 
-      const updatedImages = [...currentImages, ...newImages];
+      // When multiple is false, replace existing images instead of appending
+      const updatedImages = this.multiple
+        ? [...currentImages, ...newImages]
+        : newImages;
       this.setImages(updatedImages);
       this.emit("ct-change", { images: updatedImages });
     } finally {
@@ -439,6 +442,7 @@ export class CTImageInput extends BaseElement {
                       ${this.removable
                         ? html`
                           <button
+                            type="button"
                             class="remove-button"
                             @click="${() => this._handleRemove(image.id)}"
                             aria-label="Remove image"
