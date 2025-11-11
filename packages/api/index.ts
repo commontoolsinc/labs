@@ -1110,6 +1110,17 @@ export type FetchDataFunction = <T>(
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
 
+export type FetchProgramFunction = (
+  params: Opaque<{ url: string }>,
+) => OpaqueRef<{
+  pending: boolean;
+  result: {
+    files: Array<{ name: string; contents: string }>;
+    main: string;
+  };
+  error: any;
+}>;
+
 export type StreamDataFunction = <T>(
   params: Opaque<{
     url: string;
@@ -1185,6 +1196,7 @@ export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
 export declare const fetchData: FetchDataFunction;
+export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;

@@ -1,0 +1,57 @@
+import {
+  cell,
+  compileAndRun,
+  fetchProgram,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
+
+/**
+ * Test pattern for fetchProgram builtin.
+ * Fetches a program from a URL and compiles it.
+ */
+export default recipe("Fetch Program Test", () => {
+  // URL to a simple pattern file
+  const url = cell(
+    "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
+  );
+
+  // Step 1: Fetch the program from URL
+  const { pending: fetchPending, result: program, error: fetchError } =
+    fetchProgram({ url });
+
+  // Step 2: Compile and run the fetched program
+  const { pending: compilePending, result, error: compileError } =
+    compileAndRun({
+      ...program, // Spreads { files, main }
+      input: { initialCount: 10 },
+    });
+
+  return {
+    [NAME]: "Fetch Program Test",
+    [UI]: (
+      <div>
+        <h1>Fetch Program Test</h1>
+        <div>
+          <label>URL:</label>
+          <input type="text" value={url} />
+        </div>
+        {fetchPending && <div>Fetching program...</div>}
+        {compilePending && <div>Compiling...</div>}
+        {fetchError && <div style="color: red">Fetch error: {fetchError}</div>}
+        {compileError && (
+          <div style="color: red">Compile error: {compileError}</div>
+        )}
+        {result && (
+          <div style="color: green">
+            Successfully compiled recipe! Charm ID: {result}
+          </div>
+        )}
+      </div>
+    ),
+    url,
+    program,
+    result,
+  };
+});
