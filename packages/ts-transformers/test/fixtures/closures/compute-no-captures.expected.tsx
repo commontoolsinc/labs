@@ -1,7 +1,11 @@
 import * as __ctHelpers from "commontools";
 import { compute } from "commontools";
 export default function TestComputeNoCaptures() {
-    const result = derive(true as const satisfies __ctHelpers.JSONSchema, {
+    const result = derive({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {}
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {}, () => 42);
     return result;
