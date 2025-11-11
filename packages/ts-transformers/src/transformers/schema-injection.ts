@@ -357,28 +357,52 @@ export class SchemaInjectionTransformer extends Transformer {
           node.arguments.length >= 2 &&
           isFunctionLikeExpression(node.arguments[1]!)
         ) {
+          const firstArg = node.arguments[0]!;
           const callback = node.arguments[1] as
             | ts.ArrowFunction
             | ts.FunctionExpression;
-          const argumentType = checker.getTypeAtLocation(
-            node.arguments[0]!,
-          );
+
+          // Special case: detect empty object literal {} and generate specific schema
+          let argNode: ts.TypeNode | undefined;
+          let argType: ts.Type | undefined;
+
+          if (
+            ts.isObjectLiteralExpression(firstArg) &&
+            firstArg.properties.length === 0
+          ) {
+            // Empty object literal - create a specific type for it
+            // This should generate {type: "object", properties: {}, additionalProperties: false}
+            argNode = factory.createTypeLiteralNode([]);
+            // Don't set argType - let schema generator handle the synthetic node
+          } else {
+            // Normal case - infer from the argument type
+            const argumentType = checker.getTypeAtLocation(firstArg);
+            const inferred = collectFunctionSchemaTypeNodes(
+              callback,
+              checker,
+              sourceFile,
+              argumentType,
+            );
+            argNode = inferred.argument;
+            argType = inferred.argumentType;
+          }
+
+          // Always infer return type
           const inferred = collectFunctionSchemaTypeNodes(
             callback,
             checker,
             sourceFile,
-            argumentType,
           );
 
           // Transform if we got at least one type, filling in unknown for the other
-          if (inferred.argument || inferred.result) {
-            const argNode = inferred.argument ??
+          if (argNode || inferred.result) {
+            const finalArgNode = argNode ??
               factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
             const resNode = inferred.result ??
               factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
             return updateWithSchemas(
-              argNode,
-              inferred.argumentType,
+              finalArgNode,
+              argType,
               resNode,
               inferred.resultType,
             );

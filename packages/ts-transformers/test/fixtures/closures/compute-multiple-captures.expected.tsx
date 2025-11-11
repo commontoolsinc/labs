@@ -1,0 +1,41 @@
+import * as __ctHelpers from "commontools";
+import { cell, compute } from "commontools";
+export default function TestComputeMultipleCaptures() {
+    const a = cell(10);
+    const b = cell(20);
+    const c = cell(30);
+    const result = __ctHelpers.derive({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {
+            a: {
+                type: "number",
+                asOpaque: true
+            },
+            b: {
+                type: "number",
+                asOpaque: true
+            },
+            c: {
+                type: "number",
+                asOpaque: true
+            }
+        },
+        required: ["a", "b", "c"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        a: a,
+        b: b,
+        c: c
+    }, ({ a, b, c }) => {
+        const sum = a.get() + b.get();
+        return sum * c.get();
+    });
+    return result;
+}
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
