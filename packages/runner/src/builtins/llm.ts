@@ -448,7 +448,7 @@ export function generateObject<T extends Record<string, unknown>>(
       metadata,
     } = inputsCell.getAsQueryResult([], tx) ?? {};
 
-    if ((!prompt && !messages) || !schema) {
+    if ((!prompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
