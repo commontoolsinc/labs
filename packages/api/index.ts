@@ -371,7 +371,7 @@ export interface AsCell extends HKT {
 export interface ICell<T>
   extends
     IAnyCell<T>,
-    ICreatable<AnyBrandedCell<T>>,
+    ICreatable<Cell<T>>,
     IReadable<T>,
     IWritable<T, Cell<T>>,
     IStreamable<T>,
