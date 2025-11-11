@@ -304,26 +304,18 @@ export class CTImageInput extends BaseElement {
     }
   }
 
-  private async _processFile(file: File): Promise<ImageData> {
+  private _processFile(file: File): Promise<ImageData> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       const id = this._generateId();
 
-      reader.onload = async () => {
+      reader.onload = () => {
         try {
           const dataUrl = reader.result as string;
 
           // Get image dimensions
           const img = new Image();
-          img.onload = async () => {
-            // Extract EXIF data
-            let exif: ExifData | undefined;
-            try {
-              exif = await this._extractExif(file);
-            } catch (error) {
-              console.warn("Failed to extract EXIF data:", error);
-            }
-
+          img.onload = () => {
             const imageData: ImageData = {
               id,
               name: file.name || `Photo-${Date.now()}.jpg`,
@@ -334,7 +326,6 @@ export class CTImageInput extends BaseElement {
               height: img.height,
               size: file.size,
               type: file.type,
-              exif,
             };
 
             resolve(imageData);
@@ -356,12 +347,6 @@ export class CTImageInput extends BaseElement {
 
       reader.readAsDataURL(file);
     });
-  }
-
-  private async _extractExif(file: File): Promise<ExifData | undefined> {
-    // TODO: Implement EXIF extraction using a library
-    // For now, return undefined - we'll add this in the next step
-    return undefined;
   }
 
   private _handleRemove(id: string) {

@@ -4,7 +4,6 @@ import {
   cell,
   derive,
   generateText,
-  handler,
   ImageData,
   NAME,
   recipe,
@@ -28,14 +27,6 @@ type ImageChatOutput = {
   pending: boolean | undefined;
   ui: VNode;
 };
-
-// Handler to update images
-const handleImageChange = handler<
-  { detail: { images: ImageData[] } },
-  { images: Cell<ImageData[]> }
->((event, { images }) => {
-  images.set(event.detail.images);
-});
 
 export default recipe<ImageChatInput, ImageChatOutput>(
   "Image Chat",
@@ -85,26 +76,13 @@ export default recipe<ImageChatInput, ImageChatOutput>(
               <ct-vstack gap="2">
                 <ct-heading level={5}>Upload Images</ct-heading>
                 <ct-image-input
-                  multiple={true}
+                  multiple
                   maxImages={5}
-                  showPreview={true}
+                  showPreview
                   previewSize="md"
-                  removable={true}
+                  removable
                   $images={images}
                 />
-
-                {/*also works*/}
-                {
-                  /*<ct-image-input
-                  multiple={true}
-                  maxImages={5}
-                  showPreview={true}
-                  previewSize="md"
-                  removable={true}
-                  images={images}
-                  onct-change={handleImageChange({ images })}
-                />*/
-                }
               </ct-vstack>
             </ct-card>
 
@@ -123,7 +101,7 @@ export default recipe<ImageChatInput, ImageChatOutput>(
             {derive(
               [result, pending, requestHash],
               (
-                [res, pend, hash]: [
+                [res, pend, _hash]: [
                   string | undefined,
                   boolean | undefined,
                   string | undefined,
