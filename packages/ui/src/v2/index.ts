@@ -38,6 +38,7 @@ export * from "./components/ct-grid/index.ts";
 export * from "./components/ct-hgroup/index.ts";
 export * from "./components/ct-hscroll/index.ts";
 export * from "./components/ct-hstack/index.ts";
+export * from "./components/ct-image-input/index.ts";
 export * from "./components/ct-input/index.ts";
 export * from "./components/ct-input-otp/index.ts";
 export * from "./components/ct-label/index.ts";
