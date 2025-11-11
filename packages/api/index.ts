@@ -811,22 +811,43 @@ export interface BuiltInLLMDialogState {
   flattenedTools: Record<string, any>;
 }
 
-export interface BuiltInGenerateObjectParams {
-  model?: string;
-  prompt?: BuiltInLLMContent;
-  schema?: JSONSchema;
-  system?: string;
-  cache?: boolean;
-  maxTokens?: number;
-  metadata?: Record<string, string | undefined | object>;
-}
+export type BuiltInGenerateObjectParams =
+  | {
+    model?: string;
+    prompt: BuiltInLLMContent;
+    messages?: never;
+    schema?: JSONSchema;
+    system?: string;
+    cache?: boolean;
+    maxTokens?: number;
+    metadata?: Record<string, string | undefined | object>;
+  }
+  | {
+    model?: string;
+    prompt?: never;
+    messages: BuiltInLLMMessage[];
+    schema?: JSONSchema;
+    system?: string;
+    cache?: boolean;
+    maxTokens?: number;
+    metadata?: Record<string, string | undefined | object>;
+  };
 
-export interface BuiltInGenerateTextParams {
-  prompt: BuiltInLLMContent;
-  system?: string;
-  model?: string;
-  maxTokens?: number;
-}
+export type BuiltInGenerateTextParams =
+  | {
+    prompt: BuiltInLLMContent;
+    messages?: never;
+    system?: string;
+    model?: string;
+    maxTokens?: number;
+  }
+  | {
+    prompt?: never;
+    messages: BuiltInLLMMessage[];
+    system?: string;
+    model?: string;
+    maxTokens?: number;
+  };
 
 export interface BuiltInGenerateTextState {
   pending: boolean;

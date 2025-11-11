@@ -271,21 +271,24 @@ export function generateText(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, prompt, model, maxTokens } =
+    const { system, prompt, messages, model, maxTokens } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
-    // If no prompt is provided, don't make a request
-    if (!prompt) {
+    // If neither prompt nor messages is provided, don't make a request
+    if (!prompt && !messages) {
       resultWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
     }
 
-    // Convert simple prompt to messages array format for LLM client
+    // Convert prompt to messages if provided, otherwise use messages directly
+    const requestMessages: BuiltInLLMMessage[] = messages ||
+      [{ role: "user", content: prompt! }];
+
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: [{ role: "user", content: prompt }],
+      messages: requestMessages,
       stop: "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -429,16 +432,15 @@ export function generateObject<T extends Record<string, unknown>>(
       sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
     }
-    const thisRun = ++currentRun;
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { prompt, maxTokens, model, schema, system, cache, metadata } =
+    const { prompt, messages, maxTokens, model, schema, system, cache, metadata } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
-    if (!prompt || !schema) {
+    if ((!prompt && !messages) || !schema) {
       resultWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
@@ -447,11 +449,12 @@ export function generateObject<T extends Record<string, unknown>>(
 
     const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
 
-    // Convert prompt to messages format, consistent with generateText
-    const messages: BuiltInLLMMessage[] = [{ role: "user", content: prompt }];
+    // Convert prompt to messages if provided, otherwise use messages directly
+    const requestMessages: BuiltInLLMMessage[] = messages ||
+      [{ role: "user", content: prompt! }];
 
     const generateObjectParams: LLMGenerateObjectRequest = {
-      messages,
+      messages: requestMessages,
       maxTokens: maxTokens ?? 8192,
       schema: JSON.parse(JSON.stringify(schema)),
       model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
@@ -467,12 +470,28 @@ export function generateObject<T extends Record<string, unknown>>(
     }
 
     const hash = refer(generateObjectParams).toString();
+    const currentRequestHash = requestHashWithLog.get();
+    const currentResult = resultWithLog.get();
 
-    // Return if the same request is being made again, either concurrently (same
-    // as previousCallHash) or when rehydrated from storage (same as the
-    // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    // Return if the same request is being made again
+    // Only skip if we have a result - otherwise we need to (re)make the request
+    if (currentResult !== undefined && hash === currentRequestHash) {
+      return;
+    }
+
+    // Also skip if this is the same request in the current transaction
+    if (hash === previousCallHash) {
+      return;
+    }
+
     previousCallHash = hash;
+
+    // Only increment currentRun if this is a NEW request (different hash)
+    // This prevents abandoning in-flight requests when the same params are re-evaluated
+    if (hash !== currentRequestHash) {
+      currentRun++;
+    }
+    const thisRun = currentRun;
 
     resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
     partialWithLog.set(undefined);

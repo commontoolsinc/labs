@@ -48,7 +48,7 @@ export async function generateObject(
       }
     }
 
-    // Use messages directly - consistent with generateText
+    // Use messages directly - conversion happens client-side
     const messages = params.messages as ModelMessage[];
 
     const { object } = await generateObjectCore({
