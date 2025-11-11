@@ -798,6 +798,7 @@ const addItem = handler<
 const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
   (_, { chatsList }) => {
     const chat = Chat({ title: "New Chat", messages: [] });
+    const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
 
     // ❌ This will cause: RangeError: Maximum call stack size exceeded
     chatsList.push({
