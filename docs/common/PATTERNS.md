@@ -810,12 +810,15 @@ const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
 );
 
 // ✅ CORRECT - Use lift() to wrap the push operation
-const storeChat = lift(
-  toSchema<{ charm: any; chatsList: Cell<Entry[]>; isInitialized: Cell<boolean> }>(),
-  undefined,
+const storeChat = lift<{
+  charm: any;
+  chatsList: Cell<Entry[]>;
+  isInitialized: Cell<boolean>;
+}, undefined>(
   ({ charm, chatsList, isInitialized }) => {
     if (!isInitialized.get()) {
-      chatsList.push({ [ID]: randomId, local_id: randomId, charm });
+      // Use stable ID - in production use proper ID generation
+      chatsList.push({ local_id: `chat-${Date.now()}`, charm });
       isInitialized.set(true);
     }
   }
@@ -826,7 +829,7 @@ const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
     const isInitialized = cell(false);
     const chat = Chat({ title: "New Chat", messages: [] });
 
-    // ✅ Handler returns the lift call instead of pushing directly
+    // ✅ Handler returns the lift call (no casting needed with modern types)
     return storeChat({ charm: chat, chatsList, isInitialized });
   }
 );

@@ -501,19 +501,17 @@ type Entry = {
 };
 
 // ✅ CORRECT: Wrap the push operation in a lift function
-const storePattern = lift(
-  toSchema<{
-    charm: any;
-    patternsList: Cell<Entry[]>;
-    isInitialized: Cell<boolean>;
-  }>(),
-  undefined,
+const storePattern = lift<{
+  charm: any;
+  patternsList: Cell<Entry[]>;
+  isInitialized: Cell<boolean>;
+}, undefined>(
   ({ charm, patternsList, isInitialized }) => {
     if (!isInitialized.get()) {
       // ✅ CORRECT: .push() happens inside lift, not handler
       patternsList.push({
-        [ID]: Math.random().toString(36).substring(2, 10),
-        local_id: Math.random().toString(36).substring(2, 10),
+        // Note: Using a stable ID here - in real code use proper ID generation
+        local_id: `pattern-${Date.now()}`,
         charm
       });
       isInitialized.set(true);
@@ -530,11 +528,11 @@ const createPattern = handler<
     const isInitialized = cell(false);
     const pattern = MyPattern({ title: "New" });
 
-    // ✅ CORRECT: Return the lift function call
+    // ✅ CORRECT: Return the lift function call (no casting needed with modern types)
     return storePattern({
       charm: pattern,
-      patternsList: patternsList as unknown as OpaqueRef<Entry[]>,
-      isInitialized: isInitialized as unknown as Cell<boolean>
+      patternsList,
+      isInitialized
     });
   }
 );
