@@ -68,6 +68,7 @@ export interface ImageData {
  *
  * @attr {boolean} multiple - Allow multiple images (default: false)
  * @attr {number} maxImages - Max number of images (default: unlimited)
+ * @attr {number} maxSizeBytes - Max size in bytes before compression (default: no compression)
  * @attr {string} capture - Capture mode: "user" | "environment" | false
  * @attr {string} buttonText - Custom button text (default: "📷 Add Photo")
  * @attr {string} variant - Button style variant
@@ -83,6 +84,8 @@ export interface ImageData {
  *
  * @example
  * <ct-image-input capture="environment" buttonText="📸 Scan"></ct-image-input>
+ * @example
+ * <ct-image-input maxSizeBytes={5000000} buttonText="📸 Upload"></ct-image-input>
  */
 export class CTImageInput extends BaseElement {
   static override styles = [
@@ -219,6 +222,9 @@ export class CTImageInput extends BaseElement {
   @property({ type: Boolean })
   disabled = false;
 
+  @property({ type: Number })
+  maxSizeBytes?: number;
+
   @property({ type: Array })
   images: Cell<ImageData[]> | ImageData[] = [];
 
@@ -307,10 +313,120 @@ export class CTImageInput extends BaseElement {
     }
   }
 
+  /**
+   * Compress an image file to meet size requirements using Canvas API
+   * @param file - The image file to compress
+   * @param maxSizeBytes - Target maximum size in bytes
+   * @returns Compressed blob or original file if already small enough
+   */
+  private async _compressImage(
+    file: File,
+    maxSizeBytes: number,
+  ): Promise<Blob> {
+    // If file is already small enough, return as-is
+    if (file.size <= maxSizeBytes) {
+      return file;
+    }
+
+    try {
+      // Create image bitmap for processing
+      const imageBitmap = await createImageBitmap(file);
+
+      // Calculate scale to reduce dimensions (helps with size)
+      // Start with max 2048px on longest side, will reduce further if needed
+      let maxDimension = 2048;
+      const scale = Math.min(
+        1,
+        maxDimension / Math.max(imageBitmap.width, imageBitmap.height),
+      );
+
+      // Try progressively smaller dimensions and quality levels
+      const attempts = [
+        { maxDim: 2048, quality: 0.85 },
+        { maxDim: 1600, quality: 0.80 },
+        { maxDim: 1600, quality: 0.70 },
+        { maxDim: 1600, quality: 0.60 },
+        { maxDim: 1200, quality: 0.70 },
+        { maxDim: 1200, quality: 0.60 },
+        { maxDim: 1200, quality: 0.50 },
+        { maxDim: 800, quality: 0.70 },
+        { maxDim: 800, quality: 0.50 },
+      ];
+
+      for (const { maxDim, quality } of attempts) {
+        const scale = Math.min(
+          1,
+          maxDim / Math.max(imageBitmap.width, imageBitmap.height),
+        );
+        const width = Math.floor(imageBitmap.width * scale);
+        const height = Math.floor(imageBitmap.height * scale);
+
+        // Create canvas with scaled dimensions
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          throw new Error("Failed to get canvas context");
+        }
+
+        // Draw scaled image
+        ctx.drawImage(imageBitmap, 0, 0, width, height);
+
+        // Convert to JPEG blob with specified quality
+        const blob = await canvas.convertToBlob({
+          type: "image/jpeg",
+          quality,
+        });
+
+        // Check if we're under the size limit
+        if (blob.size <= maxSizeBytes) {
+          console.log(
+            `Compressed ${file.name}: ${this._formatFileSize(file.size)} → ${this._formatFileSize(blob.size)} (${width}x${height}, q${quality})`,
+          );
+          return blob;
+        }
+      }
+
+      // If all attempts failed, return the last (smallest) attempt
+      const minScale = Math.min(
+        1,
+        800 / Math.max(imageBitmap.width, imageBitmap.height),
+      );
+      const width = Math.floor(imageBitmap.width * minScale);
+      const height = Math.floor(imageBitmap.height * minScale);
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(imageBitmap, 0, 0, width, height);
+      const finalBlob = await canvas.convertToBlob({
+        type: "image/jpeg",
+        quality: 0.5,
+      });
+
+      console.warn(
+        `Could not compress ${file.name} below ${this._formatFileSize(maxSizeBytes)}. Final size: ${this._formatFileSize(finalBlob.size)}`,
+      );
+      return finalBlob;
+    } catch (error) {
+      console.error("Compression failed, using original:", error);
+      return file;
+    }
+  }
+
   private _processFile(file: File): Promise<ImageData> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const reader = new FileReader();
       const id = this._generateId();
+
+      // Compress if maxSizeBytes is set and file exceeds it
+      let fileToProcess: Blob = file;
+      if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
+        try {
+          fileToProcess = await this._compressImage(file, this.maxSizeBytes);
+        } catch (error) {
+          console.error("Compression failed, using original file:", error);
+          // Continue with original file if compression fails
+        }
+      }
 
       reader.onload = () => {
         try {
@@ -327,8 +443,8 @@ export class CTImageInput extends BaseElement {
               timestamp: Date.now(),
               width: img.width,
               height: img.height,
-              size: file.size,
-              type: file.type,
+              size: fileToProcess.size, // Use compressed size
+              type: fileToProcess.type || file.type,
             };
 
             resolve(imageData);
@@ -348,7 +464,7 @@ export class CTImageInput extends BaseElement {
         reject(new Error("Failed to read file"));
       };
 
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(fileToProcess);
     });
   }
 
