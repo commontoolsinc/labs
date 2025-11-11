@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, compute } from "commontools";
+import { cell, computed } from "commontools";
 
 export default function TestComputeConditionalExpression() {
   const value = cell(10);
@@ -7,7 +7,7 @@ export default function TestComputeConditionalExpression() {
   const a = cell(100);
   const b = cell(200);
 
-  const result = compute(() =>
+  const result = computed(() =>
     value.get() > threshold.get() ? a.get() : b.get()
   );
 

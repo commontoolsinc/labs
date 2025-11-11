@@ -24,7 +24,7 @@ import {
 import { h } from "@commontools/html";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import { recipe } from "./recipe.ts";
-import { byRef, compute, derive, handler, lift, render } from "./module.ts";
+import { byRef, computed, derive, handler, lift } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -83,8 +83,7 @@ export const createBuilder = (): {
       lift,
       handler,
       derive,
-      compute,
-      render,
+      computed,
 
       // Built-in modules
       str,

@@ -1057,9 +1057,7 @@ export type DeriveFunction = {
   ): OpaqueRef<Out>;
 };
 
-export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
-
-export type RenderFunction = <T>(fn: () => T) => OpaqueRef<T>;
+export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
 export type StrFunction = (
   strings: TemplateStringsArray,
@@ -1176,8 +1174,7 @@ export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const derive: DeriveFunction;
-export declare const compute: ComputeFunction;
-export declare const render: RenderFunction;
+export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 export declare const llm: LLMFunction;
