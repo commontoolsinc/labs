@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface PersistenceDefaultsArgs {
   value: Default<number, 0>;

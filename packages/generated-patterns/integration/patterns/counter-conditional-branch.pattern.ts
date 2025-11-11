@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  handler,
-  ifElse,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, ifElse, lift, recipe, str } from "commontools";
 
 interface ConditionalBranchArgs {
   value: Default<number, 0>;

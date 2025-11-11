@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface MutableTupleArgs {
   pair: Default<[number, number], [0, 0]>;
