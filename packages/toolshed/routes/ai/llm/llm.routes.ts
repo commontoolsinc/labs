@@ -72,7 +72,7 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
 
 export const GenerateObjectRequestSchema = toZod<LLMGenerateObjectRequest>()
   .with({
-    prompt: z.string(),
+    messages: z.array(MessageSchema) as any,
     schema: z.record(z.string(), z.any()),
     system: z.string().optional(),
     cache: z.boolean().default(true).optional(),
@@ -282,8 +282,11 @@ export const generateObject = createRoute({
         "application/json": {
           schema: GenerateObjectRequestSchema.openapi({
             example: {
-              prompt:
-                "What is the first thing that comes to mind when I say 'apple'?",
+              messages: [{
+                role: "user",
+                content:
+                  "What is the first thing that comes to mind when I say 'apple'?",
+              }],
               schema: {
                 type: "object",
                 properties: {

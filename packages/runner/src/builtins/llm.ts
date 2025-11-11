@@ -10,6 +10,7 @@ import {
 import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
+  BuiltInLLMMessage,
   BuiltInLLMParams,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
@@ -446,8 +447,11 @@ export function generateObject<T extends Record<string, unknown>>(
 
     const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
 
+    // Convert prompt to messages format, consistent with generateText
+    const messages: BuiltInLLMMessage[] = [{ role: "user", content: prompt }];
+
     const generateObjectParams: LLMGenerateObjectRequest = {
-      prompt,
+      messages,
       maxTokens: maxTokens ?? 8192,
       schema: JSON.parse(JSON.stringify(schema)),
       model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,

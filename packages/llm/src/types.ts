@@ -56,7 +56,7 @@ export interface LLMRequest {
 
 export interface LLMGenerateObjectRequest {
   schema: Record<string, unknown>;
-  prompt: string;
+  messages: BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
   cache?: boolean;
