@@ -40,7 +40,7 @@ describe("Recipe Runner", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({
       lift,
       derive,

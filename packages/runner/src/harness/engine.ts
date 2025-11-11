@@ -106,9 +106,8 @@ export class Engine extends EventTarget implements Harness {
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
-    const { runtimeExports, exportsCallback } = await RuntimeModules.getExports(
-      this.ctRuntime,
-    );
+    const { runtimeExports, exportsCallback } = await RuntimeModules
+      .getExports();
     return { compiler, runtime, isolate, runtimeExports, exportsCallback };
   }
 

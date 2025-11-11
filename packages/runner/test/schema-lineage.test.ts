@@ -272,7 +272,7 @@ describe("Schema propagation end-to-end example", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ recipe, UI } = commontools);
   });
 

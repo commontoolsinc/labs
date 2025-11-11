@@ -27,7 +27,7 @@ describe("fetch-data mutex mechanism", () => {
     });
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     recipe = commontools.recipe;
     byRef = commontools.byRef;
 

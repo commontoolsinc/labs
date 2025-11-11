@@ -42,7 +42,6 @@ import {
 import { cellConstructorFactory } from "../cell.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
-import type { IRuntime } from "../runtime.ts";
 
 // Runtime implementation of toSchema - this should never be called
 // The TypeScript transformer should replace all calls at compile time
@@ -58,9 +57,7 @@ const toSchema: ToSchemaFunction = (_options?) => {
  * @param runtime - The runtime instance to use for cell creation
  * @returns An object containing all builder functions
  */
-export const createBuilder = (
-  runtime: IRuntime,
-): {
+export const createBuilder = (): {
   commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {

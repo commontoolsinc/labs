@@ -49,8 +49,8 @@ export const getTypes = (() => {
   };
 })();
 
-export function getExports(runtime: IRuntime) {
-  const { commontools, exportsCallback } = createBuilder(runtime);
+export function getExports() {
+  const { commontools, exportsCallback } = createBuilder();
   return {
     runtimeExports: {
       "commontools": commontools,

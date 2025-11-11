@@ -52,7 +52,7 @@ describe("Conflict Reproduction", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ lift, recipe, cell, handler } = commontools);
   });
 

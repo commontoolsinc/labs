@@ -85,7 +85,7 @@ describe("Cell Static Methods", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ Cell } = commontools);
   });
 
