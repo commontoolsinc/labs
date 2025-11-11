@@ -1555,7 +1555,9 @@ function rewriteCaptureReferences(
     // Don't substitute identifiers that are property names
     if (ts.isIdentifier(node)) {
       // Skip if this identifier is the property name in a property access (e.g., '.get' in 'obj.get')
-      if (parent && ts.isPropertyAccessExpression(parent) && parent.name === node) {
+      if (
+        parent && ts.isPropertyAccessExpression(parent) && parent.name === node
+      ) {
         return node;
       }
 
@@ -1565,7 +1567,10 @@ function rewriteCaptureReferences(
       }
 
       // Skip if this identifier is a shorthand property name (e.g., 'foo' in '{ foo }')
-      if (parent && ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+      if (
+        parent && ts.isShorthandPropertyAssignment(parent) &&
+        parent.name === node
+      ) {
         return node;
       }
 
@@ -1578,7 +1583,10 @@ function rewriteCaptureReferences(
     return ts.visitEachChild(node, (child) => visitor(child, node), undefined);
   };
 
-  return ts.visitNode(body, (node) => visitor(node, undefined)) as ts.ConciseBody;
+  return ts.visitNode(
+    body,
+    (node) => visitor(node, undefined),
+  ) as ts.ConciseBody;
 }
 
 /**
