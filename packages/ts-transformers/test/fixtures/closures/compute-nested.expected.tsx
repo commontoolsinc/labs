@@ -28,13 +28,16 @@ export default recipe(() => {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
-            sum: true
+            sum: {
+                type: "number",
+                asOpaque: true
+            }
         },
         required: ["sum"]
     } as const satisfies __ctHelpers.JSONSchema, {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum.get() * 2);
+    } as const satisfies __ctHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
     return doubled;
 });
 // @ts-ignore: Internals
