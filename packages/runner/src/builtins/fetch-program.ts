@@ -2,18 +2,9 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
 import { HttpProgramResolver } from "@commontools/js-runtime/program.ts";
 import { resolveProgram } from "@commontools/js-runtime/typescript/resolver.ts";
 import { TARGET } from "@commontools/js-runtime/typescript/options.ts";
-import {
-  computeInputHash,
-  internalSchema,
-  tryClaimMutex,
-  tryWriteResult,
-} from "./fetch-utils.ts";
-
-const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
 export interface ProgramResult {
   files: Array<{ name: string; contents: string }>;
@@ -22,108 +13,60 @@ export interface ProgramResult {
 
 /**
  * Fetch and resolve a program from a URL.
- *
- * Returns the resolved program as `result` with structure { files, main }.
- * `pending` is true while resolution is in progress.
- *
- * @param url - A cell containing the URL to fetch the program from.
- * @returns { pending: boolean, result: ProgramResult, error: any } - As individual cells.
+ * Returns { pending, result: { files, main }, error }
  */
 export function fetchProgram(
-  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
+  inputsCell: Cell<{ url: string }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  addCancel: (cancel: () => void) => void,
+  _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<ProgramResult | undefined>;
-  let error: Cell<any | undefined>;
-  let internal: Cell<Schema<typeof internalSchema>>;
-  let myRequestId: string | undefined = undefined;
-  let abortController: AbortController | undefined = undefined;
-
-  // This is called when the recipe containing this node is being stopped.
-  addCancel(() => {
-    // Abort the request if it's still pending.
-    abortController?.abort("Recipe stopped");
-
-    // Only try to update state if cells were initialized
-    if (!cellsInitialized) return;
-
-    const tx = runtime.edit();
-
-    try {
-      // If the pending request is ours, set pending to false and clear the requestId.
-      const currentRequestId = internal.withTx(tx).key("requestId").get();
-      if (currentRequestId === myRequestId) {
-        pending.withTx(tx).set(false);
-        internal.withTx(tx).key("requestId").set("");
-      }
-
-      tx.commit();
-    } catch (_) {
-      // Ignore errors during cleanup - the runtime might be shutting down
-      tx.abort();
-    }
-  });
+  let error: Cell<string | undefined>;
+  let initialized = false;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
+    // Initialize cells once
+    if (!initialized) {
       pending = runtime.getCell(
         parentCell.space,
         { fetchProgram: { pending: cause } },
         undefined,
         tx,
       );
-
-      result = runtime.getCell<ProgramResult | undefined>(
+      result = runtime.getCell(
         parentCell.space,
-        {
-          fetchProgram: { result: cause },
-        },
+        { fetchProgram: { result: cause } },
         undefined,
         tx,
       );
-
-      error = runtime.getCell<any | undefined>(
+      error = runtime.getCell(
         parentCell.space,
-        {
-          fetchProgram: { error: cause },
-        },
+        { fetchProgram: { error: cause } },
         undefined,
-        tx,
-      );
-
-      internal = runtime.getCell(
-        parentCell.space,
-        { fetchProgram: { internal: cause } },
-        internalSchema,
         tx,
       );
 
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      internal.setSourceCell(parentCell);
 
-      // Kick off sync in the background
       pending.sync();
       result.sync();
       error.sync();
-      internal.sync();
 
-      cellsInitialized = true;
+      initialized = true;
     }
 
-    // Set results to links to our cells
+    // Send cell references
     sendResult(tx, { pending, result, error });
 
     const { url } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(tx, inputsCell);
 
+    // If no URL, clear everything
     if (!url) {
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
@@ -131,121 +74,43 @@ export function fetchProgram(
       return;
     }
 
-    // Check if inputs changed - if so, abort any in-flight request
-    const currentInternal = internal.withTx(tx).get();
-    if (myRequestId && currentInternal?.inputHash !== inputHash) {
-      abortController?.abort("Inputs changed");
-      myRequestId = undefined;
-    }
+    // Check if already pending or already have result for this URL
+    const isPending = pending.withTx(tx).get();
+    if (isPending) return;
 
-    // Try to start a new request
-    if (!myRequestId) {
-      const newRequestId = crypto.randomUUID();
+    // Start resolution
+    pending.withTx(tx).set(true);
 
-      // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(
-        runtime,
-        inputsCell,
-        pending,
-        internal,
-        newRequestId,
-        PROGRAM_REQUEST_TIMEOUT,
-      ).then(
-        ({ claimed, inputs, inputHash }) => {
-          if (!claimed) {
-            // Another tab is handling this, we're done
-            return;
-          }
+    (async () => {
+      try {
+        const resolver = new HttpProgramResolver(url);
+        const program = await resolveProgram(resolver, {
+          unresolvedModules: { type: "allow-all" },
+          resolveUnresolvedModuleTypes: true,
+          target: TARGET,
+        });
 
-          const { url } = inputs;
+        await runtime.idle();
 
-          // Check if URL became empty while waiting for mutex
-          if (!url) {
-            // Release the lock and clear state
-            myRequestId = undefined;
-            runtime.editWithRetry((tx) => {
-              pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
-              error.withTx(tx).set(undefined);
-              internal.withTx(tx).set({
-                requestId: "",
-                lastActivity: 0,
-                inputHash: "",
-              });
-            });
-            return;
-          }
+        runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set({
+            files: program.files,
+            main: program.main,
+          });
+          error.withTx(tx).set(undefined);
+        });
+      } catch (err) {
+        await runtime.idle();
 
-          abortController = new AbortController();
-
-          // We claimed the mutex, start the resolution
-          myRequestId = newRequestId;
-          startResolve(
-            runtime,
-            inputsCell,
-            url,
-            inputHash,
-            pending,
-            result,
-            error,
-            internal,
-            abortController.signal,
+        runtime.editWithRetry((tx) => {
+          pending.withTx(tx).set(false);
+          result.withTx(tx).set(undefined);
+          error.withTx(tx).set(
+            err instanceof Error ? err.message : String(err),
           );
-        },
-      );
-    }
+        });
+      }
+    })();
   };
-}
-
-async function startResolve(
-  runtime: IRuntime,
-  inputsCell: Cell<{ url: string }>,
-  url: string,
-  inputHash: string,
-  pending: Cell<boolean>,
-  result: Cell<ProgramResult | undefined>,
-  error: Cell<any | undefined>,
-  internal: Cell<Schema<typeof internalSchema>>,
-  abortSignal: AbortSignal,
-) {
-  try {
-    // Create HTTP program resolver
-    const resolver = new HttpProgramResolver(url);
-
-    // Resolve the program with all dependencies
-    const program = await resolveProgram(resolver, {
-      unresolvedModules: { type: "allow-all" },
-      resolveUnresolvedModuleTypes: true,
-      target: TARGET,
-    });
-
-    // Check if aborted during resolution
-    if (abortSignal.aborted) return;
-
-    await runtime.idle();
-
-    // Try to write result - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set({
-        files: program.files,
-        main: program.main,
-      });
-      error.withTx(tx).set(undefined);
-    });
-  } catch (err) {
-    // Don't write errors if request was aborted
-    if (abortSignal.aborted) return;
-
-    await runtime.idle();
-
-    // Try to write error - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-      error.withTx(tx).set(
-        err instanceof Error ? err.message : String(err),
-      );
-    });
-  }
 }
