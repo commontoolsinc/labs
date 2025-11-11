@@ -3154,13 +3154,21 @@ interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "maxImages"?: number;
   "capture"?: "user" | "environment" | false;
   "buttonText"?: string;
-  "variant"?: "default" | "primary" | "secondary" | "outline" | "ghost" | "link" | "destructive";
+  "variant"?:
+    | "default"
+    | "primary"
+    | "secondary"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "destructive";
   "size"?: "default" | "sm" | "lg" | "icon";
   "showPreview"?: boolean;
   "previewSize"?: "sm" | "md" | "lg";
   "removable"?: boolean;
   "disabled"?: boolean;
   "images"?: any[]; // ImageData[]
+  "$images"?: any; // CellLike<ImageData[]>
   "onct-change"?: EventHandler<any>;
   "onct-remove"?: EventHandler<any>;
   "onct-error"?: EventHandler<any>;

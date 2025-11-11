@@ -90,9 +90,21 @@ export default recipe<ImageChatInput, ImageChatOutput>(
                   showPreview={true}
                   previewSize="md"
                   removable={true}
+                  $images={images}
+                />
+
+                {/*also works*/}
+                {
+                  /*<ct-image-input
+                  multiple={true}
+                  maxImages={5}
+                  showPreview={true}
+                  previewSize="md"
+                  removable={true}
                   images={images}
                   onct-change={handleImageChange({ images })}
-                />
+                />*/
+                }
               </ct-vstack>
             </ct-card>
 
