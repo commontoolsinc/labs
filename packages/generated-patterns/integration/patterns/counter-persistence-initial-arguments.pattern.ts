@@ -74,14 +74,6 @@ const sanitizeHistory = (
   return sanitized;
 };
 
-const cloneNormalizedState = (
-  state: NormalizedState,
-): NormalizedState => ({
-  value: state.value,
-  step: state.step,
-  history: [...state.history],
-});
-
 const normalizeState = (
   input: PersistedState | undefined,
 ): NormalizedState => {
