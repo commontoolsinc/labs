@@ -768,7 +768,7 @@ export interface BuiltInLLMDialogState {
 
 export interface BuiltInGenerateObjectParams {
   model?: string;
-  prompt?: string;
+  prompt?: BuiltInLLMContent;
   schema?: JSONSchema;
   system?: string;
   cache?: boolean;
@@ -777,7 +777,7 @@ export interface BuiltInGenerateObjectParams {
 }
 
 export interface BuiltInGenerateTextParams {
-  prompt: string;
+  prompt: BuiltInLLMContent;
   system?: string;
   model?: string;
   maxTokens?: number;
