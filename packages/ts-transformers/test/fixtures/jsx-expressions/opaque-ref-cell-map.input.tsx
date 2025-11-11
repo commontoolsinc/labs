@@ -2,7 +2,6 @@
 import {
   Cell,
   cell,
-  createCell,
   handler,
   ifElse,
   lift,
@@ -32,7 +31,7 @@ const createCellRef = lift(
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
       console.log("Creating cellRef - first time");
-      const newCellRef = createCell(undefined, "charmsArray");
+      const newCellRef = Cell.for<any[]>("charmsArray");
       newCellRef.set([]);
       storedCellRef.set(newCellRef);
       isInitialized.set(true);

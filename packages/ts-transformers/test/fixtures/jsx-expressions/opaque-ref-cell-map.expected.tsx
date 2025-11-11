@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
     [NAME]: "Some Simple Recipe",
@@ -15,7 +15,7 @@ const createCellRef = lift({
 }, undefined, ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
-        const newCellRef = createCell(undefined, "charmsArray");
+        const newCellRef = Cell.for<any[]>("charmsArray");
         newCellRef.set([]);
         storedCellRef.set(newCellRef);
         isInitialized.set(true);
