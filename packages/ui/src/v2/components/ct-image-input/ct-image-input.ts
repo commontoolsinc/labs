@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { ifDefined } from "lit/directives/if-defined.js";
-import type { ButtonVariant, ButtonSize } from "../ct-button/ct-button.ts";
+import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
 import { type Cell } from "@commontools/runner";
 import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
@@ -440,34 +440,36 @@ export class CTImageInput extends BaseElement {
         </ct-button>
 
         ${this.loading
-          ? html`<div class="loading">Processing images...</div>`
-          : ""}
-        ${this.showPreview && currentImages.length > 0
           ? html`
-              <div class="previews">
-                ${currentImages.map(
-                  (image) => html`
+            <div class="loading">Processing images...</div>
+          `
+          : ""} ${this.showPreview && currentImages.length > 0
+          ? html`
+            <div class="previews">
+              ${currentImages.map(
+                (image) =>
+                  html`
                     <div class="preview-item size-${this.previewSize}">
                       <img src="${image.url}" alt="${image.name}" />
                       ${this.removable
                         ? html`
-                            <button
-                              class="remove-button"
-                              @click="${() => this._handleRemove(image.id)}"
-                              aria-label="Remove image"
-                            >
-                              ×
-                            </button>
-                          `
+                          <button
+                            class="remove-button"
+                            @click="${() => this._handleRemove(image.id)}"
+                            aria-label="Remove image"
+                          >
+                            ×
+                          </button>
+                        `
                         : ""}
                       <div class="image-info" title="${image.name}">
                         ${image.name} (${this._formatFileSize(image.size)})
                       </div>
                     </div>
                   `,
-                )}
-              </div>
-            `
+              )}
+            </div>
+          `
           : ""}
       </div>
     `;

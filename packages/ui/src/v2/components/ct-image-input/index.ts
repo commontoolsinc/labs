@@ -5,4 +5,4 @@ if (!customElements.get("ct-image-input")) {
 }
 
 export { CTImageInput };
-export type { ImageData, ExifData } from "./ct-image-input.ts";
+export type { ExifData, ImageData } from "./ct-image-input.ts";
