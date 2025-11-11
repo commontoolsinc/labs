@@ -153,6 +153,13 @@ keywords/features.
   - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,
     $mentioned, backlinks, cell
 
+- on-demand-pattern-creation.tsx: Demonstrates creating child patterns on-demand
+  in handlers when they share parent cell references. Shows view selector that
+  creates ListView or GridView patterns when user selects them.
+  - **Data types**: array of objects (Item with title/done)
+  - **Keywords**: handler, pattern composition, conditional creation, ifElse,
+    cell, derive, dynamic instantiation
+
 - output_schema.tsx: Demonstrates explicit output schema typing
   - **Data types**: number, VNode
   - **Keywords**: handler, output schema, type safety, ct-button

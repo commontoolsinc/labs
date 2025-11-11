@@ -454,6 +454,94 @@ const addItemWithTimestamp = handler<
 );
 ```
 
+### Storing Pattern Instances in Cell Arrays
+
+**⚠️ CRITICAL:** When storing pattern instances (recipes) in a `Cell` array, you must use a `lift` function to perform the `.push()` operation. Calling `.push()` directly in a handler will cause a stack overflow.
+
+This pattern is commonly used to create "charm lists" or "pattern collections" (like a list of chat instances).
+
+#### ❌ WRONG - Stack Overflow
+
+```typescript
+import { handler, Cell, ID } from "commontools";
+
+type Entry = {
+  [ID]: string;
+  local_id: string;
+  charm: any;
+};
+
+// ❌ This will cause: RangeError: Maximum call stack size exceeded
+const createPattern = handler<
+  unknown,
+  { patternsList: Cell<Entry[]> }
+>(
+  (_, { patternsList }) => {
+    const pattern = MyPattern({ title: "New" });
+
+    // ❌ WRONG: Direct .push() in handler causes stack overflow
+    patternsList.push({
+      [ID]: randomId,
+      local_id: randomId,
+      charm: pattern
+    });
+  }
+);
+```
+
+#### ✅ CORRECT - Use lift()
+
+```typescript
+import { handler, Cell, ID, lift, toSchema, cell, OpaqueRef } from "commontools";
+
+type Entry = {
+  [ID]: string;
+  local_id: string;
+  charm: any;
+};
+
+// ✅ CORRECT: Wrap the push operation in a lift function
+const storePattern = lift<{
+  charm: any;
+  patternsList: Cell<Entry[]>;
+  isInitialized: Cell<boolean>;
+}, undefined>(
+  ({ charm, patternsList, isInitialized }) => {
+    if (!isInitialized.get()) {
+      // ✅ CORRECT: .push() happens inside lift, not handler
+      patternsList.push({
+        // Note: Using a stable ID here - in real code use proper ID generation
+        local_id: `pattern-${Date.now()}`,
+        charm
+      });
+      isInitialized.set(true);
+    }
+  }
+);
+
+// Handler returns the lift call instead of pushing directly
+const createPattern = handler<
+  unknown,
+  { patternsList: Cell<Entry[]> }
+>(
+  (_, { patternsList }) => {
+    const isInitialized = cell(false);
+    const pattern = MyPattern({ title: "New" });
+
+    // ✅ CORRECT: Return the lift function call (no casting needed with modern types)
+    return storePattern({
+      charm: pattern,
+      patternsList,
+      isInitialized
+    });
+  }
+);
+```
+
+**Why this matters:** The pattern instance storage workflow requires coordination between the handler (which creates the instance) and the lift (which stores it). This separation prevents the recursion detector in `recursivelyAddIDIfNeeded()` from encountering circular references.
+
+**Reference:** See `packages/patterns/chatbot-list-view.tsx` for the canonical implementation of this pattern, particularly the `storeCharm` lift function and `createChatRecipe` handler.
+
 #### Improving Event Typing
 
 While `Record<string, never>` works for simple handlers that don't use event data, better event typing improves development experience and catches errors:

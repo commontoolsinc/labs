@@ -432,11 +432,11 @@ logic.
    });
    ```
 
-7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays with bidirectional binding, you **must** add the `OpaqueRef<T>` type annotation to make it type-check correctly:
+7. **Type Array Map Parameters When Needed**: When mapping over cell arrays, TypeScript usually infers types correctly, but you may need to add type annotations in some cases:
 
    ```typescript
-   // ✅ CORRECT - Type as OpaqueRef for bidirectional binding
-   {items.map((item: OpaqueRef<ShoppingItem>) => (
+   // ✅ USUALLY WORKS - Type inference handles most cases
+   {items.map((item) => (
      <div>
        <ct-checkbox $checked={item.done}>
          <span>{item.title}</span>
@@ -445,13 +445,22 @@ logic.
      </div>
    ))}
 
-   // ❌ INCORRECT - Missing type leads to type errors with $-props
-   {items.map((item) => (
-     <ct-checkbox $checked={item.done} /> // Type error!
+   // ✅ ADD TYPE IF NEEDED - For complex scenarios or type errors
+   {items.map((item: OpaqueRef<ShoppingItem>) => (
+     <ct-checkbox $checked={item.done}>
+       <span>{item.title}</span>
+     </ct-checkbox>
    ))}
    ```
 
-   **Why is this needed?** When you use `.map()` on a Cell array, TypeScript cannot always infer the correct type for bidirectional binding properties. The `OpaqueRef<T>` annotation tells TypeScript that each item is a cell-like reference that supports property access and bidirectional binding.
+   **When to add types:**
+   - If you see TypeScript errors with bidirectional binding (`$-props`)
+   - When working with complex nested structures
+   - When TypeScript cannot infer the correct type
+
+   **When to skip types:**
+   - Most simple cases work fine without explicit types
+   - The framework usually handles type inference correctly
 
 8. **Understand When Conditionals Work in JSX**: Ternary operators work fine in JSX **attributes**, but you need `ifElse()` for conditional **rendering** and **data transformations**:
 
@@ -534,6 +543,82 @@ logic.
    **When to use lift:** When you need a reusable transformation function that you'll call with different inputs.
 
    **When to use derive:** When you're computing a single value from specific cells.
+
+   **⚠️ Include All Closed-Over Cells in Derive Dependencies**: When your derive callback references cells, you must include them in the dependency array:
+
+   ```typescript
+   // ❌ INCORRECT - items is closed over but not in dependencies
+   {derive(itemCount, (count) =>
+     count === 0 ? (
+       <div>No items yet</div>
+     ) : (
+       <div>
+         {items.map((item) => <div>{item.title}</div>)}
+       </div>
+     )
+   )}
+
+   // ✅ CORRECT - Include all cells used in the callback
+   {derive([itemCount, items] as const, ([count, itemsList]: [number, Item[]]) =>
+     count === 0 ? (
+       <div>No items yet</div>
+     ) : (
+       <div>
+         {itemsList.map((item) => <div>{item.title}</div>)}
+       </div>
+     )
+   )}
+
+   // Alternative: Use ternary directly if you don't need reactivity
+   {itemCount === 0 ? (
+     <div>No items yet</div>
+   ) : (
+     <div>
+       {items.map((item) => <div>{item.title}</div>)}
+     </div>
+   )}
+   ```
+
+   **⚠️ CRITICAL: Items Inside Derive Callbacks Are Read-Only**:
+
+   When you use `derive()` for conditional rendering and then `.map()` over arrays inside the callback, the items become **read-only snapshots**. This means you cannot access mutable properties or use bidirectional binding on those items.
+
+   ```typescript
+   // ❌ BROKEN - Using derive for conditional rendering with .map()
+   {derive(customFields, (fields) => fields.length > 0 ? (
+     <ct-vstack>
+       {fields.map((field) => (
+         <ct-input
+           value={field.value}  // field.value will be undefined/read-only!
+           onct-input={updateField({ fieldKey: field.key })}
+         />
+       ))}
+     </ct-vstack>
+   ) : null)}
+
+   // ✅ CORRECT - Use ifElse for conditional rendering, map over cell directly
+   {ifElse(
+     derive(customFields, (fields) => fields.length > 0),
+     <ct-vstack>
+       {customFields.map((field) => (  // Map over the cell, not the derived array
+         <ct-input
+           value={field.value}  // Now field.value works correctly!
+           onct-input={updateField({ fieldKey: field.key })}
+         />
+       ))}
+     </ct-vstack>,
+     null
+   )}
+   ```
+
+   **Why this happens**: Inside a `derive()` callback, all values are immutable snapshots for consistency. When you map over a derived array, each item is also a snapshot, losing access to mutable properties.
+
+   **The fix**: Use `ifElse()` for conditional rendering (which only needs a reactive boolean), and map directly over the cell itself. This keeps the items mutable and accessible.
+
+   **This applies to**:
+   - Bidirectional binding (`$checked`, `$value`)
+   - Accessing nested cell properties (`.value`, `.field`)
+   - Any pattern where you need to interact with individual items in a mapped array
 
 10. **Access Properties Directly on Derived Objects**: You can access properties on derived objects without additional helpers:
 
@@ -716,6 +801,71 @@ logic.
    rather than directly in recipes.
 
 21. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
+
+22. **Create Patterns On-Demand for Conditional Composition**: When composing patterns that share parent cell references and are conditionally instantiated, create them on-demand in handlers rather than during recipe initialization:
+
+    ```typescript
+    // ❌ WRONG - Creating shared-cell patterns during recipe init
+    export default recipe("Launcher", ({ items }) => {
+      const currentView = cell("none");
+
+      // These patterns share the 'items' cell but are created upfront
+      const listView = ShoppingList({ items });
+      const gridView = GridView({ items });
+
+      // Later conditionally shown based on user selection...
+    });
+    ```
+
+    ```typescript
+    // ✅ CORRECT - Create patterns on-demand in handlers
+    const selectList = handler<
+      unknown,
+      { items: any; currentView: Cell<any> }
+    >((_event, { items, currentView }) => {
+      // Create pattern when user selects it
+      const view = ShoppingList({ items });
+      currentView.set(view);
+    });
+
+    const selectGrid = handler<
+      unknown,
+      { items: any; currentView: Cell<any> }
+    >((_event, { items, currentView }) => {
+      const view = GridView({ items });
+      currentView.set(view);
+    });
+
+    export default recipe("Launcher", ({ items }) => {
+      const currentView = cell(null);
+
+      return {
+        [UI]: (
+          <div>
+            <ct-button onClick={selectList({ items, currentView })}>
+              List View
+            </ct-button>
+            <ct-button onClick={selectGrid({ items, currentView })}>
+              Grid View
+            </ct-button>
+            <div>{currentView}</div>
+          </div>
+        ),
+      };
+    });
+    ```
+
+    **Why this matters**: Creating patterns that share parent cells during recipe initialization can cause "Shadow ref alias with parent cell not found in current frame" errors when those patterns are conditionally instantiated. The framework's cell tracking system works best when patterns are created on-demand in response to user events.
+
+    **When this applies**:
+    - Child patterns share cell references with parent
+    - Patterns are created conditionally based on user selection
+    - You see "Shadow ref alias" errors
+
+    **When upfront creation is fine**:
+    - All patterns are always rendered (even if hidden with CSS/ifElse)
+    - Patterns don't share parent cell references
+    - No conditional instantiation
 
 ## Type Best Practices
 
@@ -1187,3 +1337,161 @@ export default recipe<Input, Output>(
   }
 );
 ```
+
+## Pattern Discovery with wish()
+
+Patterns can discover and interact with other charms in the space using `wish()`.
+
+### Auto-Discovering All Charms
+
+```tsx
+import { wish, derive } from "commontools";
+
+// Get all charms in the space
+const allCharms = derive<any[], any[]>(
+  wish<any[]>("#allCharms", []),
+  (c) => c,
+);
+
+// Filter for specific pattern types
+const personCharms = derive(allCharms, (charms) =>
+  charms.filter((charm: any) =>
+    charm && typeof charm === "object" && "profile" in charm
+  )
+);
+
+// Use in your UI
+const personCount = derive(personCharms, (list) => list.length);
+```
+
+### Common Wish Patterns
+
+| Wish | Purpose | Example Use Case |
+|------|---------|------------------|
+| `wish("#allCharms", [])` | All charms in space | Meta-analysis, aggregation |
+| `wish("#mentionable", [])` | Charms available for `[[` refs | Autocomplete lists |
+| `wish("#recentCharms", [])` | Recently viewed | Navigation helpers |
+
+### When to Use wish vs Manual Linking
+
+**Use wish when:**
+- You want to find all charms of a certain type
+- The list of charms changes dynamically
+- You're building meta-patterns (analyzers, dashboards)
+
+**Use manual linking when:**
+- You need a specific charm reference that doesn't change
+- You're connecting exactly two patterns
+- The relationship is one-to-one
+
+Example: A meta-analyzer that finds all Person charms should use `wish("#allCharms")` and filter. A single Person linked to their Company record should use explicit linking.
+
+## Exporting Tools with patternTool
+
+Patterns can export functions that chatbots and other patterns can call programmatically using `patternTool`.
+
+### When to Use patternTool
+
+**Use `patternTool` when:**
+- You need to parametrize the operation (e.g., supply a search term, filter criteria)
+- The operation requires input from the caller beyond what's in the pattern's state
+
+**Don't use `patternTool` when:**
+- The chatbot just needs to read data - simply return the data alongside your UI
+- Example: `return { [UI]: <MyUI />, items }` - chatbot can read `items` directly
+
+### Basic Pattern Tool
+
+```tsx
+import { patternTool, derive } from "commontools";
+
+return {
+  [UI]: <MyUI />,
+  content,
+  // Export a tool for searching content
+  searchContent: patternTool(
+    ({ query, content }: { query: string; content: string }) => {
+      return derive({ query, content }, ({ query, content }) => {
+        if (!query) return [];
+        return content.split("\n").filter((line) =>
+          line.toLowerCase().includes(query.toLowerCase())
+        );
+      });
+    },
+    { content } // Bind to pattern fields
+  ),
+};
+```
+
+### How Parameter Splitting Works
+
+The second argument to `patternTool` determines which parameters are pre-filled vs. callable:
+
+```tsx
+// Function signature has: { items: Item[], query: string }
+// Second argument supplies: { items }
+// Result: query becomes the tool parameter
+searchItems: patternTool(
+  ({ items, query }: { items: Item[], query: string }) => {
+    return derive({ items, query }, ({ items, query }) =>
+      items.filter(item => item.text.includes(query))
+    );
+  },
+  { items }  // Pre-fill items, query is left as a parameter
+)
+```
+
+**Key insight:** Only supply **some** of the function's inputs in the second argument. The remainder become tool parameters that the caller (chatbot/pattern) must provide.
+
+### Pattern Tool Best Practices
+
+1. **Return derived values**: patternTool functions should return `derive()` results
+2. **Bind to pattern fields**: Second argument connects to your pattern's data
+3. **Clear function signatures**: Type your inputs for better tool calling
+4. **Useful operations**: Export things chatbots would want to do (search, summarize, extract)
+5. **Parameter splitting**: Use the second argument to pre-fill pattern data, leaving caller-specific params open
+
+### Example: Person Pattern Tools
+
+```tsx
+return {
+  [UI]: <PersonUI />,
+  displayName,
+  emails,
+  notes,
+  // Tools for omnibot/chatbot
+  getContactInfo: patternTool(
+    ({ displayName, emails }: { displayName: string; emails: EmailEntry[] }) => {
+      return derive({ displayName, emails }, ({ displayName, emails }) => {
+        const parts = [`Name: ${displayName || "Not provided"}`];
+        if (emails && emails.length > 0) {
+          parts.push(`Email: ${emails[0].value}`);
+        }
+        return parts.join("\n");
+      });
+    },
+    { displayName, emails }
+  ),
+  searchNotes: patternTool(
+    ({ query, notes }: { query: string; notes: string }) => {
+      return derive({ query, notes }, ({ query, notes }) => {
+        if (!query || !notes) return [];
+        return notes.split("\n").filter((line) =>
+          line.toLowerCase().includes(query.toLowerCase())
+        );
+      });
+    },
+    { notes }
+  ),
+};
+```
+
+### How Chatbots Use Pattern Tools
+
+When a charm with patternTool exports is attached to a chatbot:
+1. The tools appear in the chatbot's available tools list
+2. The LLM can call them like: `PersonCharm_searchNotes({ query: "MIT" })`
+3. Results are returned to the LLM for further processing
+
+This enables rich AI interactions where the chatbot can programmatically query and extract information from attached charms.
+

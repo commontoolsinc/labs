@@ -103,6 +103,7 @@ patterns/feature/
 - **Data doesn't update** → Check `$` prefix for bidirectional binding
 - **Handler not called** → Verify event name matches component (e.g., `onct-send`)
 - **Crash on interaction** → Check Cell types in handler parameters
+- **Field values show "undefined" in mapped items** → Using `derive()` for conditional rendering with `.map()` - Use `ifElse()` instead (see RECIPES.md section 9)
 
 **Debugging technique:** Simplify pattern to minimal reproduction, then add features back one at a time.
 
@@ -230,6 +231,9 @@ Use `derive()` judiciously for expensive operations.
 2. **Wrong Cell type in handler** - Type errors
 3. **Conditionals in JSX** - Use `ifElse()` instead
 4. **Calling `llm()` from handler** - Only works in recipe body
+5. **⚠️ Using `derive()` for conditional rendering with `.map()`** - Items become read-only snapshots
+   - Symptom: Field values show as "undefined" or properties are inaccessible
+   - Fix: Use `ifElse()` for the conditional, map over the cell directly (see RECIPES.md section 9)
 
 **Solution:** Read the relevant `docs/common/*.md` file.
 

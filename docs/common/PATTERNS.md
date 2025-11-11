@@ -363,6 +363,87 @@ export default recipe<ComposedInput, ComposedInput>(
 | Reusable components within a recipe | Pattern Composition (Level 4) |
 | Separate deployments that communicate | Linked Charms (Level 3) |
 
+### Pattern Composition: Upfront vs On-Demand Creation
+
+When composing patterns that share cell references, you have two approaches:
+
+#### ✅ Upfront Creation (All patterns rendered together)
+
+```typescript
+export default recipe("Multi-View", ({ items }) => {
+  // Create all patterns upfront
+  const listView = ShoppingList({ items });
+  const gridView = GridView({ items });
+
+  return {
+    [NAME]: "Multi-View",
+    [UI]: (
+      <div>
+        {/* Both patterns always rendered */}
+        <div>{listView}</div>
+        <div>{gridView}</div>
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+**Use when**: All child patterns are displayed simultaneously or conditionally rendered with `ifElse()`.
+
+#### ✅ On-Demand Creation (Patterns created when needed)
+
+```typescript
+const selectView = handler<
+  unknown,
+  { currentView: Cell<any>; items: any; viewType: string }
+>((_event, { currentView, items, viewType }) => {
+  // Create pattern on-demand in handler
+  const view = viewType === "list"
+    ? ShoppingList({ items })
+    : GridView({ items });
+
+  currentView.set(view);
+});
+
+export default recipe("View Selector", ({ items }) => {
+  const currentView = cell<any>(null);
+
+  return {
+    [NAME]: "View Selector",
+    [UI]: (
+      <div>
+        <ct-button onClick={selectView({ currentView, items, viewType: "list" })}>
+          List View
+        </ct-button>
+        <ct-button onClick={selectView({ currentView, items, viewType: "grid" })}>
+          Grid View
+        </ct-button>
+
+        {ifElse(
+          derive(currentView, (v) => v !== null),
+          <div>{currentView}</div>,
+          <div />
+        )}
+      </div>
+    ),
+    items,
+  };
+});
+```
+
+**Use when**: Child patterns are created based on user selection or other runtime conditions.
+
+#### Why This Matters
+
+Creating patterns that share parent cells during recipe initialization can cause cell tracking issues when those patterns are conditionally instantiated. The framework's cell system tracks references during pattern creation - creating patterns on-demand in handlers ensures proper reference tracking.
+
+**Common Error**: If you see "Shadow ref alias with parent cell not found in current frame", you're likely creating shared-cell child patterns during recipe init when they should be created on-demand.
+
+**Rule of thumb**:
+- Multiple views always visible → Create upfront
+- User selects which view → Create on-demand in handler
+
 ## Common Pattern: Search/Filter with Inline Logic
 
 Filtering a list without creating intermediate variables.
@@ -526,6 +607,54 @@ const activeItems = derive(items, (list) => list.filter(item => !item.done));
 {activeItems.map(...)}
 ```
 
+**Issue: Sorting cell arrays while preserving reactivity**
+
+When you need to sort items based on derived values (like LLM results) while maintaining cell references for bidirectional binding, use the **boxing pattern**:
+
+```typescript
+// ❌ BROKEN - Sorting derived array loses cell references
+const sortedItems = derive(itemsWithAisles, (assignments) => {
+  return assignments.slice().sort((a, b) => compare(a.aisle, b.aisle));
+});
+
+{sortedItems.map(({ item }) => (
+  <ct-checkbox $checked={item.done} />  // ✗ Doesn't work - items are read-only
+))}
+
+// ✅ CORRECT - Boxing pattern preserves cell references
+// 1. Box: Wrap items in objects
+const boxedItems = itemsWithAisles.map(assignment => ({ assignment }));
+
+// 2. Sort: Perform sort on boxed items
+const sortedBoxedItems = derive(boxedItems, (boxed) => {
+  return boxed.slice().sort((a, b) => {
+    // Access properties via .assignment prefix
+    const aValue = a.assignment.aisle;
+    const bValue = b.assignment.aisle;
+    return aValue.localeCompare(bValue);
+  });
+});
+
+// 3. Unbox: Map over sorted items, extract original cell reference
+{sortedBoxedItems.map(({ assignment }) => (
+  <ct-checkbox $checked={assignment.item.done} />  // ✓ Works! Cell preserved
+))}
+```
+
+**Why this works:**
+- Boxing wraps the cell reference in a plain object `{ assignment }`
+- Sorting rearranges the wrapper objects, not the cells themselves
+- The original cell reference (`assignment.item`) remains intact
+- Bidirectional binding works because we're accessing the original cell
+
+**When to use:**
+- Sorting items by derived/computed values (LLM results, calculations)
+- Reordering while maintaining reactivity
+- Any transformation that needs to preserve cell references
+
+**Real-world example:**
+Shopping list sorted by grocery store aisle (from LLM categorization) while keeping checkboxes reactive.
+
 **Issue: Can't access variable from outer map**
 
 ```typescript
@@ -661,6 +790,144 @@ const addItem = handler<
 ```
 
 **Rule:** Always use `Cell<T[]>` in handler parameters. The Cell wraps the entire array. You can make the elements cells as well, e.g. to access `.equals`, `.set`, `.update`, etc. directly
+
+#### 5. Storing Pattern Instances Directly in Handlers (Stack Overflow)
+
+```typescript
+// ❌ WRONG - Causes stack overflow
+const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
+  (_, { chatsList }) => {
+    const chat = Chat({ title: "New Chat", messages: [] });
+    const randomId = Math.random().toString(36).substring(2, 10); // Random 8-char string
+
+    // ❌ This will cause: RangeError: Maximum call stack size exceeded
+    chatsList.push({
+      [ID]: randomId,
+      local_id: randomId,
+      charm: chat
+    });
+  }
+);
+
+// ✅ CORRECT - Use lift() to wrap the push operation
+const storeChat = lift<{
+  charm: any;
+  chatsList: Cell<Entry[]>;
+  isInitialized: Cell<boolean>;
+}, undefined>(
+  ({ charm, chatsList, isInitialized }) => {
+    if (!isInitialized.get()) {
+      // Use stable ID - in production use proper ID generation
+      chatsList.push({ local_id: `chat-${Date.now()}`, charm });
+      isInitialized.set(true);
+    }
+  }
+);
+
+const createChat = handler<unknown, { chatsList: Cell<Entry[]> }>(
+  (_, { chatsList }) => {
+    const isInitialized = cell(false);
+    const chat = Chat({ title: "New Chat", messages: [] });
+
+    // ✅ Handler returns the lift call (no casting needed with modern types)
+    return storeChat({ charm: chat, chatsList, isInitialized });
+  }
+);
+```
+
+**When you'll encounter this:** Creating "charm lists" or "pattern collections" - like a list of chat instances, a list of notes, or any UI that lets users create multiple instances of a pattern.
+
+**Why this is a pitfall:** The stack overflow error is cryptic and doesn't indicate the solution. The pattern instance storage workflow requires coordination between handlers (which create instances) and lift functions (which store them).
+
+**Reference:** See `packages/patterns/chatbot-list-view.tsx` for the canonical implementation, specifically the `storeCharm` lift and `createChatRecipe` handler. Full details in `HANDLERS.md` under "Storing Pattern Instances in Cell Arrays".
+
+#### 6. Manually Creating Cells for Array Items (Stack Overflow)
+
+```typescript
+// ❌ WRONG - Manually wrapping items in cells causes stack overflow
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    const currentItems = items.get();
+    const newItems = data.map(d => cell({ name: d.name })); // ❌ Don't do this!
+    items.set([...currentItems, ...newItems]); // RangeError: Maximum call stack size exceeded
+  }
+);
+
+// ✅ CORRECT - Use plain objects with .push(), framework auto-wraps
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    data.forEach(d => {
+      items.push({ name: d.name }); // ✅ Plain object, framework wraps it
+    });
+  }
+);
+
+// ✅ ALSO CORRECT - Use .set() with plain objects only
+const applyData = handler<
+  unknown,
+  { items: Cell<Ingredient[]> }
+>(
+  (_, { items }) => {
+    const currentItems = items.get();
+    const newItems = data.map(d => ({ name: d.name })); // Plain objects
+    items.set([...currentItems, ...newItems]); // ✅ Works when all are plain
+  }
+);
+```
+
+**When you'll encounter this:** Applying bulk data (like LLM extraction results) to arrays in your recipe. You might think you need to wrap each item in `cell()` before adding it to a `Cell<T[]>` array.
+
+**Why this is a pitfall:** When using `.set([...currentItems, ...newItems])`, `currentItems` are already wrapped in cells by the framework. Manually wrapping `newItems` with `cell()` creates a mix of framework-wrapped cells and manually-created cells, causing infinite recursion in the reactive system. The cryptic "Maximum call stack size exceeded" error doesn't indicate the solution.
+
+**Rule:** Never manually call `cell()` when adding items to `Cell<T[]>` arrays. Use `.push(plainObject)` to add items one at a time (framework auto-wraps each), or use `.set([...plainObjects])` with only plain objects. Let the framework handle all cell wrapping.
+
+#### 7. Not Including All Cells in Derive Dependencies
+
+```typescript
+// ❌ WRONG - items is used in callback but not in dependencies
+{derive(itemCount, (count) =>
+  count === 0 ? (
+    <div>No items yet</div>
+  ) : (
+    <div>
+      {items.map((item) => <div>{item.title}</div>)}
+    </div>
+  )
+)}
+// Error: Shadow ref alias with parent cell not found in current frame
+
+// ✅ CORRECT - Include all cells referenced in the callback
+{derive([itemCount, items] as const, ([count, itemsList]: [number, Item[]]) =>
+  count === 0 ? (
+    <div>No items yet</div>
+  ) : (
+    <div>
+      {itemsList.map((item) => <div>{item.title}</div>)}
+    </div>
+  )
+)}
+
+// ✅ ALTERNATIVE - Use direct ternary if you don't need derive's reactivity
+{itemCount === 0 ? (
+  <div>No items yet</div>
+) : (
+  <div>
+    {items.map((item) => <div>{item.title}</div>)}
+  </div>
+)}
+```
+
+**Why this is a pitfall:** When a derive callback closes over cells (references them from the outer scope), those cells must be included in the dependency array. Otherwise, you'll get cryptic "Shadow ref" errors.
+
+**Rule:** If your derive callback uses any cells, include them all in the dependency array: `derive([cell1, cell2, ...], ([val1, val2, ...]) => ...)`.
+
+**Note:** Values inside derive callbacks are read-only. If you need bidirectional binding (like `$checked`), use cells directly outside the derive instead.
 
 ## Testing Patterns and Development Workflow
 
