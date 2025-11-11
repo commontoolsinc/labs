@@ -1551,20 +1551,34 @@ function rewriteCaptureReferences(
     return body; // No substitutions needed
   }
 
-  const visitor = (node: ts.Node): ts.Node => {
-    // Only substitute root-level identifiers that match captured variable names
-    // Don't substitute property names or nested references
+  const visitor = (node: ts.Node, parent?: ts.Node): ts.Node => {
+    // Don't substitute identifiers that are property names
     if (ts.isIdentifier(node)) {
+      // Skip if this identifier is the property name in a property access (e.g., '.get' in 'obj.get')
+      if (parent && ts.isPropertyAccessExpression(parent) && parent.name === node) {
+        return node;
+      }
+
+      // Skip if this identifier is a property name in an object literal (e.g., 'foo' in '{ foo: value }')
+      if (parent && ts.isPropertyAssignment(parent) && parent.name === node) {
+        return node;
+      }
+
+      // Skip if this identifier is a shorthand property name (e.g., 'foo' in '{ foo }')
+      if (parent && ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+        return node;
+      }
+
       const substituteName = substitutions.get(node.text);
       if (substituteName) {
         return factory.createIdentifier(substituteName);
       }
     }
 
-    return ts.visitEachChild(node, visitor, undefined);
+    return ts.visitEachChild(node, (child) => visitor(child, node), undefined);
   };
 
-  return ts.visitNode(body, visitor) as ts.ConciseBody;
+  return ts.visitNode(body, (node) => visitor(node, undefined)) as ts.ConciseBody;
 }
 
 /**
