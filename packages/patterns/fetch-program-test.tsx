@@ -1,4 +1,6 @@
+/// <cts-enable />
 import {
+  derive,
   cell,
   compileAndRun,
   fetchProgram,
@@ -22,11 +24,20 @@ export default recipe("Fetch Program Test", () => {
     fetchProgram({ url });
 
   // Step 2: Compile and run the fetched program
+  // Explicitly map program fields to compileAndRun params
+  const compileParams = derive(program, (p) => ({
+    files: p?.files ?? [],
+    main: p?.main ?? "",
+    input: { value: 10 },
+  }));
   const { pending: compilePending, result, error: compileError } =
-    compileAndRun({
-      ...program, // Spreads { files, main }
-      input: { initialCount: 10 },
-    });
+    compileAndRun(compileParams);
+
+  derive([result, program, compileError], ([r, p, c]) => {
+    console.log('program', JSON.stringify(p, null, 2));
+    console.log('result', JSON.stringify(r, null, 2));
+    console.log('compileError', JSON.stringify(c, null, 2));
+  })
 
   return {
     [NAME]: "Fetch Program Test",
@@ -46,6 +57,7 @@ export default recipe("Fetch Program Test", () => {
         {result && (
           <div style="color: green">
             Successfully compiled recipe! Charm ID: {result}
+            <pre>{derive(result, r => JSON.stringify(r, null, 2))}</pre>
           </div>
         )}
       </div>

@@ -3,9 +3,8 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
-import { HttpProgramResolver } from "@commontools/js-runtime/program.ts";
-import { resolveProgram } from "@commontools/js-runtime/typescript/resolver.ts";
-import { TARGET } from "@commontools/js-runtime/typescript/options.ts";
+import { HttpProgramResolver } from "@commontools/js-runtime";
+import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
 import {
   computeInputHash,
   internalSchema,

@@ -1117,7 +1117,7 @@ export type FetchProgramFunction = (
   result: {
     files: Array<{ name: string; contents: string }>;
     main: string;
-  };
+  } | undefined;
   error: any;
 }>;
 

@@ -28,6 +28,7 @@ import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
+  fetchProgram,
   generateObject,
   generateText,
   ifElse,
@@ -94,6 +95,7 @@ export const createBuilder = (): {
       generateObject,
       generateText,
       fetchData,
+      fetchProgram,
       streamData,
       compileAndRun,
       navigateTo,

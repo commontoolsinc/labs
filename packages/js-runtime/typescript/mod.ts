@@ -7,4 +7,9 @@ export {
   type CompilationErrorType,
   CompilerError,
 } from "./diagnostics/mod.ts";
-export { getCompilerOptions } from "./options.ts";
+export { getCompilerOptions, TARGET } from "./options.ts";
+export {
+  resolveProgram,
+  type ResolveModuleConfig,
+  type UnresolvedModuleHandling,
+} from "./resolver.ts";

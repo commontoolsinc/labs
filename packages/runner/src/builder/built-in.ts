@@ -81,7 +81,7 @@ export const fetchProgram = createNodeFactory({
   result: {
     files: Array<{ name: string; contents: string }>;
     main: string;
-  };
+  } | undefined;
   error: unknown;
 }>;
 
