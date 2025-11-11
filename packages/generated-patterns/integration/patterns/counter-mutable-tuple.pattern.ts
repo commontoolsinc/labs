@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  computed,
   Default,
   handler,
   lift,
@@ -42,11 +41,6 @@ const adjustPair = handler(
 export const counterWithMutableTuple = recipe<MutableTupleArgs>(
   "Counter With Mutable Tuple",
   ({ pair }) => {
-    const initialize = computed(() => {
-      const current = pair.get();
-      return Array.isArray(current) ? current : [0, 0];
-    });
-
     const tuple = lift((values: [number, number] | undefined) => {
       const leftValue = Array.isArray(values) && typeof values[0] === "number"
         ? values[0]
@@ -72,7 +66,6 @@ export const counterWithMutableTuple = recipe<MutableTupleArgs>(
       label,
       set: setPair({ pair }),
       adjust: adjustPair({ pair }),
-      effects: { initialize },
     };
   },
 );

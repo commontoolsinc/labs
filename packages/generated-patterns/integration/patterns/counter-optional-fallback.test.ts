@@ -40,7 +40,7 @@ export const scenarios = [counterOptionalFallbackScenario];
 
 describe("counter-optional-fallback", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

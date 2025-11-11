@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  computed,
   Default,
   handler,
   lift,
@@ -34,12 +33,6 @@ const bumpWithFallback = handler(
 export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
   "Counter With Optional Fallback",
   ({ value, defaultValue }) => {
-    const fallbackEffect = computed(() => {
-      const fallback = defaultValue.get() ?? 10;
-      const current = value.get();
-      return current ?? fallback;
-    });
-
     const safeDefault = lift((fallback: number | undefined) =>
       typeof fallback === "number" ? fallback : 10
     )(defaultValue);
@@ -56,7 +49,6 @@ export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
       effectiveDefault: safeDefault,
       label: str`Value ${safeValue} (default ${safeDefault})`,
       increment: bumpWithFallback({ value, defaultValue }),
-      effects: { fallbackEffect },
     };
   },
 );

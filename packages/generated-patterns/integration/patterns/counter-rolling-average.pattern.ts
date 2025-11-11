@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  computed,
   Default,
   handler,
   lift,
@@ -44,17 +43,6 @@ const recordAndAverage = handler(
 export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
-    const initialize = computed(() => {
-      const currentValue = value.get();
-      const currentHistory = history.get();
-      const windowValue = window.get();
-      return {
-        value: currentValue,
-        history: currentHistory,
-        window: windowValue,
-      };
-    });
-
     const average = lift((entries: number[] | undefined) => {
       const list = Array.isArray(entries) ? entries : [];
       if (list.length === 0) return 0;
@@ -77,7 +65,6 @@ export const counterWithRollingAverage = recipe<RollingAverageArgs>(
       historyView,
       label: str`Average ${average}`,
       increment: recordAndAverage({ value, history, window }),
-      effects: { initialize },
     };
   },
 );
