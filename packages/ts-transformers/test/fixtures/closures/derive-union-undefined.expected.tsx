@@ -12,7 +12,7 @@ export default function TestDerive(config: Config) {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
                 type: "object",
@@ -28,10 +28,7 @@ export default function TestDerive(config: Config) {
             }
         },
         required: ["value", "config"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
         value,
         config: {
             required: config.required,

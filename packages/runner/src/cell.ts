@@ -1392,7 +1392,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param providedSchema - Optional JSON schema for the cell
      * @returns A new Cell wrapping the value
      */
-    of<T>(value: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
+    of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(

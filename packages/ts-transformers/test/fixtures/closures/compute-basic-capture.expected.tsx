@@ -9,11 +9,11 @@ export default function TestCompute() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "multiplier"]

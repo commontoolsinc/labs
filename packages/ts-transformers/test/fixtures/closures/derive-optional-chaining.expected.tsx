@@ -11,7 +11,7 @@ export default function TestDerive(config: Config) {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
                 type: "object",

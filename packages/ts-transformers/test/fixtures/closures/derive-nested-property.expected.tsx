@@ -13,7 +13,7 @@ export default function TestDerive(state: State) {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             state: {
                 type: "object",

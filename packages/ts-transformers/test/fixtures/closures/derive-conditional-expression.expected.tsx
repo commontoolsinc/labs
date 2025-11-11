@@ -10,22 +10,19 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             threshold: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "threshold", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
         value,
         threshold: threshold,
         multiplier: multiplier

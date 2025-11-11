@@ -300,7 +300,7 @@ export interface CellTypeConstructor<
    * @param schema - Optional JSON schema for the cell
    * @returns A new cell
    */
-  of<T>(value: T, schema?: JSONSchema): Apply<Wrap, T>;
+  of<T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
 
   /**
    * Create a cell with an initial/default value and a typed schema.
@@ -492,13 +492,16 @@ export type OpaqueRef<T> = T extends AnyBrandedCell<any> ? T
  *
  * Note: This is primarily used for type constraints that require a cell.
  */
-export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>>;
+export type CellLike<T> = AnyBrandedCell<MaybeCellWrapped<T>> & {
+  [CELL_LIKE]?: unknown;
+};
 type MaybeCellWrapped<T> =
   | T
   | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<MaybeCellWrapped<U>>
     : T extends object ? { [K in keyof T]: MaybeCellWrapped<T[K]> }
     : never);
+export declare const CELL_LIKE: unique symbol;
 
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
@@ -1076,6 +1079,8 @@ export type HandlerFunction = {
  *    - Whether Cell is passed directly or nested in objects, it stays wrapped
  *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
  * 4. Generic overload: Handles all other cases, unwrapping Opaque types
+ *
+ * @deprecated Use compute() instead
  */
 export type DeriveFunction = {
   // Overload 1: Schema-based derive with explicit input/output schemas
@@ -1127,6 +1132,7 @@ export type IfElseFunction = <T = any, U = any, V = any>(
   ifFalse: Opaque<V>,
 ) => OpaqueRef<U | V>;
 
+/** @deprecated Use generateText() or generateObject() instead */
 export type LLMFunction = (
   params: Opaque<BuiltInLLMParams>,
 ) => OpaqueRef<BuiltInLLMState>;
@@ -1193,14 +1199,10 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
 // Default type for specifying default values in type definitions
 export type Default<T, V extends T = T> = T;
 
-// Re-export opaque ref creators
-export type CellFunction = <T>(
-  defaultValue?: T,
-  schema?: JSONSchema,
-) => OpaqueRef<T>;
-export type StreamFunction = <T>(schema?: JSONSchema) => OpaqueRef<T>;
+// Internal-only way to instantiate internal modules
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
+// Internal-only helper to create VDOM nodes
 export type HFunction = {
   (
     name: string | ((...args: any[]) => VNode),
@@ -1230,10 +1232,12 @@ export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
+/** @deprecated Use compute() instead */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
+/** @deprecated Use generateText() or generateObject() instead */
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
@@ -1244,8 +1248,8 @@ export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
-export declare const cell: CellFunction;
-export declare const stream: StreamFunction;
+/** @deprecated Use Cell.of(defaultValue?) instead */
+export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 export declare const schema: SchemaFunction;

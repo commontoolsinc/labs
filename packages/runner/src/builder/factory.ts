@@ -22,7 +22,6 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { opaqueRef, stream } from "./opaque-ref.ts";
 import { recipe } from "./recipe.ts";
 import { byRef, computed, derive, handler, lift } from "./module.ts";
 import {
@@ -99,8 +98,7 @@ export const createBuilder = (): {
       wish,
 
       // Cell creation
-      cell: opaqueRef,
-      stream,
+      cell: cellConstructorFactory<AsCell>("cell").of,
 
       // Cell constructors with static methods
       Cell: cellConstructorFactory<AsCell>("cell"),

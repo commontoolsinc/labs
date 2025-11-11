@@ -7,7 +7,7 @@ export default function TestDerive() {
   const multiplier = cell(2);
 
   const result = derive(value, (v) =>
-    v > threshold.get() ? v * multiplier.get() : v
+    v.get() > threshold.get() ? v.get() * multiplier.get() : v
   );
 
   return result;

@@ -584,7 +584,7 @@ export default recipe(
     const calendars = cell<Calendar[]>([]);
 
     derive(events, (events) => {
-      console.log("events", events.length);
+      console.log("events", events.get().length);
     });
 
     return {
@@ -597,7 +597,8 @@ export default recipe(
             {auth?.user?.email}
           </h2>
           <h2 style="font-size: 20px; font-weight: bold;">
-            Imported event count: {derive(events, (events) => events.length)}
+            Imported event count: {derive(events, (events) =>
+              events.get().length)}
           </h2>
 
           <h2>

@@ -18,7 +18,7 @@ export default recipe({
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
                 type: "object",

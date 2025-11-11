@@ -4,7 +4,8 @@ export default function TestDerive() {
     const value = cell(10);
     // No captures - should not be transformed
     const result = derive({
-        type: "number"
+        type: "number",
+        asCell: true
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, value, (v) => v * 2);
