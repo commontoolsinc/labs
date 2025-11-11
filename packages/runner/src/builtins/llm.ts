@@ -437,8 +437,16 @@ export function generateObject<T extends Record<string, unknown>>(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { prompt, messages, maxTokens, model, schema, system, cache, metadata } =
-      inputsCell.getAsQueryResult([], tx) ?? {};
+    const {
+      prompt,
+      messages,
+      maxTokens,
+      model,
+      schema,
+      system,
+      cache,
+      metadata,
+    } = inputsCell.getAsQueryResult([], tx) ?? {};
 
     if ((!prompt && !messages) || !schema) {
       resultWithLog.set(undefined);

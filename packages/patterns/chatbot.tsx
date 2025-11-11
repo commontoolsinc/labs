@@ -162,7 +162,7 @@ export const TitleGenerator = recipe<
 
     if (selectedMessages.length === 0) return "";
 
-    return selectedMessages
+    return selectedMessages;
   });
 
   const { result } = generateObject({
