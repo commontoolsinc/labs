@@ -81,12 +81,12 @@ export interface IReadable<T> {
 /**
  * Writable cells can update their value.
  */
-export interface IWritable<T> {
-  set(value: T | AnyCellWrapping<T>): void;
+export interface IWritable<T, C extends AnyBrandedCell<any>> {
+  set(value: T | AnyCellWrapping<T>): C;
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
-  ): void;
+  ): C;
   push(
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
@@ -263,58 +263,8 @@ export interface IOpaquable<T> {
 }
 
 // ============================================================================
-// Cell Type Definitions
+// Cell Constructor Interfaces
 // ============================================================================
-
-/**
- * Base type for all cell variants that has methods. Internal API augments this
- * interface with internal only API. Uses a second symbol brand to distinguish
- * from core cell brand without any methods.
- */
-export interface AnyCell<T = unknown> extends AnyBrandedCell<T>, IAnyCell<T> {
-}
-
-/**
- * Opaque cell reference - only supports keying and derivation, not direct I/O.
- * Has .key(), .map(), .mapWithPattern()
- * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
- */
-export interface IOpaqueCell<T>
-  extends
-    IAnyCell<T>,
-    ICreatable<AnyBrandedCell<T>>,
-    IKeyableOpaque<T>,
-    IDerivable<T>,
-    IOpaquable<T> {}
-
-export interface OpaqueCell<T>
-  extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
-
-export declare const OpaqueCell: CellTypeConstructor<OpaqueCell<any>>;
-
-/**
- * Full cell with read, write capabilities.
- * Has .get(), .set(), .update(), .push(), .equals(), .key(), .resolveAsCell()
- *
- * Note: This is an interface (not a type) to allow module augmentation by the runtime.
- */
-export interface AsCell extends HKT {
-  type: Cell<this["_A"]>;
-}
-
-export interface ICell<T>
-  extends
-    IAnyCell<T>,
-    ICreatable<AnyBrandedCell<T>>,
-    IReadable<T>,
-    IWritable<T>,
-    IStreamable<T>,
-    IEquatable,
-    IKeyable<T, AsCell>,
-    IDerivable<T>,
-    IResolvable<T, Cell<T>> {}
-
-export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 
 /**
  * Generic constructor interface for cell types with static methods.
@@ -373,6 +323,60 @@ export interface CellTypeConstructor<C extends AnyBrandedCell<any>> {
 }
 
 export declare const Cell: CellTypeConstructor<Cell<any>>;
+
+// ============================================================================
+// Cell Type Definitions
+// ============================================================================
+
+/**
+ * Base type for all cell variants that has methods. Internal API augments this
+ * interface with internal only API. Uses a second symbol brand to distinguish
+ * from core cell brand without any methods.
+ */
+export interface AnyCell<T = unknown> extends AnyBrandedCell<T>, IAnyCell<T> {
+}
+
+/**
+ * Opaque cell reference - only supports keying and derivation, not direct I/O.
+ * Has .key(), .map(), .mapWithPattern()
+ * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
+ */
+export interface IOpaqueCell<T>
+  extends
+    IAnyCell<T>,
+    ICreatable<AnyBrandedCell<T>>,
+    IKeyableOpaque<T>,
+    IDerivable<T>,
+    IOpaquable<T> {}
+
+export interface OpaqueCell<T>
+  extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
+
+export declare const OpaqueCell: CellTypeConstructor<OpaqueCell<any>>;
+
+/**
+ * Full cell with read, write capabilities.
+ * Has .get(), .set(), .update(), .push(), .equals(), .key(), .resolveAsCell()
+ *
+ * Note: This is an interface (not a type) to allow module augmentation by the runtime.
+ */
+export interface AsCell extends HKT {
+  type: Cell<this["_A"]>;
+}
+
+export interface ICell<T>
+  extends
+    IAnyCell<T>,
+    ICreatable<AnyBrandedCell<T>>,
+    IReadable<T>,
+    IWritable<T, Cell<T>>,
+    IStreamable<T>,
+    IEquatable,
+    IKeyable<T, AsCell>,
+    IDerivable<T>,
+    IResolvable<T, Cell<T>> {}
+
+export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 
 /**
  * Stream-only cell - can only send events, not read or write.
@@ -443,7 +447,7 @@ export interface WriteonlyCell<T>
     BrandedCell<T, "writeonly">,
     IAnyCell<T>,
     ICreatable<WriteonlyCell<T>>,
-    IWritable<T>,
+    IWritable<T, WriteonlyCell<T>>,
     IKeyable<T, AsWriteonlyCell> {}
 
 export declare const WriteonlyCell: CellTypeConstructor<WriteonlyCell<any>>;
@@ -1130,20 +1134,6 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
 
-export type CreateCellFunction = {
-  <T>(
-    schema?: JSONSchema,
-    name?: string,
-    value?: T,
-  ): Cell<T>;
-
-  <S extends JSONSchema = JSONSchema>(
-    schema: S,
-    name?: string,
-    value?: Schema<S>,
-  ): Cell<Schema<S>>;
-};
-
 // Default type for specifying default values in type definitions
 export type Default<T, V extends T = T> = T;
 
@@ -1199,7 +1189,6 @@ export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
-export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;

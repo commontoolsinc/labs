@@ -79,11 +79,11 @@ declare module "@commontools/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
    */
-  interface IWritable<T> {
+  interface IWritable<T, C extends AnyBrandedCell<any>> {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-    ): void;
+    ): C;
   }
 
   /**
@@ -519,7 +519,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   set(
     newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
-  ): void {
+  ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime.readTx(this.tx),
       this.link,
@@ -543,32 +543,33 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.cleanup = cancel;
 
       this.listeners.forEach((callback) => addCancel(callback(event)));
-      return;
+    } else {
+      // Regular cell behavior
+      if (!this.tx) throw new Error("Transaction required for set");
+
+      // No await for the sync, just kicking this off, so we have the data to
+      // retry on conflict.
+      if (!this.synced) this.sync();
+
+      // Looks for arrays and makes sure each object gets its own doc.
+      const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+
+      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      diffAndUpdate(
+        this.runtime,
+        this.tx,
+        resolveLink(this.tx, this.link, "writeRedirect"),
+        transformedValue,
+        this._frame?.cause,
+      );
+
+      // Register commit callback if provided
+      if (onCommit) {
+        this.tx.addCommitCallback(onCommit);
+      }
     }
 
-    // Regular cell behavior
-    if (!this.tx) throw new Error("Transaction required for set");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    // Looks for arrays and makes sure each object gets its own doc.
-    const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
-
-    // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
-    diffAndUpdate(
-      this.runtime,
-      this.tx,
-      resolveLink(this.tx, this.link, "writeRedirect"),
-      transformedValue,
-      this._frame?.cause,
-    );
-
-    // Register commit callback if provided
-    if (onCommit) {
-      this.tx.addCommitCallback(onCommit);
-    }
+    return this as unknown as Cell<T>;
   }
 
   send(
@@ -580,7 +581,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     values: V extends object ? AnyCellWrapping<V> : never,
-  ): void {
+  ): Cell<T> {
     if (!this.tx) throw new Error("Transaction required for update");
     if (!isRecord(values)) {
       throw new Error("Can't update with non-object value");
@@ -625,6 +626,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     for (const [key, value] of Object.entries(values)) {
       (this as unknown as Cell<any>).key(key).set(value);
     }
+
+    return this as unknown as Cell<T>;
   }
 
   push(

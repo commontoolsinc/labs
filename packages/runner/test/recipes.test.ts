@@ -23,7 +23,7 @@ describe("Recipe Runner", () => {
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
-  let createCell: ReturnType<typeof createBuilder>["commontools"]["createCell"];
+  let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
   let ifElse: ReturnType<typeof createBuilder>["commontools"]["ifElse"];
@@ -45,7 +45,7 @@ describe("Recipe Runner", () => {
       lift,
       derive,
       recipe,
-      createCell,
+      Cell,
       handler,
       byRef,
       ifElse,
@@ -1050,7 +1050,7 @@ describe("Recipe Runner", () => {
       ({ value }) => {
         // Create a named cell to store the counter
         const wrapper = lift((v: number) => {
-          const cell = createCell({ type: "number" }, "wrapper", v);
+          const cell = Cell.for("wrapper").asSchema({ type: "number" }).set(v);
           return { value: cell };
         })(value);
 

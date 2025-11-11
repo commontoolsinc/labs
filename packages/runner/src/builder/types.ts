@@ -9,7 +9,6 @@ import type {
   ComparableCellConstructor,
   CompileAndRunFunction,
   ComputeFunction,
-  CreateCellFunction,
   DeriveFunction,
   FetchDataFunction,
   GenerateObjectFunction,
@@ -74,7 +73,6 @@ export type {
   AnyCellWrapping,
   Cell,
   CellKind,
-  CreateCellFunction,
   Handler,
   HandlerFactory,
   IDerivable,
@@ -253,7 +251,6 @@ export interface BuilderFunctionsAndConstants {
   wish: WishFunction;
 
   // Cell creation
-  createCell: CreateCellFunction;
   cell: CellFunction;
   stream: StreamFunction;
 

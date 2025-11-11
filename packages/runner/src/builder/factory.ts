@@ -3,9 +3,6 @@
  */
 import type {
   BuilderFunctionsAndConstants,
-  Cell,
-  CreateCellFunction,
-  JSONSchema,
   ToSchemaFunction,
 } from "./types.ts";
 import {
@@ -20,10 +17,10 @@ import {
 } from "./types.ts";
 import { h } from "@commontools/html";
 import { opaqueRef, stream } from "./opaque-ref.ts";
-import { getTopFrame, recipe } from "./recipe.ts";
+import { recipe } from "./recipe.ts";
 import { byRef, compute, derive, handler, lift, render } from "./module.ts";
 import {
-  Cell as CellConstructorValue,
+  Cell as CellConstructor,
   ComparableCell as ComparableCellConstructor,
   compileAndRun,
   fetchData,
@@ -66,33 +63,6 @@ export const createBuilder = (
   commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
-  // Implementation of createCell moved from runner/harness
-  const createCell: CreateCellFunction = function createCell<T = any>(
-    schema?: JSONSchema,
-    name?: string,
-    value?: T,
-  ): Cell<T> {
-    const frame = getTopFrame();
-    if (!frame || !frame.cause || !frame.unsafe_binding) {
-      throw new Error(
-        "Can't invoke createCell outside of a lifted function or handler",
-      );
-    }
-    const space = frame.unsafe_binding.space;
-    const tx = frame.unsafe_binding.tx;
-
-    const cause = { parent: frame.cause } as Record<string, any>;
-    if (name) cause.name = name;
-    else cause.number = frame.generatedIdCounter++;
-
-    // Cast to Cell<T> is necessary to cast to interface-only Cell type
-    const cell = runtime.getCell<T>(space, cause, schema, tx) as Cell<T>;
-
-    if (value !== undefined) cell.set(value);
-
-    return cell;
-  } as CreateCellFunction;
-
   // Associate runtime programs with recipes after compilation and initial eval
   // and before compilation returns, so before any e.g. recipe would be
   // instantiated. This way they get saved with a way to rehydrate them.
@@ -132,12 +102,11 @@ export const createBuilder = (
       wish,
 
       // Cell creation
-      createCell,
       cell: opaqueRef,
       stream,
 
       // Cell constructors with static methods
-      Cell: CellConstructorValue,
+      Cell: CellConstructor,
       OpaqueCell: OpaqueCellConstructor,
       Stream: StreamConstructor,
       ComparableCell: ComparableCellConstructor,
