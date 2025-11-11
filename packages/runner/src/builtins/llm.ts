@@ -298,8 +298,13 @@ export function generateText(
 
     const hash = refer(llmParams).toString();
 
-    // Return if the same request is being made again
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    // Return if the same request is being made again (and we already have a result)
+    if (
+      (hash === previousCallHash || hash === requestHashWithLog.get()) &&
+      resultWithLog.get() !== undefined
+    ) {
+      return;
+    }
     previousCallHash = hash;
 
     resultWithLog.set(undefined);
