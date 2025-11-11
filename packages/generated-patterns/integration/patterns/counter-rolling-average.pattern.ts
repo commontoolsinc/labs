@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  compute,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface RollingAverageArgs {
   value: Default<number, 0>;
@@ -44,17 +36,6 @@ const recordAndAverage = handler(
 export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
-    const initialize = compute(() => {
-      const currentValue = value.get();
-      const currentHistory = history.get();
-      const windowValue = window.get();
-      return {
-        value: currentValue,
-        history: currentHistory,
-        window: windowValue,
-      };
-    });
-
     const average = lift((entries: number[] | undefined) => {
       const list = Array.isArray(entries) ? entries : [];
       if (list.length === 0) return 0;
@@ -77,7 +58,6 @@ export const counterWithRollingAverage = recipe<RollingAverageArgs>(
       historyView,
       label: str`Average ${average}`,
       increment: recordAndAverage({ value, history, window }),
-      effects: { initialize },
     };
   },
 );

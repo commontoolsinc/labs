@@ -181,7 +181,7 @@ export const scenarios = [workflowStateMachineScenario];
 
 describe("workflow-state-machine", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

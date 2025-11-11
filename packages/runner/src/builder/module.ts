@@ -13,14 +13,12 @@ import type {
   StripCell,
   toJSON,
 } from "./types.ts";
-import { isModule } from "./types.ts";
 import { opaqueRef, stream } from "./opaque-ref.ts";
 import {
   applyArgumentIfcToResult,
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { traverseValue } from "./traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
 import { generateHandlerSchema } from "../schema.ts";
 
@@ -225,15 +223,5 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
 }
 
 // unsafe closures: like derive, but doesn't need any arguments
-export const compute: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
+export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
   lift<any, T>(fn)(undefined);
-
-// unsafe closures: like compute, but also convert all functions to handlers
-export const render = <T>(fn: () => T): OpaqueRef<T> =>
-  compute(() =>
-    traverseValue(fn(), (v: (event: unknown, props: unknown) => any) => {
-      // Modules are functions, so we need to exclude them
-      if (!isModule(v) && typeof v === "function") return handler(v)({});
-      else return v;
-    })
-  );

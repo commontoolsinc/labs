@@ -78,7 +78,7 @@ export const scenarios = [counterRollingAverageScenario];
 
 describe("counter-rolling-average", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

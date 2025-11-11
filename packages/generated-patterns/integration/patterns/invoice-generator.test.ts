@@ -116,7 +116,7 @@ export const scenarios = [invoiceGeneratorScenario];
 
 describe("invoice-generator", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

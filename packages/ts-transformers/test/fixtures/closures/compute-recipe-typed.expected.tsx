@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, compute, recipe } from "commontools";
+import { cell, computed, recipe } from "commontools";
 export default recipe({
     type: "object",
     properties: {

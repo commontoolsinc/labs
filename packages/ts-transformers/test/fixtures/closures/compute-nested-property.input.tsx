@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { cell, compute } from "commontools";
+import { cell, computed } from "commontools";
 
 export default function TestComputeNestedProperty() {
   const counter = cell({ count: 0 });
 
-  const doubled = compute(() => {
+  const doubled = computed(() => {
     const current = counter.get();
     return current.count * 2;
   });

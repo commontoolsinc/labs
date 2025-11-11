@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, compute } from "commontools";
+import { cell, computed } from "commontools";
 export default function TestComputeConditionalExpression() {
     const value = cell(10);
     const threshold = cell(5);

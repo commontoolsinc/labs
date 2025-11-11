@@ -49,7 +49,7 @@ export const scenarios = [counterMutableTupleScenario];
 
 describe("counter-mutable-tuple", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

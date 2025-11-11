@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, compute } from "commontools";
+import { cell, computed } from "commontools";
 export default function TestComputeNestedProperty() {
     const counter = cell({ count: 0 });
     const doubled = __ctHelpers.derive({

@@ -36,7 +36,7 @@ export const scenarios = [boundedCounterScenario];
 
 describe("bounded-counter", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

@@ -6,7 +6,7 @@ const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
   "handler",
   "lift",
-  "compute",
+  "computed",
   "render",
 ]);
 
