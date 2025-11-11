@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
   Cell,
-  compute,
+  computed,
   Default,
   handler,
   ifElse,
@@ -36,7 +36,7 @@ const adjustValue = handler(
 export const counterWithConditionalBranch = recipe<ConditionalBranchArgs>(
   "Counter With Conditional Branch",
   ({ value, enabled }) => {
-    const initialize = compute(() => {
+    const initialize = computed(() => {
       const currentValue = value.get();
       const currentFlag = enabled.get();
       return { value: currentValue, enabled: currentFlag };

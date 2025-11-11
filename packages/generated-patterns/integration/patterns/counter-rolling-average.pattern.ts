@@ -1,7 +1,7 @@
 /// <cts-enable />
 import {
   Cell,
-  compute,
+  computed,
   Default,
   handler,
   lift,
@@ -44,7 +44,7 @@ const recordAndAverage = handler(
 export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
-    const initialize = compute(() => {
+    const initialize = computed(() => {
       const currentValue = value.get();
       const currentHistory = history.get();
       const windowValue = window.get();
