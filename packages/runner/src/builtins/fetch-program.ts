@@ -8,7 +8,6 @@ import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
 import {
   computeInputHash,
   internalSchema,
-  REQUEST_TIMEOUT,
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";

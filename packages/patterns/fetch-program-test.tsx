@@ -33,12 +33,6 @@ export default recipe("Fetch Program Test", () => {
   const { pending: compilePending, result, error: compileError } =
     compileAndRun(compileParams);
 
-  derive([result, program, compileError], ([r, p, c]) => {
-    console.log("program", JSON.stringify(p, null, 2));
-    console.log("result", JSON.stringify(r, null, 2));
-    console.log("compileError", JSON.stringify(c, null, 2));
-  });
-
   return {
     [NAME]: "Fetch Program Test",
     [UI]: (
@@ -46,7 +40,7 @@ export default recipe("Fetch Program Test", () => {
         <h1>Fetch Program Test</h1>
         <div>
           <label>URL:</label>
-          <input type="text" value={url} />
+          <ct-input type="text" $value={url} />
         </div>
         {fetchPending && <div>Fetching program...</div>}
         {compilePending && <div>Compiling...</div>}

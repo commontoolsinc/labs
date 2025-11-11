@@ -9,7 +9,7 @@ export {
 } from "./diagnostics/mod.ts";
 export { getCompilerOptions, TARGET } from "./options.ts";
 export {
-  resolveProgram,
   type ResolveModuleConfig,
+  resolveProgram,
   type UnresolvedModuleHandling,
 } from "./resolver.ts";
