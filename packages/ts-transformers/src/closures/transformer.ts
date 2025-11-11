@@ -1324,31 +1324,38 @@ function extractDeriveCallback(
 /**
  * Build the merged input object containing both the original input and captures.
  * Example: {value, multiplier} where value is the original input and multiplier is a capture.
+ *
+ * When hadZeroParameters is true, skip the original input and only include captures.
+ * This handles the case where user wrote derive({}, () => ...) and we only need captures.
  */
 function buildDeriveInputObject(
   originalInput: ts.Expression,
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
   factory: ts.NodeFactory,
+  hadZeroParameters: boolean,
 ): ts.ObjectLiteralExpression {
   const properties: ts.ObjectLiteralElementLike[] = [];
 
-  // Add the original input as a property
-  // Use shorthand if the original input is a simple identifier matching the param name
-  if (
-    ts.isIdentifier(originalInput) &&
-    originalInput.text === originalInputParamName
-  ) {
-    properties.push(
-      factory.createShorthandPropertyAssignment(originalInput, undefined),
-    );
-  } else {
-    properties.push(
-      factory.createPropertyAssignment(
-        createPropertyName(originalInputParamName, factory),
-        originalInput,
-      ),
-    );
+  // Add the original input as a property UNLESS callback had zero parameters
+  // When hadZeroParameters, we only include captures
+  if (!hadZeroParameters) {
+    // Use shorthand if the original input is a simple identifier matching the param name
+    if (
+      ts.isIdentifier(originalInput) &&
+      originalInput.text === originalInputParamName
+    ) {
+      properties.push(
+        factory.createShorthandPropertyAssignment(originalInput, undefined),
+      );
+    } else {
+      properties.push(
+        factory.createPropertyAssignment(
+          createPropertyName(originalInputParamName, factory),
+          originalInput,
+        ),
+      );
+    }
   }
 
   // Add captures
@@ -1363,6 +1370,9 @@ function buildDeriveInputObject(
 /**
  * Create the derive callback with parameter aliasing to preserve user's parameter name.
  * Example: ({value: v, multiplier}) => v * multiplier
+ *
+ * When hadZeroParameters is true, build a parameter from just the captures (no original input).
+ * This handles the case where user wrote derive({}, () => ...) with captures.
  */
 function createDeriveCallback(
   callback: ts.ArrowFunction | ts.FunctionExpression,
@@ -1370,6 +1380,7 @@ function createDeriveCallback(
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
+  hadZeroParameters: boolean,
 ): ts.ArrowFunction | ts.FunctionExpression {
   const { factory } = context;
   const usedBindingNames = new Set<string>();
@@ -1377,7 +1388,49 @@ function createDeriveCallback(
   // Get the original parameter
   const originalParam = callback.parameters[0];
   if (!originalParam) {
-    // No parameter - shouldn't happen for derive, but handle gracefully
+    // No parameter - if there are captures, build parameter from captures only
+    if (hadZeroParameters && captureTree.size > 0) {
+      // Build binding elements from just the captures (no original input)
+      const createBindingIdentifier = (name: string): ts.Identifier => {
+        return reserveIdentifier(name, usedBindingNames, factory);
+      };
+
+      const bindingElements = createBindingElementsFromNames(
+        captureTree.keys(),
+        factory,
+        createBindingIdentifier,
+      );
+
+      const destructuredParam = factory.createParameterDeclaration(
+        undefined, // modifiers
+        undefined, // dotDotDotToken
+        factory.createObjectBindingPattern(bindingElements),
+        undefined, // questionToken
+        undefined, // type
+        undefined, // initializer
+      );
+
+      return ts.isArrowFunction(callback)
+        ? factory.createArrowFunction(
+          callback.modifiers,
+          callback.typeParameters,
+          [destructuredParam],
+          undefined, // No return type - rely on inference
+          callback.equalsGreaterThanToken,
+          transformedBody,
+        )
+        : factory.createFunctionExpression(
+          callback.modifiers,
+          callback.asteriskToken,
+          callback.name,
+          callback.typeParameters,
+          [destructuredParam],
+          undefined, // No return type - rely on inference
+          transformedBody as ts.Block,
+        );
+    }
+
+    // No parameter and no captures (or not hadZeroParameters) - shouldn't happen, but handle gracefully
     return ts.isArrowFunction(callback)
       ? factory.createArrowFunction(
         callback.modifiers,
@@ -1466,37 +1519,43 @@ function createDeriveCallback(
 /**
  * Build schema TypeNode for the merged input object.
  * Creates an object schema with properties for input and all captures.
+ *
+ * When hadZeroParameters is true, skip the input and only include captures.
  */
 function buildDeriveInputSchema(
   originalInputParamName: string,
   originalInput: ts.Expression,
   captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
+  hadZeroParameters: boolean,
 ): ts.TypeNode {
   const { factory, checker } = context;
 
   // Build type elements for the object schema
   const typeElements: ts.TypeElement[] = [];
 
-  // Add type element for original input using the helper function
-  const inputTypeNode = expressionToTypeNode(originalInput, context);
+  // Add type element for original input UNLESS callback had zero parameters
+  if (!hadZeroParameters) {
+    // Add type element for original input using the helper function
+    const inputTypeNode = expressionToTypeNode(originalInput, context);
 
-  // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
-  let questionToken: ts.QuestionToken | undefined = undefined;
-  if (ts.isPropertyAccessExpression(originalInput)) {
-    if (isOptionalPropertyAccess(originalInput, checker)) {
-      questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+    // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
+    let questionToken: ts.QuestionToken | undefined = undefined;
+    if (ts.isPropertyAccessExpression(originalInput)) {
+      if (isOptionalPropertyAccess(originalInput, checker)) {
+        questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+      }
     }
-  }
 
-  typeElements.push(
-    factory.createPropertySignature(
-      undefined,
-      factory.createIdentifier(originalInputParamName),
-      questionToken,
-      inputTypeNode,
-    ),
-  );
+    typeElements.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier(originalInputParamName),
+        questionToken,
+        inputTypeNode,
+      ),
+    );
+  }
 
   // Add type elements for captures
   typeElements.push(
@@ -1574,12 +1633,17 @@ function transformDeriveCall(
   }
   // For other expressions (object literals, etc.), use "input" fallback
 
+  // Check if callback originally had zero parameters
+  // In this case, we don't need to preserve the input - just use captures
+  const hadZeroParameters = callback.parameters.length === 0;
+
   // Build merged input object
   const mergedInput = buildDeriveInputObject(
     originalInput,
     originalInputParamName,
     captureTree,
     factory,
+    hadZeroParameters,
   );
 
   // Create new callback with parameter aliasing
@@ -1589,6 +1653,7 @@ function transformDeriveCall(
     originalInputParamName,
     captureTree,
     context,
+    hadZeroParameters,
   );
 
   // Build TypeNodes for schema generation (similar to handlers/maps pattern)
@@ -1598,6 +1663,7 @@ function transformDeriveCall(
     originalInput,
     captureTree,
     context,
+    hadZeroParameters,
   );
 
   // Infer result type from callback
