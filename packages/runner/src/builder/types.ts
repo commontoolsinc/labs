@@ -2,12 +2,18 @@ import { isObject, type Mutable } from "@commontools/utils/types";
 import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   ByRefFunction,
   Cell,
   CellFunction,
+  CellTypeConstructor,
   CompileAndRunFunction,
   ComputeFunction,
-  CreateCellFunction,
   DeriveFunction,
   FetchDataFunction,
   GenerateObjectFunction,
@@ -66,21 +72,31 @@ export { AuthSchema } from "./schema-lib.ts";
 export type {
   AnyCell,
   AnyCellWrapping,
+  Apply,
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   Cell,
   CellKind,
-  CreateCellFunction,
   Handler,
   HandlerFactory,
+  HKT,
+  ICell,
   IDerivable,
   IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
   IsThisObject,
+  IStreamable,
   JSONObject,
   JSONSchema,
   JSONSchemaTypes,
   JSONValue,
+  KeyResultType,
   Module,
   ModuleFactory,
   NodeFactory,
@@ -247,9 +263,16 @@ export interface BuilderFunctionsAndConstants {
   wish: WishFunction;
 
   // Cell creation
-  createCell: CreateCellFunction;
   cell: CellFunction;
   stream: StreamFunction;
+
+  // Cell constructors with static methods
+  Cell: CellTypeConstructor<AsCell>;
+  OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
+  Stream: CellTypeConstructor<AsStream>;
+  ComparableCell: CellTypeConstructor<AsComparableCell>;
+  ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
+  WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
   // Utility
   byRef: ByRefFunction;

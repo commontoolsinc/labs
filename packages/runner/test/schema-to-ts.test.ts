@@ -45,7 +45,7 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ str } = commontools);
   });
 
