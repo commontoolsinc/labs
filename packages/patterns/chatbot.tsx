@@ -162,13 +162,13 @@ export const TitleGenerator = recipe<
 
     if (selectedMessages.length === 0) return "";
 
-    return selectedMessages.map((msg) => JSON.stringify(msg)).join("\n");
+    return selectedMessages;
   });
 
   const { result } = generateObject({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
-    prompt: titleMessages,
+    messages: titleMessages,
     model,
     schema: {
       type: "object",

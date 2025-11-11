@@ -797,6 +797,42 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
+// Image types from UI components
+export interface ImageData {
+  id: string;
+  name: string;
+  url: string;
+  data: string;
+  timestamp: number;
+  width?: number;
+  height?: number;
+  size: number;
+  type: string;
+  exif?: {
+    // Core metadata
+    dateTime?: string;
+    make?: string;
+    model?: string;
+    orientation?: number;
+    // Location
+    gpsLatitude?: number;
+    gpsLongitude?: number;
+    gpsAltitude?: number;
+    // Camera settings
+    fNumber?: number;
+    exposureTime?: string;
+    iso?: number;
+    focalLength?: number;
+    // Dimensions
+    pixelXDimension?: number;
+    pixelYDimension?: number;
+    // Software
+    software?: string;
+    // Raw EXIF tags
+    raw?: Record<string, any>;
+  };
+}
+
 export type BuiltInLLMTool =
   & { description?: string }
   & (
@@ -848,22 +884,43 @@ export interface BuiltInLLMDialogState {
   flattenedTools: Record<string, any>;
 }
 
-export interface BuiltInGenerateObjectParams {
-  model?: string;
-  prompt?: string;
-  schema?: JSONSchema;
-  system?: string;
-  cache?: boolean;
-  maxTokens?: number;
-  metadata?: Record<string, string | undefined | object>;
-}
+export type BuiltInGenerateObjectParams =
+  | {
+    model?: string;
+    prompt: BuiltInLLMContent;
+    messages?: never;
+    schema?: JSONSchema;
+    system?: string;
+    cache?: boolean;
+    maxTokens?: number;
+    metadata?: Record<string, string | undefined | object>;
+  }
+  | {
+    model?: string;
+    prompt?: never;
+    messages: BuiltInLLMMessage[];
+    schema?: JSONSchema;
+    system?: string;
+    cache?: boolean;
+    maxTokens?: number;
+    metadata?: Record<string, string | undefined | object>;
+  };
 
-export interface BuiltInGenerateTextParams {
-  prompt: string;
-  system?: string;
-  model?: string;
-  maxTokens?: number;
-}
+export type BuiltInGenerateTextParams =
+  | {
+    prompt: BuiltInLLMContent;
+    messages?: never;
+    system?: string;
+    model?: string;
+    maxTokens?: number;
+  }
+  | {
+    prompt?: never;
+    messages: BuiltInLLMMessage[];
+    system?: string;
+    model?: string;
+    maxTokens?: number;
+  };
 
 export interface BuiltInGenerateTextState {
   pending: boolean;

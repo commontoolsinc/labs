@@ -3,7 +3,11 @@ import {
   type LLMGenerateObjectResponse,
 } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
-import { generateObject as generateObjectCore, jsonSchema } from "ai";
+import {
+  generateObject as generateObjectCore,
+  jsonSchema,
+  type ModelMessage,
+} from "ai";
 import { Ajv } from "ajv";
 import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commontools/llm";
 import { trace } from "@opentelemetry/api";
@@ -44,9 +48,12 @@ export async function generateObject(
       }
     }
 
+    // Use messages directly - conversion happens client-side
+    const messages = params.messages as ModelMessage[];
+
     const { object } = await generateObjectCore({
       model: modelConfig.model,
-      prompt: params.prompt,
+      prompt: messages,
       mode: "json",
       schema: jsonSchema(params.schema, {
         validate: (value: unknown) => {

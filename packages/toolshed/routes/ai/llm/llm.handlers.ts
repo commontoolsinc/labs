@@ -277,9 +277,9 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
 ) => {
   const payload = await c.req.json();
 
-  if (!payload.prompt || !payload.schema) {
+  if (!payload.messages || !payload.schema) {
     return c.json(
-      { error: "Missing required fields: prompt and schema" },
+      { error: "Missing required fields: messages and schema" },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
