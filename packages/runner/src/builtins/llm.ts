@@ -265,7 +265,6 @@ export function generateText(
       sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
     }
-    const thisRun = ++currentRun;
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
     const partialWithLog = partial.withTx(tx);
@@ -297,15 +296,28 @@ export function generateText(
     };
 
     const hash = refer(llmParams).toString();
+    const currentRequestHash = requestHashWithLog.get();
+    const currentResult = resultWithLog.get();
 
-    // Return if the same request is being made again (and we already have a result)
-    if (
-      (hash === previousCallHash || hash === requestHashWithLog.get()) &&
-      resultWithLog.get() !== undefined
-    ) {
+    // Return if the same request is being made again
+    // Only skip if we have a result - otherwise we need to (re)make the request
+    if (currentResult !== undefined && hash === currentRequestHash) {
       return;
     }
+
+    // Also skip if this is the same request in the current transaction
+    if (hash === previousCallHash) {
+      return;
+    }
+
     previousCallHash = hash;
+
+    // Only increment currentRun if this is a NEW request (different hash)
+    // This prevents abandoning in-flight requests when the same params are re-evaluated
+    if (hash !== currentRequestHash) {
+      currentRun++;
+    }
+    const thisRun = currentRun;
 
     resultWithLog.set(undefined);
     partialWithLog.set(undefined);

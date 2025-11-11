@@ -1,9 +1,18 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { classMap } from "lit/directives/class-map.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import type { ButtonVariant, ButtonSize } from "../ct-button/ct-button.ts";
+import { type Cell } from "@commontools/runner";
+import { createArrayCellController } from "../../core/cell-controller.ts";
+import { consume } from "@lit/context";
+import {
+  applyThemeToElement,
+  type CTTheme,
+  defaultTheme,
+  themeContext,
+} from "../theme-context.ts";
+import "../ct-button/ct-button.ts";
 
 /**
  * Image data structure
@@ -98,64 +107,6 @@ export class CTImageInput extends BaseElement {
 
       input[type="file"] {
         display: none;
-      }
-
-      .button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        white-space: nowrap;
-        border-radius: var(
-          --ct-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
-        );
-        font-size: 0.875rem;
-        font-weight: 500;
-        font-family: var(--ct-theme-font-family, inherit);
-        line-height: 1.25rem;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
-        cursor: pointer;
-        user-select: none;
-        border: 1px solid transparent;
-        outline: 2px solid transparent;
-        outline-offset: 2px;
-        background-color: transparent;
-        padding: var(--ct-theme-spacing-normal, 0.5rem)
-          var(--ct-theme-spacing-loose, 1rem);
-        height: 2.5rem;
-      }
-
-      .button:hover:not(:disabled) {
-        opacity: 0.9;
-      }
-
-      .button:disabled {
-        pointer-events: none;
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .button.outline {
-        background-color: transparent;
-        border: 1px solid
-          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
-      }
-
-      .button.primary {
-        background-color: var(
-          --ct-theme-color-primary,
-          var(--ct-color-primary, #3b82f6)
-        );
-        color: white;
-      }
-
-      .button.secondary {
-        background-color: var(
-          --ct-theme-color-secondary,
-          var(--ct-color-gray-200, #e5e7eb)
-        );
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
       }
 
       .previews {
@@ -269,13 +220,34 @@ export class CTImageInput extends BaseElement {
   disabled = false;
 
   @property({ type: Array })
-  images: ImageData[] = [];
+  images: Cell<ImageData[]> | ImageData[] = [];
 
   @property({ type: Boolean })
   private loading = false;
 
+  // Theme consumption
+  @consume({ context: themeContext, subscribe: true })
+  @property({ attribute: false })
+  declare theme?: CTTheme;
+
+  private _cellController = createArrayCellController<ImageData>(this, {
+    onChange: (_newImages: ImageData[], _oldImages: ImageData[]) => {
+      // Just request an update to re-render with the new cell value
+      // Don't emit ct-change here - that causes infinite loops when using handlers
+      this.requestUpdate();
+    },
+  });
+
   private _generateId(): string {
-    return `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `img-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  private getImages(): ImageData[] {
+    return [...this._cellController.getValue()];
+  }
+
+  private setImages(newImages: ImageData[]): void {
+    this._cellController.setValue(newImages);
   }
 
   private _handleButtonClick() {
@@ -291,10 +263,12 @@ export class CTImageInput extends BaseElement {
 
     if (!files || files.length === 0) return;
 
+    const currentImages = this.getImages();
+
     // Check max images limit
     if (
       this.maxImages &&
-      this.images.length + files.length > this.maxImages
+      currentImages.length + files.length > this.maxImages
     ) {
       this.emit("ct-error", {
         error: new Error("Max images exceeded"),
@@ -320,8 +294,9 @@ export class CTImageInput extends BaseElement {
         }
       }
 
-      this.images = [...this.images, ...newImages];
-      this.emit("ct-change", { images: this.images });
+      const updatedImages = [...currentImages, ...newImages];
+      this.setImages(updatedImages);
+      this.emit("ct-change", { images: updatedImages });
     } finally {
       this.loading = false;
       // Reset input so same file can be selected again
@@ -390,9 +365,11 @@ export class CTImageInput extends BaseElement {
   }
 
   private _handleRemove(id: string) {
-    this.images = this.images.filter((img) => img.id !== id);
-    this.emit("ct-remove", { id, images: this.images });
-    this.emit("ct-change", { images: this.images });
+    const currentImages = this.getImages();
+    const updatedImages = currentImages.filter((img) => img.id !== id);
+    this.setImages(updatedImages);
+    this.emit("ct-remove", { id, images: updatedImages });
+    this.emit("ct-change", { images: updatedImages });
   }
 
   private _formatFileSize(bytes: number): string {
@@ -401,15 +378,46 @@ export class CTImageInput extends BaseElement {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  override render() {
-    const buttonClasses = {
-      button: true,
-      [this.variant]: true,
-      [this.size]: true,
-    };
+  override connectedCallback() {
+    super.connectedCallback();
+    // CellController handles subscription automatically via ReactiveController
+  }
 
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // CellController handles cleanup automatically via ReactiveController
+  }
+
+  override willUpdate(changedProperties: Map<string, any>) {
+    super.willUpdate(changedProperties);
+
+    // If the images property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("images")) {
+      // Bind the new value (Cell or plain array) to the controller
+      this._cellController.bind(this.images);
+    }
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+
+    if (changedProperties.has("theme")) {
+      applyThemeToElement(this, this.theme ?? defaultTheme);
+    }
+  }
+
+  override firstUpdated() {
+    // Bind the initial value to the cell controller
+    this._cellController.bind(this.images);
+
+    // Apply theme after first render
+    applyThemeToElement(this, this.theme ?? defaultTheme);
+  }
+
+  override render() {
     // Only set capture attribute if explicitly specified (not false)
     const captureAttr = this.capture !== false ? this.capture : undefined;
+    const currentImages = this.getImages();
 
     return html`
       <div class="container">
@@ -422,21 +430,22 @@ export class CTImageInput extends BaseElement {
           @change="${this._handleFileChange}"
         />
 
-        <button
-          class="${classMap(buttonClasses)}"
+        <ct-button
+          variant="${this.variant}"
+          size="${this.size}"
           ?disabled="${this.disabled || this.loading}"
           @click="${this._handleButtonClick}"
         >
           ${this.loading ? "Loading..." : this.buttonText}
-        </button>
+        </ct-button>
 
         ${this.loading
           ? html`<div class="loading">Processing images...</div>`
           : ""}
-        ${this.showPreview && this.images.length > 0
+        ${this.showPreview && currentImages.length > 0
           ? html`
               <div class="previews">
-                ${this.images.map(
+                ${currentImages.map(
                   (image) => html`
                     <div class="preview-item size-${this.previewSize}">
                       <img src="${image.url}" alt="${image.name}" />

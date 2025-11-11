@@ -65,10 +65,11 @@ export default recipe<ImageChatInput, ImageChatOutput>(
 
     // Generate text from the content parts
     const { result, pending, requestHash } = generateText({
-      system: systemPrompt ||
-        "You are a helpful assistant that can analyze images. Describe what you see.",
+      system: derive(systemPrompt, (s) =>
+        s ||
+        "You are a helpful assistant that can analyze images. Describe what you see."),
       prompt: contentParts,
-      model: model || "anthropic:claude-sonnet-4-5",
+      model: derive(model, (m) => m || "anthropic:claude-sonnet-4-5"),
     });
 
     const ui = (
@@ -107,28 +108,37 @@ export default recipe<ImageChatInput, ImageChatOutput>(
             </ct-card>
 
             {/* Response */}
-            {derive([result, pending, requestHash], ([res, pend, hash]: [string | undefined, boolean | undefined, string | undefined]) => {
-              if (pend) {
-                return (
-                  <ct-card>
-                    <div>Analyzing...</div>
-                  </ct-card>
-                );
-              }
+            {derive(
+              [result, pending, requestHash],
+              (
+                [res, pend, hash]: [
+                  string | undefined,
+                  boolean | undefined,
+                  string | undefined,
+                ],
+              ) => {
+                if (pend) {
+                  return (
+                    <ct-card>
+                      <div>Analyzing...</div>
+                    </ct-card>
+                  );
+                }
 
-              if (res) {
-                return (
-                  <ct-card>
-                    <ct-vstack gap="2">
-                      <ct-heading level={5}>Response</ct-heading>
-                      <div style="white-space: pre-wrap;">{res}</div>
-                    </ct-vstack>
-                  </ct-card>
-                );
-              }
+                if (res) {
+                  return (
+                    <ct-card>
+                      <ct-vstack gap="2">
+                        <ct-heading level={5}>Response</ct-heading>
+                        <div style="white-space: pre-wrap;">{res}</div>
+                      </ct-vstack>
+                    </ct-card>
+                  );
+                }
 
-              return null;
-            })}
+                return null;
+              },
+            )}
           </ct-vstack>
         </ct-vscroll>
       </ct-screen>
