@@ -28,13 +28,16 @@ export default function TestDerive(config: Config) {
             }
         },
         required: ["value", "config"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
         value,
         config: {
             required: config.required,
             unionUndefined: config.unionUndefined
         }
-    }, ({ value: v, config }) => v + config.required + (config.unionUndefined ?? 0));
+    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0));
     return result;
 }
 // @ts-ignore: Internals

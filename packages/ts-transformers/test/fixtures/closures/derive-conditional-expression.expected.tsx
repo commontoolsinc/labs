@@ -26,7 +26,7 @@ export default function TestDerive() {
         value,
         threshold: threshold,
         multiplier: multiplier
-    }, ({ value: v, threshold, multiplier }) => v > threshold.get() ? v * multiplier.get() : v);
+    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v);
     return result;
 }
 // @ts-ignore: Internals

@@ -14,10 +14,10 @@ import type { TransformationContext } from "../core/mod.ts";
  * allows the ClosureTransformer to properly detect and transform captures.
  *
  * Pipeline:
- *   [1] ComputeTransformer: computed(() => expr) → derive({}, (_input) => expr)
+ *   [1] ComputedTransformer: computed(() => expr) → derive({}, (_input) => expr)
  *   [2] ClosureTransformer: derive({}, (_input) => expr) → derive(schema, schema, {input: {}, ...captures}, ({input: _input, ...captures}) => expr)
  */
-export class ComputeTransformer extends Transformer {
+export class ComputedTransformer extends Transformer {
   /**
    * Filter: Only run if the file contains 'computed' somewhere.
    * This is a quick optimization to skip files without computed calls.
@@ -27,7 +27,7 @@ export class ComputeTransformer extends Transformer {
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
-    const visitor = createComputeToDeriveVisitor(context);
+    const visitor = createComputedToDeriveVisitor(context);
     return ts.visitNode(context.sourceFile, visitor) as ts.SourceFile;
   }
 }
@@ -35,7 +35,7 @@ export class ComputeTransformer extends Transformer {
 /**
  * Create a visitor that transforms computed() calls to derive() calls
  */
-function createComputeToDeriveVisitor(
+function createComputedToDeriveVisitor(
   context: TransformationContext,
 ): ts.Visitor {
   const { factory, checker, tsContext } = context;

@@ -28,10 +28,7 @@ export default recipe(() => {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
-            sum: {
-                type: "number",
-                asOpaque: true
-            }
+            sum: true
         },
         required: ["sum"]
     } as const satisfies __ctHelpers.JSONSchema, {
