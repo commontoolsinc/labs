@@ -61,7 +61,7 @@ export const scenarios = [counterConditionalBranchScenario];
 
 describe("counter-conditional-branch", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }

@@ -5,25 +5,25 @@ import { Transformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
 /**
- * ComputeTransformer: Transforms compute() calls into derive() calls
+ * ComputeTransformer: Transforms computed() calls into derive() calls
  *
  * This transformer performs a simple syntactic rewrite:
- *   compute(() => expr) → derive({}, (_input) => expr)
+ *   computed(() => expr) → derive({}, (_input) => expr)
  *
  * The empty object {} serves as a placeholder input, and the _input parameter
  * allows the ClosureTransformer to properly detect and transform captures.
  *
  * Pipeline:
- *   [1] ComputeTransformer: compute(() => expr) → derive({}, (_input) => expr)
+ *   [1] ComputeTransformer: computed(() => expr) → derive({}, (_input) => expr)
  *   [2] ClosureTransformer: derive({}, (_input) => expr) → derive(schema, schema, {input: {}, ...captures}, ({input: _input, ...captures}) => expr)
  */
 export class ComputeTransformer extends Transformer {
   /**
-   * Filter: Only run if the file contains 'compute' somewhere.
-   * This is a quick optimization to skip files without compute calls.
+   * Filter: Only run if the file contains 'computed' somewhere.
+   * This is a quick optimization to skip files without computed calls.
    */
   override filter(context: TransformationContext): boolean {
-    return context.sourceFile.text.includes("compute");
+    return context.sourceFile.text.includes("computed");
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
@@ -33,7 +33,7 @@ export class ComputeTransformer extends Transformer {
 }
 
 /**
- * Create a visitor that transforms compute() calls to derive() calls
+ * Create a visitor that transforms computed() calls to derive() calls
  */
 function createComputeToDeriveVisitor(
   context: TransformationContext,
@@ -46,16 +46,16 @@ function createComputeToDeriveVisitor(
       return ts.visitEachChild(node, visitor, tsContext);
     }
 
-    // Check if this is a compute() call from commontools
+    // Check if this is a computed() call from commontools
     const callKind = detectCallKind(node, checker);
-    if (callKind?.kind !== "builder" || callKind.builderName !== "compute") {
-      // Not a compute call, continue traversing
+    if (callKind?.kind !== "builder" || callKind.builderName !== "computed") {
+      // Not a computed call, continue traversing
       return ts.visitEachChild(node, visitor, tsContext);
     }
 
-    // Validate: compute must have exactly 1 argument (the callback)
+    // Validate: computed must have exactly 1 argument (the callback)
     if (node.arguments.length !== 1) {
-      // Invalid compute call - skip transformation
+      // Invalid computed call - skip transformation
       return ts.visitEachChild(node, visitor, tsContext);
     }
 
@@ -65,11 +65,11 @@ function createComputeToDeriveVisitor(
       return ts.visitEachChild(node, visitor, tsContext);
     }
 
-    // Transform: compute(() => expr) → derive({}, () => expr)
+    // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
     return factory.updateCallExpression(
       node,
-      factory.createIdentifier("derive"), // Replace 'compute' with 'derive'
+      factory.createIdentifier("derive"), // Replace 'computed' with 'derive'
       node.typeArguments, // Preserve type arguments (if any)
       [
         factory.createObjectLiteralExpression([], false), // First arg: empty object {}

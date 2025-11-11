@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { compute } from "commontools";
+import { computed } from "commontools";
 
 export default function TestComputeNoCaptures() {
-  const result = compute(() => 42);
+  const result = computed(() => 42);
 
   return result;
 }

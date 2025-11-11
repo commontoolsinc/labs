@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, compute } from "commontools";
+import { cell, computed } from "commontools";
 export default function TestCompute() {
     const value = cell(10);
     const multiplier = cell(2);

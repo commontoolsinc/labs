@@ -13,7 +13,7 @@ import type {
   CellFunction,
   CellTypeConstructor,
   CompileAndRunFunction,
-  ComputeFunction,
+  ComputedFunction,
   DeriveFunction,
   FetchDataFunction,
   GenerateObjectFunction,
@@ -37,7 +37,6 @@ import type {
   PatternToolFunction,
   Recipe,
   RecipeFunction,
-  RenderFunction,
   Schema,
   schema as schemaFunction,
   StreamDataFunction,
@@ -246,8 +245,7 @@ export interface BuilderFunctionsAndConstants {
   lift: LiftFunction;
   handler: HandlerFunction;
   derive: DeriveFunction;
-  compute: ComputeFunction;
-  render: RenderFunction;
+  computed: ComputedFunction;
 
   // Built-in modules
   str: StrFunction;

@@ -473,7 +473,7 @@ export const scenarios = [shoppingCartAggregationScenario];
 
 describe("shopping-cart-aggregation", () => {
   for (const scenario of scenarios) {
-    it.skip(scenario.name, async () => {
+    it(scenario.name, async () => {
       await runPatternScenario(scenario);
     });
   }
