@@ -3,7 +3,6 @@ import { createNodeFactory, lift } from "./module.ts";
 import { recipe } from "./recipe.ts";
 import { isRecipe } from "./types.ts";
 import type {
-  Cell,
   JSONSchema,
   NodeFactory,
   Opaque,
@@ -11,6 +10,7 @@ import type {
   RecipeFactory,
   Schema,
 } from "./types.ts";
+import type { Cell as CellType } from "./types.ts";
 import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
@@ -157,12 +157,12 @@ declare function createCell<T>(
   schema?: JSONSchema,
   name?: string,
   value?: T,
-): Cell<T>;
+): CellType<T>;
 declare function createCell<S extends JSONSchema = JSONSchema>(
   schema: S,
   name?: string,
   value?: Schema<S>,
-): Cell<Schema<S>>;
+): CellType<Schema<S>>;
 
 export type { createCell };
 

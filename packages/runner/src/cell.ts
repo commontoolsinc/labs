@@ -4,15 +4,22 @@ import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
 import {
   type AnyCell,
+  type AnyCellWrapping,
+  type Apply,
+  type AsCell,
   type Cell,
   type CellKind,
   type Frame,
+  type HKT,
+  type ICell,
   ID,
   ID_FIELD,
   type IDFields,
   isStreamValue,
   type IsThisObject,
+  type IStreamable,
   type JSONSchema,
+  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -79,11 +86,11 @@ declare module "@commontools/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
    */
-  interface IWritable<T> {
+  interface IWritable<T, C extends AnyBrandedCell<any>> {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-    ): void;
+    ): C;
   }
 
   /**
@@ -191,13 +198,6 @@ declare module "@commontools/api" {
 }
 
 export type { AnyCell, Cell, Stream } from "@commontools/api";
-import type {
-  AnyCellWrapping,
-  AsCell,
-  ICell,
-  IStreamable,
-  KeyResultType,
-} from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -301,7 +301,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [] };
+    this._link = link ?? { path: [], type: "application/json" };
+    if (!this._link.type) {
+      this._link = { ...this._link, type: "application/json" };
+    }
 
     // Use provided container or create one
     // If link has an id, extract it to the container
@@ -515,7 +518,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   set(
     newValue: AnyCellWrapping<T> | T,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
-  ): void {
+  ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime.readTx(this.tx),
       this.link,
@@ -539,32 +542,33 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       this.cleanup = cancel;
 
       this.listeners.forEach((callback) => addCancel(callback(event)));
-      return;
+    } else {
+      // Regular cell behavior
+      if (!this.tx) throw new Error("Transaction required for set");
+
+      // No await for the sync, just kicking this off, so we have the data to
+      // retry on conflict.
+      if (!this.synced) this.sync();
+
+      // Looks for arrays and makes sure each object gets its own doc.
+      const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+
+      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      diffAndUpdate(
+        this.runtime,
+        this.tx,
+        resolveLink(this.tx, this.link, "writeRedirect"),
+        transformedValue,
+        this._frame?.cause,
+      );
+
+      // Register commit callback if provided
+      if (onCommit) {
+        this.tx.addCommitCallback(onCommit);
+      }
     }
 
-    // Regular cell behavior
-    if (!this.tx) throw new Error("Transaction required for set");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    // Looks for arrays and makes sure each object gets its own doc.
-    const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
-
-    // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
-    diffAndUpdate(
-      this.runtime,
-      this.tx,
-      resolveLink(this.tx, this.link, "writeRedirect"),
-      transformedValue,
-      this._frame?.cause,
-    );
-
-    // Register commit callback if provided
-    if (onCommit) {
-      this.tx.addCommitCallback(onCommit);
-    }
+    return this as unknown as Cell<T>;
   }
 
   send(
@@ -576,7 +580,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     values: V extends object ? AnyCellWrapping<V> : never,
-  ): void {
+  ): Cell<T> {
     if (!this.tx) throw new Error("Transaction required for update");
     if (!isRecord(values)) {
       throw new Error("Can't update with non-object value");
@@ -621,6 +625,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     for (const [key, value] of Object.entries(values)) {
       (this as unknown as Cell<any>).key(key).set(value);
     }
+
+    return this as unknown as Cell<T>;
   }
 
   push(
@@ -1373,3 +1379,94 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
       : any
     : any
   : any;
+
+/**
+ * Factory function to create Cell constructor with static methods for a specific cell kind
+ */
+export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
+  return {
+    /**
+     * Create a Cell wrapping a value with optional schema.
+     * This is a convenience method that creates a cell with a schema that has a default value.
+     * @param value - The value to wrap in a Cell
+     * @param providedSchema - Optional JSON schema for the cell
+     * @returns A new Cell wrapping the value
+     */
+    of<T>(value: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
+      const frame = getTopFrame();
+      if (!frame || !frame.runtime) {
+        throw new Error(
+          "Can't invoke Cell.of() outside of a recipe/handler/lift context",
+        );
+      }
+
+      // Convert schema to object form and merge default value if value is defined
+      const schemaObj = ContextualFlowControl.toSchemaObj(providedSchema);
+      const schema: JSONSchema = value !== undefined
+        ? { ...schemaObj, default: value as any }
+        : schemaObj;
+
+      // Create a cell without a link - it will be created on demand via .for()
+      const cell = createCell<T>(
+        frame.runtime,
+        {
+          path: [],
+          schema,
+          rootSchema: schema,
+          ...(frame.space && { space: frame.space }),
+        },
+        frame.tx,
+        false,
+        kind,
+      );
+
+      // Set the initial value only if value is defined
+      if (value !== undefined) {
+        cell.setInitialValue(value);
+      }
+
+      return cell;
+    },
+
+    /**
+     * Compare two cells or values for equality.
+     * @param a - First cell or value to compare
+     * @param b - Second cell or value to compare
+     * @returns true if the values are equal
+     */
+    equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+      return areLinksSame(a, b);
+    },
+
+    /**
+     * Create a Cell with an optional cause.
+     * @param cause - The cause to associate with this cell
+     * @returns A new Cell
+     */
+    for<T>(cause: unknown): Apply<Wrap, T> {
+      const frame = getTopFrame();
+      if (!frame || !frame.runtime) {
+        throw new Error(
+          "Can't invoke Cell.for() outside of a recipe/handler/lift context",
+        );
+      }
+
+      // Create a cell without a link
+      const cell = createCell<T>(
+        frame.runtime,
+        {
+          path: [],
+          ...(frame.space && { space: frame.space }),
+        },
+        frame.tx,
+        false,
+        kind,
+      );
+
+      // Associate it with the cause
+      cell.for(cause);
+
+      return cell;
+    },
+  };
+}

@@ -22,7 +22,7 @@ describe("OpaqueRef Schema Support", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ recipe, cell } = commontools);
   });
 

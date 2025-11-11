@@ -43,7 +43,7 @@ describe("recipes with HTML", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ lift, derive, recipe, str, UI } = commontools);
   });
 

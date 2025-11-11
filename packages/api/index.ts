@@ -81,12 +81,12 @@ export interface IReadable<T> {
 /**
  * Writable cells can update their value.
  */
-export interface IWritable<T> {
-  set(value: T | AnyCellWrapping<T>): void;
+export interface IWritable<T, C extends AnyBrandedCell<any>> {
+  set(value: T | AnyCellWrapping<T>): C;
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
-  ): void;
+  ): C;
   push(
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
@@ -101,11 +101,11 @@ export interface IStreamable<T> {
 }
 
 // Lightweight HKT, so we can pass cell types to IKeyable<>.
-interface HKT {
+export interface HKT {
   _A: unknown;
   type: unknown;
 }
-type Apply<F extends HKT, A> = (F & { _A: A })["type"];
+export type Apply<F extends HKT, A> = (F & { _A: A })["type"];
 
 /**
  * A key-addressable, **covariant** view over a structured value `T`.
@@ -263,6 +263,68 @@ export interface IOpaquable<T> {
 }
 
 // ============================================================================
+// Cell Constructor Interfaces
+// ============================================================================
+
+/**
+ * Generic constructor interface for cell types with static methods.
+ */
+export interface CellTypeConstructor<
+  Wrap extends HKT,
+> {
+  /**
+   * Create a cell with a cause.
+   *
+   * Can be chained with .of() or .set():
+   *
+   * const foo = Cell.for(cause).set(value); // sets cell to latest value
+   * const bar = Cell.for(cause).of(value); // sets cell to initial value
+   *
+   * @param cause - The cause to associate with this cell
+   * @returns A new cell
+   */
+  for<T>(cause: unknown): Apply<Wrap, T>;
+
+  /**
+   * Create a cell with an initial/default value. In a reactive context, this
+   * value will only be set on first call.
+   *
+   * Can be chained with .for() to set a cause and initial value.
+   * E.g. `const foo = Cell.for(cause).of(value)`.
+   *
+   * AST transformation adds `.for("foo")` in `const foo = Cell.of(value)`.
+   *
+   * Internally it just merges the value into the schema as a default value.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - Optional JSON schema for the cell
+   * @returns A new cell
+   */
+  of<T>(value: T, schema?: JSONSchema): Apply<Wrap, T>;
+
+  /**
+   * Create a cell with an initial/default value and a typed schema.
+   * Type is inferred from the schema.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - JSON schema for the cell
+   * @returns A new cell with type derived from schema
+   */
+  of<S extends JSONSchema>(
+    value: Schema<S>,
+    schema: S,
+  ): Apply<Wrap, Schema<S>>;
+
+  /**
+   * Compare two cells or values for equality.
+   * @param a - First cell or value to compare
+   * @param b - Second cell or value to compare
+   * @returns true if the values are equal
+   */
+  equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+}
+
+// ============================================================================
 // Cell Type Definitions
 // ============================================================================
 
@@ -279,6 +341,10 @@ export interface AnyCell<T = unknown> extends AnyBrandedCell<T>, IAnyCell<T> {
  * Has .key(), .map(), .mapWithPattern()
  * Does NOT have .get()/.set()/.send()/.equals()/.resolveAsCell()
  */
+export interface AsOpaqueCell extends HKT {
+  type: OpaqueCell<this["_A"]>;
+}
+
 export interface IOpaqueCell<T>
   extends
     IAnyCell<T>,
@@ -289,6 +355,8 @@ export interface IOpaqueCell<T>
 
 export interface OpaqueCell<T>
   extends BrandedCell<T, "opaque">, IOpaqueCell<T> {}
+
+export declare const OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
 
 /**
  * Full cell with read, write capabilities.
@@ -303,9 +371,9 @@ export interface AsCell extends HKT {
 export interface ICell<T>
   extends
     IAnyCell<T>,
-    ICreatable<AnyBrandedCell<T>>,
+    ICreatable<Cell<T>>,
     IReadable<T>,
-    IWritable<T>,
+    IWritable<T, Cell<T>>,
     IStreamable<T>,
     IEquatable,
     IKeyable<T, AsCell>,
@@ -314,6 +382,8 @@ export interface ICell<T>
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 
+export declare const Cell: CellTypeConstructor<AsCell>;
+
 /**
  * Stream-only cell - can only send events, not read or write.
  * Has .send() only
@@ -321,6 +391,10 @@ export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
  *
  * Note: This is an interface (not a type) to allow module augmentation by the runtime.
  */
+export interface AsStream extends HKT {
+  type: Stream<this["_A"]>;
+}
+
 export interface Stream<T>
   extends
     BrandedCell<T, "stream">,
@@ -328,12 +402,14 @@ export interface Stream<T>
     ICreatable<Stream<T>>,
     IStreamable<T> {}
 
+export declare const Stream: CellTypeConstructor<AsStream>;
+
 /**
  * Comparable-only cell - just for equality checks and keying.
  * Has .equals(), .key()
  * Does NOT have .resolveAsCell()/.get()/.set()/.send()
  */
-interface AsComparableCell extends HKT {
+export interface AsComparableCell extends HKT {
   type: ComparableCell<this["_A"]>;
 }
 
@@ -345,12 +421,14 @@ export interface ComparableCell<T>
     IEquatable,
     IKeyable<T, AsComparableCell> {}
 
+export declare const ComparableCell: CellTypeConstructor<AsComparableCell>;
+
 /**
  * Read-only cell variant.
  * Has .get(), .equals(), .key()
  * Does NOT have .resolveAsCell()/.set()/.send()
  */
-interface AsReadonlyCell extends HKT {
+export interface AsReadonlyCell extends HKT {
   type: ReadonlyCell<this["_A"]>;
 }
 
@@ -363,12 +441,14 @@ export interface ReadonlyCell<T>
     IEquatable,
     IKeyable<T, AsReadonlyCell> {}
 
+export declare const ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
+
 /**
  * Write-only cell variant.
  * Has .set(), .update(), .push(), .key()
  * Does NOT have .resolveAsCell()/.get()/.equals()/.send()
  */
-interface AsWriteonlyCell extends HKT {
+export interface AsWriteonlyCell extends HKT {
   type: WriteonlyCell<this["_A"]>;
 }
 
@@ -377,8 +457,10 @@ export interface WriteonlyCell<T>
     BrandedCell<T, "writeonly">,
     IAnyCell<T>,
     ICreatable<WriteonlyCell<T>>,
-    IWritable<T>,
+    IWritable<T, WriteonlyCell<T>>,
     IKeyable<T, AsWriteonlyCell> {}
+
+export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
 // ============================================================================
 // OpaqueRef - Proxy-based variant of OpaqueCell
@@ -1053,20 +1135,6 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
 
-export type CreateCellFunction = {
-  <T>(
-    schema?: JSONSchema,
-    name?: string,
-    value?: T,
-  ): Cell<T>;
-
-  <S extends JSONSchema = JSONSchema>(
-    schema: S,
-    name?: string,
-    value?: Schema<S>,
-  ): Cell<Schema<S>>;
-};
-
 // Default type for specifying default values in type definitions
 export type Default<T, V extends T = T> = T;
 
@@ -1122,7 +1190,6 @@ export declare const compileAndRun: CompileAndRunFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
-export declare const createCell: CreateCellFunction;
 export declare const cell: CellFunction;
 export declare const stream: StreamFunction;
 export declare const byRef: ByRefFunction;
