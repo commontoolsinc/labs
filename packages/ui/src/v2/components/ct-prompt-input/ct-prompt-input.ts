@@ -443,7 +443,10 @@ export class CTPromptInput extends BaseElement {
           if (changedProperties.has("model") && this.model != null) {
             this._modelController.bind(this.model);
           }
-          if (changedProperties.has("model") || changedProperties.has("modelItems")) {
+          if (
+            changedProperties.has("model") ||
+            changedProperties.has("modelItems")
+          ) {
             this._applyModelValueToDom();
           }
 
