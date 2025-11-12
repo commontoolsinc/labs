@@ -1,4 +1,5 @@
 import * as FS from "@std/fs";
+import * as Path from "@std/path";
 
 import * as Error from "./error.ts";
 import * as Space from "./space.ts";
@@ -262,7 +263,17 @@ export const open = async (
 
     try {
       if (options.store.protocol === "file:") {
-        await FS.ensureDir(options.store);
+        // Check if path has a file extension (single-file mode) or is a directory
+        const isFile = Path.extname(options.store.pathname) !== '';
+
+        if (isFile) {
+          // Ensure parent directory exists for single-file mode
+          const parentDir = Path.dirname(options.store.pathname);
+          await FS.ensureDir(Path.toFileUrl(parentDir));
+        } else {
+          // Ensure directory exists for directory mode
+          await FS.ensureDir(options.store);
+        }
       }
       return { ok: await new Memory(options) };
     } catch (cause) {
