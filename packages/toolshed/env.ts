@@ -75,11 +75,18 @@ const EnvSchema = z.object({
   // ===========================================================================
   // Memory Store
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
+  //    (directory mode - default, backwards compatible)
+  //  - DB_PATH is an optional absolute path to a single SQLite database file
+  //    (single-file mode - for clusterduck clustering)
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint
   // ===========================================================================
   MEMORY_DIR: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
+  DB_PATH: z.string().refine(
+    (path) => !path || Path.isAbsolute(path),
+    { message: "DB_PATH must be an absolute path" },
+  ).optional(),
   MEMORY_URL: z.string().default("http://localhost:8000"),
   // ===========================================================================
   // Sentry DSN global middleware
