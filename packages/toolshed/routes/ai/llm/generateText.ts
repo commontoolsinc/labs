@@ -302,6 +302,12 @@ export async function generateText(
   const stream = new ReadableStream({
     async start(controller) {
       let result = "";
+      const toolCalls: Array<{
+        toolCallId: string;
+        toolName: string;
+        input: any;
+      }> = [];
+
       // If last message was from assistant, send it first
       if (messages[messages.length - 1].role === "assistant") {
         const content = messages[messages.length - 1].content;
@@ -329,6 +335,12 @@ export async function generateText(
             ),
           );
         } else if (part.type === "tool-call") {
+          // Track tool calls for message history
+          toolCalls.push({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+          });
           // Send tool call event to client
           controller.enqueue(
             new TextEncoder().encode(
@@ -370,11 +382,34 @@ export async function generateText(
         result = cleanJsonResponse(result);
       }
 
+      // Update message history with proper content structure
+      let assistantContent: BuiltInLLMMessage["content"];
+
+      if (toolCalls.length > 0) {
+        // Build structured content when tool calls are present
+        const contentParts: BuiltInLLMMessage["content"] = [];
+        if (result.trim()) {
+          contentParts.push({ type: "text", text: result } as any);
+        }
+        for (const tc of toolCalls) {
+          contentParts.push({
+            type: "tool-call",
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            input: tc.input,
+          } as any);
+        }
+        assistantContent = contentParts as any;
+      } else {
+        // Plain text response
+        assistantContent = result;
+      }
+
       // Update message history
       if (messages[messages.length - 1].role === "user") {
-        messages.push({ role: "assistant", content: result });
+        messages.push({ role: "assistant", content: assistantContent } as any);
       } else {
-        messages[messages.length - 1].content = result;
+        messages[messages.length - 1].content = assistantContent as any;
       }
 
       // Send finish event to client
