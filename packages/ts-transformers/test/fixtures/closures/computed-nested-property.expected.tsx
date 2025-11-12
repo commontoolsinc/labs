@@ -14,7 +14,7 @@ export default function TestComputeNestedProperty() {
                     }
                 },
                 required: ["count"],
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["counter"]

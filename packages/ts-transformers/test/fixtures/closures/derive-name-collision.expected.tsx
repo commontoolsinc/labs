@@ -5,7 +5,8 @@ export default function TestDerive() {
     const _multiplier = cell(2);
     // Parameter name collides with capture name
     const result = derive({
-        type: "number"
+        type: "number",
+        asCell: true
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, value, (multiplier) => multiplier * 3);

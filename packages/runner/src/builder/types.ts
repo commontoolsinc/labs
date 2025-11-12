@@ -10,7 +10,6 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
-  CellFunction,
   CellTypeConstructor,
   CompileAndRunFunction,
   ComputedFunction,
@@ -40,7 +39,6 @@ import type {
   Schema,
   schema as schemaFunction,
   StreamDataFunction,
-  StreamFunction,
   StrFunction,
   WishFunction,
 } from "@commontools/api";
@@ -261,8 +259,7 @@ export interface BuilderFunctionsAndConstants {
   wish: WishFunction;
 
   // Cell creation
-  cell: CellFunction;
-  stream: StreamFunction;
+  cell: CellTypeConstructor<AsCell>["of"];
 
   // Cell constructors with static methods
   Cell: CellTypeConstructor<AsCell>;

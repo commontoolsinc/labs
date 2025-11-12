@@ -12,7 +12,7 @@ export default function TestDerive(config: Config) {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
                 type: "object",
@@ -37,7 +37,7 @@ export default function TestDerive(config: Config) {
             required: config.required,
             unionUndefined: config.unionUndefined
         }
-    }, ({ value: v, config }) => v + config.required + (config.unionUndefined ?? 0));
+    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0));
     return result;
 }
 // @ts-ignore: Internals

@@ -1,7 +1,14 @@
 // Upstream DOM types use "{}" intentionally --
 // disable lint for this type
 // deno-lint-ignore-file ban-types
-import type { Cell, CellLike, Props, RenderNode, VNode } from "commontools";
+import type {
+  Cell,
+  CELL_LIKE,
+  CellLike,
+  Props,
+  RenderNode,
+  VNode,
+} from "commontools";
 
 /**
  * Used to represent DOM API's where users can either pass
@@ -1431,7 +1438,10 @@ declare namespace CTDOM {
 
   export type DetailedHTMLProps<E extends HTMLAttributes<T>, T> =
     & ClassAttributes<T>
-    & E;
+    & {
+      [K in keyof E]: E[K] extends { [CELL_LIKE]: unknown } ? E[K]
+        : (E[K] | CellLike<E[K]>);
+    };
 
   // All the WAI-ARIA 1.1 attributes from https://www.w3.org/TR/wai-aria-1.1/
   interface AriaAttributes {

@@ -14,7 +14,7 @@ export default function TestDerive(state: State) {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             state: {
                 type: "object",
@@ -33,10 +33,7 @@ export default function TestDerive(state: State) {
             }
         },
         required: ["value", "state"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
         value,
         state: {
             counter: {

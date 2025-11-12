@@ -62,7 +62,7 @@ export default recipe<InputSchema>(({ title }) => {
   // FIXME(@ellyxir): use inputschema instead of just creating it here
   const linkedListString = derive(
     items_list,
-    (list) => listToString(list, "\n"),
+    (list) => listToString(list.get(), "\n"),
   );
 
   return {

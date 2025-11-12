@@ -184,7 +184,7 @@ export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
     )(lastPrepared);
     const stageStatus = derive(
       stage,
-      (current) => current ? `staged:${current.tag}` : "idle",
+      (current) => current.get() ? `staged:${current.get()!.tag}` : "idle",
     );
     const label = str`${preparedView} prepared, ${appliedView} applied`;
 

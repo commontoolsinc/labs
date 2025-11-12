@@ -1,11 +1,16 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive } from "commontools";
-interface State {
-    config: {
-        multiplier: number;
-    };
-}
-export default function TestDerive(state: State) {
+import { cell, computed, recipe } from "commontools";
+export default recipe({
+    type: "object",
+    properties: {
+        multiplier: {
+            type: "number"
+        }
+    },
+    required: ["multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, (config: {
+    multiplier: number;
+}) => {
     const value = cell(10);
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -15,36 +20,28 @@ export default function TestDerive(state: State) {
                 type: "number",
                 asCell: true
             },
-            state: {
+            config: {
                 type: "object",
                 properties: {
-                    config: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["multiplier"]
+                    multiplier: {
+                        type: "number"
                     }
                 },
-                required: ["config"]
+                required: ["multiplier"]
             }
         },
-        required: ["value", "state"]
+        required: ["value", "config"]
     } as const satisfies __ctHelpers.JSONSchema, {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
-        value,
-        state: {
-            config: {
-                multiplier: state.config.multiplier
-            }
+        value: value,
+        config: {
+            multiplier: config.multiplier
         }
-    }, ({ value: v, state }) => v * state.config.multiplier);
+    }, ({ value, config }) => value.get() * config.multiplier);
     return result;
-}
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

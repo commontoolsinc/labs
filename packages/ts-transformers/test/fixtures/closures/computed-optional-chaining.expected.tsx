@@ -11,16 +11,20 @@ export default function TestComputeOptionalChaining() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number"
-                    }
-                },
-                asOpaque: true
+                anyOf: [{
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number"
+                            }
+                        }
+                    }, {
+                        type: "null"
+                    }],
+                asCell: true
             }
         },
         required: ["value", "config"]

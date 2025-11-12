@@ -1,24 +1,24 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed } from "commontools";
-export default function TestComputeComplexExpression() {
+export default function TestComputeMultipleCaptures() {
     const a = cell(10);
     const b = cell(20);
-    const c = cell(5);
+    const c = cell(30);
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             a: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             b: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             c: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["a", "b", "c"]
@@ -29,7 +29,10 @@ export default function TestComputeComplexExpression() {
         a: a,
         b: b,
         c: c
-    }, ({ a, b, c }) => (a.get() * b.get() + c.get()) / 2);
+    }, ({ a, b, c }) => {
+        const sum = a.get() + b.get();
+        return sum * c.get();
+    });
     return result;
 }
 // @ts-ignore: Internals

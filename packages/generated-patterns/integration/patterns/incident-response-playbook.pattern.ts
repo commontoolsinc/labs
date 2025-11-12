@@ -493,7 +493,7 @@ export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
         if (!id) {
           return "idle";
         }
-        const target = list.find((step) => step.id === active);
+        const target = list.find((step) => step.id === active.get());
         return target ? target.title : "idle";
       },
     );

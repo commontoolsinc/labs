@@ -10,15 +10,15 @@ export default function TestDerive() {
         properties: {
             a: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             b: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             c: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["a", "b", "c"]

@@ -178,7 +178,10 @@ export const counterWithDerivedSummary = recipe<SummaryArgs>(
     );
     const historyView = lift(sanitizeHistory)(history);
     const adjustmentsView = lift(sanitizeAdjustments)(adjustments);
-    const sequenceView = derive(sequence, (count) => toInteger(count ?? 0, 0));
+    const sequenceView = derive(
+      sequence,
+      (count) => toInteger(count.get() ?? 0, 0),
+    );
 
     const summary = lift(
       toSchema<SummaryInputs>(),

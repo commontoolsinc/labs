@@ -10,11 +10,11 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             __ct_reserved: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "__ct_reserved"]

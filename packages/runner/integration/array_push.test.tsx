@@ -92,7 +92,9 @@ export default recipe(
       [UI]: (
         <div>
           <h3>Array Push Test</h3>
-          <p>Array length: {derive(my_numbers_array, (arr) => arr.length)}</p>
+          <p>
+            Array length: {derive(my_numbers_array, (arr) => arr.get().length)}
+          </p>
           <p>
             <ul>
               Current values:{" "}

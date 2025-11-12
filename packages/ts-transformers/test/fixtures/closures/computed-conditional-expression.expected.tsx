@@ -11,19 +11,19 @@ export default function TestComputeConditionalExpression() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             threshold: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             a: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             b: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "threshold", "a", "b"]
