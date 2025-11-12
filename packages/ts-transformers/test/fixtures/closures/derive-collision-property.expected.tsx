@@ -10,11 +10,11 @@ export default function TestDeriveCollisionProperty() {
         properties: {
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             multiplier_1: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["multiplier", "multiplier_1"]

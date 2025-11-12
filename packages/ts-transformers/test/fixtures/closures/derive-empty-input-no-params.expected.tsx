@@ -5,7 +5,6 @@ export default function TestDeriveEmptyInputNoParams() {
     const b = cell(20);
     // Zero-parameter callback that closes over a and b
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             a: {
@@ -19,7 +18,6 @@ export default function TestDeriveEmptyInputNoParams() {
         },
         required: ["a", "b"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         a: a,
