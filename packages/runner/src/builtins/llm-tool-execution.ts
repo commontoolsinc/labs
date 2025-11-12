@@ -566,7 +566,9 @@ async function invokeToolCall(
       : [];
     const realized = charmMeta.cell.getAsQueryResult(pathParts);
     // Ensure we return plain JSON by stringifying and parsing
-    const value = JSON.parse(JSON.stringify(realized));
+    // Guard against undefined which JSON.stringify returns as undefined (not "undefined")
+    const stringified = JSON.stringify(realized);
+    const value = stringified !== undefined ? JSON.parse(stringified) : null;
     return { type: "json", value };
   }
 

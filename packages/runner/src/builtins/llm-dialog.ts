@@ -276,6 +276,7 @@ export function llmDialog(
             parentCell.space,
             cause,
             inputs,
+            result,
             pending,
             internal,
             requestId,
@@ -307,25 +308,6 @@ export function llmDialog(
     // cell as it's the only way to get to requestId, here we are passing it
     // around on the side.
 
-    // Update flattened tools whenever tools change
-    // This is done asynchronously since buildToolCatalog is async
-    const toolsCell = inputs.key("tools");
-    // Ensure reactivity: register a read of tools with this tx
-    toolsCell.withTx(tx).get();
-
-    // Build tool catalog asynchronously and update flattened tools
-    buildToolCatalog(runtime, toolsCell).then((catalog) => {
-      runtime.editWithRetry((tx) => {
-        const currentFlattened = result.withTx(tx).key("flattenedTools").get();
-        const flattenedStr = JSON.stringify(catalog.llmTools);
-        const currentStr = JSON.stringify(currentFlattened);
-
-        if (flattenedStr !== currentStr) {
-          result.withTx(tx).key("flattenedTools").set(catalog.llmTools as any);
-        }
-      });
-    });
-
     if (
       (!result.withTx(tx).key("pending").get() ||
         requestId !== internal.withTx(tx).key("requestId").get()) && requestId
@@ -344,6 +326,7 @@ async function startRequest(
   space: MemorySpace,
   cause: any,
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
+  result: Cell<Schema<typeof resultSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
@@ -354,9 +337,18 @@ async function startRequest(
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools");
 
-  // No need to flatten here; UI handles flattened tools reactively
-
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
+
+  // Update flattened tools synchronously after building catalog
+  runtime.editWithRetry((tx) => {
+    const currentFlattened = result.withTx(tx).key("flattenedTools").get();
+    const flattenedStr = JSON.stringify(toolCatalog.llmTools);
+    const currentStr = JSON.stringify(currentFlattened);
+
+    if (flattenedStr !== currentStr) {
+      result.withTx(tx).key("flattenedTools").set(toolCatalog.llmTools as any);
+    }
+  });
 
   const llmParams: LLMRequest = {
     system: system ?? "",
@@ -488,6 +480,7 @@ async function startRequest(
               space,
               cause,
               inputs,
+              result,
               pending,
               internal,
               requestId,

@@ -19,12 +19,10 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
-  buildAssistantMessage,
   buildToolCatalog,
-  createToolResultMessages,
-  executeToolCalls,
   extractToolCallParts,
   hasValidContent,
+  processToolCalls,
 } from "./llm-tool-execution.ts";
 
 const client = new LLMClient();
@@ -266,76 +264,72 @@ async function executeGenerateText(params: {
       llmParams.tools = toolCatalog.llmTools;
     }
 
-    // Keep track of all messages for tool calling loop
-    const allMessages: BuiltInLLMMessage[] = [...requestMessages];
-    let iterationCount = 0;
-    const MAX_ITERATIONS = 50;
+    // Make initial LLM request
+    llmParams.messages = requestMessages;
+    const llmResult = await client.sendRequest(llmParams, updatePartial);
 
-    while (iterationCount < MAX_ITERATIONS) {
-      iterationCount++;
+    if (thisRun !== currentRun) return;
 
-      if (thisRun !== currentRun) return;
-
-      // Update params with current messages
-      llmParams.messages = allMessages;
-
-      // Make LLM request
-      const llmResult = await client.sendRequest(llmParams, updatePartial);
-
-      if (thisRun !== currentRun) return;
-
-      // Validate content
-      if (!hasValidContent(llmResult.content)) {
-        throw new Error("LLM returned invalid/empty content");
-      }
-
-      // Check for tool calls
-      const toolCallParts = extractToolCallParts(llmResult.content);
-
-      if (toolCallParts.length === 0 || !toolCatalog) {
-        // No tool calls - we're done
-        await runtime.idle();
-
-        const textResult = extractTextFromLLMResponse(llmResult);
-
-        await runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(textResult);
-          partial.withTx(tx).set(textResult);
-          requestHash.withTx(tx).set(hash);
-        });
-        return;
-      }
-
-      // Execute tool calls
-      const assistantMessage = buildAssistantMessage(
-        llmResult.content,
-        toolCallParts,
-      );
-      allMessages.push(assistantMessage);
-
-      const toolResults = await executeToolCalls(
-        runtime,
-        parentCell.space,
-        toolCatalog,
-        toolCallParts,
-      );
-
-      if (thisRun !== currentRun) return;
-
-      // Add tool results to messages
-      const toolResultMessages = createToolResultMessages(toolResults);
-      allMessages.push(...toolResultMessages);
-
-      // Continue loop to get next response
+    // Validate content
+    if (!hasValidContent(llmResult.content)) {
+      throw new Error("LLM returned invalid/empty content");
     }
 
-    // Hit max iterations
-    console.warn(`generateText hit max iterations (${MAX_ITERATIONS})`);
+    // If no tools or no tool calls, we're done
+    const toolCallParts = extractToolCallParts(llmResult.content);
+    if (toolCallParts.length === 0 || !toolCatalog) {
+      await runtime.idle();
+
+      const textResult = extractTextFromLLMResponse(llmResult);
+
+      await runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(textResult);
+        partial.withTx(tx).set(textResult);
+        requestHash.withTx(tx).set(hash);
+      });
+      return;
+    }
+
+    // Use shared tool execution loop
+    // Track conversation history for subsequent LLM calls
+    const conversationMessages: BuiltInLLMMessage[] = [];
+
+    const { finalContent } = await processToolCalls({
+      runtime,
+      space: parentCell.space,
+      toolCatalog,
+      llmContent: llmResult.content,
+      continueConversation: async (newMessages) => {
+        if (thisRun !== currentRun) {
+          throw new Error("Request cancelled");
+        }
+        // Append new messages to conversation history
+        conversationMessages.push(...newMessages);
+        // Build full message array: initial request + all tool-related messages
+        llmParams.messages = [...requestMessages, ...conversationMessages];
+        return await client.sendRequest(llmParams, updatePartial);
+      },
+      shouldContinue: () => thisRun === currentRun,
+      maxIterations: 50,
+    });
+
+    if (thisRun !== currentRun) return;
+
+    await runtime.idle();
+
+    // Extract text from final content
+    const textResult = extractTextFromLLMResponse({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: finalContent,
+    });
+
     await runtime.editWithRetry((tx) => {
       pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-      partial.withTx(tx).set("Error: Maximum tool call iterations exceeded");
+      result.withTx(tx).set(textResult);
+      partial.withTx(tx).set(textResult);
+      requestHash.withTx(tx).set(hash);
     });
   } catch (error) {
     if (thisRun !== currentRun) return;
@@ -440,7 +434,8 @@ export function generateText(
       cache: true,
     };
 
-    const hash = refer(llmParams).toString();
+    // Include tools in hash to ensure requests rerun when tool definitions change
+    const hash = refer({ ...llmParams, tools }).toString();
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
 
@@ -583,75 +578,82 @@ async function executeGenerateObject<T extends Record<string, unknown>>(
       mode: "json",
     };
 
-    const allMessages: BuiltInLLMMessage[] = [...requestMessages];
-    let iterationCount = 0;
-    const MAX_ITERATIONS = 50;
+    // Make initial request
+    const llmResult = await client.sendRequest(llmParams, () => {});
 
-    while (iterationCount < MAX_ITERATIONS) {
-      iterationCount++;
+    if (thisRun !== currentRun) return;
 
-      if (thisRun !== currentRun) return;
-
-      llmParams.messages = allMessages;
-
-      const llmResult = await client.sendRequest(llmParams, () => {});
-
-      if (thisRun !== currentRun) return;
-
-      if (!hasValidContent(llmResult.content)) {
-        throw new Error("LLM returned invalid/empty content");
-      }
-
-      const toolCallParts = extractToolCallParts(llmResult.content);
-
-      if (toolCallParts.length === 0) {
-        // No tool calls - parse final response as JSON
-        await runtime.idle();
-
-        const textResult = extractTextFromLLMResponse(llmResult);
-        let parsedResult: T;
-        try {
-          parsedResult = JSON.parse(textResult) as T;
-        } catch (parseError) {
-          throw new Error(
-            `Failed to parse LLM response as JSON: ${parseError}`,
-          );
-        }
-
-        await runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(parsedResult);
-          requestHash.withTx(tx).set(hash);
-        });
-        return;
-      }
-
-      // Execute tool calls
-      const assistantMessage = buildAssistantMessage(
-        llmResult.content,
-        toolCallParts,
-      );
-      allMessages.push(assistantMessage);
-
-      const toolResults = await executeToolCalls(
-        runtime,
-        parentCell.space,
-        toolCatalog,
-        toolCallParts,
-      );
-
-      if (thisRun !== currentRun) return;
-
-      const toolResultMessages = createToolResultMessages(toolResults);
-      allMessages.push(...toolResultMessages);
+    if (!hasValidContent(llmResult.content)) {
+      throw new Error("LLM returned invalid/empty content");
     }
 
-    // Hit max iterations
-    console.warn(`generateObject hit max iterations (${MAX_ITERATIONS})`);
+    const toolCallParts = extractToolCallParts(llmResult.content);
+
+    if (toolCallParts.length === 0) {
+      // No tool calls - parse final response as JSON
+      await runtime.idle();
+
+      const textResult = extractTextFromLLMResponse(llmResult);
+      let parsedResult: T;
+      try {
+        parsedResult = JSON.parse(textResult) as T;
+      } catch (parseError) {
+        throw new Error(
+          `Failed to parse LLM response as JSON: ${parseError}`,
+        );
+      }
+
+      await runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(parsedResult);
+        requestHash.withTx(tx).set(hash);
+      });
+      return;
+    }
+
+    // Use shared tool execution loop
+    const conversationMessages: BuiltInLLMMessage[] = [];
+
+    const { finalContent } = await processToolCalls({
+      runtime,
+      space: parentCell.space,
+      toolCatalog,
+      llmContent: llmResult.content,
+      continueConversation: async (newMessages) => {
+        if (thisRun !== currentRun) {
+          throw new Error("Request cancelled");
+        }
+        conversationMessages.push(...newMessages);
+        llmParams.messages = [...requestMessages, ...conversationMessages];
+        return await client.sendRequest(llmParams, () => {});
+      },
+      shouldContinue: () => thisRun === currentRun,
+      maxIterations: 50,
+    });
+
+    if (thisRun !== currentRun) return;
+
+    await runtime.idle();
+
+    // Extract text from final content
+    const textResult = extractTextFromLLMResponse({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: finalContent,
+    });
+    let parsedResult: T;
+    try {
+      parsedResult = JSON.parse(textResult) as T;
+    } catch (parseError) {
+      throw new Error(
+        `Failed to parse LLM response as JSON: ${parseError}`,
+      );
+    }
+
     await runtime.editWithRetry((tx) => {
       pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-      partial.withTx(tx).set("Error: Maximum tool call iterations exceeded");
+      result.withTx(tx).set(parsedResult);
+      requestHash.withTx(tx).set(hash);
     });
   } catch (error) {
     if (thisRun !== currentRun) return;
@@ -773,7 +775,8 @@ export function generateObject<T extends Record<string, unknown>>(
       generateObjectParams.system = system;
     }
 
-    const hash = refer(generateObjectParams).toString();
+    // Include tools in hash to ensure requests rerun when tool definitions change
+    const hash = refer({ ...generateObjectParams, tools }).toString();
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
 
