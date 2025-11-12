@@ -1,0 +1,45 @@
+/// <cts-enable />
+import { Cell, handler, ifElse, recipe, UI } from "commontools";
+
+interface Item {
+  id: number;
+  name: string;
+}
+
+// Handler that closes over both items array and individual item
+const removeItem = handler<
+  unknown,
+  { items: Cell<Array<Cell<Item>>>; item: Cell<Item> }
+>((_event, { items, item }) => {
+  const currentItems = items.get();
+  const index = currentItems.findIndex((el) => el.equals(item));
+  if (index >= 0) {
+    items.set(currentItems.toSpliced(index, 1));
+  }
+});
+
+export default recipe<{ items: Item[]; hasItems: boolean }>(
+  "CT-1035: Map with handler inside ifElse",
+  ({ items, hasItems }) => {
+    // CT-1035: Map inside ifElse branches should transform to mapWithPattern
+    // The handler closure should work correctly with the map iterator variable
+    return {
+      [UI]: (
+        <div>
+          {ifElse(
+            hasItems,
+            <div>
+              {items.map((item) => (
+                <div>
+                  <span>{item.name}</span>
+                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
+                </div>
+              ))}
+            </div>,
+            <div>No items</div>
+          )}
+        </div>
+      ),
+    };
+  },
+);
