@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
+import { setParentPointers } from "../ast/utils.ts";
 import { Transformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -67,7 +68,7 @@ function createComputedToDeriveVisitor(
 
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
-    return factory.updateCallExpression(
+    const deriveCall = factory.updateCallExpression(
       node,
       factory.createIdentifier("derive"), // Replace 'computed' with 'derive'
       node.typeArguments, // Preserve type arguments (if any)
@@ -76,6 +77,13 @@ function createComputedToDeriveVisitor(
         callback, // Second arg: original callback (unchanged)
       ],
     );
+
+    // Set parent pointers so parent-walking logic works (e.g., in shouldTransformMap)
+    // Don't manually set callback.parent - let it keep its original parent from source
+    // so that getSourceFile() works correctly for capture detection
+    setParentPointers(deriveCall);
+
+    return deriveCall;
   };
 
   return visitor;

@@ -24,6 +24,40 @@ export function getExpressionText(expr: ts.Expression): string {
 }
 
 /**
+ * Gets the type of a node, checking typeRegistry first (for synthetic nodes),
+ * then falling back to the type checker.
+ *
+ * This is useful when working with nodes that may have been created during
+ * transformation (synthetic nodes) which can lose their type information.
+ *
+ * @param node - The node to get the type for
+ * @param checker - The TypeScript type checker
+ * @param typeRegistry - Optional registry of types for synthetic nodes
+ * @param logger - Optional logger for error messages
+ * @returns The type, or undefined if it couldn't be determined
+ */
+export function getTypeAtLocationWithFallback(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  logger?: (message: string) => void,
+): ts.Type | undefined {
+  if (typeRegistry?.has(node)) {
+    return typeRegistry.get(node)!;
+  }
+
+  try {
+    return checker.getTypeAtLocation(node);
+  } catch (error) {
+    if (logger) {
+      const nodeText = node.getText?.() ?? `<${ts.SyntaxKind[node.kind]}>`;
+      logger(`Warning: Could not get type for node "${nodeText}": ${error}`);
+    }
+    return undefined;
+  }
+}
+
+/**
  * Helper to resolve the base type of an expression
  */
 function resolveBaseType(
