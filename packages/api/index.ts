@@ -1241,9 +1241,13 @@ export type CompileAndRunFunction = <T = any, S = any>(
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
-export type WishFunction = <T = unknown>(
-  target: Opaque<string>,
-) => OpaqueRef<T>;
+export type WishFunction = {
+  <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
+  <S extends JSONSchema = JSONSchema>(
+    target: Opaque<string>,
+    schema: S,
+  ): OpaqueRef<Schema<S>>;
+};
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
