@@ -2,9 +2,8 @@
 import {
   BuiltInLLMMessage,
   Cell,
-  cell,
+  computed,
   Default,
-  derive,
   fetchData,
   generateObject,
   handler,
@@ -20,7 +19,7 @@ import {
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
 function schemaifyWish<T>(path: string) {
-  return derive<T, T>(wish<T>(path), (i) => i);
+  return wish<T>(path);
 }
 
 const addAttachment = handler<
@@ -153,11 +152,11 @@ type ChatOutput = {
 export const TitleGenerator = recipe<
   { model?: string; messages: Array<BuiltInLLMMessage> }
 >("Title Generator", ({ model, messages }) => {
-  const titleMessages = derive(messages, (m) => {
-    if (!m || m.length === 0) return "";
+  const titleMessages = computed(() => {
+    if (!messages || messages.length === 0) return "";
 
     const messageCount = 2;
-    const selectedMessages = m.slice(0, messageCount).filter(Boolean);
+    const selectedMessages = messages.slice(0, messageCount).filter(Boolean);
 
     if (selectedMessages.length === 0) return "";
 
@@ -181,8 +180,8 @@ export const TitleGenerator = recipe<
     },
   });
 
-  const title = derive(result, (t) => {
-    return t?.title || "Untitled Chat";
+  const title = computed(() => {
+    return result?.title || "Untitled Chat";
   });
 
   return title;
@@ -291,55 +290,50 @@ const listRecent = handler<
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
   ({ messages, tools, theme, system }) => {
-    const model = cell<string>("anthropic:claude-sonnet-4-5");
-    const allAttachments = cell<Array<PromptAttachment>>([]);
+    const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
+    const allAttachments = Cell.of<Array<PromptAttachment>>([]);
     const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
     const recentCharms = schemaifyWish<MentionableCharm[]>("#recent");
 
     // Auto-attach the most recent charm (union with user attachments)
-    const attachmentsWithRecent = derive(
-      [allAttachments, recentCharms],
-      ([userAttachments, recent]: [
-        Array<PromptAttachment>,
-        Array<MentionableCharm>,
-      ]): Array<PromptAttachment> => {
-        const attachments = userAttachments || [];
+    const attachmentsWithRecent = computed((): Array<PromptAttachment> => {
+      const userAttachments = allAttachments.get();
+      const attachments = [...(userAttachments || [])];
 
-        // If there's a most recent charm, auto-inject it
-        if (recent && recent.length > 0) {
-          const mostRecent = recent[0];
-          const mostRecentName = mostRecent[NAME];
+      // If there's a most recent charm, auto-inject it
+      if (recentCharms && recentCharms.length > 0) {
+        const mostRecent = recentCharms[0];
+        const mostRecentName = mostRecent[NAME];
 
-          // Check if it's already in the attachments
-          const alreadyAttached = attachments.some(
-            (a) => a.type === "mention" && a.name === mostRecentName,
-          );
+        // Check if it's already in the attachments
+        const alreadyAttached = attachments.some(
+          (a) => a.type === "mention" && a.name === mostRecentName,
+        );
 
-          if (!alreadyAttached && mostRecentName) {
-            // Add the most recent charm to the beginning
-            const id = `attachment-auto-recent-${mostRecentName}`;
-            return [
-              {
-                id,
-                name: mostRecentName,
-                type: "mention" as const,
-                charm: mostRecent,
-                removable: false, // Auto-attached charm cannot be removed
-              },
-              ...attachments,
-            ];
-          }
+        if (!alreadyAttached && mostRecentName) {
+          // Add the most recent charm to the beginning
+          const id = `attachment-auto-recent-${mostRecentName}`;
+          return [
+            {
+              id,
+              name: mostRecentName,
+              type: "mention" as const,
+              charm: mostRecent,
+              removable: false, // Auto-attached charm cannot be removed
+            },
+            ...attachments,
+          ];
         }
+      }
 
-        return attachments;
-      },
-    );
+      return attachments;
+    });
 
     // Derive tools from attachments (including auto-attached recent charm)
-    const dynamicTools = derive(attachmentsWithRecent, (attachments) => {
+    const dynamicTools = computed(() => {
       const tools: Record<string, any> = {};
 
-      for (const attachment of attachments || []) {
+      for (const attachment of attachmentsWithRecent || []) {
         if (attachment.type === "mention" && attachment.charm) {
           const charmName = attachment.charm[NAME] || "Charm";
           tools[charmName] = {
@@ -385,20 +379,17 @@ export default recipe<ChatInput, ChatOutput>(
     };
 
     // Merge static and dynamic tools
-    const mergedTools = derive(
-      [tools, dynamicTools, attachmentTools],
-      ([staticTools, dynamic, attachments]: [any, any, any]) => ({
-        ...staticTools,
-        ...dynamic,
-        ...attachments,
-      }),
-    );
+    const mergedTools = computed(() => ({
+      ...tools,
+      ...dynamicTools,
+      ...attachmentTools,
+    }));
 
     const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog(
       {
-        system: derive(system, (s) =>
-          s ??
-            "You are a polite but efficient assistant."),
+        system: computed(() => {
+          return system ?? "You are a polite but efficient assistant.";
+        }),
         messages,
         tools: mergedTools,
         model,
@@ -410,9 +401,9 @@ export default recipe<ChatInput, ChatOutput>(
       mode: "json",
     });
 
-    const items = derive(result, (models) => {
-      if (!models) return [];
-      const items = Object.keys(models as any).map((key) => ({
+    const items = computed(() => {
+      if (!result) return [];
+      const items = Object.keys(result as any).map((key) => ({
         label: key,
         value: key,
       }));

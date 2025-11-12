@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  derive,
   handler,
   NAME,
   navigateTo,
@@ -101,13 +100,7 @@ const spawnNote = handler<void, void>((_, __) => {
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
-    const { allCharms } = derive<
-      { allCharms: MentionableCharm[] },
-      { allCharms: MentionableCharm[] }
-    >(
-      wish<{ allCharms: MentionableCharm[] }>("/"),
-      (c) => c,
-    );
+    const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
     const index = BacklinksIndex({ allCharms });
 
     const fab = OmniboxFAB({
