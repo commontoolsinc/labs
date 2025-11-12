@@ -230,6 +230,7 @@ export interface IResolvable<T, C extends AnyBrandedCell<T>> {
  */
 export interface IEquatable {
   equals(other: AnyCell<any> | object): boolean;
+  equalLinks(other: AnyCell<any> | object): boolean;
 }
 
 /**
@@ -316,12 +317,23 @@ export interface CellTypeConstructor<
   ): Apply<Wrap, Schema<S>>;
 
   /**
-   * Compare two cells or values for equality.
+   * Compare two cells or values for equality after resolving, i.e. after
+   * following all links in case we have cells pointing to other cells.
    * @param a - First cell or value to compare
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
   equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+
+  /**
+   * Compare two cells or values for equality by comparing their underlying
+   * links. No resolving.
+   *
+   * @param a - First cell or value to compare
+   * @param b - Second cell or value to compare
+   * @returns true if the values are equal
+   */
+  equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
 }
 
 // ============================================================================

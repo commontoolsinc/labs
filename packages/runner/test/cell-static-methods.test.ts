@@ -359,6 +359,192 @@ describe("Cell Static Methods", () => {
       expect(Cell.equals(cell, null as any)).toBe(false);
       expect(Cell.equals(null as any, cell)).toBe(false);
     });
+
+    it("should resolve links before comparing", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Create a target cell with a value
+        const targetCell = runtime.getCell<number>(
+          space,
+          "target",
+          undefined,
+          tx,
+        );
+        targetCell.set(42);
+
+        // Create a cell that links to the target
+        const linkingCell = runtime.getCell<number>(
+          space,
+          "linking",
+          undefined,
+          tx,
+        );
+        linkingCell.set(targetCell);
+
+        // After resolving, linkingCell should point to same location as targetCell
+        expect(Cell.equals(linkingCell, targetCell)).toBe(true);
+      });
+    });
+
+    it("should handle chains of links", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Create chain: cell1 -> cell2 -> cell3 (with value)
+        const cell3 = runtime.getCell<number>(space, "cell3", undefined, tx);
+        cell3.set(100);
+
+        const cell2 = runtime.getCell<number>(space, "cell2", undefined, tx);
+        cell2.set(cell3);
+
+        const cell1 = runtime.getCell<number>(space, "cell1", undefined, tx);
+        cell1.set(cell2);
+
+        // All should resolve to the same final location
+        expect(Cell.equals(cell1, cell3)).toBe(true);
+        expect(Cell.equals(cell2, cell3)).toBe(true);
+        expect(Cell.equals(cell1, cell2)).toBe(true);
+      });
+    });
+  });
+
+  describe("Cell.equalLinks()", () => {
+    it("should return true for the same cell", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "test-cell",
+        undefined,
+        tx,
+      );
+      expect(Cell.equalLinks(cell, cell)).toBe(true);
+    });
+
+    it("should return false for different cells", () => {
+      const cell1 = runtime.getCell<number>(
+        space,
+        "cell1",
+        undefined,
+        tx,
+      );
+      const cell2 = runtime.getCell<number>(
+        space,
+        "cell2",
+        undefined,
+        tx,
+      );
+      expect(Cell.equalLinks(cell1, cell2)).toBe(false);
+    });
+
+    it("should return true for cells with same link", () => {
+      const cell1 = runtime.getCell<number>(
+        space,
+        "same-link",
+        undefined,
+        tx,
+      );
+      const cell2 = runtime.getCell<number>(
+        space,
+        "same-link",
+        undefined,
+        tx,
+      );
+      expect(Cell.equalLinks(cell1, cell2)).toBe(true);
+    });
+
+    it("should NOT resolve links before comparing", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Create a target cell with a value
+        const targetCell = runtime.getCell<number>(
+          space,
+          "target",
+          undefined,
+          tx,
+        );
+        targetCell.set(42);
+
+        // Create a cell that links to the target
+        const linkingCell = runtime.getCell<number>(
+          space,
+          "linking",
+          undefined,
+          tx,
+        );
+        linkingCell.set(targetCell);
+
+        // Without resolving, these should be different
+        expect(Cell.equalLinks(linkingCell, targetCell)).toBe(false);
+      });
+    });
+
+    it("should return false when both cells link to the same target but are different cells", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const targetCell = runtime.getCell<number>(
+          space,
+          "target",
+          undefined,
+          tx,
+        );
+        targetCell.set(42);
+
+        const linkCell1 = runtime.getCell<number>(
+          space,
+          "link1",
+          undefined,
+          tx,
+        );
+        linkCell1.set(targetCell);
+
+        const linkCell2 = runtime.getCell<number>(
+          space,
+          "link2",
+          undefined,
+          tx,
+        );
+        linkCell2.set(targetCell);
+
+        // linkCell1 and linkCell2 are different cells, so equalLinks returns false
+        expect(Cell.equalLinks(linkCell1, linkCell2)).toBe(false);
+      });
+    });
+
+    it("should handle chains of links without resolving", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Create chain: cell1 -> cell2 -> cell3
+        const cell3 = runtime.getCell<number>(space, "cell3", undefined, tx);
+        cell3.set(100);
+
+        const cell2 = runtime.getCell<number>(space, "cell2", undefined, tx);
+        cell2.set(cell3);
+
+        const cell1 = runtime.getCell<number>(space, "cell1", undefined, tx);
+        cell1.set(cell2);
+
+        // Without resolving, these should all be different
+        expect(Cell.equalLinks(cell1, cell3)).toBe(false);
+        expect(Cell.equalLinks(cell2, cell3)).toBe(false);
+        // cell1 links to cell2, so they're different
+        expect(Cell.equalLinks(cell1, cell2)).toBe(false);
+      });
+    });
+
+    it("should handle null and undefined", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "test",
+        undefined,
+        tx,
+      );
+      expect(Cell.equalLinks(cell, null as any)).toBe(false);
+      expect(Cell.equalLinks(null as any, cell)).toBe(false);
+    });
+
+    it("should handle comparison with non-cell objects", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "test",
+        undefined,
+        tx,
+      );
+      const obj = { some: "object" };
+      expect(Cell.equalLinks(cell, obj)).toBe(false);
+    });
   });
 
   describe("Integration tests", () => {

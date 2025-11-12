@@ -9,6 +9,7 @@ import {
   type AsCell,
   type Cell,
   type CellKind,
+  type CellTypeConstructor,
   type Frame,
   type HKT,
   type ICell,
@@ -208,6 +209,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "update",
   "push",
   "equals",
+  "equalLinks",
   "key",
   "map",
   "mapWithPattern",
@@ -682,6 +684,16 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   equals(other: any): boolean {
+    return areLinksSame(
+      this,
+      other,
+      undefined,
+      true,
+      this.runtime.readTx(this.tx),
+    );
+  }
+
+  equalLinks(other: any): boolean {
     return areLinksSame(this, other);
   }
 
@@ -1430,12 +1442,23 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
     },
 
     /**
-     * Compare two cells or values for equality.
+     * Compare two cells or values for equality, after resolving them.
      * @param a - First cell or value to compare
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
     equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+      const { tx } = getTopFrame() ?? {};
+      return areLinksSame(a, b, undefined, !!tx, tx);
+    },
+
+    /**
+     * Compare two cells or values for equality.
+     * @param a - First cell or value to compare
+     * @param b - Second cell or value to compare
+     * @returns true if the values are equal
+     */
+    equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
       return areLinksSame(a, b);
     },
 
@@ -1469,5 +1492,5 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
 
       return cell;
     },
-  };
+  } satisfies CellTypeConstructor<Wrap>;
 }

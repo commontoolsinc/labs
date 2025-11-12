@@ -78,6 +78,7 @@ export type {
   AsWriteonlyCell,
   Cell,
   CellKind,
+  CellTypeConstructor,
   Handler,
   HandlerFactory,
   HKT,
