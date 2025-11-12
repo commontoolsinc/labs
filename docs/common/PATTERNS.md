@@ -50,11 +50,11 @@ The simplest and most common pattern: a list where users can check items and edi
 
 **Key Concepts:**
 - Bidirectional binding with `$checked` and `$value`
-- Simple add/remove operations with handlers
+- Inline handlers for simple add/remove operations
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI, cell } from "commontools";
+import { Cell, Default, NAME, recipe, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -62,32 +62,12 @@ interface ShoppingItem {
 }
 
 interface ShoppingListInput {
-  items: Default<ShoppingItem[], []>;
+  items: Cell<ShoppingItem[]>; // Note: Cell<T[]> for inline handlers
 }
 
-interface ShoppingListOutput extends ShoppingListInput {}
-
-const addItem = handler<
-  { detail: { message: string } },
-  { items: Cell<ShoppingItem[]> }
->(({ detail }, { items }) => {
-  const itemName = detail?.message?.trim();
-  if (!itemName) return;
-
-  const currentItems = items.get();
-  items.set([...currentItems, { title: itemName, done: false }]);
-});
-
-const removeItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
->((_event, { items, item }) => {
-  const currentItems = items.get();
-  const index = currentItems.findIndex((el) => item.equals(el));
-  if (index >= 0) {
-    items.set(currentItems.toSpliced(index, 1));
-  }
-});
+interface ShoppingListOutput {
+  items: Cell<ShoppingItem[]>;
+}
 
 export default recipe<ShoppingListInput, ShoppingListOutput>(
   "Shopping List",
@@ -105,14 +85,29 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
                     {item.title}
                   </span>
                 </ct-checkbox>
-                <ct-button onClick={removeItem({ items, item })}>×</ct-button>
+                {/* Inline handler for remove */}
+                <ct-button onClick={() => {
+                  const current = items.get();
+                  const index = current.findIndex((el) => Cell.equals(item, el));
+                  if (index >= 0) {
+                    items.set(current.toSpliced(index, 1));
+                  }
+                }}>
+                  ×
+                </ct-button>
               </div>
             ))}
           </div>
 
+          {/* Inline handler for add */}
           <ct-message-input
             placeholder="Add item..."
-            onct-send={addItem({ items })}
+            onct-send={(e) => {
+              const itemName = e.detail?.message?.trim();
+              if (itemName) {
+                items.push({ title: itemName, done: false });
+              }
+            }}
           />
         </div>
       ),
@@ -126,20 +121,22 @@ export default recipe<ShoppingListInput, ShoppingListOutput>(
 - ✅ `$checked` automatically updates `item.done` - no handler needed
 - ✅ Ternary operator in `style` attribute works fine
 - ✅ Type inference automatically works in `.map()` - no type annotation needed!
-- ✅ Handlers only for structural changes (add/remove)
+- ✅ **Inline handlers** for add/remove operations - no `handler()` needed
+- ✅ Declare `items` as `Cell<ShoppingItem[]>` in input type for inline handlers
 
 ## Level 2: Filtered and Grouped Views
 
 Adding derived data transformations to create multiple views of the same data.
 
 **Key Concepts:**
-- Using `derive()` for data transformations
-- Direct property access on derived objects with `groupedItems[category]`
+- Using `computed()` for data transformations
+- Direct property access on computed objects with `groupedItems[category]`
 - Inline expressions like `(array ?? []).map(...)`
+- Within JSX, you don't need `computed()` - reactivity is automatic
 
 ```typescript
 /// <cts-enable />
-import { Default, derive, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, computed, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -156,11 +153,11 @@ interface CategorizedListOutput extends CategorizedListInput {}
 export default recipe<CategorizedListInput, CategorizedListOutput>(
   "Shopping List (Categorized)",
   ({ items }) => {
-    // Group items by category using derive
-    const groupedItems = derive(items, (itemsList) => {
+    // Group items by category using computed
+    const groupedItems = computed(() => {
       const groups: Record<string, ShoppingItem[]> = {};
 
-      for (const item of itemsList) {
+      for (const item of items) {
         const category = item.category || "Uncategorized";
         if (!groups[category]) {
           groups[category] = [];
@@ -172,8 +169,8 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
     });
 
     // Get sorted category names
-    const categories = derive(groupedItems, (groups) => {
-      return Object.keys(groups).sort();
+    const categories = computed(() => {
+      return Object.keys(groupedItems).sort();
     });
 
     return {
@@ -202,10 +199,10 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
 ```
 
 **What to notice:**
-- ✅ `derive()` creates reactive transformations
-- ✅ `groupedItems[category]` - direct property access on derived object
+- ✅ `computed()` creates reactive transformations
+- ✅ `groupedItems[category]` - direct property access on computed object
 - ✅ `(groupedItems[category] ?? [])` - inline null coalescing instead of intermediate variable
-- ✅ Multiple views of same data (categories derived from groupedItems)
+- ✅ Multiple views of same data (categories computed from groupedItems)
 
 ## Level 3: Linked Charms (Master-Detail Pattern)
 
@@ -215,7 +212,7 @@ Two separate recipes sharing the same data through charm linking.
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, handler, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, Default, NAME, recipe, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -224,29 +221,17 @@ interface ShoppingItem {
 }
 
 interface EditorInput {
-  items: Default<ShoppingItem[], []>;
+  items: Cell<ShoppingItem[]>; // Cell<T[]> for inline handlers
 }
 
-interface EditorOutput extends EditorInput {}
-
-const addItem = handler<
-  { detail: { message: string } },
-  { items: Cell<ShoppingItem[]>; newCategory: Cell<string> }
->(({ detail }, { items, newCategory }) => {
-  const itemName = detail?.message?.trim();
-  if (!itemName) return;
-
-  items.push({
-    title: itemName,
-    done: false,
-    category: newCategory.get(),
-  });
-});
+interface EditorOutput {
+  items: Cell<ShoppingItem[]>;
+}
 
 export default recipe<EditorInput, EditorOutput>(
   "Shopping List Editor",
   ({ items }) => {
-    const newCategory = cell("Uncategorized");
+    const newCategory = Cell.of("Uncategorized");
 
     return {
       [NAME]: "Editor",
@@ -262,9 +247,19 @@ export default recipe<EditorInput, EditorOutput>(
               { label: "Other", value: "Uncategorized" },
             ]}
           />
+          {/* Inline handler */}
           <ct-message-input
             placeholder="Add item..."
-            onct-send={addItem({ items, newCategory })}
+            onct-send={(e) => {
+              const itemName = e.detail?.message?.trim();
+              if (itemName) {
+                items.push({
+                  title: itemName,
+                  done: false,
+                  category: newCategory.get(),
+                });
+              }
+            }}
           />
         </div>
       ),
@@ -368,7 +363,7 @@ export default recipe<ComposedInput, ComposedInput>(
 Filtering a list without creating intermediate variables.
 
 ```typescript
-const searchQuery = cell("");
+const searchQuery = Cell.of("");
 
 // Filter items inline
 {items
@@ -388,10 +383,10 @@ const searchQuery = cell("");
 **Wait, this looks wrong!** The `.filter()` will execute during recipe definition, not reactively. Here's the **correct** way:
 
 ```typescript
-const searchQuery = cell("");
+const searchQuery = Cell.of("");
 
-// ✅ CORRECT - Use derive for reactive filtering
-const filteredItems = derive({ items, searchQuery }, ({ items, searchQuery }) => {
+// ✅ CORRECT - Use computed for reactive filtering
+const filteredItems = computed(() => {
   const query = searchQuery.toLowerCase();
   return items.filter((item) => item.title.toLowerCase().includes(query));
 });
@@ -406,8 +401,8 @@ const filteredItems = derive({ items, searchQuery }, ({ items, searchQuery }) =>
 
 **What to notice:**
 - ❌ Can't use `.filter()` directly on cells in JSX
-- ✅ Must use `derive()` to create reactive filtered list
-- ✅ The derived list updates when `searchQuery` or `items` changes
+- ✅ Must use `computed()` to create reactive filtered list
+- ✅ The computed list updates when `searchQuery` or `items` changes
 
 ## Decision Matrix: When to Use What
 
@@ -415,23 +410,25 @@ const filteredItems = derive({ items, searchQuery }, ({ items, searchQuery }) =>
 
 | Scenario | Use |
 |----------|-----|
-| Toggle checkbox | `$checked` |
-| Edit text field | `$value` |
-| Select dropdown option | `$value` |
-| Add item to array | `handler` |
-| Remove item from array | `handler` |
-| Reorder items | `handler` |
-| Validate input | `handler` or `derive` |
-| Call API on change | `handler` |
+| Toggle checkbox | `$checked` (bidirectional binding) |
+| Edit text field | `$value` (bidirectional binding) |
+| Select dropdown option | `$value` (bidirectional binding) |
+| Add item to array | Inline handler: `onClick={() => items.push(...)}` |
+| Remove item from array | Inline handler: `onClick={() => items.set(...)}` |
+| Simple counter | Inline handler: `onClick={() => count.set(count.get() + 1)}` |
+| Reorder items | Inline handler or `handler()` for complexity |
+| Validate input | Inline handler or `computed()` |
+| Call API on change | Inline handler or `handler()` for complex logic |
 
-### derive() vs lift()
+### When to Use computed()
 
 | Scenario | Use |
 |----------|-----|
-| Single transformation of specific cells | `derive(items, fn)` |
-| Reusable transformation function | `lift(fn)` |
-| Need to call with different inputs | `lift(fn)` |
-| Simple one-off calculation | `derive(cells, fn)` |
+| Transform data reactively | `computed(() => ...)` |
+| Create derived values | `computed(() => ...)` |
+| Filter or sort lists reactively | `computed(() => ...)` |
+| Complex calculations | `computed(() => ...)` |
+| **Within JSX** | Not needed - reactivity is automatic |
 
 ### Intermediate Variables vs Inline
 
@@ -454,17 +451,17 @@ Don't optimize prematurely! Most patterns perform well without optimization. Con
 
 ### Common Optimizations
 
-1. **Limit derived calculations**: Only derive what you need
+1. **Limit computed calculations**: Only compute what you need
 
 ```typescript
-// ❌ AVOID - Deriving entire sorted list when you only need count
-const sortedItems = derive(items, (list) => {
-  return list.toSorted((a, b) => a.priority - b.priority);
+// ❌ AVOID - Computing entire sorted list when you only need count
+const sortedItems = computed(() => {
+  return items.toSorted((a, b) => a.priority - b.priority);
 });
-const itemCount = derive(sortedItems, (list) => list.length);
+const itemCount = computed(() => sortedItems.length);
 
-// ✅ BETTER - Derive just the count
-const itemCount = derive(items, (list) => list.length);
+// ✅ BETTER - Compute just the count
+const itemCount = computed(() => items.length);
 ```
 
 2. **Avoid index-based removal, pass item references**
@@ -481,21 +478,32 @@ const removeItem = handler((_, { items, item }: { items: Cell<Array<Cell<Item>>>
 });
 ```
 
-3. **Avoid creating handlers inside render**
+3. **Use inline handlers for simple operations**
 
 ```typescript
-// ❌ AVOID - Creates new handler instance for each item
-{items.map((item) => {
-  const remove = handler(() => { /* ... */ });
-  return <ct-button onClick={remove}>×</ct-button>;
-})}
+// ✅ BEST - Inline handler (no overhead)
+{items.map((item) => (
+  <ct-button onClick={() => {
+    const current = items.get();
+    const index = current.findIndex((el) => Cell.equals(item, el));
+    if (index >= 0) items.set(current.toSpliced(index, 1));
+  }}>
+    ×
+  </ct-button>
+))}
 
-// ✅ CORRECT - Handler defined at module level
+// ✅ ALSO GOOD - Module-level handler() for complex/reusable logic
 const removeItem = handler((_, { items, item }) => { /* ... */ });
 
 {items.map((item) => (
   <ct-button onClick={removeItem({ items, item })}>×</ct-button>
 ))}
+
+// ❌ AVOID - Creating handler() inside map
+{items.map((item) => {
+  const remove = handler(() => { /* ... */ });
+  return <ct-button onClick={remove}>×</ct-button>;
+})}
 ```
 
 ## Debugging Patterns
@@ -521,8 +529,8 @@ const removeItem = handler((_, { items, item }) => { /* ... */ });
 // ❌ WRONG - Direct filter doesn't create reactive node
 {items.filter(item => !item.done).map(...)}
 
-// ✅ CORRECT - Use derive
-const activeItems = derive(items, (list) => list.filter(item => !item.done));
+// ✅ CORRECT - Use computed
+const activeItems = computed(() => items.filter(item => !item.done));
 {activeItems.map(...)}
 ```
 
@@ -532,16 +540,16 @@ const activeItems = derive(items, (list) => list.filter(item => !item.done));
 // ❌ WRONG - category from outer scope not accessible
 {categories.map((category) => (
   <div>
-    {derive(items, (list) =>
-      list.filter(item => item.category === category) // category not accessible!
+    {computed(() =>
+      items.filter(item => item.category === category) // category not accessible!
     )}
   </div>
 ))}
 
 // ✅ CORRECT - Pre-group the data
-const groupedItems = derive(items, (list) => {
+const groupedItems = computed(() => {
   const groups = {};
-  for (const item of list) {
+  for (const item of items) {
     if (!groups[item.category]) groups[item.category] = [];
     groups[item.category].push(item);
   }
@@ -585,11 +593,10 @@ These are the most frequent mistakes developers make when building patterns:
 
 **Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
 
-#### 2. Using Handlers Instead of Bidirectional Binding
+#### 2. Using handler() Instead of Inline Handlers or Bidirectional Binding
 
 ```typescript
-// ❌ AVOID - Unnecessary handler for simple toggle
-// ❌ AVOID - Rewriting the whole array instead of just toggling one item
+// ❌ AVOID - Unnecessary handler() for simple toggle
 const toggleDone = handler<unknown, { item: Cell<Item> }>(
   (_, { item }) => {
     const current = item.get();
@@ -598,13 +605,34 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
 );
 <ct-checkbox checked={item.done} onct-change={toggleDone({ item })} />
 
-// ✅ PREFERRED - Bidirectional binding handles it
+// ✅ BEST - Bidirectional binding (no handler at all)
 <ct-checkbox $checked={item.done} />
+
+// ✅ GOOD - Inline handler if you need custom logic
+<ct-checkbox
+  checked={item.done}
+  onct-change={(e) => {
+    item.set({ ...item.get(), done: e.detail.checked });
+    console.log("Toggled:", item.get().title);
+  }}
+/>
+
+// ❌ AVOID - handler() for simple increment
+const increment = handler<never, { count: Cell<number> }>(
+  (_, { count }) => count.set(count.get() + 1)
+);
+<ct-button onClick={increment({ count })}>+1</ct-button>
+
+// ✅ PREFERRED - Inline handler
+<ct-button onClick={() => count.set(count.get() + 1)}>+1</ct-button>
 ```
 
-**Why this is a pitfall:** Writing unnecessary code that the framework handles automatically.
+**Why this is a pitfall:** Over-engineering with `handler()` when inline handlers or bidirectional binding suffice.
 
-**Remember:** If you're just syncing UI ↔ data, use `$` binding. Only use handlers for side effects, validation, or structural changes.
+**Remember:**
+1. **Bidirectional binding** (`$checked`, `$value`) for simple UI ↔ data sync
+2. **Inline handlers** for simple operations with custom logic
+3. **`handler()`** only for complex or reusable logic
 
 #### 3. Trying to Use [ID] When You Don't Need It
 
@@ -856,14 +884,14 @@ Remember: HTML elements use object syntax, custom elements use string syntax.
 
 See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
 
-### Direct Property Access on Derived Objects
+### Direct Property Access on Computed Objects
 
-When you derive an object (not an array), you can access its properties directly:
+When you compute an object (not an array), you can access its properties directly:
 
 ```typescript
-const groupedItems = derive(items, (list) => {
+const groupedItems = computed(() => {
   const groups: Record<string, ShoppingItem[]> = {};
-  for (const item of list) {
+  for (const item of items) {
     const category = item.category || "Uncategorized";
     if (!groups[category]) groups[category] = [];
     groups[category].push(item);
@@ -871,7 +899,7 @@ const groupedItems = derive(items, (list) => {
   return groups;
 });
 
-const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
+const categories = computed(() => Object.keys(groupedItems).sort());
 
 // ✅ Direct property access with inline null coalescing
 {categories.map((category) => (
@@ -885,9 +913,9 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 ```
 
 **What to notice:**
-- ✅ `groupedItems[category]` - direct property access works on derived objects
+- ✅ `groupedItems[category]` - direct property access works on computed objects
 - ✅ `(groupedItems[category] ?? [])` - inline null coalescing for safety
-- ✅ No intermediate `derive` needed for simple property access
+- ✅ No intermediate `computed()` needed for simple property access
 - ✅ Type inference works automatically, even in nested maps!
 
 ## Summary
@@ -898,9 +926,10 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 - Automatic type inference in `.map()` (no manual annotations needed!)
 
 **Level 2 patterns:**
-- `derive()` for data transformations
+- `computed()` for data transformations
 - Inline expressions for simple operations
 - Multiple views of same data
+- Within JSX, reactivity is automatic - no need for `computed()`
 
 **Level 3 patterns:**
 - Charm linking for data sharing
@@ -915,6 +944,6 @@ const categories = derive(groupedItems, (groups) => Object.keys(groups).sort());
 **Key principles:**
 1. Use bidirectional binding when possible
 2. Use handlers for side effects and structural changes
-3. Use `derive()` for reactive transformations
+3. Use `computed()` for reactive transformations (but not in JSX - it's automatic there)
 4. Keep it simple - don't over-engineer
 5. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`

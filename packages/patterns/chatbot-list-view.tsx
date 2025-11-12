@@ -1,9 +1,7 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   Default,
-  derive,
   handler,
   ID,
   ifElse,
@@ -128,7 +126,7 @@ const populateChatList = lift(
     { charmsList, allCharms, selectedCharm },
   ) => {
     if (charmsList.length === 0) {
-      const isInitialized = cell(false);
+      const isInitialized = Cell.of(false);
       return storeCharm({
         charm: Chat({
           title: "New Chat",
@@ -154,7 +152,7 @@ const createChatRecipe = handler<
   }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
-    const isInitialized = cell(false);
+    const isInitialized = Cell.of(false);
 
     const charm = Chat({
       title: "New Chat",
@@ -238,10 +236,7 @@ const extractLocalMentionable = lift<
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, theme }) => {
-    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
-      (c) => c,
-    );
+    const allCharms = wish<MentionableCharm[]>("#allCharms", []);
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
     populateChatList({
@@ -259,9 +254,9 @@ export default recipe<Input, Output>(
     const localMentionable = extractLocalMentionable({ list: charmsList });
 
     const localTheme = theme ?? {
-      accentColor: cell("#3b82f6"),
-      fontFace: cell("system-ui, -apple-system, sans-serif"),
-      borderRadius: cell("0.5rem"),
+      accentColor: Cell.of("#3b82f6"),
+      fontFace: Cell.of("system-ui, -apple-system, sans-serif"),
+      borderRadius: Cell.of("0.5rem"),
     };
 
     return {
