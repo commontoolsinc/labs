@@ -352,48 +352,26 @@ export class CTImageInput extends BaseElement {
   private async _processFile(file: File): Promise<ImageData> {
     const id = this._generateId();
 
-    console.log(
-      `Processing file: ${file.name}, size: ${
-        formatFileSize(file.size)
-      }, maxSizeBytes: ${this.maxSizeBytes}`,
-    );
-
     // Compress if maxSizeBytes is set and file exceeds it
     let fileToProcess: Blob = file;
     if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
-      console.log(`File exceeds limit, starting compression...`);
       try {
         fileToProcess = await this._compressImage(file, this.maxSizeBytes);
-        console.log(
-          `Compression complete: ${formatFileSize(fileToProcess.size)}`,
-        );
       } catch (error) {
         console.error("Compression failed, using original file:", error);
         // Continue with original file if compression fails
       }
-    } else {
-      console.log(`File is small enough, skipping compression`);
     }
 
     return new Promise((resolve, reject) => {
-      console.log(
-        `Converting compressed file to data URL (${
-          formatFileSize(fileToProcess.size)
-        })...`,
-      );
       const reader = new FileReader();
 
       reader.onload = () => {
         const dataUrl = reader.result as string;
-        console.log(
-          `Data URL ready (${formatFileSize(dataUrl.length)} as string)`,
-        );
 
         // Get image dimensions from the data URL
         const img = new Image();
         img.onload = () => {
-          console.log(`Dimensions: ${img.width}x${img.height}`);
-
           const imageData: ImageData = {
             id,
             name: file.name || `Photo-${Date.now()}.jpg`,
