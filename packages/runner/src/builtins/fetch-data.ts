@@ -148,40 +148,38 @@ export function fetchData(
       return;
     }
 
-    // Check if inputs changed
+    // Check if we're already working on or have the result for these inputs
     const currentInternal = internal.withTx(tx).get();
-    const inputsChanged = currentInternal?.inputHash !== inputHash;
+    const currentPending = pending.withTx(tx).get();
+    const currentResult = result.withTx(tx).get();
 
-    if (inputsChanged) {
-      // Abort any in-flight request
+    const inputsMatch = currentInternal?.inputHash === inputHash;
+
+    // If inputs changed, clear everything and abort any in-flight request
+    if (!inputsMatch) {
       if (myRequestId) {
         abortController?.abort("Inputs changed");
         myRequestId = undefined;
       }
 
-      // Clear stale outputs immediately when inputs change
+      pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(undefined);
+      internal.withTx(tx).update({
+        inputHash,
+        requestId: "",
+        lastActivity: 0
+      });
     }
 
-    // Check if we already have a result for these inputs
-    let currentPending = pending.withTx(tx).get();
-    const currentResult = result.withTx(tx).get();
+    // If we have a valid result for these inputs, we're done
+    const hasValidResult = inputsMatch && currentResult !== undefined;
 
-    // Clean up stuck pending state: if we have a valid result for current inputs
-    // but pending is still true (e.g., app was shut down during a request),
-    // clear the pending flag
-    if (!inputsChanged && currentResult !== undefined && currentPending === true) {
-      pending.withTx(tx).set(false);
-      currentPending = false;
-    }
+    // If we're already fetching these inputs, wait
+    const alreadyFetching = inputsMatch && currentPending && myRequestId !== undefined;
 
-    const hasResult = !inputsChanged &&
-                      currentResult !== undefined &&
-                      currentPending === false;
-
-    // Try to start a new request only if we don't have a result and not currently pending
-    if (!myRequestId && !hasResult && !currentPending) {
+    // Start a new fetch if we don't have a result and aren't already fetching
+    if (!hasValidResult && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
 
       // Try to claim mutex - returns immediately if another tab is processing

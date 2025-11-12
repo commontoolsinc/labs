@@ -59,43 +59,22 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
-    const currentResult = result.withTx(tx).get();
     const now = Date.now();
 
     inputs = inputsCell.getAsQueryResult([], tx);
     inputHash = computeInputHash(tx, inputsCell);
 
-    // Don't claim if we already have a valid result for these inputs
-    const hasValidResult = currentResult !== undefined &&
-                           currentInternal.inputHash === inputHash;
-
-    if (hasValidResult) {
-      // Clean up stuck pending state if we have a valid result
-      if (isPending) {
-        pending.withTx(tx).set(false);
-      }
-      claimed = false;
-      return;
-    }
-
     // Can claim if:
     // 1. Nothing is pending, OR
-    // 2. Previous request timed out, OR
-    // 3. Inputs changed (different hash)
+    // 2. Previous request timed out
     const canClaim = !isPending ||
-      (currentInternal.lastActivity < now - timeout) ||
-      (currentInternal.inputHash !== inputHash);
+      (currentInternal.lastActivity < now - timeout);
 
     if (canClaim) {
       pending.withTx(tx).set(true);
-      // Clear result and error when starting a new request to maintain
-      // the invariant that they're undefined while pending
-      result.withTx(tx).set(undefined);
-      error.withTx(tx).set(undefined);
-      internal.withTx(tx).set({
+      internal.withTx(tx).update({
         requestId,
         lastActivity: now,
-        inputHash,
       });
       claimed = true;
     } else {
