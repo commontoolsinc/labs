@@ -3612,4 +3612,308 @@ describe("Cell success callbacks", () => {
       expect(resolvedCell.equals(innerCell)).toBe(true);
     });
   });
+
+  describe("cell.equals() instance method", () => {
+    it("should return true when comparing a cell to itself", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "self-compare",
+        undefined,
+        tx,
+      );
+      cell.set(42);
+      expect(cell.equals(cell)).toBe(true);
+    });
+
+    it("should return false when comparing different cells", () => {
+      const cell1 = runtime.getCell<number>(space, "cell1", undefined, tx);
+      const cell2 = runtime.getCell<number>(space, "cell2", undefined, tx);
+      cell1.set(42);
+      cell2.set(42);
+      expect(cell1.equals(cell2)).toBe(false);
+    });
+
+    it("should return true for cells pointing to the same location", () => {
+      const cell1 = runtime.getCell<number>(
+        space,
+        "same-location",
+        undefined,
+        tx,
+      );
+      const cell2 = runtime.getCell<number>(
+        space,
+        "same-location",
+        undefined,
+        tx,
+      );
+      expect(cell1.equals(cell2)).toBe(true);
+    });
+
+    it("should resolve links before comparing", () => {
+      const targetCell = runtime.getCell<number>(
+        space,
+        "target",
+        undefined,
+        tx,
+      );
+      targetCell.set(100);
+
+      const linkingCell = runtime.getCell<number>(
+        space,
+        "linking",
+        undefined,
+        tx,
+      );
+      linkingCell.set(targetCell);
+
+      // After resolving, linkingCell should equal targetCell
+      expect(linkingCell.equals(targetCell)).toBe(true);
+    });
+
+    it("should handle chains of links when resolving", () => {
+      const cell3 = runtime.getCell<number>(space, "final", undefined, tx);
+      cell3.set(999);
+
+      const cell2 = runtime.getCell<number>(space, "middle", undefined, tx);
+      cell2.set(cell3);
+
+      const cell1 = runtime.getCell<number>(space, "first", undefined, tx);
+      cell1.set(cell2);
+
+      // All should resolve to the same final location
+      expect(cell1.equals(cell3)).toBe(true);
+      expect(cell2.equals(cell3)).toBe(true);
+      expect(cell1.equals(cell2)).toBe(true);
+    });
+
+    it("should return false when comparing with plain objects", () => {
+      const cell = runtime.getCell<number>(space, "test", undefined, tx);
+      cell.set(42);
+      expect(cell.equals({ value: 42 })).toBe(false);
+    });
+
+    it("should handle null and undefined comparisons", () => {
+      const cell = runtime.getCell<number>(space, "test", undefined, tx);
+      expect(cell.equals(null as any)).toBe(false);
+      expect(cell.equals(undefined as any)).toBe(false);
+    });
+
+    it("should work with nested cell structures", () => {
+      const innerCell = runtime.getCell<number>(space, "inner", undefined, tx);
+      innerCell.set(42);
+
+      const outerCell = runtime.getCell<{ value: any }>(
+        space,
+        "outer",
+        undefined,
+        tx,
+      );
+      outerCell.set({ value: innerCell });
+
+      const resolvedInner = outerCell.key("value").resolveAsCell();
+      expect(resolvedInner.equals(innerCell)).toBe(true);
+    });
+  });
+
+  describe("cell.equalLinks() instance method", () => {
+    it("should return true when comparing a cell to itself", () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "self-compare",
+        undefined,
+        tx,
+      );
+      cell.set(42);
+      expect(cell.equalLinks(cell)).toBe(true);
+    });
+
+    it("should return false when comparing different cells", () => {
+      const cell1 = runtime.getCell<number>(space, "cell1-link", undefined, tx);
+      const cell2 = runtime.getCell<number>(space, "cell2-link", undefined, tx);
+      cell1.set(42);
+      cell2.set(42);
+      expect(cell1.equalLinks(cell2)).toBe(false);
+    });
+
+    it("should return true for cells pointing to the same location", () => {
+      const cell1 = runtime.getCell<number>(space, "same-loc", undefined, tx);
+      const cell2 = runtime.getCell<number>(space, "same-loc", undefined, tx);
+      expect(cell1.equalLinks(cell2)).toBe(true);
+    });
+
+    it("should NOT resolve links before comparing", () => {
+      const targetCell = runtime.getCell<number>(
+        space,
+        "target-link",
+        undefined,
+        tx,
+      );
+      targetCell.set(100);
+
+      const linkingCell = runtime.getCell<number>(
+        space,
+        "linking-link",
+        undefined,
+        tx,
+      );
+      linkingCell.set(targetCell);
+
+      // Without resolving, these should be different
+      expect(linkingCell.equalLinks(targetCell)).toBe(false);
+    });
+
+    it("should return false when both cells link to the same target but are different cells", () => {
+      const targetCell = runtime.getCell<number>(
+        space,
+        "shared-target",
+        undefined,
+        tx,
+      );
+      targetCell.set(42);
+
+      const link1 = runtime.getCell<number>(space, "link-a", undefined, tx);
+      link1.set(targetCell);
+
+      const link2 = runtime.getCell<number>(space, "link-b", undefined, tx);
+      link2.set(targetCell);
+
+      // link1 and link2 are different cells, so they're not equal
+      expect(link1.equalLinks(link2)).toBe(false);
+    });
+
+    it("should handle chains of links without resolving", () => {
+      const cell3 = runtime.getCell<number>(
+        space,
+        "chain-final",
+        undefined,
+        tx,
+      );
+      cell3.set(999);
+
+      const cell2 = runtime.getCell<number>(
+        space,
+        "chain-middle",
+        undefined,
+        tx,
+      );
+      cell2.set(cell3);
+
+      const cell1 = runtime.getCell<number>(
+        space,
+        "chain-first",
+        undefined,
+        tx,
+      );
+      cell1.set(cell2);
+
+      // Without resolving, these should all be different
+      expect(cell1.equalLinks(cell3)).toBe(false);
+      expect(cell2.equalLinks(cell3)).toBe(false);
+      expect(cell1.equalLinks(cell2)).toBe(false);
+    });
+
+    it("should return false when comparing with plain objects", () => {
+      const cell = runtime.getCell<number>(space, "test-link", undefined, tx);
+      cell.set(42);
+      expect(cell.equalLinks({ value: 42 })).toBe(false);
+    });
+
+    it("should handle null and undefined comparisons", () => {
+      const cell = runtime.getCell<number>(space, "test-null", undefined, tx);
+      expect(cell.equalLinks(null as any)).toBe(false);
+      expect(cell.equalLinks(undefined as any)).toBe(false);
+    });
+
+    it("should distinguish between direct value and linked value", () => {
+      const valueCell = runtime.getCell<number>(
+        space,
+        "has-value",
+        undefined,
+        tx,
+      );
+      valueCell.set(42);
+
+      const linkCell = runtime.getCell<number>(
+        space,
+        "has-link",
+        undefined,
+        tx,
+      );
+      linkCell.set(valueCell);
+
+      // One has a value, one has a link - they're different
+      expect(valueCell.equalLinks(linkCell)).toBe(false);
+      expect(linkCell.equalLinks(valueCell)).toBe(false);
+    });
+  });
+
+  describe("equals() vs equalLinks() comparison", () => {
+    it("should show difference between equals and equalLinks with single link", () => {
+      const target = runtime.getCell<number>(
+        space,
+        "compare-target",
+        undefined,
+        tx,
+      );
+      target.set(100);
+
+      const linker = runtime.getCell<number>(
+        space,
+        "compare-linker",
+        undefined,
+        tx,
+      );
+      linker.set(target);
+
+      // equals resolves, so they're equal
+      expect(linker.equals(target)).toBe(true);
+      // equalLinks doesn't resolve, so they're different
+      expect(linker.equalLinks(target)).toBe(false);
+    });
+
+    it("should show difference with link chains", () => {
+      const final = runtime.getCell<number>(space, "chain-end", undefined, tx);
+      final.set(42);
+
+      const middle = runtime.getCell<number>(space, "chain-mid", undefined, tx);
+      middle.set(final);
+
+      const start = runtime.getCell<number>(
+        space,
+        "chain-start",
+        undefined,
+        tx,
+      );
+      start.set(middle);
+
+      // equals resolves all links
+      expect(start.equals(final)).toBe(true);
+      expect(middle.equals(final)).toBe(true);
+
+      // equalLinks doesn't resolve
+      expect(start.equalLinks(final)).toBe(false);
+      expect(middle.equalLinks(final)).toBe(false);
+    });
+
+    it("should behave the same for cells without links", () => {
+      const cell1 = runtime.getCell<number>(space, "no-link-1", undefined, tx);
+      const cell2 = runtime.getCell<number>(space, "no-link-2", undefined, tx);
+
+      cell1.set(42);
+      cell2.set(42);
+
+      // Both should return false since cells are different
+      expect(cell1.equals(cell2)).toBe(false);
+      expect(cell1.equalLinks(cell2)).toBe(false);
+    });
+
+    it("should behave the same for same cell references", () => {
+      const cell = runtime.getCell<number>(space, "same-ref", undefined, tx);
+      cell.set(42);
+
+      // Both should return true for same reference
+      expect(cell.equals(cell)).toBe(true);
+      expect(cell.equalLinks(cell)).toBe(true);
+    });
+  });
 });

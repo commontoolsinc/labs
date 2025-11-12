@@ -28,6 +28,8 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { resolveLink } from "./link-resolution.ts";
+import { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -332,6 +334,8 @@ export function areLinksSame(
   value1: any,
   value2: any,
   base?: Cell | NormalizedLink,
+  resolveBeforeComparing?: boolean,
+  txForResolving?: IExtendedStorageTransaction,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;
@@ -340,11 +344,18 @@ export function areLinksSame(
   if (!value1 || !value2) return value1 === value2;
 
   // Try parsing both as links
-  const link1 = parseLink(value1, base);
-  const link2 = parseLink(value2, base);
+  let link1 = parseLink(value1, base);
+  let link2 = parseLink(value2, base);
 
   // If one parses and the other doesn't, they're not equal
   if (!link1 || !link2) return false;
+
+  if (resolveBeforeComparing) {
+    const tx = txForResolving;
+    if (!tx) throw new Error("Provide tx to resolve before comparing");
+    link1 = isNormalizedFullLink(link1) ? resolveLink(tx, link1) : link1;
+    link2 = isNormalizedFullLink(link2) ? resolveLink(tx, link2) : link2;
+  }
 
   // Compare normalized links
   return areNormalizedLinksSame(link1, link2);
