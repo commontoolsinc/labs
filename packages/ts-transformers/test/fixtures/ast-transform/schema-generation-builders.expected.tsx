@@ -47,7 +47,6 @@ export default recipe({
         </button>
         <ul>
           {state.items.mapWithPattern(__ctHelpers.recipe({
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 element: {

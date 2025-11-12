@@ -10,7 +10,6 @@ interface State {
     taxRate: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -49,7 +48,6 @@ export default recipe({
                 items: state.items
             } }, ({ state }) => state.items
             .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 element: {

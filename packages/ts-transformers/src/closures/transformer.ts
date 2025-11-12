@@ -1951,19 +1951,26 @@ function transformDeriveCall(
   // SchemaInjectionTransformer will use this to generate the result schema
   const signature = context.checker.getSignatureFromDeclaration(callback);
   let resultTypeNode: ts.TypeNode | undefined;
+  let resultType: ts.Type | undefined;
 
   if (callback.type) {
-    // Explicit return type annotation - use it
+    // Explicit return type annotation - use it directly (no need to register in typeRegistry)
     resultTypeNode = callback.type;
   } else if (signature) {
     // Infer from callback signature
-    const returnType = signature.getReturnType();
+    resultType = signature.getReturnType();
     resultTypeNode = context.checker.typeToTypeNode(
-      returnType,
+      resultType,
       context.sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
         ts.NodeBuilderFlags.UseStructuralFallback,
     );
+
+    // Register the result Type in typeRegistry for the synthetic TypeNode
+    // This fixes schema generation for shorthand properties referencing captured variables
+    if (resultTypeNode && context.options.typeRegistry) {
+      context.options.typeRegistry.set(resultTypeNode, resultType);
+    }
   }
 
   // Build the derive call expression

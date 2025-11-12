@@ -29,7 +29,6 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 state: {
@@ -59,7 +58,6 @@ export default recipe({
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
             const scaled = state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

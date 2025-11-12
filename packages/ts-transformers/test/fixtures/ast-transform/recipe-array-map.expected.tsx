@@ -43,7 +43,6 @@ export default recipe({
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
             {values.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

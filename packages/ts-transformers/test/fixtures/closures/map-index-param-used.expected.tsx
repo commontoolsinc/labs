@@ -9,7 +9,6 @@ interface State {
     offset: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -42,7 +41,6 @@ export default recipe({
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

@@ -5,7 +5,6 @@ export default function TestDerive() {
     // Input name collides with capture name
     // multiplier is both the input AND a captured variable (used via .get())
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             multiplier: {
@@ -19,7 +18,6 @@ export default function TestDerive() {
         },
         required: ["multiplier", "multiplier_1"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         multiplier,

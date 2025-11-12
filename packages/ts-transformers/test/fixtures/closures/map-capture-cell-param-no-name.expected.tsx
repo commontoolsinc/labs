@@ -8,7 +8,6 @@ interface InputSchema {
     ]>;
 }
 const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -39,7 +38,6 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
     // Not relevant for repro
 });
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {

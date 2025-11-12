@@ -5,7 +5,6 @@ export default recipe(true as const satisfies __ctHelpers.JSONSchema, (_state: a
     return {
         [UI]: (<div>
         {items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

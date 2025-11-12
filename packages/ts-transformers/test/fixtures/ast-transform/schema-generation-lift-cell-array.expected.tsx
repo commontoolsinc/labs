@@ -7,7 +7,6 @@ interface CharmEntry {
 // Test that lift with single generic parameter preserves Cell wrapper
 // This was broken on main - Cell would be unwrapped to ProxyArray
 const logCharmsList = lift({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         charmsList: {
@@ -34,7 +33,6 @@ const logCharmsList = lift({
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "array",
     items: {
         $ref: "#/$defs/CharmEntry"

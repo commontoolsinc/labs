@@ -9,7 +9,6 @@ interface State {
     scale: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         pizzas: {
@@ -36,7 +35,6 @@ export default recipe({
         [UI]: (<div>
         {/* Map with array destructured parameter */}
         {state.pizzas.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
@@ -62,7 +60,6 @@ export default recipe({
 
         {/* Map with array destructured parameter and capture */}
         {state.pizzas.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

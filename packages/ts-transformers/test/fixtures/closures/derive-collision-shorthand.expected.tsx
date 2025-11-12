@@ -6,7 +6,6 @@ export default function TestDeriveCollisionShorthand() {
     // The callback uses shorthand property { multiplier }
     // This should expand to { multiplier: multiplier_1 } after renaming
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             multiplier: {
@@ -20,7 +19,6 @@ export default function TestDeriveCollisionShorthand() {
         },
         required: ["multiplier", "multiplier_1"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -29,7 +27,10 @@ export default function TestDeriveCollisionShorthand() {
             data: {
                 type: "object",
                 properties: {
-                    multiplier: true
+                    multiplier: {
+                        type: "number",
+                        asOpaque: true
+                    }
                 },
                 required: ["multiplier"]
             }

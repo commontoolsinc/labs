@@ -9,7 +9,6 @@ interface TimedState {
     history: Map<string, Date>;
 }
 const timedHandler = handler({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         timestamp: {
@@ -33,7 +32,6 @@ const timedHandler = handler({
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         lastUpdate: {

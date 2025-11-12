@@ -5,7 +5,6 @@ export default function TestDerive() {
     const config = { multiplier: 2, divisor: 5 };
     const key = "multiplier";
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -31,7 +30,6 @@ export default function TestDerive() {
         },
         required: ["value", "config", "key"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value,

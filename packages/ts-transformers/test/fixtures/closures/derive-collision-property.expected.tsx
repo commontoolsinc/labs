@@ -6,7 +6,6 @@ export default function TestDeriveCollisionProperty() {
     // The callback returns an object with a property named 'multiplier'
     // Only the variable reference should be renamed, NOT the property name
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             multiplier: {
@@ -20,7 +19,6 @@ export default function TestDeriveCollisionProperty() {
         },
         required: ["multiplier", "multiplier_1"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             multiplier: {

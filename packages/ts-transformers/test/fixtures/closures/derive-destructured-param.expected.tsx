@@ -9,7 +9,6 @@ export default function TestDerive() {
     const multiplier = cell(2);
     // Destructured parameter
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             point: {
@@ -37,7 +36,6 @@ export default function TestDerive() {
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         point,

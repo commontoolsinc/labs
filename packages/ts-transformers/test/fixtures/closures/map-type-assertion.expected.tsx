@@ -24,7 +24,6 @@ export default recipe({
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
         {typedItems.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

@@ -14,7 +14,6 @@ interface State {
     prefix: string;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -65,7 +64,6 @@ export default recipe({
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
@@ -125,7 +123,6 @@ export default recipe({
             {state.prefix}: {item.name}
             <ul>
               {item.tags.mapWithPattern(__ctHelpers.recipe({
-                    $schema: "https://json-schema.org/draft/2020-12/schema",
                     type: "object",
                     properties: {
                         element: {
