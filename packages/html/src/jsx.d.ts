@@ -3162,6 +3162,7 @@ interface CTInputLegacyAttributes<T> extends CTHTMLAttributes<T> {
 interface CTImageInputAttributes<T> extends CTHTMLAttributes<T> {
   "multiple"?: boolean;
   "maxImages"?: number;
+  "maxSizeBytes"?: number;
   "capture"?: "user" | "environment" | false;
   "buttonText"?: string;
   "variant"?:

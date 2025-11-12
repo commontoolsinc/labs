@@ -12,6 +12,10 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import {
+  compressImage,
+  formatFileSize,
+} from "../../utils/image-compression.ts";
 import "../ct-button/ct-button.ts";
 
 /**
@@ -68,6 +72,7 @@ export interface ImageData {
  *
  * @attr {boolean} multiple - Allow multiple images (default: false)
  * @attr {number} maxImages - Max number of images (default: unlimited)
+ * @attr {number} maxSizeBytes - Max size in bytes before compression (default: no compression)
  * @attr {string} capture - Capture mode: "user" | "environment" | false
  * @attr {string} buttonText - Custom button text (default: "📷 Add Photo")
  * @attr {string} variant - Button style variant
@@ -83,6 +88,8 @@ export interface ImageData {
  *
  * @example
  * <ct-image-input capture="environment" buttonText="📸 Scan"></ct-image-input>
+ * @example
+ * <ct-image-input maxSizeBytes={5000000} buttonText="📸 Upload"></ct-image-input>
  */
 export class CTImageInput extends BaseElement {
   static override styles = [
@@ -219,6 +226,9 @@ export class CTImageInput extends BaseElement {
   @property({ type: Boolean })
   disabled = false;
 
+  @property({ type: Number })
+  maxSizeBytes?: number = 5 * 1024 * 1024; // Default to 5MB
+
   @property({ type: Array })
   images: Cell<ImageData[]> | ImageData[] = [];
 
@@ -307,48 +317,88 @@ export class CTImageInput extends BaseElement {
     }
   }
 
-  private _processFile(file: File): Promise<ImageData> {
+  /**
+   * Compress an image file using the image compression utility
+   * @param file - The image file to compress
+   * @param maxSizeBytes - Target maximum size in bytes
+   * @returns Compressed blob
+   */
+  private async _compressImage(
+    file: File,
+    maxSizeBytes: number,
+  ): Promise<Blob> {
+    const result = await compressImage(file, { maxSizeBytes });
+
+    // Log compression result
+    if (result.compressedSize < result.originalSize) {
+      console.log(
+        `Compressed ${file.name}: ${formatFileSize(result.originalSize)} → ${
+          formatFileSize(result.compressedSize)
+        } (${result.width}x${result.height}, q${result.quality.toFixed(2)})`,
+      );
+    }
+
+    if (result.compressedSize > maxSizeBytes) {
+      console.warn(
+        `Could not compress ${file.name} below ${
+          formatFileSize(maxSizeBytes)
+        }. Final size: ${formatFileSize(result.compressedSize)}`,
+      );
+    }
+
+    return result.blob;
+  }
+
+  private async _processFile(file: File): Promise<ImageData> {
+    const id = this._generateId();
+
+    // Compress if maxSizeBytes is set and file exceeds it
+    let fileToProcess: Blob = file;
+    if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
+      try {
+        fileToProcess = await this._compressImage(file, this.maxSizeBytes);
+      } catch (error) {
+        console.error("Compression failed, using original file:", error);
+        // Continue with original file if compression fails
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      const id = this._generateId();
 
       reader.onload = () => {
-        try {
-          const dataUrl = reader.result as string;
+        const dataUrl = reader.result as string;
 
-          // Get image dimensions
-          const img = new Image();
-          img.onload = () => {
-            const imageData: ImageData = {
-              id,
-              name: file.name || `Photo-${Date.now()}.jpg`,
-              url: dataUrl,
-              data: dataUrl,
-              timestamp: Date.now(),
-              width: img.width,
-              height: img.height,
-              size: file.size,
-              type: file.type,
-            };
-
-            resolve(imageData);
+        // Get image dimensions from the data URL
+        const img = new Image();
+        img.onload = () => {
+          const imageData: ImageData = {
+            id,
+            name: file.name || `Photo-${Date.now()}.jpg`,
+            url: dataUrl,
+            data: dataUrl,
+            timestamp: Date.now(),
+            width: img.width,
+            height: img.height,
+            size: fileToProcess.size, // Use compressed size
+            type: fileToProcess.type || file.type,
           };
 
-          img.onerror = () => {
-            reject(new Error("Failed to load image"));
-          };
+          resolve(imageData);
+        };
 
-          img.src = dataUrl;
-        } catch (error) {
-          reject(error);
-        }
+        img.onerror = () => {
+          reject(new Error("Failed to load image"));
+        };
+
+        img.src = dataUrl;
       };
 
       reader.onerror = () => {
         reject(new Error("Failed to read file"));
       };
 
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(fileToProcess);
     });
   }
 
@@ -358,12 +408,6 @@ export class CTImageInput extends BaseElement {
     this.setImages(updatedImages);
     this.emit("ct-remove", { id, images: updatedImages });
     this.emit("ct-change", { images: updatedImages });
-  }
-
-  private _formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   override connectedCallback() {
@@ -452,7 +496,7 @@ export class CTImageInput extends BaseElement {
                         `
                         : ""}
                       <div class="image-info" title="${image.name}">
-                        ${image.name} (${this._formatFileSize(image.size)})
+                        ${image.name} (${formatFileSize(image.size)})
                       </div>
                     </div>
                   `,
