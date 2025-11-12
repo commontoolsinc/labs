@@ -724,6 +724,19 @@ export const llmDialogTestHelpers = {
 };
 
 /**
+ * Shared tool execution utilities for use by other LLM built-ins (llm, generateText).
+ * These functions handle tool catalog building, tool call resolution, and execution.
+ */
+export const llmToolExecutionHelpers = {
+  buildToolCatalog,
+  executeToolCalls,
+  extractToolCallParts,
+  buildAssistantMessage,
+  createToolResultMessages,
+  hasValidContent,
+};
+
+/**
  * Performs a mutation on the storage if the pending flag is active and the
  * request ID matches. This ensures the pending flag has final say over whether
  * the LLM continues generating.

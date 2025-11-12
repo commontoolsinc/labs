@@ -18,6 +18,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 
 const client = new LLMClient();
 
@@ -130,7 +131,7 @@ export function llm(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, messages, stop, maxTokens, model } =
+    const { system, messages, stop, maxTokens, model, tools } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     const llmParams: LLMRequest = {
@@ -146,6 +147,7 @@ export function llm(
         context: "charm",
       },
       cache: true,
+      // tools will be added below if present
     };
 
     const hash = refer(llmParams).toString();
@@ -176,12 +178,54 @@ export function llm(
       partialWithLog.set(text);
     };
 
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
+    // Start the LLM request with tool execution loop
+    const executeWithTools = async (
+      currentMessages: BuiltInLLMMessage[],
+      toolCatalog?: Awaited<ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>>,
+    ): Promise<void> => {
+      if (thisRun !== currentRun) return;
 
-    resultPromise
-      .then(async (llmResult) => {
-        if (thisRun !== currentRun) return;
+      const requestParams: LLMRequest = {
+        ...llmParams,
+        messages: currentMessages,
+        tools: toolCatalog?.llmTools,
+      };
 
+      const llmResult = await client.sendRequest(requestParams, updatePartial);
+
+      if (thisRun !== currentRun) return;
+
+      // Check if there are tool calls in the response
+      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(llmResult.content);
+      const hasToolCalls = toolCallParts.length > 0;
+
+      if (hasToolCalls && toolCatalog) {
+        // Execute tools and continue conversation
+        const assistantMessage = llmToolExecutionHelpers.buildAssistantMessage(
+          llmResult.content,
+          toolCallParts,
+        );
+
+        const toolResults = await llmToolExecutionHelpers.executeToolCalls(
+          runtime,
+          parentCell.space,
+          toolCatalog,
+          toolCallParts,
+        );
+
+        const toolResultMessages = llmToolExecutionHelpers.createToolResultMessages(toolResults);
+
+        // Build new message history with assistant message + tool results
+        const updatedMessages = [
+          ...currentMessages,
+          assistantMessage,
+          ...toolResultMessages,
+        ];
+
+        // Continue conversation with tool results
+        await executeWithTools(updatedMessages, toolCatalog);
+      } else {
+        // No more tool calls, finish
         await runtime.idle();
 
         await runtime.editWithRetry((tx) => {
@@ -190,27 +234,39 @@ export function llm(
           partial.withTx(tx).set(extractTextFromLLMResponse(llmResult));
           requestHash.withTx(tx).set(hash);
         });
-      })
-      .catch(async (error) => {
-        if (thisRun !== currentRun) return;
+      }
+    };
 
-        console.error("Error generating data", error);
+    // Build tool catalog if tools are present, then start execution
+    const resultPromise = (async () => {
+      const toolsCell = tools ? inputsCell.key("tools") : undefined;
+      const toolCatalog = toolsCell
+        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        : undefined;
 
-        await runtime.idle();
+      await executeWithTools(messages ?? [], toolCatalog);
+    })();
 
-        await runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(undefined);
-          partial.withTx(tx).set(undefined);
-        });
+    resultPromise.catch(async (error) => {
+      if (thisRun !== currentRun) return;
 
-        // Reset previousCallHash to allow retry after error
-        previousCallHash = undefined;
+      console.error("Error generating data", error);
 
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
+      await runtime.idle();
+
+      await runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(undefined);
+        partial.withTx(tx).set(undefined);
       });
+
+      // Reset previousCallHash to allow retry after error
+      previousCallHash = undefined;
+
+      // TODO(seefeld): Not writing now, so we retry the request after failure.
+      // Replace this with more fine-grained retry logic.
+      // requestHash.setAtPath([], hash, log);
+    });
   };
 }
 
@@ -271,7 +327,7 @@ export function generateText(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, prompt, messages, model, maxTokens } =
+    const { system, prompt, messages, model, maxTokens, tools } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     // If neither prompt nor messages is provided, don't make a request
@@ -297,6 +353,7 @@ export function generateText(
         context: "charm",
       },
       cache: true,
+      // tools will be added below if present
     };
 
     const hash = refer(llmParams).toString();
@@ -335,15 +392,56 @@ export function generateText(
       partialWithLog.set(text);
     };
 
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
+    // Start the LLM request with tool execution loop
+    const executeWithTools = async (
+      currentMessages: BuiltInLLMMessage[],
+      toolCatalog?: Awaited<ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>>,
+    ): Promise<void> => {
+      if (thisRun !== currentRun) return;
 
-    resultPromise
-      .then(async (llmResult) => {
-        if (thisRun !== currentRun) return;
+      const requestParams: LLMRequest = {
+        ...llmParams,
+        messages: currentMessages,
+        tools: toolCatalog?.llmTools,
+      };
 
+      const llmResult = await client.sendRequest(requestParams, updatePartial);
+
+      if (thisRun !== currentRun) return;
+
+      // Check if there are tool calls in the response
+      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(llmResult.content);
+      const hasToolCalls = toolCallParts.length > 0;
+
+      if (hasToolCalls && toolCatalog) {
+        // Execute tools and continue conversation
+        const assistantMessage = llmToolExecutionHelpers.buildAssistantMessage(
+          llmResult.content,
+          toolCallParts,
+        );
+
+        const toolResults = await llmToolExecutionHelpers.executeToolCalls(
+          runtime,
+          parentCell.space,
+          toolCatalog,
+          toolCallParts,
+        );
+
+        const toolResultMessages = llmToolExecutionHelpers.createToolResultMessages(toolResults);
+
+        // Build new message history with assistant message + tool results
+        const updatedMessages = [
+          ...currentMessages,
+          assistantMessage,
+          ...toolResultMessages,
+        ];
+
+        // Continue conversation with tool results
+        await executeWithTools(updatedMessages, toolCatalog);
+      } else {
+        // No more tool calls, finish - extract text from final response
         await runtime.idle();
 
-        // Extract text from the LLM response
         const textResult = extractTextFromLLMResponse(llmResult);
 
         await runtime.editWithRetry((tx) => {
@@ -352,27 +450,39 @@ export function generateText(
           partial.withTx(tx).set(textResult);
           requestHash.withTx(tx).set(hash);
         });
-      })
-      .catch(async (error) => {
-        if (thisRun !== currentRun) return;
+      }
+    };
 
-        console.error("Error generating text", error);
+    // Build tool catalog if tools are present, then start execution
+    const resultPromise = (async () => {
+      const toolsCell = tools ? inputsCell.key("tools") : undefined;
+      const toolCatalog = toolsCell
+        ? await llmToolExecutionHelpers.buildToolCatalog(runtime, toolsCell)
+        : undefined;
 
-        await runtime.idle();
+      await executeWithTools(requestMessages, toolCatalog);
+    })();
 
-        await runtime.editWithRetry((tx) => {
-          pending.withTx(tx).set(false);
-          result.withTx(tx).set(undefined);
-          partial.withTx(tx).set(undefined);
-        });
+    resultPromise.catch(async (error) => {
+      if (thisRun !== currentRun) return;
 
-        // Reset previousCallHash to allow retry after error
-        previousCallHash = undefined;
+      console.error("Error generating text", error);
 
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
+      await runtime.idle();
+
+      await runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(undefined);
+        partial.withTx(tx).set(undefined);
       });
+
+      // Reset previousCallHash to allow retry after error
+      previousCallHash = undefined;
+
+      // TODO(seefeld): Not writing now, so we retry the request after failure.
+      // Replace this with more fine-grained retry logic.
+      // requestHash.setAtPath([], hash, log);
+    });
   };
 }
 
