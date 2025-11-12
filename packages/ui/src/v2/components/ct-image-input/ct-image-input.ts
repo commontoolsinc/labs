@@ -332,34 +332,39 @@ export class CTImageInput extends BaseElement {
     // Log compression result
     if (result.compressedSize < result.originalSize) {
       console.log(
-        `Compressed ${file.name}: ${formatFileSize(result.originalSize)} → ${formatFileSize(result.compressedSize)} (${result.width}x${result.height}, q${result.quality.toFixed(2)})`,
+        `Compressed ${file.name}: ${formatFileSize(result.originalSize)} → ${
+          formatFileSize(result.compressedSize)
+        } (${result.width}x${result.height}, q${result.quality.toFixed(2)})`,
       );
     }
 
     if (result.compressedSize > maxSizeBytes) {
       console.warn(
-        `Could not compress ${file.name} below ${formatFileSize(maxSizeBytes)}. Final size: ${formatFileSize(result.compressedSize)}`,
+        `Could not compress ${file.name} below ${
+          formatFileSize(maxSizeBytes)
+        }. Final size: ${formatFileSize(result.compressedSize)}`,
       );
     }
 
     return result.blob;
   }
 
-  private _processFile(file: File): Promise<ImageData> {
-    return new Promise(async (resolve, reject) => {
-      const reader = new FileReader();
-      const id = this._generateId();
+  private async _processFile(file: File): Promise<ImageData> {
+    const id = this._generateId();
 
-      // Compress if maxSizeBytes is set and file exceeds it
-      let fileToProcess: Blob = file;
-      if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
-        try {
-          fileToProcess = await this._compressImage(file, this.maxSizeBytes);
-        } catch (error) {
-          console.error("Compression failed, using original file:", error);
-          // Continue with original file if compression fails
-        }
+    // Compress if maxSizeBytes is set and file exceeds it
+    let fileToProcess: Blob = file;
+    if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
+      try {
+        fileToProcess = await this._compressImage(file, this.maxSizeBytes);
+      } catch (error) {
+        console.error("Compression failed, using original file:", error);
+        // Continue with original file if compression fails
       }
+    }
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
 
       reader.onload = () => {
         try {
