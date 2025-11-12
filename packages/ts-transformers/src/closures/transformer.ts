@@ -761,6 +761,11 @@ function buildHandlerStateTypeNode(
 /**
  * Check if a node is inside a derive or computed callback.
  * Returns the callback function and the derive/computed call if found.
+ *
+ * This needs to handle both:
+ * 1. Original computed() calls before ComputedTransformer runs
+ * 2. Synthetic derive() calls created by ComputedTransformer (no proper symbols)
+ * 3. Real derive() calls from source code
  */
 function findContainingDeriveCallback(
   node: ts.Node,
@@ -775,8 +780,17 @@ function findContainingDeriveCallback(
       // Check if this function is an argument to a derive/computed call
       const parent = current.parent;
       if (ts.isCallExpression(parent)) {
+        // First check the call expression name directly
+        // This handles synthetic derives from ComputedTransformer which lack symbol info
+        if (ts.isIdentifier(parent.expression)) {
+          const name = parent.expression.text;
+          if (name === "derive" || name === "computed") {
+            return { callback: current, deriveCall: parent };
+          }
+        }
+
+        // Also check using detectCallKind for proper source derives/computed
         const callKind = detectCallKind(parent, context.checker);
-        // Check for both derive and computed (which becomes derive)
         if (callKind?.kind === "derive" ||
             (callKind?.kind === "builder" && callKind.builderName === "computed")) {
           return { callback: current, deriveCall: parent };
