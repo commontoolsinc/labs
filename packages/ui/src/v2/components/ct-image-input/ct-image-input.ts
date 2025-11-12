@@ -12,6 +12,10 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import {
+  compressImage,
+  formatFileSize,
+} from "../../utils/image-compression.ts";
 import "../ct-button/ct-button.ts";
 
 /**
@@ -314,139 +318,31 @@ export class CTImageInput extends BaseElement {
   }
 
   /**
-   * Compress an image file to meet size requirements using Canvas API
-   * Uses binary search to efficiently find optimal quality setting
+   * Compress an image file using the image compression utility
    * @param file - The image file to compress
    * @param maxSizeBytes - Target maximum size in bytes
-   * @returns Compressed blob or original file if already small enough
+   * @returns Compressed blob
    */
   private async _compressImage(
     file: File,
     maxSizeBytes: number,
   ): Promise<Blob> {
-    // If file is already small enough, return as-is
-    if (file.size <= maxSizeBytes) {
-      return file;
+    const result = await compressImage(file, { maxSizeBytes });
+
+    // Log compression result
+    if (result.compressedSize < result.originalSize) {
+      console.log(
+        `Compressed ${file.name}: ${formatFileSize(result.originalSize)} → ${formatFileSize(result.compressedSize)} (${result.width}x${result.height}, q${result.quality.toFixed(2)})`,
+      );
     }
 
-    try {
-      // Create image bitmap for processing
-      const imageBitmap = await createImageBitmap(file);
-
-      // Helper function to compress at given dimensions and quality
-      const compressAtSettings = async (
-        maxDim: number,
-        quality: number,
-      ): Promise<Blob> => {
-        const scale = Math.min(
-          1,
-          maxDim / Math.max(imageBitmap.width, imageBitmap.height),
-        );
-        const width = Math.floor(imageBitmap.width * scale);
-        const height = Math.floor(imageBitmap.height * scale);
-
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext("2d");
-
-        if (!ctx) {
-          throw new Error("Failed to get canvas context");
-        }
-
-        ctx.drawImage(imageBitmap, 0, 0, width, height);
-
-        return await canvas.convertToBlob({
-          type: "image/jpeg",
-          quality,
-        });
-      };
-
-      // Binary search for optimal quality at given dimension
-      const findOptimalQuality = async (
-        maxDim: number,
-        minQuality: number = 0.5,
-        maxQuality: number = 0.95,
-      ): Promise<{ blob: Blob; quality: number } | null> => {
-        let bestBlob: Blob | null = null;
-        let bestQuality = maxQuality;
-
-        // First check if even max quality is too large at this dimension
-        const maxQualityBlob = await compressAtSettings(maxDim, maxQuality);
-        if (maxQualityBlob.size > maxSizeBytes) {
-          // Need to reduce dimension
-          return null;
-        }
-
-        // Binary search for lowest quality that still meets size requirement
-        let low = minQuality;
-        let high = maxQuality;
-        const tolerance = 0.05; // Stop when range is small enough
-
-        while (high - low > tolerance) {
-          const mid = (low + high) / 2;
-          const blob = await compressAtSettings(maxDim, mid);
-
-          if (blob.size <= maxSizeBytes) {
-            // This quality works, try lower quality
-            bestBlob = blob;
-            bestQuality = mid;
-            high = mid;
-          } else {
-            // Quality too low, need higher quality
-            low = mid;
-          }
-        }
-
-        // If we found a solution, return it
-        if (bestBlob) {
-          return { blob: bestBlob, quality: bestQuality };
-        }
-
-        // Otherwise, try with the high quality setting one more time
-        const finalBlob = await compressAtSettings(maxDim, high);
-        if (finalBlob.size <= maxSizeBytes) {
-          return { blob: finalBlob, quality: high };
-        }
-
-        return null;
-      };
-
-      // Try progressively smaller dimensions using binary search for quality
-      const dimensions = [2048, 1600, 1200, 800];
-
-      for (const maxDim of dimensions) {
-        const result = await findOptimalQuality(maxDim);
-        if (result) {
-          const scale = Math.min(
-            1,
-            maxDim / Math.max(imageBitmap.width, imageBitmap.height),
-          );
-          const width = Math.floor(imageBitmap.width * scale);
-          const height = Math.floor(imageBitmap.height * scale);
-
-          console.log(
-            `Compressed ${file.name}: ${this._formatFileSize(file.size)} → ${this._formatFileSize(result.blob.size)} (${width}x${height}, q${result.quality.toFixed(2)})`,
-          );
-          return result.blob;
-        }
-      }
-
-      // If all attempts failed, return smallest possible attempt
-      const minScale = Math.min(
-        1,
-        800 / Math.max(imageBitmap.width, imageBitmap.height),
-      );
-      const width = Math.floor(imageBitmap.width * minScale);
-      const height = Math.floor(imageBitmap.height * minScale);
-      const finalBlob = await compressAtSettings(800, 0.5);
-
+    if (result.compressedSize > maxSizeBytes) {
       console.warn(
-        `Could not compress ${file.name} below ${this._formatFileSize(maxSizeBytes)}. Final size: ${this._formatFileSize(finalBlob.size)}`,
+        `Could not compress ${file.name} below ${formatFileSize(maxSizeBytes)}. Final size: ${formatFileSize(result.compressedSize)}`,
       );
-      return finalBlob;
-    } catch (error) {
-      console.error("Compression failed, using original:", error);
-      return file;
     }
+
+    return result.blob;
   }
 
   private _processFile(file: File): Promise<ImageData> {
@@ -511,12 +407,6 @@ export class CTImageInput extends BaseElement {
     this.setImages(updatedImages);
     this.emit("ct-remove", { id, images: updatedImages });
     this.emit("ct-change", { images: updatedImages });
-  }
-
-  private _formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   override connectedCallback() {
@@ -605,7 +495,7 @@ export class CTImageInput extends BaseElement {
                         `
                         : ""}
                       <div class="image-info" title="${image.name}">
-                        ${image.name} (${this._formatFileSize(image.size)})
+                        ${image.name} (${formatFileSize(image.size)})
                       </div>
                     </div>
                   `,
