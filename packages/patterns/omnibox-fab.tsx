@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   compileAndRun,
+  computed,
   derive,
   fetchProgram,
   handler,
@@ -86,22 +86,21 @@ export default recipe<OmniboxFABInput>(
       },
     });
 
-    const fabExpanded = cell(false);
-    const showHistory = cell(false);
-    const peekDismissedIndex = cell(-1); // Track which message index was dismissed
+    const fabExpanded = Cell.of(false);
+    const showHistory = Cell.of(false);
+    const peekDismissedIndex = Cell.of(-1); // Track which message index was dismissed
 
     // Derive assistant message count for dismiss tracking
-    const assistantMessageCount = derive(
-      omnibot.messages,
-      (messages) => messages.filter((m) => m.role === "assistant").length,
-    );
+    const assistantMessageCount = computed(() => {
+      return omnibot.messages.filter((m) => m.role === "assistant").length;
+    });
 
     // Derive latest assistant message for peek
-    const latestAssistantMessage = derive(omnibot.messages, (messages) => {
-      if (!messages || messages.length === 0) return null;
+    const latestAssistantMessage = derive(omnibot, (omnibot) => {
+      if (!omnibot.messages || omnibot.messages.length === 0) return null;
 
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
+      for (let i = omnibot.messages.length - 1; i >= 0; i--) {
+        const msg = omnibot.messages[i];
         if (msg.role === "assistant") {
           const content = typeof msg.content === "string"
             ? msg.content
@@ -121,7 +120,7 @@ export default recipe<OmniboxFABInput>(
       messages: omnibot.messages,
       [UI]: (
         <ct-fab
-          expanded={fabExpanded}
+          expanded={computed(() => fabExpanded.get())}
           variant="primary"
           position="bottom-right"
           pending={omnibot.pending}
@@ -134,26 +133,25 @@ export default recipe<OmniboxFABInput>(
             {/* Chevron at top - the "handle" for the drawer */}
             <div style="border-bottom: 1px solid #e5e5e5; flex-shrink: 0;">
               <ct-chevron-button
-                expanded={showHistory}
+                expanded={computed(() => showHistory.get())}
                 loading={omnibot.pending}
                 onct-toggle={toggle({ value: showHistory })}
               />
             </div>
 
             <div
-              style={derive(
-                showHistory,
-                (show) =>
-                  `flex: ${
-                    show ? "1" : "0"
-                  }; min-height: 0; display: flex; flex-direction: column; opacity: ${
-                    show ? "1" : "0"
-                  }; max-height: ${
-                    show ? "480px" : "0"
-                  }; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: ${
-                    show ? "auto" : "none"
-                  };`,
-              )}
+              style={computed(() => {
+                const show = showHistory.get();
+                return `flex: ${
+                  show ? "1" : "0"
+                }; min-height: 0; display: flex; flex-direction: column; opacity: ${
+                  show ? "1" : "0"
+                }; max-height: ${
+                  show ? "480px" : "0"
+                }; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: ${
+                  show ? "auto" : "none"
+                };`;
+              })}
             >
               <div style="padding: .25rem; flex-shrink: 0;">
                 {omnibot.ui.attachmentsAndTools}
@@ -164,16 +162,12 @@ export default recipe<OmniboxFABInput>(
             </div>
 
             {ifElse(
-              derive(
-                [
-                  showHistory,
-                  latestAssistantMessage,
-                  peekDismissedIndex,
-                  assistantMessageCount,
-                ],
-                ([show, msg, dismissedIdx, count]) =>
-                  !show && msg && count !== dismissedIdx,
-              ),
+              computed(() => {
+                const show = showHistory.get();
+                const dismissedIdx = peekDismissedIndex.get();
+                return !show && latestAssistantMessage &&
+                  assistantMessageCount !== dismissedIdx;
+              }),
               <div style="margin: .5rem; margin-bottom: 0; padding: 0; flex-shrink: 0; position: relative;">
                 <ct-button
                   variant="ghost"
