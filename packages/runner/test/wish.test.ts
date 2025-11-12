@@ -16,6 +16,7 @@ describe("wish built-in", () => {
   let tx: ReturnType<Runtime["edit"]>;
   let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -27,7 +28,7 @@ describe("wish built-in", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ wish, recipe } = commontools);
+    ({ wish, recipe, derive } = commontools);
   });
 
   afterEach(async () => {
