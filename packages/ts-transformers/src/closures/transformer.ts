@@ -1,10 +1,14 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   createDataFlowAnalyzer,
   detectCallKind,
   getMethodCallTarget,
+  getTypeAtLocationWithFallback,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isMethodCall,
@@ -488,13 +492,22 @@ function hasArrayTypeArgument(
 function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
   checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  logger?: (message: string) => void,
 ): boolean {
   // Check if this is a property access expression with name "map"
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
   if (node.expression.name.text !== "map") return false;
 
   // Get the type of the target (what we're calling .map on)
-  const targetType = checker.getTypeAtLocation(node.expression.expression);
+  const target = node.expression.expression;
+  const targetType = getTypeAtLocationWithFallback(
+    target,
+    checker,
+    typeRegistry,
+    logger,
+  );
+  if (!targetType) return false;
 
   // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
   if (
@@ -516,7 +529,7 @@ function isOpaqueRefArrayMapCall(
     "flatMap",
   ];
 
-  let current: ts.Expression = node.expression.expression;
+  let current: ts.Expression = target;
 
   // Walk back through call chain to find the origin
   while (
@@ -528,7 +541,14 @@ function isOpaqueRefArrayMapCall(
   }
 
   // Check if origin is OpaqueRef<T[]> or Cell<T[]>
-  const originType = checker.getTypeAtLocation(current);
+  const originType = getTypeAtLocationWithFallback(
+    current,
+    checker,
+    typeRegistry,
+    logger,
+  );
+  if (!originType) return false;
+
   return isOpaqueRefType(originType, checker) &&
     hasArrayTypeArgument(originType, checker);
 }
@@ -759,37 +779,97 @@ function buildHandlerStateTypeNode(
 }
 
 /**
- * Check if a map call should be transformed to mapWithPattern.
- * Returns false if the map will end up inside a derive (where the array is unwrapped).
- *
- * This happens when the map is nested inside a larger expression with opaque refs,
- * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ * Check if map call is inside a derive/computed callback with a non-Cell OpaqueRef.
+ * Returns true if we should skip transformation due to OpaqueRef unwrapping.
  */
-function shouldTransformMap(
+function isInsideDeriveWithOpaqueRef(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  // Find the closest containing JSX expression
-  let node: ts.Node = mapCall;
-  let closestJsxExpression: ts.JsxExpression | undefined;
+  const { checker } = context;
+  const typeRegistry = context.options.typeRegistry;
 
+  let node: ts.Node = mapCall;
   while (node.parent) {
-    if (ts.isJsxExpression(node.parent)) {
-      closestJsxExpression = node.parent;
-      break;
+    if (
+      ts.isArrowFunction(node.parent) || ts.isFunctionExpression(node.parent)
+    ) {
+      const callback = node.parent;
+      // Check if this callback's parent is a derive call
+      if (callback.parent && ts.isCallExpression(callback.parent)) {
+        const deriveCall = callback.parent;
+        const callKind = detectCallKind(deriveCall, checker);
+
+        // Check if this is a derive or computed call
+        // Note: Even though ComputedTransformer runs first, callback nodes are reused,
+        // so parent pointers may still point to the original 'computed' call
+        const isDeriveOrComputed = callKind?.kind === "derive" ||
+          (callKind?.kind === "builder" && callKind.builderName === "computed");
+
+        if (
+          isDeriveOrComputed &&
+          ts.isPropertyAccessExpression(mapCall.expression)
+        ) {
+          // We're inside a derive callback - check if target is Cell or OpaqueRef
+          const mapTarget = mapCall.expression.expression;
+
+          const targetType = getTypeAtLocationWithFallback(
+            mapTarget,
+            checker,
+            typeRegistry,
+            context.options.logger,
+          );
+
+          if (targetType && isOpaqueRefType(targetType, checker)) {
+            const kind = getCellKind(targetType, checker);
+            // Only skip transformation for non-Cell OpaqueRefs
+            // Cell<T[]>.map() should still transform even inside derive
+            if (kind !== "cell") {
+              return true;
+            }
+          }
+        }
+      }
     }
     node = node.parent;
   }
 
-  // If we didn't find a JSX expression, default to transforming
-  // (this handles maps in regular statements like `const x = items.map(...)`)
-  if (!closestJsxExpression || !closestJsxExpression.expression) {
-    return true;
+  return false;
+}
+
+/**
+ * Find the closest JSX expression ancestor of a node.
+ */
+function findClosestJsxExpression(
+  node: ts.Node,
+): ts.JsxExpression | undefined {
+  let current = node;
+  while (current.parent) {
+    if (ts.isJsxExpression(current.parent)) {
+      return current.parent;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Check if a map call will be wrapped in a derive by the JSX transformer.
+ * Returns true if wrapping will occur (meaning we should NOT transform the map).
+ */
+function willBeWrappedByJsx(
+  mapCall: ts.CallExpression,
+  closestJsxExpression: ts.JsxExpression,
+  context: TransformationContext,
+): boolean {
+  // JSX expression must have an expression to analyze
+  if (!closestJsxExpression.expression) {
+    return false;
   }
 
   const analyze = createDataFlowAnalyzer(context.checker);
 
-  //Case 1: Map is nested in a larger expression within the same JSX expression
+  // Case 1: Map is nested in a larger expression within the same JSX expression
   // Example: {list.length > 0 && list.map(...)}
   // Only check THIS expression for derive wrapping
   if (closestJsxExpression.expression !== mapCall) {
@@ -799,13 +879,13 @@ function shouldTransformMap(
     const willBeWrappedInDerive = analysis.requiresRewrite &&
       !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
         analysis.rewriteHint.reason === "array-map");
-    return !willBeWrappedInDerive;
+    return willBeWrappedInDerive;
   }
 
   // Case 2: Map IS the direct content of the JSX expression
   // Example: <div>{list.map(...)}</div>
   // Check if an ANCESTOR JSX expression will wrap this in a derive
-  node = closestJsxExpression.parent;
+  let node: ts.Node | undefined = closestJsxExpression.parent;
   while (node) {
     if (ts.isJsxExpression(node) && node.expression) {
       const analysis = analyze(node.expression);
@@ -814,14 +894,46 @@ function shouldTransformMap(
           analysis.rewriteHint.reason === "array-map");
       if (willBeWrappedInDerive) {
         // An ancestor JSX expression will wrap this in a derive
-        return false;
+        return true;
       }
     }
     node = node.parent;
   }
 
-  // No ancestor will wrap in derive, transform normally
-  return true;
+  // No ancestor will wrap in derive
+  return false;
+}
+
+/**
+ * Check if a map call should be transformed to mapWithPattern.
+ * Returns false if the map will end up inside a derive (where the array is unwrapped).
+ *
+ * This happens when the map is nested inside a larger expression with opaque refs,
+ * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ *
+ * Special case: Inside derive callbacks, Cell<T[]>.map() should still be transformed,
+ * but OpaqueRef<T[]>.map() should not (OpaqueRefs are unwrapped in derive).
+ */
+function shouldTransformMap(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
+  if (isInsideDeriveWithOpaqueRef(mapCall, context)) {
+    return false;
+  }
+
+  // Find the closest containing JSX expression
+  const closestJsxExpression = findClosestJsxExpression(mapCall);
+
+  // If we didn't find a JSX expression, default to transforming
+  // (this handles maps in regular statements like `const x = items.map(...)`)
+  if (!closestJsxExpression || !closestJsxExpression.expression) {
+    return true;
+  }
+
+  // Check if this expression or ancestors will be wrapped by JSX transformer
+  return !willBeWrappedByJsx(mapCall, closestJsxExpression, context);
 }
 
 function createClosureTransformVisitor(
@@ -837,7 +949,15 @@ function createClosureTransformVisitor(
       }
     }
 
-    if (ts.isCallExpression(node) && isOpaqueRefArrayMapCall(node, checker)) {
+    if (
+      ts.isCallExpression(node) &&
+      isOpaqueRefArrayMapCall(
+        node,
+        checker,
+        context.options.typeRegistry,
+        context.options.logger,
+      )
+    ) {
       const callback = node.arguments[0];
 
       if (callback && isFunctionLikeExpression(callback)) {
