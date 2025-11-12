@@ -148,6 +148,7 @@ export function fetchProgram(
     const currentInternal = internal.withTx(tx).get();
     const currentPending = pending.withTx(tx).get();
     const currentResult = result.withTx(tx).get();
+    const currentError = error.withTx(tx).get();
 
     const inputsMatch = currentInternal?.inputHash === inputHash;
 
@@ -168,15 +169,16 @@ export function fetchProgram(
       });
     }
 
-    // If we have a valid result for these inputs, we're done
+    // If we have a result OR error for these inputs, we're done
     const hasValidResult = inputsMatch && currentResult !== undefined;
+    const hasError = inputsMatch && currentError !== undefined;
 
     // If we're already fetching these inputs, wait
     const alreadyFetching = inputsMatch && currentPending &&
       myRequestId !== undefined;
 
-    // Start a new fetch if we don't have a result and aren't already fetching
-    if (!hasValidResult && !alreadyFetching) {
+    // Start a new fetch if we don't have a result/error and aren't already fetching
+    if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
 
       // Try to claim mutex - returns immediately if another tab is processing
@@ -278,13 +280,14 @@ async function startResolve(
 
     await runtime.idle();
 
-    // Try to write error - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
+    // Always write error and clear pending
+    await runtime.editWithRetry((tx) => {
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(
         err instanceof Error ? err.message : String(err),
       );
+      internal.withTx(tx).update({ inputHash });
     });
   }
 }

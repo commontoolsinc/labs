@@ -152,6 +152,7 @@ export function fetchData(
     const currentInternal = internal.withTx(tx).get();
     const currentPending = pending.withTx(tx).get();
     const currentResult = result.withTx(tx).get();
+    const currentError = error.withTx(tx).get();
 
     const inputsMatch = currentInternal?.inputHash === inputHash;
 
@@ -172,15 +173,16 @@ export function fetchData(
       });
     }
 
-    // If we have a valid result for these inputs, we're done
+    // If we have a result OR error for these inputs, we're done
     const hasValidResult = inputsMatch && currentResult !== undefined;
+    const hasError = inputsMatch && currentError !== undefined;
 
     // If we're already fetching these inputs, wait
     const alreadyFetching = inputsMatch && currentPending &&
       myRequestId !== undefined;
 
-    // Start a new fetch if we don't have a result and aren't already fetching
-    if (!hasValidResult && !alreadyFetching) {
+    // Start a new fetch if we don't have a result/error and aren't already fetching
+    if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
 
       // Try to claim mutex - returns immediately if another tab is processing
@@ -295,11 +297,24 @@ async function startFetch(
 
     await runtime.idle();
 
-    // Try to write error - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-      error.withTx(tx).set(err);
-    });
+    // Always write error and clear pending - use try/catch to ensure this completes
+    try {
+      await runtime.editWithRetry((tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(undefined);
+        error.withTx(tx).set(err);
+        internal.withTx(tx).update({ inputHash });
+      });
+    } catch (writeErr) {
+      // If we can't write the error, at least clear pending
+      console.error("Failed to write error state:", writeErr);
+      const tx = runtime.edit();
+      try {
+        pending.withTx(tx).set(false);
+        tx.commit();
+      } catch {
+        tx.abort();
+      }
+    }
   }
 }
