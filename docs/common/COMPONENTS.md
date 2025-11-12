@@ -1,18 +1,44 @@
 # ct-button
 
-A styled button component matching the regular `button` API. Pass a handler to the `onClick` prop to bind it.
+A styled button component matching the regular `button` API. You can use inline handlers or the `handler()` function.
+
+## Inline Handler (Preferred for Simple Cases)
 
 ```tsx
-type InputSchema = { count: Cell<number> };
-type OutputSchema = { count: Cell<number> };
+interface Input {
+  count: Cell<number>;
+}
 
-const MyRecipe = recipe<InputSchema, OutputSchema>(({ count }) => {
-  const handleClick = handler<unknown, { count: Cell<number> }>((_event, { count }) => {
-    count.set(count.get() + 1);
-  });
-
+const MyRecipe = recipe<Input>(({ count }) => {
   return {
-    [UI]: <ct-button onClick={handleClick({ count })} />,
+    [UI]: (
+      <ct-button onClick={() => count.set(count.get() + 1)}>
+        Increment
+      </ct-button>
+    ),
+    count,
+  };
+});
+```
+
+**Key point:** Declare `count` as `Cell<number>` in your input type to use it in inline handlers.
+
+## Using handler() for Complex Logic
+
+```tsx
+interface Input {
+  count: Cell<number>;
+}
+
+const handleClick = handler<unknown, { count: Cell<number> }>((_event, { count }) => {
+  const newValue = count.get() + 1;
+  count.set(newValue);
+  console.log("Count updated to:", newValue);
+});
+
+const MyRecipe = recipe<Input>(({ count }) => {
+  return {
+    [UI]: <ct-button onClick={handleClick({ count })}>Increment</ct-button>,
     count,
   };
 });
@@ -129,16 +155,17 @@ Consult the component for details.
 
 ### Validation Example
 
-For validation, consider using two cells: a raw input cell and a validated derived cell:
+For validation, consider using two cells: a raw input cell and a validated computed cell:
 
 ```tsx
 // Raw input with bidirectional binding
-const rawInput = cell("");
+const rawInput = Cell.of("");
 
 <ct-input $value={rawInput} />
 
-// Validated output using derive
-const validatedValue = derive(rawInput, (value) => {
+// Validated output using computed
+const validatedValue = computed(() => {
+  const value = rawInput;
   if (value.length < 3) return null;
   if (!value.match(/^[a-z]+$/i)) return null;
   return value;
@@ -151,7 +178,7 @@ const validatedValue = derive(rawInput, (value) => {
 }
 ```
 
-This approach separates concerns: bidirectional binding handles the UI sync, while derive handles validation logic.
+This approach separates concerns: bidirectional binding handles the UI sync, while computed handles validation logic.
 
 ## Styling: String vs Object Syntax
 
@@ -245,36 +272,49 @@ CommonTools custom elements (`common-hstack`, `common-vstack`, `ct-card`, etc.) 
 
 ## ct-input
 
-The `ct-input` component demonstrates bidirectional binding perfectly:
+The `ct-input` component demonstrates bidirectional binding and inline handlers:
 
 ```tsx
-type InputSchema = { value: Cell<string> };
-type OutputSchema = { value: Cell<string> };
+interface Input {
+  value: Cell<string>;
+}
 
-const MyRecipe = recipe(({ value }: InputSchema) => {
-  // Option 1: Bidirectional binding (simplest)
-  const simpleInput = <ct-input $value={value} />;
-
-  // Option 2: With handler for additional logic
-  const handleChange = handler<
-    { detail: { value: string } },
-    { value: Cell<string> }
-  >((event, { value }) => {
-    value.set(event.detail.value);
-    console.log("Value changed:", event.detail.value);
-  });
-  const inputWithHandler = <ct-input value={value} onct-input={handleChange({ value })} />;
-
+const MyRecipe = recipe<Input>(({ value }) => {
   return {
-    [UI]: <div>
-      {simpleInput}
-      {inputWithHandler}
-    </div>,
+    [UI]: (
+      <div>
+        {/* Option 1: Bidirectional binding (simplest) */}
+        <ct-input $value={value} />
+
+        {/* Option 2: Inline handler for additional logic */}
+        <ct-input
+          value={value}
+          onct-input={(e) => {
+            value.set(e.detail.value);
+            console.log("Value changed:", e.detail.value);
+          }}
+        />
+
+        {/* Option 3: handler() for complex/reusable logic */}
+        <ct-input value={value} onct-input={handleChange({ value })} />
+      </div>
+    ),
+    value,
   };
+});
+
+// If using handler() for complex logic
+const handleChange = handler<
+  { detail: { value: string } },
+  { value: Cell<string> }
+>((event, { value }) => {
+  value.set(event.detail.value);
+  console.log("Value changed:", event.detail.value);
+  // Additional complex logic...
 });
 ```
 
-Both inputs update the cell, but the second one logs changes. Use the simple bidirectional binding unless you need the extra logic.
+**Recommendation:** Use bidirectional binding unless you need custom logic, then use inline handlers. Only use `handler()` for complex or reusable logic.
 
 ## ct-select
 

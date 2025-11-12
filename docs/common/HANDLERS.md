@@ -1,5 +1,51 @@
 # CommonTools Handler Patterns Guide
 
+## Inline Handlers (Preferred for Simple Cases)
+
+**New in CommonTools**: You can now write event handlers directly inline without the `handler()` wrapper!
+
+```typescript
+interface Input {
+  count: Cell<number>;
+  title: Cell<string>;
+}
+
+export default recipe<Input>(({ count, title }) => {
+  return {
+    [UI]: (
+      <div>
+        {/* Simple click handler */}
+        <ct-button onClick={() => count.set(count.get() + 1)}>
+          Increment
+        </ct-button>
+
+        {/* Handler with event */}
+        <ct-input
+          value={title}
+          onct-input={(e) => title.set(e.detail.value)}
+        />
+
+        {/* Multi-line handler */}
+        <ct-button onClick={() => {
+          const current = count.get();
+          if (current < 10) {
+            count.set(current + 1);
+          }
+        }}>
+          Increment (max 10)
+        </ct-button>
+      </div>
+    ),
+  };
+});
+```
+
+**Key points:**
+- Declare cells as `Cell<T>` in your recipe input types
+- Write arrow functions directly: `onClick={() => ...}` or `onClick={(e) => ...}`
+- No `handler()` wrapper needed for simple cases
+- Can still use `handler()` for complex/reusable logic
+
 ## When Do You Need Handlers?
 
 **Important:** Many UI updates don't need handlers at all! CommonTools components support **bidirectional binding** with the `$` prefix, which automatically updates cells when users interact with components.
@@ -11,17 +57,23 @@
 | Update checkbox | ✅ Bidirectional binding | `<ct-checkbox $checked={item.done} />` |
 | Update text input | ✅ Bidirectional binding | `<ct-input $value={item.title} />` |
 | Update dropdown | ✅ Bidirectional binding | `<ct-select $value={item.category} items={...} />` |
-| Add item to list | ❌ Need handler | `addItem` handler with `items.set([...])` |
-| Remove item from list | ❌ Need handler | `removeItem` handler with `toSpliced()` |
-| Validate input | ❌ Need handler (or derive) | Handler with validation logic |
-| Call API on change | ❌ Need handler | Handler with fetch/save logic |
-| Log changes | ❌ Need handler | Handler with logging |
+| Add item to list | ✅ Inline handler | `onClick={() => items.push({ title: "New" })}` |
+| Remove item from list | ✅ Inline handler | `onClick={() => items.set(items.get().filter(i => i !== item))}` |
+| Simple counter | ✅ Inline handler | `onClick={() => count.set(count.get() + 1)}` |
+| Validate input | ✅ Inline handler or computed | Inline handler or `computed()` |
+| Call API on change | ✅ Inline handler or `handler()` | For complex logic, use `handler()` |
+| Complex reusable logic | ✅ `handler()` function | Module-level `handler()` |
 
-**Rule of thumb:** If you're just syncing UI ↔ cell with no additional logic, use bidirectional binding. If you need side effects, validation, or structural changes (add/remove), use handlers.
+**Rule of thumb:**
+1. **Bidirectional binding** for simple UI ↔ cell sync (no logic needed)
+2. **Inline handlers** for simple one-off operations
+3. **`handler()` function** for complex or reusable logic
 
 See `COMPONENTS.md` for detailed bidirectional binding examples.
 
 ## Handler Function Structure
+
+**Note:** This section describes the `handler()` function for complex/reusable handlers. For simple cases, prefer inline handlers (see above).
 
 Handlers in CommonTools follow a specific pattern that creates a factory function:
 

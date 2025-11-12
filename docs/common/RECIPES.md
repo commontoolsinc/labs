@@ -40,12 +40,31 @@ Importantly, the framework automatically handles type validation and serializati
 
 The framework uses a reactive programming model:
 
-- `cell`: Represents a reactive state container that can be updated and observed
-- `derive`: Creates a derived value that updates when its dependencies change
-- `lift`: Similar to derive, but lifts a regular function to work on reactive values
-  - `derive(param, function)` is an alias to `lift(function)(param)`
-- `handler`: Creates an event handler that always fires with up-to-date dependencies (possibly mutating them)
-  - takes two parameters, an event and state (bound variables)
+- `Cell.of()`: Creates a reactive state container that can be updated and
+  observed
+  - `Cell.of<T>()` - typed cell with no initial value
+  - `Cell.of(defaultValue)` - cell with initial value
+  - `Cell.of<T>(defaultValue)` - typed cell with initial value
+- `computed()`: Creates a computed value that updates when its dependencies
+  change
+  - Use `computed(() => ...)` closing over variables for reactive
+    transformations
+  - Not needed within JSX - the framework handles reactivity automatically
+- `Cell.equals(a, b)`: Convenient way to compare two things that are cells or
+  were returned by `.get()`
+  - Neither parameter has to be of type Cell
+- `Cell.for(cause)`: Explicit cell creation in lift contexts (rarely needed)
+  - Typically used as `Cell.for(cause).set(value)`
+  - Sets the cell to that value on every reactive change, not just the initial
+    value
+  - Difference from `.of()`: `.of()` sets only the initial value
+- **Inline handlers**: You can write event handlers directly inline without the `handler()` wrapper
+  - Simply write arrow functions inline: `onClick={() => counter.set(counter.get() + 1)}`
+  - Works with events too: `onClick={(e) => handleClick(e, counter)}`
+  - **Important**: Pass cells as `Cell<T>` in your recipe inputs to use them in inline handlers
+- `handler()`: Legacy function for creating reusable handler factories (optional)
+  - Still useful for complex handlers that need to be reused
+  - Takes two parameters: an event and state (bound variables)
   - e.g. `<ct-button onClick={myHandler({ counter })}>`
 
 ### Handlers vs Reactive Functions
@@ -56,11 +75,28 @@ There are important differences between the types of functions in the framework:
 
 (For even more detail, see `HANDLERS.md`)
 
-Handlers are functions that declare node types in the reactive graph that
-respond to events:
+Handlers respond to events and can update cells:
 
-- Created with `handler()` function
-- Use `Cell<>` to indicate you want a reactive value (for mutation, usually):
+- **Inline handlers** (preferred for simple cases):
+
+  ```typescript
+  // Simple click handler
+  <ct-button onClick={() => count.set(count.get() + 1)}>
+    Increment
+  </ct-button>
+
+  // Handler with event
+  <ct-input
+    onct-input={(e) => title.set(e.detail.value)}
+    value={title}
+  />
+  ```
+
+  - **Important**: Declare cells as `Cell<T>` in your recipe input types
+  - Works with any event type
+  - No `handler()` wrapper needed
+
+- **`handler()` function** (for complex/reusable handlers):
 
   ```typescript
   const updateCounter = handler<never, { count: Cell<number> }>(
@@ -69,54 +105,39 @@ respond to events:
       count.set(count.get() + 1);
     },
   );
+
+  // Instantiated in recipes by passing parameters:
+  const stream = updateCounter({ count });
+
+  // Used in JSX:
+  <ct-button onClick={stream}>Increment</ct-button>
   ```
 
-- Instantiated in recipes by passing parameters:
+  - Returns a stream that can be:
+    - Passed to JSX components as event handlers
+    - Returned by a recipe for external consumption
+    - Passed to another handler which can call `.send(...)` on it
 
-  ```typescript
-  const stream = definedHandler({ cell1, cell2 });
-  ```
-
-- Return a stream that can be:
-  - Passed to JSX components as event handlers (e.g., `onClick={stream}`)
-  - Returned by a recipe for external consumption
-  - Passed to another handler which can call `.send(...)` on it to generate
-    events
 - Can update cells and trigger side effects
 - Support async operations for data processing
 - React to outside events (user interactions, API responses)
 - Cannot directly call built-in functions like `llm`
 
-#### Reactive Functions (lift/derive)
+#### Reactive Functions (computed)
 
-- `lift`: Declares a reactive node type that transforms data in the reactive
-  graph
-
-    ```typescript
-    const transformData = lift(
-      ({ value, multiplier }: { value: number, multiplier: number }) => value * multiplier,
-    );
-    ```
-
-  - When instantiated, it inserts a reactive node in the graph:
+- `computed()`: Creates a computed value that automatically updates when dependencies change
 
     ```typescript
-    const newCell = liftedFunction({ cell1, cell2 });
+    const multipliedValue = computed(() => value * multiplier);
     ```
 
-  - The result is a proxy cell that can be further referenced:
+  - Closes over variables to capture dependencies
+  - Not needed within JSX - reactivity is automatic there
+  - Returns a reactive value that can be used elsewhere
 
     ```typescript
-    const compound = { data: newCell.field };
+    const compound = { data: multipliedValue };
     ```
-
-- `derive`: A convenience wrapper around lift:
-
-  ```typescript
-  // These are equivalent:
-  const result1 = derive({ x, y }, ({ x, y }) => x + y);
-  const result2 = lift(({ x, y }) => x + y)({ x, y });
-  ```
 
 - React to data changes within the reactive graph
 - Cannot directly call built-in functions like `llm`
@@ -294,9 +315,9 @@ logic.
      items.push({ title: value });
    });
 
-   // ✅ DO THIS - Use cells for input state
-   const name = cell("");
-   const category = cell("Other");
+   // ✅ DO THIS - Use Cell.of() for input state
+   const name = Cell.of("");
+   const category = Cell.of("Other");
 
    // Bind to inputs
    <ct-input $value={name} placeholder="Name" />
@@ -393,12 +414,43 @@ logic.
    ))}
    ```
 
-   **Why?** Using `cell.equals(other)` is more reliable than index-based operations, especially when items are reordered or modified.
+   **Why?** Using `Cell.equals(item, el)` is more reliable than index-based operations, especially when items are reordered or modified.
 
-6. **Define Handlers and Lifts at Module Level**: Place `handler` and `lift` definitions outside the recipe function for reusability and performance:
+6. **Prefer Inline Handlers for Simple Cases**: Use inline arrow functions for simple event handlers:
 
    ```typescript
-   // ✅ CORRECT - Module level
+   // ✅ PREFERRED - Inline handler for simple operations
+   interface Input {
+     items: Cell<Item[]>;
+     name: Cell<string>;
+   }
+
+   export default recipe<Input>(({ items, name }) => {
+     // Use computed() for reactive transformations
+     const grouped = computed(() => {
+       return items.reduce((acc, item) => {
+         if (!acc[item.category]) acc[item.category] = [];
+         acc[item.category].push(item);
+         return acc;
+       }, {} as Record<string, Item[]>);
+     });
+
+     return {
+       [UI]: (
+         <ct-button onClick={() => {
+           if (name.get().trim()) {
+             items.push({ title: name.get() });
+             name.set("");
+           }
+         }}>
+           Add
+         </ct-button>
+       ),
+       grouped,
+     };
+   });
+
+   // ✅ ALSO GOOD - Module-level handler() for complex/reusable logic
    const addItem = handler(
      (_event, { items, name }: { items: Cell<Item[]>; name: Cell<string> }) => {
        if (name.get().trim()) {
@@ -408,29 +460,16 @@ logic.
      }
    );
 
-   const groupByCategory = lift((items: Item[]) => {
-     return items.reduce((acc, item) => {
-       if (!acc[item.category]) acc[item.category] = [];
-       acc[item.category].push(item);
-       return acc;
-     }, {} as Record<string, Item[]>);
-   });
-
    export default recipe(({ items, name }) => {
-     const grouped = groupByCategory(items);
      return {
        [UI]: <ct-button onClick={addItem({ items, name })}>Add</ct-button>,
-       grouped,
      };
    });
-
-   // ❌ INCORRECT - Inside recipe function
-   export default recipe(({ items, name }) => {
-     const addItem = handler((_event, { items, name }) => { /* ... */ });
-     const grouped = lift((items) => { /* ... */ })(items);
-     // This creates new function instances on each evaluation
-   });
    ```
+
+   **Rule of thumb:**
+   - **Simple, one-off handlers**: Use inline arrow functions
+   - **Complex or reusable handlers**: Use `handler()` at module level
 
 7. **Type Array Map Parameters as OpaqueRef**: When mapping over cell arrays with bidirectional binding, you **must** add the `OpaqueRef<T>` type annotation to make it type-check correctly:
 
@@ -505,11 +544,11 @@ logic.
    - **Ternaries for elements**: ❌ Use `ifElse()` instead
    - **if statements**: ❌ Never work, use `ifElse()` instead
 
-9. **Understand lift vs derive**: Know when to use each reactive function:
+9. **Use computed() for Reactive Transformations**: Use `computed()` to create reactive values:
 
    ```typescript
-   // lift - Creates a reusable function that can be called multiple times
-   const groupByCategory = lift((items: Item[]) => {
+   // computed() - Closes over variables to capture dependencies
+   const grouped = computed(() => {
      return items.reduce((acc, item) => {
        if (!acc[item.category]) acc[item.category] = [];
        acc[item.category].push(item);
@@ -517,28 +556,28 @@ logic.
      }, {} as Record<string, Item[]>);
    });
 
-   // Call it with different inputs
-   const grouped1 = groupByCategory(items);
-   const grouped2 = groupByCategory(otherItems);
-
-   // derive - Directly computes a value from cells (convenience wrapper)
-   const categories = derive(itemsByCategory, (grouped) => {
+   // Compute derived values from other computed values
+   const categories = computed(() => {
      return Object.keys(grouped).sort();
    });
 
-   // These are equivalent:
-   const result1 = derive({ x, y }, ({ x, y }) => x + y);
-   const result2 = lift(({ x, y }) => x + y)({ x, y });
+   // Simple reactive computation
+   const sum = computed(() => x + y);
    ```
 
-   **When to use lift:** When you need a reusable transformation function that you'll call with different inputs.
+   **Note:** Within JSX, you don't need `computed()` - reactivity is automatic there.
 
-   **When to use derive:** When you're computing a single value from specific cells.
-
-10. **Access Properties Directly on Derived Objects**: You can access properties on derived objects without additional helpers:
+10. **Access Properties Directly on Computed Objects**: You can access properties on computed objects without additional helpers:
 
     ```typescript
-    const itemsByCategory = groupByCategory(items);
+    const itemsByCategory = computed(() => {
+      const grouped = {};
+      for (const item of items) {
+        if (!grouped[item.category]) grouped[item.category] = [];
+        grouped[item.category].push(item);
+      }
+      return grouped;
+    });
     // Returns Record<string, Item[]>
 
     // ✅ DO THIS - Direct property access works
@@ -551,8 +590,8 @@ logic.
       </div>
     ))}
 
-    // ❌ NOT NEEDED - Don't create unnecessary helpers
-    const getCategoryItems = lift((grouped, category) => grouped[category]);
+    // ❌ NOT NEEDED - Don't create unnecessary computed values for simple access
+    const getCategoryItems = computed(() => itemsByCategory[categoryName]);
     {itemsByCategory[categoryName].map((item) => ...)}
     ```
 
@@ -567,18 +606,14 @@ logic.
     </div>
 
     // ❌ AVOID - Unnecessary intermediate variable
-    {derive(groupedItems, (groups) => {
-      const categoryItems = groups[category] || [];
-      return (
-        <div>
-          {categoryItems.map(item => ...)}
-        </div>
-      );
-    })}
+    // (Note: Within JSX, you don't need computed() - reactivity is automatic)
+    <div>
+      {(groupedItems[category] ?? []).map(item => ...)}
+    </div>
 
     // ✅ GOOD USE - When expression is complex or reused
-    const sortedItems = derive(items, (list) => {
-      return list
+    const sortedItems = computed(() => {
+      return items
         .filter(item => !item.done)
         .sort((a, b) => a.priority - b.priority)
         .slice(0, 10);
@@ -634,17 +669,25 @@ logic.
     - Items only added to end or removed from end
     - Most basic list patterns
 
-13. **Understand Variable Scoping Limitations**: Variables from outer scopes don't work as expected inside `.map()` callbacks:
+13. **Understand Variable Scoping Limitations**: Variables from outer scopes don't work as expected inside nested reactive contexts:
 
     ```typescript
-    // ❌ DOESN'T WORK - Can't access `category` from outer map
+    // ❌ DOESN'T WORK - Can't access `category` from outer scope in computed
     {categories.map((category) => (
-      {derive(items, (arr) => arr.filter(i => i.category === category))}
+      {computed(() => items.filter(i => i.category === category))}
       // category is not accessible here
     ))}
 
     // ✅ WORKS - Use property access or pre-computed values
-    const itemsByCategory = groupByCategory(items);
+    const itemsByCategory = computed(() => {
+      const grouped = {};
+      for (const item of items) {
+        if (!grouped[item.category]) grouped[item.category] = [];
+        grouped[item.category].push(item);
+      }
+      return grouped;
+    });
+
     {categories.map((category) => (
       {itemsByCategory[category].map((item) => (
         <div>{item.name}</div>
@@ -652,26 +695,21 @@ logic.
     ))}
     ```
 
-14. **Understand lift Currying with Multiple Parameters**: Multi-parameter lift creates curried functions:
+14. **Use computed() for Complex Transformations**: For complex transformations, use `computed()`:
 
     ```typescript
-    // lift with multiple parameters creates curried function
-    const formatValue = lift((label: string, value: number) => `${label}: ${value}`);
+    // ✅ CORRECT - Use computed() to close over variables
+    const formattedValue = computed(() => `${label}: ${value}`);
 
-    // ✅ CORRECT - Call with currying
-    const result = formatValue("count")(42); // "count: 42"
-
-    // ❌ INCORRECT - This won't work
-    const result = formatValue("count", 42);
-
-    // Usually better to use single parameter with object
-    const formatValue = lift(({ label, value }: { label: string; value: number }) =>
-      `${label}: ${value}`
-    );
-    const result = formatValue({ label: "count", value: 42 });
+    // For more complex formatting with multiple inputs
+    const formatValue = computed(() => {
+      const formattedLabel = label.trim();
+      const formattedValue = value.toFixed(2);
+      return `${formattedLabel}: ${formattedValue}`;
+    });
     ```
 
-    **Recommendation:** In most cases, direct property access or single-parameter lifts are clearer than multi-parameter curried functions.
+    **Note:** Within JSX, you don't need `computed()` - reactivity is automatic there.
 
 15. **Reference Data Instead of Copying**: When transforming data, reference the
     original objects rather than copying all their properties. This maintains
@@ -889,12 +927,12 @@ interface Item {
 
 ❌ **Only add [ID] when you need:**
 
-#### 1. Creating Items Within lift Functions
+#### 1. Creating Referenceable Items in Reactive Contexts
 
-When generating new items inside `lift`:
+When you need stable references to items created in computed values or handlers:
 
 ```typescript
-const generateItems = lift((count: number) => {
+const generateItems = computed(() => {
   return Array.from({ length: count }, (_, i) => ({
     [ID]: i,  // Needed for stable references
     title: `Item ${i}`,
@@ -995,8 +1033,7 @@ const addBacklink = handler<
 
 **Start without `[ID]`. Only add it if:**
 
-1. You're generating new items within a `lift` function that have to be
-   references elsewhere.
+1. You're generating new items within reactive contexts (like `computed()` or handlers) that need to be referenced elsewhere.
 
 **Don't add `[ID]` just because you see it in examples.** The `list-operations.tsx` example demonstrates advanced features, but your basic shopping list, todo list, or simple CRUD pattern doesn't need it.
 
@@ -1065,24 +1102,52 @@ flow isolation.
 ## Example Pattern
 
 ```typescript
-export default recipe(
-  InputSchema,
-  OutputSchema,
-  ({ input1, input2 }) => {
-    const state = cell<SomeState>([]);
+interface Input {
+  items: Cell<Item[]>;
+  title: Cell<string>;
+}
 
-    // Define handlers and side effects
+interface Output {
+  items: Cell<Item[]>;
+  processedItems: any;
+}
 
-    return {
-      [NAME]: "Recipe Name",
-      [UI]: (
-        // JSX component
-      ),
-      outputField1: state,
-      outputField2: derivedValue
-    };
-  }
-);
+export default recipe<Input, Output>(({ items, title }) => {
+  // Create computed values
+  const processedItems = computed(() => {
+    return items.filter(item => !item.done);
+  });
+
+  return {
+    [NAME]: "Recipe Name",
+    [UI]: (
+      <div>
+        {/* Inline handler for simple operations */}
+        <ct-button onClick={() => {
+          if (title.get().trim()) {
+            items.push({ title: title.get(), done: false });
+            title.set("");
+          }
+        }}>
+          Add Item
+        </ct-button>
+
+        {/* Display items */}
+        {processedItems.map(item => (
+          <div>
+            {item.title}
+            {/* Inline handler with event */}
+            <ct-button onClick={() => items.set(items.get().filter(i => i !== item))}>
+              Remove
+            </ct-button>
+          </div>
+        ))}
+      </div>
+    ),
+    items,
+    processedItems
+  };
+});
 ```
 
 ## Integration Between Recipes
@@ -1134,8 +1199,8 @@ The result object includes:
 
 A common pattern in recipes is:
 
-1. Initialize state using `cell()`
-2. Create derived values with `derive()`
+1. Initialize state using `Cell.of()`
+2. Create computed values with `computed()`
 3. Define handlers for UI events and data processing
 4. Create async functions for complex operations
 5. Return a recipe object with UI and exported values
@@ -1147,7 +1212,7 @@ export default recipe<Input, Output>(
   "Recipe Name",
   ({ inputData, settings }) => {
     // Initialize state
-    const processedData = cell<ProcessedData[]>([]);
+    const processedData = Cell.of<ProcessedData[]>([]);
 
     // Process data with LLM (directly in recipe)
     // Notice we call map() directly on the cell - inputData is a cell
@@ -1161,9 +1226,9 @@ export default recipe<Input, Output>(
       };
     });
 
-    // Create derived value from LLM results
-    const summaries = derive(processedItems, items =>
-      items.map(item => ({
+    // Create computed value from LLM results
+    const summaries = computed(() =>
+      processedItems.map(item => ({
         id: item.originalItem.id,
         summary: item.llmResult.result || "Processing...",
       }))
@@ -1181,6 +1246,11 @@ export default recipe<Input, Output>(
       [NAME]: "Recipe Name",
       [UI]: (
         // JSX UI component
+        <div>
+          {summaries.map(summary => (
+            <div>{summary.summary}</div>
+          ))}
+        </div>
       ),
       processedData,
     };
