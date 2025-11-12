@@ -22,11 +22,14 @@ export default function TestDerive() {
             }
         },
         required: ["value", "threshold", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
         value,
         threshold: threshold,
         multiplier: multiplier
-    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v);
+    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v.get());
     return result;
 }
 // @ts-ignore: Internals
