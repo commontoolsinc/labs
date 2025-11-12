@@ -10,6 +10,7 @@ export {
   getExpressionText,
   getMemberSymbol,
   getMethodCallTarget,
+  getTypeAtLocationWithFallback,
   isFunctionParameter,
   isMethodCall,
   isOptionalProperty,
