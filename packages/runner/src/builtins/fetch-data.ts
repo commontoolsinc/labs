@@ -3,13 +3,19 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
+import { computeInputHash } from "./fetch-utils.ts";
 import {
-  computeInputHash,
-  internalSchema,
-  tryClaimMutex,
-  tryWriteResult,
-} from "./fetch-utils.ts";
+  asyncOperationCacheSchema,
+  type AsyncOperationCache,
+  getState,
+  isTimedOut,
+  transitionToError,
+  transitionToFetching,
+  transitionToIdle,
+  transitionToSuccess,
+} from "./async-operation-state.ts";
+
+const DATA_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for data fetching
 
 /**
  * Fetch data from a URL.
@@ -38,7 +44,7 @@ export function fetchData(
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
-  let internal: Cell<Schema<typeof internalSchema>>;
+  let cache: Cell<Record<string, AsyncOperationCache<any, any>>>;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -48,20 +54,31 @@ export function fetchData(
     abortController?.abort("Recipe stopped");
 
     // Only try to update state if cells were initialized
-    if (!cellsInitialized) return;
+    if (!cellsInitialized || !myRequestId) return;
 
     const tx = runtime.edit();
 
     try {
-      // If the pending request is ours, set pending to false and clear the requestId.
-      const currentRequestId = internal.withTx(tx).key("requestId").get();
-      if (currentRequestId === myRequestId) {
-        pending.withTx(tx).set(false);
-        internal.withTx(tx).key("requestId").set("");
+      // If we were fetching, transition back to idle
+      const currentCache = cache.withTx(tx).get();
+      const updates: Record<string, AsyncOperationCache<any, any>> = {};
+
+      for (const [hash, entry] of Object.entries(currentCache)) {
+        if (
+          entry.state.type === "fetching" &&
+          entry.state.requestId === myRequestId
+        ) {
+          updates[hash] = {
+            inputHash: hash,
+            state: { type: "idle" },
+          };
+        }
       }
 
-      // Since we're aborting, don't retry. If the above fails, it's because the
-      // requestId was already changing under us.
+      if (Object.keys(updates).length > 0) {
+        cache.withTx(tx).update(updates);
+      }
+
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -96,177 +113,97 @@ export function fetchData(
         tx,
       );
 
-      internal = runtime.getCell(
+      cache = runtime.getCell(
         parentCell.space,
-        { fetchData: { internal: cause } },
-        internalSchema,
+        { fetchData: { cache: cause } },
+        asyncOperationCacheSchema,
         tx,
-      );
+      ) as Cell<Record<string, AsyncOperationCache<any, any>>>;
 
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      internal.setSourceCell(parentCell);
+      cache.setSourceCell(parentCell);
 
       // Kick off sync in the background
       pending.sync();
       result.sync();
       error.sync();
-      internal.sync();
+      cache.sync();
 
       cellsInitialized = true;
     }
-
-    // Set results to links to our cells. We have to do this outside of
-    // isInitialized since the write could conflict, and then this code will run
-    // again, but isInitialized will be true already. The framework will notice
-    // that this write is a no-op after the first successful write, so this
-    // should be fine.
-    sendResult(tx, { pending, result, error });
 
     const { url } = inputsCell.getAsQueryResult([], tx);
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {
-      // Only update if values actually need to change to reduce transaction conflicts
-      const currentPending = pending.withTx(tx).get();
-      const currentResult = result.withTx(tx).get();
-      const currentError = error.withTx(tx).get();
-      const currentInternal = internal.withTx(tx).get();
-
-      if (currentPending !== false) pending.withTx(tx).set(false);
-      if (currentResult !== undefined) result.withTx(tx).set(undefined);
-      if (currentError !== undefined) error.withTx(tx).set(undefined);
-      // Clear internal state when URL is empty so we don't think we have cached results
-      if (currentInternal.inputHash !== "") {
-        internal.withTx(tx).set({
-          requestId: "",
-          lastActivity: 0,
-          inputHash: "",
-        });
-      }
-      return;
-    }
-
-    // Check if we're already working on or have the result for these inputs
-    const currentInternal = internal.withTx(tx).get();
-    const currentPending = pending.withTx(tx).get();
-    const currentResult = result.withTx(tx).get();
-    const currentError = error.withTx(tx).get();
-
-    const inputsMatch = currentInternal?.inputHash === inputHash;
-
-    // If inputs changed, clear everything and abort any in-flight request
-    if (!inputsMatch) {
-      if (myRequestId) {
-        abortController?.abort("Inputs changed");
-        myRequestId = undefined;
-      }
-
+      // When URL is empty, clear outputs
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(undefined);
-      internal.withTx(tx).update({
-        inputHash,
-        requestId: "",
-        lastActivity: 0,
-      });
+      sendResult(tx, { pending, result, error });
+      return;
     }
 
-    // If we have a result OR error for these inputs, we're done
-    const hasValidResult = inputsMatch && currentResult !== undefined;
-    const hasError = inputsMatch && currentError !== undefined;
+    // Get current state for this input hash
+    const state = getState(cache, inputHash, tx);
 
-    // If we're already fetching these inputs, wait
-    const alreadyFetching = inputsMatch && currentPending &&
-      myRequestId !== undefined;
+    // State machine transitions
+    if (state.type === "idle") {
+      // Try to transition to fetching
+      const requestId = crypto.randomUUID();
+      transitionToFetching(cache, inputHash, requestId, tx);
 
-    // Start a new fetch if we don't have a result/error and aren't already fetching
-    if (!hasValidResult && !hasError && !alreadyFetching) {
-      const newRequestId = crypto.randomUUID();
-
-      // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(
+      // Start fetch asynchronously
+      myRequestId = requestId;
+      abortController = new AbortController();
+      startFetch(
         runtime,
-        inputsCell,
-        pending,
-        result,
-        error,
-        internal,
-        newRequestId,
-      ).then(
-        ({ claimed, inputs, inputHash }) => {
-          if (!claimed) {
-            // Another tab is handling this, we're done
-            return;
-          }
-
-          const { url, mode, options } = inputs;
-
-          // Clear any previous result/error when starting a new fetch
-          // This ensures observers see a clean pending state
-          runtime.editWithRetry((tx) => {
-            result.withTx(tx).set(undefined);
-            error.withTx(tx).set(undefined);
-          });
-
-          // Check if URL became empty while waiting for mutex
-          if (!url) {
-            // Release the lock and clear state
-            myRequestId = undefined;
-            runtime.editWithRetry((tx) => {
-              pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
-              error.withTx(tx).set(undefined);
-              internal.withTx(tx).set({
-                requestId: "",
-                lastActivity: 0,
-                inputHash: "",
-              });
-            });
-            return;
-          }
-
-          abortController = new AbortController();
-
-          // We claimed the mutex, start the fetch
-          myRequestId = newRequestId;
-          startFetch(
-            runtime,
-            inputsCell,
-            url,
-            mode,
-            options,
-            inputHash,
-            pending,
-            result,
-            error,
-            internal,
-            abortController.signal,
-          );
-        },
+        cache,
+        inputHash,
+        url,
+        inputsCell.withTx(tx).key("mode").get(),
+        inputsCell.withTx(tx).key("options").get(),
+        requestId,
+        abortController.signal,
       );
+    } else if (state.type === "fetching") {
+      // Check for timeout
+      if (isTimedOut(state, DATA_REQUEST_TIMEOUT)) {
+        // Transition back to idle if timed out
+        transitionToIdle(cache, inputHash, state.requestId, tx);
+      }
     }
+
+    // Convert state machine state to output cells
+    const currentState = getState(cache, inputHash, tx);
+    pending.withTx(tx).set(currentState.type === "fetching");
+    result.withTx(tx).set(
+      currentState.type === "success" ? currentState.data : undefined,
+    );
+    error.withTx(tx).set(
+      currentState.type === "error" ? currentState.error : undefined,
+    );
+
+    sendResult(tx, { pending, result, error });
   };
 }
 
+/**
+ * Start fetching data. Uses CAS to ensure only the tab that initiated
+ * the fetch can write the result.
+ */
 async function startFetch(
   runtime: IRuntime,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
+  cache: Cell<Record<string, AsyncOperationCache<any, any>>>,
+  inputHash: string,
   url: string,
   mode: "text" | "json" | undefined,
   options:
     | { body?: any; method?: string; headers?: Record<string, string> }
     | undefined,
-  inputHash: string,
-  pending: Cell<boolean>,
-  result: Cell<any | undefined>,
-  error: Cell<any | undefined>,
-  internal: Cell<Schema<typeof internalSchema>>,
+  requestId: string,
   abortSignal: AbortSignal,
 ) {
   const processResponse = (mode || "json") === "json"
@@ -290,33 +227,27 @@ async function startFetch(
     );
 
     const data = await processResponse(response);
+
+    // Check if aborted during fetch
+    if (abortSignal.aborted) return;
+
     await runtime.idle();
 
-    // Try to write result - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(data);
-      error.withTx(tx).set(undefined);
-    });
+    // CAS: Only write if we're still the active request
+    await transitionToSuccess(runtime, cache, inputHash, data, requestId);
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
 
     await runtime.idle();
 
-    // Write error - but only update inputHash if inputs haven't changed
-    await runtime.editWithRetry((tx) => {
-      const currentHash = computeInputHash(tx, inputsCell);
-
-      // Always clear pending and result
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-
-      // Only write error and inputHash if inputs still match
-      if (currentHash === inputHash) {
-        error.withTx(tx).set(err);
-        internal.withTx(tx).update({ inputHash });
-      }
-    });
+    // CAS: Only write error if we're still the active request
+    await transitionToError(
+      runtime,
+      cache,
+      inputHash,
+      err instanceof Error ? err.message : String(err),
+      requestId,
+    );
   }
 }

@@ -2,10 +2,19 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { JSONSchema } from "../builder/types.ts";
 import { HttpProgramResolver } from "@commontools/js-runtime";
 import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
 import { computeInputHash } from "./fetch-utils.ts";
+import {
+  asyncOperationCacheSchema,
+  type AsyncOperationCache,
+  getState,
+  isTimedOut,
+  transitionToError,
+  transitionToFetching,
+  transitionToIdle,
+  transitionToSuccess,
+} from "./async-operation-state.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -13,24 +22,6 @@ export interface ProgramResult {
   files: Array<{ name: string; contents: string }>;
   main: string;
 }
-
-// State machine for fetch lifecycle
-type FetchState =
-  | { type: "idle" }
-  | { type: "fetching"; requestId: string; startTime: number }
-  | { type: "success"; data: ProgramResult }
-  | { type: "error"; message: string };
-
-// Single source of truth for fetch status
-interface FetchCacheEntry {
-  inputHash: string;
-  state: FetchState;
-}
-
-const cacheSchema = {
-  type: "object",
-  default: {},
-} as const satisfies JSONSchema;
 
 /**
  * Fetch and resolve a program from a URL.
@@ -53,7 +44,7 @@ export function fetchProgram(
   let pending: Cell<boolean>;
   let result: Cell<ProgramResult | undefined>;
   let error: Cell<any | undefined>;
-  let cache: Cell<Record<string, FetchCacheEntry>>;
+  let cache: Cell<Record<string, AsyncOperationCache<ProgramResult, string>>>;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -70,7 +61,10 @@ export function fetchProgram(
     try {
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
-      const updates: Record<string, FetchCacheEntry> = {};
+      const updates: Record<
+        string,
+        AsyncOperationCache<ProgramResult, string>
+      > = {};
 
       for (const [hash, entry] of Object.entries(currentCache)) {
         if (
@@ -85,7 +79,7 @@ export function fetchProgram(
       }
 
       if (Object.keys(updates).length > 0) {
-        cache.withTx(tx).update(updates);
+        (cache as any).withTx(tx).update(updates);
       }
 
       tx.commit();
@@ -125,9 +119,9 @@ export function fetchProgram(
       cache = runtime.getCell(
         parentCell.space,
         { fetchProgram: { cache: cause } },
-        cacheSchema,
+        asyncOperationCacheSchema,
         tx,
-      ) as Cell<Record<string, FetchCacheEntry>>;
+      ) as Cell<Record<string, AsyncOperationCache<ProgramResult, string>>>;
 
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
@@ -156,20 +150,13 @@ export function fetchProgram(
     }
 
     // Get current state for this input hash
-    const allEntries = cache.withTx(tx).get();
-    const cacheEntry = allEntries[inputHash];
-    const state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    const state = getState(cache, inputHash, tx);
 
     // State machine transitions
     if (state.type === "idle") {
       // Try to transition to fetching
       const requestId = crypto.randomUUID();
-      cache.withTx(tx).update({
-        [inputHash]: {
-          inputHash,
-          state: { type: "fetching", requestId, startTime: Date.now() },
-        },
-      });
+      transitionToFetching(cache, inputHash, requestId, tx);
 
       // Start fetch asynchronously
       myRequestId = requestId;
@@ -184,29 +171,20 @@ export function fetchProgram(
       );
     } else if (state.type === "fetching") {
       // Check for timeout
-      const isTimedOut = Date.now() - state.startTime > PROGRAM_REQUEST_TIMEOUT;
-      if (isTimedOut) {
+      if (isTimedOut(state, PROGRAM_REQUEST_TIMEOUT)) {
         // Transition back to idle if timed out
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: { type: "idle" },
-          },
-        });
+        transitionToIdle(cache, inputHash, state.requestId, tx);
       }
     }
 
     // Convert state machine state to output cells
-    const currentEntries = cache.withTx(tx).get();
-    const currentState = currentEntries[inputHash]?.state ?? {
-      type: "idle",
-    };
+    const currentState = getState(cache, inputHash, tx);
     pending.withTx(tx).set(currentState.type === "fetching");
     result.withTx(tx).set(
       currentState.type === "success" ? currentState.data : undefined,
     );
     error.withTx(tx).set(
-      currentState.type === "error" ? currentState.message : undefined,
+      currentState.type === "error" ? currentState.error : undefined,
     );
 
     sendResult(tx, { pending, result, error });
@@ -219,7 +197,7 @@ export function fetchProgram(
  */
 async function startFetch(
   runtime: IRuntime,
-  cache: Cell<Record<string, FetchCacheEntry>>,
+  cache: Cell<Record<string, AsyncOperationCache<ProgramResult, string>>>,
   inputHash: string,
   url: string,
   requestId: string,
@@ -242,24 +220,13 @@ async function startFetch(
     await runtime.idle();
 
     // CAS: Only write if we're still the active request
-    await runtime.editWithRetry((tx) => {
-      const allEntries = cache.withTx(tx).get();
-      const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId
-      ) {
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: {
-              type: "success",
-              data: { files: program.files, main: program.main },
-            },
-          },
-        });
-      }
-    });
+    await transitionToSuccess(
+      runtime,
+      cache,
+      inputHash,
+      { files: program.files, main: program.main },
+      requestId,
+    );
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
@@ -267,23 +234,12 @@ async function startFetch(
     await runtime.idle();
 
     // CAS: Only write error if we're still the active request
-    await runtime.editWithRetry((tx) => {
-      const allEntries = cache.withTx(tx).get();
-      const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId
-      ) {
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: {
-              type: "error",
-              message: err instanceof Error ? err.message : String(err),
-            },
-          },
-        });
-      }
-    });
+    await transitionToError(
+      runtime,
+      cache,
+      inputHash,
+      err instanceof Error ? err.message : String(err),
+      requestId,
+    );
   }
 }
