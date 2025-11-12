@@ -71,6 +71,20 @@ export const fetchData = createNodeFactory({
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
 
+export const fetchProgram = createNodeFactory({
+  type: "ref",
+  implementation: "fetchProgram",
+}) as (
+  params: Opaque<{ url: string }>,
+) => OpaqueRef<{
+  pending: boolean;
+  result: {
+    files: Array<{ name: string; contents: string }>;
+    main: string;
+  } | undefined;
+  error: unknown;
+}>;
+
 export const streamData = createNodeFactory({
   type: "ref",
   implementation: "streamData",

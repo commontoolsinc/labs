@@ -1,0 +1,63 @@
+/// <cts-enable />
+import {
+  cell,
+  compileAndRun,
+  derive,
+  fetchProgram,
+  NAME,
+  recipe,
+  UI,
+} from "commontools";
+
+/**
+ * Test pattern for fetchProgram builtin.
+ * Fetches a program from a URL and compiles it.
+ */
+export default recipe("Fetch Program Test", () => {
+  // URL to a simple pattern file
+  const url = cell(
+    "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
+  );
+
+  // Step 1: Fetch the program from URL
+  const { pending: fetchPending, result: program, error: fetchError } =
+    fetchProgram({ url });
+
+  // Step 2: Compile and run the fetched program
+  // Explicitly map program fields to compileAndRun params
+  const compileParams = derive(program, (p) => ({
+    files: p?.files ?? [],
+    main: p?.main ?? "",
+    input: { value: 10 },
+  }));
+  const { pending: compilePending, result, error: compileError } =
+    compileAndRun(compileParams);
+
+  return {
+    [NAME]: "Fetch Program Test",
+    [UI]: (
+      <div>
+        <h1>Fetch Program Test</h1>
+        <div>
+          <label>URL:</label>
+          <ct-input type="text" $value={url} />
+        </div>
+        {fetchPending && <div>Fetching program...</div>}
+        {compilePending && <div>Compiling...</div>}
+        {fetchError && <div style="color: red">Fetch error: {fetchError}</div>}
+        {compileError && (
+          <div style="color: red">Compile error: {compileError}</div>
+        )}
+        {result && (
+          <div style="color: green">
+            Successfully compiled recipe! Charm ID: {result}
+            <pre>{derive(result, r => JSON.stringify(r, null, 2))}</pre>
+          </div>
+        )}
+      </div>
+    ),
+    url,
+    program,
+    result,
+  };
+});

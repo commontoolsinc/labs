@@ -1,9 +1,10 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
-import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
+import { HttpProgramResolver } from "@commontools/js-runtime";
+import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
 import {
   computeInputHash,
   internalSchema,
@@ -11,32 +12,33 @@ import {
   tryWriteResult,
 } from "./fetch-utils.ts";
 
+const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
+
+export interface ProgramResult {
+  files: Array<{ name: string; contents: string }>;
+  main: string;
+}
+
 /**
- * Fetch data from a URL.
+ * Fetch and resolve a program from a URL.
  *
- * Returns the fetched result as `result`. `pending` is true while a request is pending.
+ * Returns the resolved program as `result` with structure { files, main }.
+ * `pending` is true while resolution is in progress.
  *
- * @param url - A doc containing the URL to fetch data from.
- * @param mode - The mode to use for fetching data. Either `text` or `json`
- *   default to `json` results.
- * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, final `result`, and any `error`.
+ * @param url - A cell containing the URL to fetch the program from.
+ * @returns { pending: boolean, result: ProgramResult, error: any } - As individual cells.
  */
-export function fetchData(
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-    result?: any;
-  }>,
+export function fetchProgram(
+  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: IRuntime, // Runtime will be injected by the registration function
+  runtime: IRuntime,
 ): Action {
   let cellsInitialized = false;
   let pending: Cell<boolean>;
-  let result: Cell<any | undefined>;
+  let result: Cell<ProgramResult | undefined>;
   let error: Cell<any | undefined>;
   let internal: Cell<Schema<typeof internalSchema>>;
   let myRequestId: string | undefined = undefined;
@@ -60,8 +62,6 @@ export function fetchData(
         internal.withTx(tx).key("requestId").set("");
       }
 
-      // Since we're aborting, don't retry. If the above fails, it's because the
-      // requestId was already changing under us.
       tx.commit();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
@@ -73,15 +73,15 @@ export function fetchData(
     if (!cellsInitialized) {
       pending = runtime.getCell(
         parentCell.space,
-        { fetchData: { pending: cause } },
+        { fetchProgram: { pending: cause } },
         undefined,
         tx,
       );
 
-      result = runtime.getCell<any | undefined>(
+      result = runtime.getCell<ProgramResult | undefined>(
         parentCell.space,
         {
-          fetchData: { result: cause },
+          fetchProgram: { result: cause },
         },
         undefined,
         tx,
@@ -90,7 +90,7 @@ export function fetchData(
       error = runtime.getCell<any | undefined>(
         parentCell.space,
         {
-          fetchData: { error: cause },
+          fetchProgram: { error: cause },
         },
         undefined,
         tx,
@@ -98,7 +98,7 @@ export function fetchData(
 
       internal = runtime.getCell(
         parentCell.space,
-        { fetchData: { internal: cause } },
+        { fetchProgram: { internal: cause } },
         internalSchema,
         tx,
       );
@@ -117,11 +117,7 @@ export function fetchData(
       cellsInitialized = true;
     }
 
-    // Set results to links to our cells. We have to do this outside of
-    // isInitialized since the write could conflict, and then this code will run
-    // again, but isInitialized will be true already. The framework will notice
-    // that this write is a no-op after the first successful write, so this
-    // should be fine.
+    // Set results to links to our cells
     sendResult(tx, { pending, result, error });
 
     const { url } = inputsCell.getAsQueryResult([], tx);
@@ -138,7 +134,7 @@ export function fetchData(
       if (currentResult !== undefined) result.withTx(tx).set(undefined);
       if (currentError !== undefined) error.withTx(tx).set(undefined);
       // Clear internal state when URL is empty so we don't think we have cached results
-      if (currentInternal.inputHash !== "") {
+      if (currentInternal?.inputHash !== "") {
         internal.withTx(tx).set({
           requestId: "",
           lastActivity: 0,
@@ -194,6 +190,7 @@ export function fetchData(
         error,
         internal,
         newRequestId,
+        PROGRAM_REQUEST_TIMEOUT,
       ).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
@@ -201,7 +198,7 @@ export function fetchData(
             return;
           }
 
-          const { url, mode, options } = inputs;
+          const { url } = inputs;
 
           // Clear any previous result/error when starting a new fetch
           // This ensures observers see a clean pending state
@@ -229,14 +226,12 @@ export function fetchData(
 
           abortController = new AbortController();
 
-          // We claimed the mutex, start the fetch
+          // We claimed the mutex, start the resolution
           myRequestId = newRequestId;
-          startFetch(
+          startResolve(
             runtime,
             inputsCell,
             url,
-            mode,
-            options,
             inputHash,
             pending,
             result,
@@ -250,52 +245,40 @@ export function fetchData(
   };
 }
 
-async function startFetch(
+async function startResolve(
   runtime: IRuntime,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
+  inputsCell: Cell<{ url: string }>,
   url: string,
-  mode: "text" | "json" | undefined,
-  options:
-    | { body?: any; method?: string; headers?: Record<string, string> }
-    | undefined,
   inputHash: string,
   pending: Cell<boolean>,
-  result: Cell<any | undefined>,
+  result: Cell<ProgramResult | undefined>,
   error: Cell<any | undefined>,
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
 ) {
-  const processResponse = (mode || "json") === "json"
-    ? (r: Response) => r.json()
-    : (r: Response) => r.text();
-
-  const fetchOptions = { ...options };
-  if (
-    fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
-  ) {
-    fetchOptions.body = JSON.stringify(fetchOptions.body);
-  }
-
   try {
-    const response = await fetch(
-      new URL(url, getRecipeEnvironment().apiUrl),
-      {
-        signal: abortSignal,
-        ...fetchOptions,
-      },
-    );
+    // Create HTTP program resolver
+    const resolver = new HttpProgramResolver(url);
 
-    const data = await processResponse(response);
+    // Resolve the program with all dependencies
+    const program = await resolveProgram(resolver, {
+      unresolvedModules: { type: "allow-all" },
+      resolveUnresolvedModuleTypes: true,
+      target: TARGET,
+    });
+
+    // Check if aborted during resolution
+    if (abortSignal.aborted) return;
+
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
     await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
       pending.withTx(tx).set(false);
-      result.withTx(tx).set(data);
+      result.withTx(tx).set({
+        files: program.files,
+        main: program.main,
+      });
       error.withTx(tx).set(undefined);
     });
   } catch (err) {
@@ -314,7 +297,9 @@ async function startFetch(
 
       // Only write error and inputHash if inputs still match
       if (currentHash === inputHash) {
-        error.withTx(tx).set(err);
+        error.withTx(tx).set(
+          err instanceof Error ? err.message : String(err),
+        );
         internal.withTx(tx).update({ inputHash });
       }
     });
