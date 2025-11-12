@@ -8,6 +8,9 @@ import {
   NAME,
   recipe,
   UI,
+  navigateTo,
+  fetchProgram,
+  compileAndRun,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";
 import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
@@ -35,9 +38,29 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
+const fetchAndRunPattern = handler<
+  { url: string },
+  { mentionable: Cell<MentionableCharm[]>; }
+>(( { url }, { mentionable }) => {
+  const { pending: fetchPending, result: program, error: fetchError } =
+    fetchProgram({ url });
+
+  // Step 2: Compile and run the fetched program
+  // Explicitly map program fields to compileAndRun params
+  const compileParams = derive(program, (p) => ({
+    files: p?.files ?? [],
+    main: p?.main ?? "",
+    input: { value: 10 },
+  }));
+  const { pending: compilePending, result, error: compileError } =
+    compileAndRun(compileParams);
+
+  return navigateTo(result);
+});
+
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
-  ({ mentionable: _mentionable }) => {
+  ({ mentionable }) => {
     const omnibot = Chatbot({
       system:
         "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
@@ -51,6 +74,11 @@ export default recipe<OmniboxFABInput>(
         },
         calculator: {
           pattern: calculator,
+        },
+        fetchAndRunPattern: {
+          description:
+            "Fetch a pattern from the URL, compile it and run it.",
+          handler: fetchAndRunPattern({ mentionable }),
         },
       },
     });
