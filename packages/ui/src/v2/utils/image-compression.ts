@@ -145,15 +145,21 @@ export async function compressImage(
         }
       }
 
-      // If we found a solution, return it
+      // If we found a solution during binary search, return it
       if (bestBlob) {
         return { blob: bestBlob, quality: bestQuality };
       }
 
-      // Otherwise, try with the low quality setting one more time
-      const finalBlob = await compressAtSettings(maxDim, low);
-      if (finalBlob.size <= maxSizeBytes) {
-        return { blob: finalBlob, quality: low };
+      // Edge case: tolerance is large or range is small, so loop exited without finding solution
+      // Try both boundaries to find the highest quality that works
+      const highBlob = await compressAtSettings(maxDim, high);
+      if (highBlob.size <= maxSizeBytes) {
+        return { blob: highBlob, quality: high };
+      }
+
+      const lowBlob = await compressAtSettings(maxDim, low);
+      if (lowBlob.size <= maxSizeBytes) {
+        return { blob: lowBlob, quality: low };
       }
 
       return null;
