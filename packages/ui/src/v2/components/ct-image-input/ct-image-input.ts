@@ -315,6 +315,7 @@ export class CTImageInput extends BaseElement {
 
   /**
    * Compress an image file to meet size requirements using Canvas API
+   * Uses binary search to efficiently find optimal quality setting
    * @param file - The image file to compress
    * @param maxSizeBytes - Target maximum size in bytes
    * @returns Compressed blob or original file if already small enough
@@ -332,28 +333,11 @@ export class CTImageInput extends BaseElement {
       // Create image bitmap for processing
       const imageBitmap = await createImageBitmap(file);
 
-      // Calculate scale to reduce dimensions (helps with size)
-      // Start with max 2048px on longest side, will reduce further if needed
-      let maxDimension = 2048;
-      const scale = Math.min(
-        1,
-        maxDimension / Math.max(imageBitmap.width, imageBitmap.height),
-      );
-
-      // Try progressively smaller dimensions and quality levels
-      const attempts = [
-        { maxDim: 2048, quality: 0.85 },
-        { maxDim: 1600, quality: 0.80 },
-        { maxDim: 1600, quality: 0.70 },
-        { maxDim: 1600, quality: 0.60 },
-        { maxDim: 1200, quality: 0.70 },
-        { maxDim: 1200, quality: 0.60 },
-        { maxDim: 1200, quality: 0.50 },
-        { maxDim: 800, quality: 0.70 },
-        { maxDim: 800, quality: 0.50 },
-      ];
-
-      for (const { maxDim, quality } of attempts) {
+      // Helper function to compress at given dimensions and quality
+      const compressAtSettings = async (
+        maxDim: number,
+        quality: number,
+      ): Promise<Blob> => {
         const scale = Math.min(
           1,
           maxDim / Math.max(imageBitmap.width, imageBitmap.height),
@@ -361,7 +345,6 @@ export class CTImageInput extends BaseElement {
         const width = Math.floor(imageBitmap.width * scale);
         const height = Math.floor(imageBitmap.height * scale);
 
-        // Create canvas with scaled dimensions
         const canvas = new OffscreenCanvas(width, height);
         const ctx = canvas.getContext("2d");
 
@@ -369,38 +352,92 @@ export class CTImageInput extends BaseElement {
           throw new Error("Failed to get canvas context");
         }
 
-        // Draw scaled image
         ctx.drawImage(imageBitmap, 0, 0, width, height);
 
-        // Convert to JPEG blob with specified quality
-        const blob = await canvas.convertToBlob({
+        return await canvas.convertToBlob({
           type: "image/jpeg",
           quality,
         });
+      };
 
-        // Check if we're under the size limit
-        if (blob.size <= maxSizeBytes) {
-          console.log(
-            `Compressed ${file.name}: ${this._formatFileSize(file.size)} → ${this._formatFileSize(blob.size)} (${width}x${height}, q${quality})`,
+      // Binary search for optimal quality at given dimension
+      const findOptimalQuality = async (
+        maxDim: number,
+        minQuality: number = 0.5,
+        maxQuality: number = 0.95,
+      ): Promise<{ blob: Blob; quality: number } | null> => {
+        let bestBlob: Blob | null = null;
+        let bestQuality = maxQuality;
+
+        // First check if even max quality is too large at this dimension
+        const maxQualityBlob = await compressAtSettings(maxDim, maxQuality);
+        if (maxQualityBlob.size > maxSizeBytes) {
+          // Need to reduce dimension
+          return null;
+        }
+
+        // Binary search for lowest quality that still meets size requirement
+        let low = minQuality;
+        let high = maxQuality;
+        const tolerance = 0.05; // Stop when range is small enough
+
+        while (high - low > tolerance) {
+          const mid = (low + high) / 2;
+          const blob = await compressAtSettings(maxDim, mid);
+
+          if (blob.size <= maxSizeBytes) {
+            // This quality works, try lower quality
+            bestBlob = blob;
+            bestQuality = mid;
+            high = mid;
+          } else {
+            // Quality too low, need higher quality
+            low = mid;
+          }
+        }
+
+        // If we found a solution, return it
+        if (bestBlob) {
+          return { blob: bestBlob, quality: bestQuality };
+        }
+
+        // Otherwise, try with the high quality setting one more time
+        const finalBlob = await compressAtSettings(maxDim, high);
+        if (finalBlob.size <= maxSizeBytes) {
+          return { blob: finalBlob, quality: high };
+        }
+
+        return null;
+      };
+
+      // Try progressively smaller dimensions using binary search for quality
+      const dimensions = [2048, 1600, 1200, 800];
+
+      for (const maxDim of dimensions) {
+        const result = await findOptimalQuality(maxDim);
+        if (result) {
+          const scale = Math.min(
+            1,
+            maxDim / Math.max(imageBitmap.width, imageBitmap.height),
           );
-          return blob;
+          const width = Math.floor(imageBitmap.width * scale);
+          const height = Math.floor(imageBitmap.height * scale);
+
+          console.log(
+            `Compressed ${file.name}: ${this._formatFileSize(file.size)} → ${this._formatFileSize(result.blob.size)} (${width}x${height}, q${result.quality.toFixed(2)})`,
+          );
+          return result.blob;
         }
       }
 
-      // If all attempts failed, return the last (smallest) attempt
+      // If all attempts failed, return smallest possible attempt
       const minScale = Math.min(
         1,
         800 / Math.max(imageBitmap.width, imageBitmap.height),
       );
       const width = Math.floor(imageBitmap.width * minScale);
       const height = Math.floor(imageBitmap.height * minScale);
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(imageBitmap, 0, 0, width, height);
-      const finalBlob = await canvas.convertToBlob({
-        type: "image/jpeg",
-        quality: 0.5,
-      });
+      const finalBlob = await compressAtSettings(800, 0.5);
 
       console.warn(
         `Could not compress ${file.name} below ${this._formatFileSize(maxSizeBytes)}. Final size: ${this._formatFileSize(finalBlob.size)}`,
