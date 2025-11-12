@@ -1,5 +1,6 @@
 import * as Access from "./access.ts";
 import {
+  ACL,
   AsyncResult,
   Await,
   CauseString,
@@ -36,11 +37,12 @@ import {
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
 import { refer } from "./reference.ts";
-import { redactCommitData } from "./space.ts";
+import { redactCommitData, selectFact } from "./space.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
 import { getLogger } from "@commontools/utils/logger";
+import { ACL_TYPE, isACL } from "./acl.ts";
 
 const logger = getLogger("memory-provider", {
   enabled: true,
@@ -253,13 +255,16 @@ class MemoryProviderSession<
     this.sessions?.delete(this);
     this.sessions = null;
   }
+
   async invoke(
     { invocation, authorization }: UCAN<ConsumerCommandInvocation<Protocol>>,
   ) {
+    const acl = await this.getAcl(invocation.sub);
     const { error } = await Access.claim(
       invocation,
       authorization,
       this.memory.serviceDid(),
+      acl,
     );
 
     if (error) {
@@ -536,6 +541,48 @@ class MemoryProviderSession<
       }
     }
     return [lastId, maxSince, [...schemaMatches.values()]];
+  }
+
+  private async getAcl(space: MemorySpace): Promise<ACL | undefined> {
+    try {
+      const result = await Memory.mount(this.memory as Memory.Memory, space);
+
+      if (result.error) {
+        logger.warn(
+          () => ["Failed to mount space for ACL lookup:", result.error],
+        );
+        return undefined;
+      }
+
+      const spaceSession = result.ok as unknown as {
+        subject: MemorySpace;
+        store: any;
+      };
+
+      const aclFact = selectFact(spaceSession, {
+        the: ACL_TYPE,
+        of: space,
+      });
+
+      if (
+        !aclFact || !aclFact.is || typeof aclFact.is !== "object" ||
+        !("value" in aclFact.is)
+      ) {
+        return undefined;
+      }
+
+      if (isACL(aclFact.is.value)) {
+        return aclFact.is.value;
+      } else {
+        logger.warn(
+          () => ["Invalid ACL format in space", space, ":", aclFact.is],
+        );
+        return undefined;
+      }
+    } catch (error) {
+      logger.error(() => ["Error retrieving ACL:", error]);
+      return undefined;
+    }
   }
 }
 

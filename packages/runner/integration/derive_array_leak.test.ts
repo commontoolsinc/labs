@@ -9,7 +9,7 @@
  * Expected behavior: Memory should stabilize or grow modestly
  * Actual behavior: Memory grows by gigabytes (1GB+ per 100 increments)
  */
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime } from "../src/index.ts";
@@ -81,7 +81,7 @@ async function getServerMemoryMB(): Promise<number> {
 
 // Main test function
 async function runTest() {
-  const account = await Identity.fromPassphrase(ANYONE);
+  const account = await Identity.fromPassphrase("common user");
   const space_thingy = await account.derive(SPACE_NAME);
   const space_thingy_space = space_thingy.did();
   const session = {

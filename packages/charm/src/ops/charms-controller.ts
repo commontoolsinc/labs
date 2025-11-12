@@ -9,6 +9,7 @@ import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commontools/identity";
+import { ACLManager } from "./acl-manager.ts";
 
 export interface CreateCharmOptions {
   input?: object;
@@ -120,11 +121,16 @@ export class CharmsController<T = unknown> {
       storageManager: StorageManager.open({
         as: session.as,
         address: new URL("/api/storage/memory", apiUrl),
+        spaceIdentity: session.spaceIdentity,
       }),
     });
 
     const manager = new CharmManager(session, runtime);
     await manager.synced();
     return new CharmsController(manager);
+  }
+
+  acl(): ACLManager {
+    return new ACLManager(this.#manager.runtime, this.#manager.getSpace());
   }
 }

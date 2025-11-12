@@ -6,7 +6,7 @@
  * fast the client can render 100 mapped elements, which often ends up creating a
  * lot of vdom nodes
  */
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime, Stream } from "../src/index.ts";
@@ -29,7 +29,7 @@ console.log(`API URL: ${API_URL}`);
 
 // Main test function
 async function runTest() {
-  const account = await Identity.fromPassphrase(ANYONE);
+  const account = await Identity.fromPassphrase("common user");
   const space_thingy = await account.derive(SPACE_NAME);
   const space_thingy_space = space_thingy.did();
   const session = {
