@@ -32,7 +32,7 @@ export default recipe<{ items: Item[]; hasItems: boolean }>(
               {items.map((item) => (
                 <div>
                   <span>{item.name}</span>
-                  <button onClick={removeItem({ items, item })}>Remove</button>
+                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
                 </div>
               ))}
             </div>,

@@ -114,7 +114,7 @@ export default recipe({
                     }
                 } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { items } }) => (<div>
                   <span>{item.name}</span>
-                  <button onClick={removeItem({ items, item })}>Remove</button>
+                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
                 </div>)), {
                     items: items
                 })}
