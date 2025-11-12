@@ -17,7 +17,7 @@ export default function TestDeriveWithClosedOverOpaqueRefMap() {
             }
         },
         required: ["items"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items }, ({ items }) => items.map(n => n * 2));
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map(n => n * 2));
     return doubled;
 }
 // @ts-ignore: Internals

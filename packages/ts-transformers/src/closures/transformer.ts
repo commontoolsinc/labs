@@ -759,85 +759,19 @@ function buildHandlerStateTypeNode(
 }
 
 /**
- * Check if a map call is inside a derive callback.
- * This handles both explicit derive calls and synthetic ones created by computed transformer.
- *
- * When a map is inside a derive callback, it operates on already-unwrapped arrays,
- * so it should NOT be transformed to mapWithPattern.
- */
-function isMapInsideDeriveCallback(
-  mapCall: ts.CallExpression,
-  context: TransformationContext,
-): boolean {
-  let node: ts.Node = mapCall;
-
-  while (node.parent) {
-    // Check if parent is a call expression
-    if (ts.isCallExpression(node.parent)) {
-      const parentCall = node.parent;
-
-      // Check if this is a derive call (including synthetic ones from computed)
-      if (isDeriveCall(parentCall, context)) {
-        // Now check if our map is inside the callback argument of this derive
-        const callback = extractDeriveCallback(parentCall);
-
-        if (callback && callback.body) {
-          // Check if mapCall is a descendant of the callback body
-          if (isNodeDescendantOf(mapCall, callback.body)) {
-            return true;
-          }
-        }
-      }
-    }
-
-    node = node.parent;
-  }
-
-  return false;
-}
-
-/**
- * Check if a node is a descendant of a potential ancestor node.
- * Uses tree traversal instead of parent references to work with synthetic nodes.
- */
-function isNodeDescendantOf(
-  node: ts.Node,
-  potentialAncestor: ts.Node,
-): boolean {
-  if (node === potentialAncestor) {
-    return true;
-  }
-
-  let found = false;
-  const visitor = (child: ts.Node): void => {
-    if (found) return;
-    if (child === node) {
-      found = true;
-      return;
-    }
-    ts.forEachChild(child, visitor);
-  };
-
-  ts.forEachChild(potentialAncestor, visitor);
-  return found;
-}
-
-/**
  * Check if a map call should be transformed to mapWithPattern.
  * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
  * This happens when the map is nested inside a larger expression with opaque refs,
  * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ *
+ * Note: Maps on closed-over OpaqueRefs inside derive callbacks are handled separately
+ * in the visitor using context tracking.
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  // First, check if this map is directly inside a derive callback
-  // This handles both explicit derive calls and synthetic ones from computed
-  if (isMapInsideDeriveCallback(mapCall, context)) {
-    return false;
-  }
 
   // Find the closest containing JSX expression
   let node: ts.Node = mapCall;
@@ -899,6 +833,12 @@ function createClosureTransformVisitor(
 ): ts.Visitor {
   const { checker } = context;
 
+  // Track derive callbacks we're currently inside, along with their parameters
+  const deriveCallbackStack: Array<{
+    callback: ts.ArrowFunction | ts.FunctionExpression;
+    parameterNames: Set<string>;
+  }> = [];
+
   const visit: ts.Visitor = (node) => {
     if (ts.isJsxAttribute(node) && isEventHandlerJsxAttribute(node.name)) {
       const transformed = transformHandlerJsxAttribute(node, context, visit);
@@ -911,7 +851,39 @@ function createClosureTransformVisitor(
       const callback = node.arguments[0];
 
       if (callback && isFunctionLikeExpression(callback)) {
-        if (shouldTransformMap(node, context)) {
+        // Check if we're inside a derive callback and the map target is captured
+        let skipTransform = false;
+        if (
+          deriveCallbackStack.length > 0 &&
+          ts.isPropertyAccessExpression(node.expression)
+        ) {
+          const mapTarget = node.expression.expression;
+
+          // Get root identifier
+          let rootIdentifier: ts.Identifier | undefined;
+          let current: ts.Expression = mapTarget;
+          while (ts.isPropertyAccessExpression(current)) {
+            current = current.expression;
+          }
+          if (ts.isIdentifier(current)) {
+            rootIdentifier = current;
+          }
+
+          // Check if this is a parameter of the current derive callback
+          if (rootIdentifier) {
+            const currentContext =
+              deriveCallbackStack[deriveCallbackStack.length - 1];
+            if (
+              currentContext &&
+              !currentContext.parameterNames.has(rootIdentifier.text)
+            ) {
+              // It's captured, not a parameter - skip transformation
+              skipTransform = true;
+            }
+          }
+        }
+
+        if (!skipTransform && shouldTransformMap(node, context)) {
           return transformMapCallback(node, callback, context, visit);
         }
       }
@@ -919,7 +891,28 @@ function createClosureTransformVisitor(
 
     // Derive closure transformation
     if (ts.isCallExpression(node) && isDeriveCall(node, context)) {
+      const callback = extractDeriveCallback(node);
+
+      if (callback) {
+        // Build parameter name set
+        const parameterNames = new Set<string>();
+        for (const param of callback.parameters) {
+          extractBindingNames(param.name).forEach((name) =>
+            parameterNames.add(name)
+          );
+        }
+
+        // Push context
+        deriveCallbackStack.push({ callback, parameterNames });
+      }
+
       const transformed = transformDeriveCall(node, context, visit);
+
+      if (callback) {
+        // Pop context
+        deriveCallbackStack.pop();
+      }
+
       if (transformed) {
         return transformed;
       }
