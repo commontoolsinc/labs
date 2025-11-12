@@ -800,10 +800,11 @@ function isInsideDeriveWithOpaqueRef(
         const deriveCall = callback.parent;
         const callKind = detectCallKind(deriveCall, checker);
 
-        // Check for both "derive" and "computed" (since computed transforms to derive)
+        // Check if this is a derive or computed call
+        // Note: Even though ComputedTransformer runs first, callback nodes are reused,
+        // so parent pointers may still point to the original 'computed' call
         const isDeriveOrComputed = callKind?.kind === "derive" ||
-          (callKind?.kind === "builder" &&
-            (callKind as any)?.builderName === "computed");
+          (callKind?.kind === "builder" && callKind.builderName === "computed");
 
         if (
           isDeriveOrComputed &&
