@@ -356,37 +356,41 @@ const addItem = handler((_, { items, itemTitle }) => {
 
 **Rule:** Never access DOM directly. Use cells for all state management.
 
-### Calling llm() from Handlers
+### Calling LLM Functions from Handlers
 
-**Error:** `llm()` not available or doesn't work in handlers
+**Error:** `generateText()` or `generateObject()` not available or doesn't work in handlers
 
-❌ **Problem:** Calling `llm()` outside recipe body
+❌ **Problem:** Calling LLM functions outside recipe body
 
 ```typescript
 const processItem = handler((_, { item }) => {
-  const result = llm({  // Won't work!
+  const result = generateText({  // Won't work!
     prompt: item.content,
   });
 });
 ```
 
-✅ **Solution:** Call `llm()` in recipe body, use results in handlers
+✅ **Solution:** Call LLM functions in recipe body, use results in UI or handlers
 
 ```typescript
 export default recipe(({ item }) => {
-  // Call llm in recipe body
-  const llmResult = llm({
+  // Call generateText in recipe body
+  const llmResult = generateText({
     prompt: item.content,
   });
 
-  // Use results in UI or computed values
+  // Use results in UI
   return {
-    [UI]: <div>{llmResult.result}</div>,
+    [UI]: (
+      <div>
+        {llmResult.pending ? "Generating..." : llmResult.result}
+      </div>
+    ),
   };
 });
 ```
 
-**Rule:** `llm()` can only be called from recipe bodies, not handlers or `computed()`.
+**Rule:** `generateText()` and `generateObject()` can only be called from recipe bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
 
 ### Using if Statements in Data Transformations
 

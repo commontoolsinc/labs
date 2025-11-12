@@ -26,6 +26,8 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
   patterns step-by-step
 - `docs/common/DEBUGGING.md` - Error reference, debugging workflows,
   troubleshooting
+- `docs/common/LLM.md` - Using generateText and generateObject for LLM
+  integration
 
 **Reference:**
 
