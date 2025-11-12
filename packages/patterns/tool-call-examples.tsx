@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  cell,
-  generateText,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { cell, generateText, NAME, recipe, str, UI } from "commontools";
 
 import { calculator } from "./common-tools.tsx";
 
