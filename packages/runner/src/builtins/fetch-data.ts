@@ -304,16 +304,17 @@ async function startFetch(
 
     await runtime.idle();
 
-    // Write error and clear pending - guard inputHash write to prevent stale errors
+    // Write error - but only update inputHash if inputs haven't changed
     await runtime.editWithRetry((tx) => {
       const currentHash = computeInputHash(tx, inputsCell);
 
+      // Always clear pending and result
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
-      error.withTx(tx).set(err);
 
-      // Only update inputHash if inputs haven't changed
+      // Only write error and inputHash if inputs still match
       if (currentHash === inputHash) {
+        error.withTx(tx).set(err);
         internal.withTx(tx).update({ inputHash });
       }
     });
