@@ -181,7 +181,9 @@ export function llm(
     // Start the LLM request with tool execution loop
     const executeWithTools = async (
       currentMessages: BuiltInLLMMessage[],
-      toolCatalog?: Awaited<ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>>,
+      toolCatalog?: Awaited<
+        ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
+      >,
     ): Promise<void> => {
       if (thisRun !== currentRun) return;
 
@@ -196,7 +198,9 @@ export function llm(
       if (thisRun !== currentRun) return;
 
       // Check if there are tool calls in the response
-      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(llmResult.content);
+      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
+        llmResult.content,
+      );
       const hasToolCalls = toolCallParts.length > 0;
 
       if (hasToolCalls && toolCatalog) {
@@ -213,7 +217,8 @@ export function llm(
           toolCallParts,
         );
 
-        const toolResultMessages = llmToolExecutionHelpers.createToolResultMessages(toolResults);
+        const toolResultMessages = llmToolExecutionHelpers
+          .createToolResultMessages(toolResults);
 
         // Build new message history with assistant message + tool results
         const updatedMessages = [
@@ -395,7 +400,9 @@ export function generateText(
     // Start the LLM request with tool execution loop
     const executeWithTools = async (
       currentMessages: BuiltInLLMMessage[],
-      toolCatalog?: Awaited<ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>>,
+      toolCatalog?: Awaited<
+        ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
+      >,
     ): Promise<void> => {
       if (thisRun !== currentRun) return;
 
@@ -410,7 +417,9 @@ export function generateText(
       if (thisRun !== currentRun) return;
 
       // Check if there are tool calls in the response
-      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(llmResult.content);
+      const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
+        llmResult.content,
+      );
       const hasToolCalls = toolCallParts.length > 0;
 
       if (hasToolCalls && toolCatalog) {
@@ -427,7 +436,8 @@ export function generateText(
           toolCallParts,
         );
 
-        const toolResultMessages = llmToolExecutionHelpers.createToolResultMessages(toolResults);
+        const toolResultMessages = llmToolExecutionHelpers
+          .createToolResultMessages(toolResults);
 
         // Build new message history with assistant message + tool results
         const updatedMessages = [
