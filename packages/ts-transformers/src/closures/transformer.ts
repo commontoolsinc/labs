@@ -759,6 +759,67 @@ function buildHandlerStateTypeNode(
 }
 
 /**
+ * Check if a map call is inside a derive callback.
+ * This handles both explicit derive calls and synthetic ones created by computed transformer.
+ *
+ * When a map is inside a derive callback, it operates on already-unwrapped arrays,
+ * so it should NOT be transformed to mapWithPattern.
+ */
+function isMapInsideDeriveCallback(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  let node: ts.Node = mapCall;
+
+  while (node.parent) {
+    // Check if parent is a call expression
+    if (ts.isCallExpression(node.parent)) {
+      const parentCall = node.parent;
+
+      // Check if this is a derive call (including synthetic ones from computed)
+      if (isDeriveCall(parentCall, context)) {
+        // Now check if our map is inside the callback argument of this derive
+        const callback = extractDeriveCallback(parentCall);
+
+        if (callback && callback.body) {
+          // Check if mapCall is a descendant of the callback body
+          if (isNodeDescendantOf(mapCall, callback.body)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    node = node.parent;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a node is a descendant of a potential ancestor node.
+ * Uses tree traversal instead of parent references to work with synthetic nodes.
+ */
+function isNodeDescendantOf(node: ts.Node, potentialAncestor: ts.Node): boolean {
+  if (node === potentialAncestor) {
+    return true;
+  }
+
+  let found = false;
+  const visitor = (child: ts.Node): void => {
+    if (found) return;
+    if (child === node) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(child, visitor);
+  };
+
+  ts.forEachChild(potentialAncestor, visitor);
+  return found;
+}
+
+/**
  * Check if a map call should be transformed to mapWithPattern.
  * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
@@ -769,6 +830,12 @@ function shouldTransformMap(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
+  // First, check if this map is directly inside a derive callback
+  // This handles both explicit derive calls and synthetic ones from computed
+  if (isMapInsideDeriveCallback(mapCall, context)) {
+    return false;
+  }
+
   // Find the closest containing JSX expression
   let node: ts.Node = mapCall;
   let closestJsxExpression: ts.JsxExpression | undefined;
