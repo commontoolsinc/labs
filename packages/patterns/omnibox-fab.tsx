@@ -96,7 +96,7 @@ export default recipe<OmniboxFABInput>(
     });
 
     // Derive latest assistant message for peek
-    const latestAssistantMessage = derive(omnibot, (omnibot) => {
+    const latestAssistantMessage = computed(() => {
       if (!omnibot.messages || omnibot.messages.length === 0) return null;
 
       for (let i = omnibot.messages.length - 1; i >= 0; i--) {
