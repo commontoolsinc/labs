@@ -854,6 +854,28 @@ function findClosestJsxExpression(
 }
 
 /**
+ * Helper to check if a node is contained within a specific argument of a call expression.
+ */
+function isWithinArgument(
+  node: ts.Node,
+  callExpr: ts.CallExpression,
+  argIndex: number,
+): boolean {
+  let current: ts.Node | undefined = node;
+  while (current && current !== callExpr) {
+    if (
+      ts.isCallExpression(current.parent) &&
+      current.parent === callExpr &&
+      current.parent.arguments[argIndex] === current
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
  * Check if a map call will be wrapped in a derive by the JSX transformer.
  * Returns true if wrapping will occur (meaning we should NOT transform the map).
  */
@@ -874,6 +896,22 @@ function willBeWrappedByJsx(
   // Only check THIS expression for derive wrapping
   if (closestJsxExpression.expression !== mapCall) {
     const analysis = analyze(closestJsxExpression.expression);
+
+    // Special case: ifElse calls only wrap the predicate (first argument),
+    // not the branches (second and third arguments)
+    if (
+      analysis.rewriteHint?.kind === "call-if-else" &&
+      ts.isCallExpression(closestJsxExpression.expression)
+    ) {
+      // If map is in the predicate (arg 0), it will be wrapped
+      // If map is in the branches (args 1 or 2), it won't be wrapped
+      return isWithinArgument(
+        mapCall,
+        closestJsxExpression.expression,
+        0,
+      );
+    }
+
     // Check if this will be wrapped in a derive (not just transformed in some other way)
     // Array-map calls have skip-call-rewrite hint, so they won't be wrapped in derive
     const willBeWrappedInDerive = analysis.requiresRewrite &&
@@ -889,12 +927,25 @@ function willBeWrappedByJsx(
   while (node) {
     if (ts.isJsxExpression(node) && node.expression) {
       const analysis = analyze(node.expression);
-      const willBeWrappedInDerive = analysis.requiresRewrite &&
-        !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
-          analysis.rewriteHint.reason === "array-map");
-      if (willBeWrappedInDerive) {
-        // An ancestor JSX expression will wrap this in a derive
-        return true;
+
+      // Special case: ifElse calls only wrap the predicate
+      if (
+        analysis.rewriteHint?.kind === "call-if-else" &&
+        ts.isCallExpression(node.expression)
+      ) {
+        // If map is in the predicate, it will be wrapped
+        if (isWithinArgument(mapCall, node.expression, 0)) {
+          return true;
+        }
+        // If map is in the branches, continue checking ancestors
+      } else {
+        const willBeWrappedInDerive = analysis.requiresRewrite &&
+          !(analysis.rewriteHint?.kind === "skip-call-rewrite" &&
+            analysis.rewriteHint.reason === "array-map");
+        if (willBeWrappedInDerive) {
+          // An ancestor JSX expression will wrap this in a derive
+          return true;
+        }
       }
     }
     node = node.parent;
