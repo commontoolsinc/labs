@@ -345,11 +345,25 @@ export class SchemaInjectionTransformer extends Transformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // Check if ClosureTransformer registered Types for these TypeNodes
+          // This preserves type information for shorthand properties with captured variables
+          let argumentTypeValue: ts.Type | undefined;
+          let resultTypeValue: ts.Type | undefined;
+
+          if (typeRegistry) {
+            if (typeRegistry.has(argumentType)) {
+              argumentTypeValue = typeRegistry.get(argumentType);
+            }
+            if (typeRegistry.has(resultType)) {
+              resultTypeValue = typeRegistry.get(resultType);
+            }
+          }
+
           return updateWithSchemas(
             argumentType,
-            undefined,
+            argumentTypeValue,
             resultType,
-            undefined,
+            resultTypeValue,
           );
         }
 

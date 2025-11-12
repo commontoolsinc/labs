@@ -4,7 +4,6 @@ export default function TestDerive() {
     const value = cell(10);
     const multiplier = cell(2);
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -18,7 +17,6 @@ export default function TestDerive() {
         },
         required: ["value", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value,

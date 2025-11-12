@@ -2,11 +2,11 @@
 import { cell, derive } from "commontools";
 
 export default function TestDerive() {
-  const value = cell(10);
-  const _multiplier = cell(2);
+  const multiplier = cell(2);
 
-  // Parameter name collides with capture name
-  const result = derive(value, (multiplier) => multiplier * 3);
+  // Input name collides with capture name
+  // multiplier is both the input AND a captured variable (used via .get())
+  const result = derive(multiplier, (m) => m * 3 + multiplier.get());
 
   return result;
 }

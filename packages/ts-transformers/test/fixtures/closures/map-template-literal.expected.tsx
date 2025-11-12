@@ -10,7 +10,6 @@ interface State {
     suffix: string;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -46,7 +45,6 @@ export default recipe({
         [UI]: (<div>
         {/* Template literal with captures */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

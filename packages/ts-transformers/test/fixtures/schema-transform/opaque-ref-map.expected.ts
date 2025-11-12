@@ -5,7 +5,6 @@ interface TodoItem {
     done: boolean;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -33,7 +32,6 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     // Map on opaque ref arrays should be transformed to mapWithPattern
     const mapped = items.mapWithPattern(__ctHelpers.recipe({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             element: {
@@ -62,7 +60,6 @@ export default recipe({
     } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.title), {});
     // This should also be transformed
     const filtered = items.mapWithPattern(__ctHelpers.recipe({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             element: {

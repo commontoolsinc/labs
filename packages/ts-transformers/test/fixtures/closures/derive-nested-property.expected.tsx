@@ -8,7 +8,6 @@ interface State {
 export default function TestDerive(state: State) {
     const value = cell(10);
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -33,7 +32,6 @@ export default function TestDerive(state: State) {
         },
         required: ["value", "state"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value,

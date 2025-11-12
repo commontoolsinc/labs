@@ -12,7 +12,6 @@ interface State {
     items: Item[];
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         maybe: {
@@ -53,7 +52,6 @@ export default recipe({
         [UI]: (<div>
         <span>{state.maybe?.value}</span>
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

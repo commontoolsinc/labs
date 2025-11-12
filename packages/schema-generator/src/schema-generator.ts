@@ -400,7 +400,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     // final output
     const filtered = this.collectReferencedDefinitions(base, definitions);
     const out: Record<string, unknown> = {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
       ...(base as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
@@ -701,18 +700,14 @@ export class SchemaGenerator implements ISchemaGenerator {
       return rootSchema;
     }
 
-    // If no definitions were created or used, return simple schema with $schema
+    // If no definitions were created or used, return simple schema
     if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
-      return {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        ...(rootSchema as Record<string, unknown>),
-      } as SchemaDefinition;
+      return rootSchema;
     }
 
     // Object schema: attach only the definitions actually referenced
     const filtered = this.collectReferencedDefinitions(rootSchema, definitions);
     const out: Record<string, unknown> = {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
       ...(rootSchema as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;

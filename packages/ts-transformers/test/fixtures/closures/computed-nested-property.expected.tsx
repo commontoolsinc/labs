@@ -3,7 +3,6 @@ import { cell, computed } from "commontools";
 export default function TestComputeNestedProperty() {
     const counter = cell({ count: 0 });
     const doubled = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             counter: {
@@ -19,7 +18,6 @@ export default function TestComputeNestedProperty() {
         },
         required: ["counter"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, { counter: counter }, ({ counter }) => {
         const current = counter.get();

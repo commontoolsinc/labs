@@ -13,7 +13,6 @@ export default recipe({
 }) => {
     const value = cell(10);
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -32,7 +31,6 @@ export default recipe({
         },
         required: ["value", "config"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value: value,

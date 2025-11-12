@@ -9,7 +9,6 @@ export default function TestDerive(state: State) {
     const value = cell(10);
     // Capture property before method call
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {

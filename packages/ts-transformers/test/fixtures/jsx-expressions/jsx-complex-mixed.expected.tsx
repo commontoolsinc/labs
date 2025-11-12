@@ -13,7 +13,6 @@ interface State {
     taxRate: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -69,7 +68,6 @@ export default recipe({
         <h3>Array with Complex Expressions</h3>
         <ul>
           {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

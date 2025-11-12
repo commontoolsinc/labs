@@ -10,7 +10,6 @@ interface State {
     threshold: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -46,7 +45,6 @@ export default recipe({
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

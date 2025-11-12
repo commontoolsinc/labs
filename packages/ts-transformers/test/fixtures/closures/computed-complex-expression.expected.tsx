@@ -5,7 +5,6 @@ export default function TestComputeComplexExpression() {
     const b = cell(20);
     const c = cell(5);
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             a: {
@@ -23,7 +22,6 @@ export default function TestComputeComplexExpression() {
         },
         required: ["a", "b", "c"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         a: a,
