@@ -126,7 +126,7 @@ export async function compressImage(
         return null;
       }
 
-      // Binary search for lowest quality that still meets size requirement
+      // Binary search for highest quality that still meets size requirement
       let low = minQuality;
       let high = maxQuality;
 
@@ -135,12 +135,12 @@ export async function compressImage(
         const blob = await compressAtSettings(maxDim, mid);
 
         if (blob.size <= maxSizeBytes) {
-          // This quality works, try lower quality
+          // This quality works, try going higher (less compression)
           bestBlob = blob;
           bestQuality = mid;
           high = mid;
         } else {
-          // Quality too low, need higher quality
+          // File too large, need lower quality (more compression)
           low = mid;
         }
       }
