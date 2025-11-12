@@ -164,7 +164,7 @@ export function fetchProgram(
       internal.withTx(tx).update({
         inputHash,
         requestId: "",
-        lastActivity: 0
+        lastActivity: 0,
       });
     }
 
@@ -172,7 +172,8 @@ export function fetchProgram(
     const hasValidResult = inputsMatch && currentResult !== undefined;
 
     // If we're already fetching these inputs, wait
-    const alreadyFetching = inputsMatch && currentPending && myRequestId !== undefined;
+    const alreadyFetching = inputsMatch && currentPending &&
+      myRequestId !== undefined;
 
     // Start a new fetch if we don't have a result and aren't already fetching
     if (!hasValidResult && !alreadyFetching) {

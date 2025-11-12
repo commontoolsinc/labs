@@ -142,7 +142,8 @@ export function compileAndRun(
     if (hash === previousCallHash) return;
 
     // Check if inputs are undefined/empty (e.g., during rehydration before cells load)
-    const hasValidInputs = program.main && program.files && program.files.length > 0;
+    const hasValidInputs = program.main && program.files &&
+      program.files.length > 0;
 
     // Special case: if inputs are invalid AND this is the hash for empty inputs,
     // the user intentionally cleared them - proceed to clear outputs
@@ -152,7 +153,10 @@ export function compileAndRun(
     // If we have a previous valid result and inputs are currently invalid (likely rehydrating),
     // don't clear the outputs - just wait for real inputs to load
     // BUT if inputs are intentionally empty, we should clear
-    if (!hasValidInputs && previousCallHash && previousCallHash !== hash && !isIntentionallyEmpty) {
+    if (
+      !hasValidInputs && previousCallHash && previousCallHash !== hash &&
+      !isIntentionallyEmpty
+    ) {
       // Don't update previousCallHash - we'll wait for valid inputs
       return;
     }
