@@ -19,7 +19,6 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-
 function schemaifyWish<T>(path: string) {
   return derive<T, T>(wish<T>(path), (i) => i);
 }
@@ -382,7 +381,7 @@ export default recipe<ChatInput, ChatOutput>(
         description:
           "Remove an attachment from the attachments array by its mentionable NAME.",
         handler: removeAttachmentTool({ allAttachments }),
-      }
+      },
     };
 
     // Merge static and dynamic tools
