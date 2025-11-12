@@ -800,7 +800,10 @@ function isMapInsideDeriveCallback(
  * Check if a node is a descendant of a potential ancestor node.
  * Uses tree traversal instead of parent references to work with synthetic nodes.
  */
-function isNodeDescendantOf(node: ts.Node, potentialAncestor: ts.Node): boolean {
+function isNodeDescendantOf(
+  node: ts.Node,
+  potentialAncestor: ts.Node,
+): boolean {
   if (node === potentialAncestor) {
     return true;
   }
