@@ -2,19 +2,20 @@
 import {
   Cell,
   cell,
+  compileAndRun,
   derive,
+  fetchProgram,
   handler,
   ifElse,
   NAME,
+  navigateTo,
   recipe,
   UI,
-  navigateTo,
-  fetchProgram,
-  compileAndRun,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";
 import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 import { MentionableCharm } from "./backlinks-index.tsx";
+import { linkTool } from "./link-tool.tsx";
 
 interface OmniboxFABInput {
   mentionable: Cell<MentionableCharm[]>;
@@ -40,19 +41,17 @@ const dismissPeek = handler<
 
 const fetchAndRunPattern = handler<
   { url: string },
-  { mentionable: Cell<MentionableCharm[]>; }
->(( { url }, { mentionable }) => {
-  const { pending: fetchPending, result: program, error: fetchError } =
+  { mentionable: Cell<MentionableCharm[]> }
+>(({ url }, { mentionable }) => {
+  const { pending: fetchPending, result: program, error: _fetchError } =
     fetchProgram({ url });
 
-  // Step 2: Compile and run the fetched program
-  // Explicitly map program fields to compileAndRun params
   const compileParams = derive(program, (p) => ({
     files: p?.files ?? [],
     main: p?.main ?? "",
     input: { value: 10 },
   }));
-  const { pending: compilePending, result, error: compileError } =
+  const { pending: _compilePending, result, error: _compileError } =
     compileAndRun(compileParams);
 
   return navigateTo(result);
@@ -76,9 +75,13 @@ export default recipe<OmniboxFABInput>(
           pattern: calculator,
         },
         fetchAndRunPattern: {
-          description:
-            "Fetch a pattern from the URL, compile it and run it.",
+          description: "Fetch a pattern from the URL, compile it and run it.",
           handler: fetchAndRunPattern({ mentionable }),
+        },
+        createLink: {
+          description:
+            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
+          handler: linkTool({ mentionable }),
         },
       },
     });
