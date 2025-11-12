@@ -118,7 +118,7 @@ const updateLimit = handler(
 export const counterWithCrossFieldValidation = recipe<CrossFieldValidationArgs>(
   "Counter With Cross Field Validation",
   ({ value, limit, step }) => {
-    const auditTrail = cell<ValidationEntry[]>([]);
+    const auditTrail = cell<ValidationEntry[]>([], { type: "array" });
     const sanitizedValue = lift((input: number | undefined) =>
       toInteger(input, 0)
     )(value);
