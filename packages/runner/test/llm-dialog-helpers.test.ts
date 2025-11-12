@@ -1,16 +1,14 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
-import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
-
-const {
+import {
+  buildAssistantMessage,
   createCharmToolDefinitions,
-  normalizeCharmPathSegments,
+  createToolResultMessages,
   extractRunArguments,
   extractToolCallParts,
-  buildAssistantMessage,
-  createToolResultMessages,
   hasValidContent,
-} = llmDialogTestHelpers;
+  normalizeCharmPathSegments,
+} from "../src/builtins/llm-tool-execution.ts";
 
 Deno.test("createCharmToolDefinitions slugifies charm names and returns tool metadata", () => {
   const defs = createCharmToolDefinitions("My Charm!", '{ "type": "object" }');

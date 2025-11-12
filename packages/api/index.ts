@@ -909,6 +909,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, unknown>;
   }
   | {
     model?: string;
@@ -919,6 +920,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, unknown>;
   };
 
 export type BuiltInGenerateTextParams =
@@ -928,6 +930,7 @@ export type BuiltInGenerateTextParams =
     system?: string;
     model?: string;
     maxTokens?: number;
+    tools?: Record<string, unknown>;
   }
   | {
     prompt?: never;
@@ -935,6 +938,7 @@ export type BuiltInGenerateTextParams =
     system?: string;
     model?: string;
     maxTokens?: number;
+    tools?: Record<string, unknown>;
   };
 
 export interface BuiltInGenerateTextState {

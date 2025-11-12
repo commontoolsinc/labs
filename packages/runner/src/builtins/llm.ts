@@ -18,6 +18,14 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import {
+  buildAssistantMessage,
+  buildToolCatalog,
+  createToolResultMessages,
+  executeToolCalls,
+  extractToolCallParts,
+  hasValidContent,
+} from "./llm-tool-execution.ts";
 
 const client = new LLMClient();
 
@@ -271,7 +279,7 @@ export function generateText(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, prompt, messages, model, maxTokens } =
+    const { system, prompt, messages, model, maxTokens, tools } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     // If neither prompt nor messages is provided, don't make a request
@@ -335,25 +343,93 @@ export function generateText(
       partialWithLog.set(text);
     };
 
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
+    // Main generation logic with tool support
+    (async () => {
+      try {
+        // Build tool catalog if tools are provided
+        let toolCatalog:
+          | Awaited<ReturnType<typeof buildToolCatalog>>
+          | undefined;
+        if (tools && Object.keys(tools).length > 0) {
+          const toolsCell = inputsCell.key("tools");
+          toolCatalog = await buildToolCatalog(runtime, toolsCell);
+          llmParams.tools = toolCatalog.llmTools;
+        }
 
-    resultPromise
-      .then(async (llmResult) => {
-        if (thisRun !== currentRun) return;
+        // Keep track of all messages for tool calling loop
+        const allMessages: BuiltInLLMMessage[] = [...requestMessages];
+        let iterationCount = 0;
+        const MAX_ITERATIONS = 50;
 
-        await runtime.idle();
+        while (iterationCount < MAX_ITERATIONS) {
+          iterationCount++;
 
-        // Extract text from the LLM response
-        const textResult = extractTextFromLLMResponse(llmResult);
+          if (thisRun !== currentRun) return;
 
+          // Update params with current messages
+          llmParams.messages = allMessages;
+
+          // Make LLM request
+          const llmResult = await client.sendRequest(llmParams, updatePartial);
+
+          if (thisRun !== currentRun) return;
+
+          // Validate content
+          if (!hasValidContent(llmResult.content)) {
+            throw new Error("LLM returned invalid/empty content");
+          }
+
+          // Check for tool calls
+          const toolCallParts = extractToolCallParts(llmResult.content);
+
+          if (toolCallParts.length === 0 || !toolCatalog) {
+            // No tool calls - we're done
+            await runtime.idle();
+
+            const textResult = extractTextFromLLMResponse(llmResult);
+
+            await runtime.editWithRetry((tx) => {
+              pending.withTx(tx).set(false);
+              result.withTx(tx).set(textResult);
+              partial.withTx(tx).set(textResult);
+              requestHash.withTx(tx).set(hash);
+            });
+            return;
+          }
+
+          // Execute tool calls
+          const assistantMessage = buildAssistantMessage(
+            llmResult.content,
+            toolCallParts,
+          );
+          allMessages.push(assistantMessage);
+
+          const toolResults = await executeToolCalls(
+            runtime,
+            parentCell.space,
+            toolCatalog,
+            toolCallParts,
+          );
+
+          if (thisRun !== currentRun) return;
+
+          // Add tool results to messages
+          const toolResultMessages = createToolResultMessages(toolResults);
+          allMessages.push(...toolResultMessages);
+
+          // Continue loop to get next response
+        }
+
+        // Hit max iterations
+        console.warn(`generateText hit max iterations (${MAX_ITERATIONS})`);
         await runtime.editWithRetry((tx) => {
           pending.withTx(tx).set(false);
-          result.withTx(tx).set(textResult);
-          partial.withTx(tx).set(textResult);
-          requestHash.withTx(tx).set(hash);
+          result.withTx(tx).set(undefined);
+          partial.withTx(tx).set(
+            "Error: Maximum tool call iterations exceeded",
+          );
         });
-      })
-      .catch(async (error) => {
+      } catch (error) {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating text", error);
@@ -368,11 +444,8 @@ export function generateText(
 
         // Reset previousCallHash to allow retry after error
         previousCallHash = undefined;
-
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
-      });
+      }
+    })();
   };
 }
 
@@ -446,6 +519,7 @@ export function generateObject<T extends Record<string, unknown>>(
       system,
       cache,
       metadata,
+      tools,
     } = inputsCell.getAsQueryResult([], tx) ?? {};
 
     if ((!prompt && (!messages || messages.length === 0)) || !schema) {
@@ -505,25 +579,125 @@ export function generateObject<T extends Record<string, unknown>>(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
-    const resultPromise = client.generateObject(
-      generateObjectParams,
-    ) as Promise<{
-      object: T;
-    }>;
+    // Main generation logic with tool support
+    (async () => {
+      try {
+        // Build tool catalog if tools are provided
+        let toolCatalog:
+          | Awaited<ReturnType<typeof buildToolCatalog>>
+          | undefined;
+        if (tools && Object.keys(tools).length > 0) {
+          const toolsCell = inputsCell.key("tools");
+          toolCatalog = await buildToolCatalog(runtime, toolsCell);
+        }
 
-    resultPromise
-      .then(async (response) => {
-        if (thisRun !== currentRun) return;
+        // If no tools, use the simple generateObject API
+        if (!toolCatalog) {
+          const response = await client.generateObject(
+            generateObjectParams,
+          ) as { object: T };
 
-        await runtime.idle();
+          if (thisRun !== currentRun) return;
 
+          await runtime.idle();
+
+          await runtime.editWithRetry((tx) => {
+            pending.withTx(tx).set(false);
+            result.withTx(tx).set(response.object);
+            requestHash.withTx(tx).set(hash);
+          });
+          return;
+        }
+
+        // With tools, use the message-based API
+        const llmParams: LLMRequest = {
+          system: system ?? "",
+          messages: requestMessages,
+          maxTokens: maxTokens ?? 8192,
+          stream: false,
+          model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+          metadata: {
+            ...readyMetadata,
+            context: "charm",
+          },
+          cache: cache ?? true,
+          tools: toolCatalog.llmTools,
+          mode: "json",
+        };
+
+        const allMessages: BuiltInLLMMessage[] = [...requestMessages];
+        let iterationCount = 0;
+        const MAX_ITERATIONS = 50;
+
+        while (iterationCount < MAX_ITERATIONS) {
+          iterationCount++;
+
+          if (thisRun !== currentRun) return;
+
+          llmParams.messages = allMessages;
+
+          const llmResult = await client.sendRequest(llmParams, () => {});
+
+          if (thisRun !== currentRun) return;
+
+          if (!hasValidContent(llmResult.content)) {
+            throw new Error("LLM returned invalid/empty content");
+          }
+
+          const toolCallParts = extractToolCallParts(llmResult.content);
+
+          if (toolCallParts.length === 0) {
+            // No tool calls - parse final response as JSON
+            await runtime.idle();
+
+            const textResult = extractTextFromLLMResponse(llmResult);
+            let parsedResult: T;
+            try {
+              parsedResult = JSON.parse(textResult) as T;
+            } catch (parseError) {
+              throw new Error(
+                `Failed to parse LLM response as JSON: ${parseError}`,
+              );
+            }
+
+            await runtime.editWithRetry((tx) => {
+              pending.withTx(tx).set(false);
+              result.withTx(tx).set(parsedResult);
+              requestHash.withTx(tx).set(hash);
+            });
+            return;
+          }
+
+          // Execute tool calls
+          const assistantMessage = buildAssistantMessage(
+            llmResult.content,
+            toolCallParts,
+          );
+          allMessages.push(assistantMessage);
+
+          const toolResults = await executeToolCalls(
+            runtime,
+            parentCell.space,
+            toolCatalog,
+            toolCallParts,
+          );
+
+          if (thisRun !== currentRun) return;
+
+          const toolResultMessages = createToolResultMessages(toolResults);
+          allMessages.push(...toolResultMessages);
+        }
+
+        // Hit max iterations
+        console.warn(`generateObject hit max iterations (${MAX_ITERATIONS})`);
         await runtime.editWithRetry((tx) => {
           pending.withTx(tx).set(false);
-          result.withTx(tx).set(response.object);
-          requestHash.withTx(tx).set(hash);
+          result.withTx(tx).set(undefined);
+          partial.withTx(tx).set(
+            "Error: Maximum tool call iterations exceeded",
+          );
         });
-      })
-      .catch(async (error) => {
+      } catch (error) {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating object", error);
@@ -538,10 +712,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
         // Reset previousCallHash to allow retry after error
         previousCallHash = undefined;
-
-        // TODO(seefeld): Not writing now, so we retry the request after failure.
-        // Replace this with more fine-grained retry logic.
-        // requestHash.setAtPath([], hash, log);
-      });
+      }
+    })();
   };
 }
