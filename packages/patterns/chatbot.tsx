@@ -152,21 +152,20 @@ type ChatOutput = {
 export const TitleGenerator = recipe<
   { model?: string; messages: Array<BuiltInLLMMessage> }
 >("Title Generator", ({ model, messages }) => {
-  const titleMessages = computed(() => {
+  const previewMessage = computed(() => {
     if (!messages || messages.length === 0) return "";
 
-    const messageCount = 2;
-    const selectedMessages = messages.slice(0, messageCount).filter(Boolean);
+    const firstMessage = messages[0];
 
-    if (selectedMessages.length === 0) return "";
+    if (!firstMessage) return "";
 
-    return selectedMessages;
+    return JSON.stringify(firstMessage);
   });
 
   const { result } = generateObject({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
-    messages: titleMessages,
+    prompt: previewMessage,
     model,
     schema: {
       type: "object",
