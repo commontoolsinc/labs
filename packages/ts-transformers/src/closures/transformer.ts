@@ -819,9 +819,8 @@ function isInsideDeriveWithOpaqueRef(
             typeRegistry,
             context.options.logger,
           );
-          if (!targetType) continue;
 
-          if (isOpaqueRefType(targetType, checker)) {
+          if (targetType && isOpaqueRefType(targetType, checker)) {
             const kind = getCellKind(targetType, checker);
             // Only skip transformation for non-Cell OpaqueRefs
             // Cell<T[]>.map() should still transform even inside derive

@@ -50,7 +50,10 @@ export function getTypeAtLocationWithFallback(
     return checker.getTypeAtLocation(node);
   } catch (error) {
     if (logger) {
-      const nodeText = node.getText?.() ?? `<${ts.SyntaxKind[node.kind]}>`;
+      // Use getExpressionText to safely handle both regular and synthetic nodes
+      const nodeText = ts.isExpression(node)
+        ? getExpressionText(node)
+        : `<${ts.SyntaxKind[node.kind]}>`;
       logger(`Warning: Could not get type for node "${nodeText}": ${error}`);
     }
     return undefined;
