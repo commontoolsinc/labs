@@ -821,7 +821,7 @@ export default recipe<{
     const emails = cell<Confidential<Email[]>>([]);
 
     derive(emails, (emails) => {
-      console.log("emails", emails.length);
+      console.log("emails", emails.get().length);
     });
 
     return {
@@ -855,7 +855,8 @@ export default recipe<{
           </div>
 
           <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-            Imported email count: {derive(emails, (emails) => emails.length)}
+            Imported email count: {derive(emails, (emails) =>
+              emails.get().length)}
           </h3>
 
           <div style={{ fontSize: "14px", color: "#666" }}>

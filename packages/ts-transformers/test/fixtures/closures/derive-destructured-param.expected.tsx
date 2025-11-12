@@ -14,11 +14,11 @@ export default function TestDerive() {
         properties: {
             point: {
                 $ref: "#/$defs/Point",
-                asOpaque: true
+                asCell: true
             },
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["point", "multiplier"],

@@ -10,7 +10,7 @@ export default function TestDerive(config: Config) {
   const value = cell(10);
 
   const result = derive(value, (v) => 
-    v + config.required + (config.unionUndefined ?? 0)
+    v.get() + config.required + (config.unionUndefined ?? 0)
   );
 
   return result;

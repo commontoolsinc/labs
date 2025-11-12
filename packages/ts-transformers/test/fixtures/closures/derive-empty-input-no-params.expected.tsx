@@ -10,11 +10,11 @@ export default function TestDeriveEmptyInputNoParams() {
         properties: {
             a: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             b: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["a", "b"]

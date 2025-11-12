@@ -146,8 +146,8 @@ export const counterWithDerivedDifference = recipe<DerivedDifferenceArgs>(
   "Counter With Derived Difference",
   ({ primary, secondary, primaryStep, secondaryStep }) => {
     const sequence = cell(0);
-    const differenceHistory = cell<number[]>([]);
-    const auditLog = cell<DifferenceAudit[]>([]);
+    const differenceHistory = cell<number[]>([], { type: "array" });
+    const auditLog = cell<DifferenceAudit[]>([], { type: "array" });
 
     const primaryValue = lift((value: number | undefined) =>
       sanitizeInteger(value, 0)

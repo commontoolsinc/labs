@@ -8,9 +8,9 @@ export default recipe({
         }
     },
     required: ["multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, (config: {
-    multiplier: number;
-}) => {
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ multiplier }) => {
     const value = cell(10);
     const result = __ctHelpers.derive({
         $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -18,28 +18,21 @@ export default recipe({
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
-            config: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number"
-                    }
-                },
-                required: ["multiplier"]
+            multiplier: {
+                type: "number",
+                asOpaque: true
             }
         },
-        required: ["value", "config"]
+        required: ["value", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value: value,
-        config: {
-            multiplier: config.multiplier
-        }
-    }, ({ value, config }) => value.get() * config.multiplier);
+        multiplier: multiplier
+    }, ({ value, multiplier }) => value.get() * multiplier);
     return result;
 });
 // @ts-ignore: Internals

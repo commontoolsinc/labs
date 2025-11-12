@@ -24,7 +24,7 @@ export default recipe({
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             config: {
                 type: "object",
@@ -44,7 +44,7 @@ export default recipe({
             },
             threshold: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "config", "offset", "threshold"]

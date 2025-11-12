@@ -49,7 +49,7 @@ export default recipe<
   ({ settings }) => {
     const items = cell<FeedItem[]>([]);
 
-    console.log("feed items", items.length);
+    console.log("feed items", items.get().length);
 
     return {
       [NAME]: str`RSS/Atom Feed Importer ${settings.feedUrl}`,
@@ -63,7 +63,7 @@ export default recipe<
           }}
         >
           <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
-            Feed Items: {items.length}
+            Feed Items: {derive(items, (items) => items.get().length)}
           </h2>
 
           <common-hstack gap="sm">

@@ -10,15 +10,15 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             threshold: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "threshold", "multiplier"]
@@ -29,7 +29,7 @@ export default function TestDerive() {
         value,
         threshold: threshold,
         multiplier: multiplier
-    }, ({ value: v, threshold, multiplier }) => v > threshold.get() ? v * multiplier.get() : v);
+    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v.get());
     return result;
 }
 // @ts-ignore: Internals

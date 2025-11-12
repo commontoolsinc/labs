@@ -4,7 +4,7 @@ import {
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
-import { ComputeTransformer } from "./compute/transformer.ts";
+import { ComputedTransformer } from "./computed/transformer.ts";
 import { Pipeline, TransformationOptions } from "./core/mod.ts";
 
 export class CommonToolsTransformerPipeline extends Pipeline {
@@ -15,7 +15,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       ...options,
     };
     super([
-      new ComputeTransformer(ops),
+      new ComputedTransformer(ops),
       new ClosureTransformer(ops),
       new SchemaInjectionTransformer(ops),
       new OpaqueRefJSXTransformer(ops),

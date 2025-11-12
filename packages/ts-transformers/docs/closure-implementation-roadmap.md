@@ -73,10 +73,10 @@ Transform arbitrary closures:
 
 ```typescript
 // Input
-const compute = () => state.a + state.b;
+const computed = () => state.a + state.b;
 
 // Output
-const compute = lift(({ a, b }) => a + b).curry({ a: state.a, b: state.b });
+const computed = lift(({ a, b }) => a + b).curry({ a: state.a, b: state.b });
 ```
 
 **Open Questions**:

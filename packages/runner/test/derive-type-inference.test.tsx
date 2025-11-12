@@ -1,23 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type {
+import {
   BuiltInLLMMessage,
   Cell,
-  CellFunction,
-  DeriveFunction,
+  derive,
   OpaqueRef,
-  RecipeFunction,
+  recipe,
 } from "commontools";
-
-declare const cell: CellFunction;
-declare const derive: DeriveFunction;
-declare const recipe: RecipeFunction;
 
 describe("derive type inference", () => {
   // These tests are not meant to run, the test is that they compile correctly.
   function _doNotRun(): void {
     it("should unwrap OpaqueRef<T[]> to T[] in callback", () => {
-      const messages = cell<BuiltInLLMMessage[]>();
+      const messages = Cell.of<BuiltInLLMMessage[]>().getAsOpaqueRefProxy();
       messages.set([
         { role: "user", content: [{ type: "text", text: "hello" }] },
         { role: "assistant", content: [{ type: "text", text: "hi" }] },
@@ -39,7 +34,7 @@ describe("derive type inference", () => {
         content: string | { text: string; type: string }[];
       }
 
-      const messages = cell<ComplexMessage[]>();
+      const messages = Cell.of<ComplexMessage[]>().getAsOpaqueRefProxy();
       messages.set([
         { role: "assistant", content: "hello" },
         {
@@ -66,9 +61,9 @@ describe("derive type inference", () => {
     });
 
     it("should handle primitive types", () => {
-      const number = cell<number>();
-      const boolean = cell<boolean>();
-      const string = cell<string>();
+      const number = Cell.of<number>().getAsOpaqueRefProxy();
+      const boolean = Cell.of<boolean>().getAsOpaqueRefProxy();
+      const string = Cell.of<string>().getAsOpaqueRefProxy();
 
       const derivedNumber = derive(number, (num) => {
         // Type check: nums should be number[]
@@ -92,7 +87,7 @@ describe("derive type inference", () => {
     });
 
     it("should handle primitive array types", () => {
-      const numbers = cell<number[]>();
+      const numbers = Cell.of<number[]>().getAsOpaqueRefProxy();
       numbers.set([1, 2, 3, 4, 5]);
 
       const sum = derive(numbers, (nums) => {
@@ -105,7 +100,7 @@ describe("derive type inference", () => {
     });
 
     it("should handle nested array types", () => {
-      const matrix = cell<number[][]>();
+      const matrix = Cell.of<number[][]>().getAsOpaqueRefProxy();
       matrix.set([[1, 2], [3, 4], [5, 6]]);
 
       const flattened = derive(matrix, (m) => {
@@ -128,7 +123,7 @@ describe("derive type inference", () => {
         };
       }
 
-      const user = cell<User>();
+      const user = Cell.of<User>().getAsOpaqueRefProxy();
       user.set({
         name: "Alice",
         email: "alice@example.com",
@@ -155,7 +150,7 @@ describe("derive type inference", () => {
         };
       }
 
-      const user = cell<User>();
+      const user = Cell.of<User>().getAsOpaqueRefProxy();
       user.set({
         name: "Alice",
         email: "alice@example.com",
@@ -183,7 +178,7 @@ describe("derive type inference", () => {
         pending: boolean;
       }
 
-      const chatbot = cell<ChatbotState>();
+      const chatbot = Cell.of<ChatbotState>().getAsOpaqueRefProxy();
       chatbot.set({
         messages: [
           { role: "user", content: "hello" },
@@ -238,7 +233,7 @@ describe("derive type inference", () => {
       };
 
       // Simulate what happens when you call a recipe
-      const chatbot = cell<ChatOutput>();
+      const chatbot = Cell.of<ChatOutput>().getAsOpaqueRefProxy();
       chatbot.set({
         messages: [
           { role: "user", content: "hello" },
@@ -273,7 +268,7 @@ describe("derive type inference", () => {
         name: string;
       }
 
-      const parent = cell<{ items: Item[] }>();
+      const parent = Cell.of<{ items: Item[] }>().getAsOpaqueRefProxy();
       parent.set({
         items: [
           { id: 1, name: "first" },
@@ -305,7 +300,8 @@ describe("derive type inference", () => {
 
       // Create a recipe that returns an object with an array property
       const Chatbot = recipe<ChatbotInput, ChatbotOutput>("TestChatbot", () => {
-        const messagesRef = cell<BuiltInLLMMessage[]>();
+        const messagesRef = Cell.of<BuiltInLLMMessage[]>()
+          .getAsOpaqueRefProxy();
         messagesRef.set([
           { role: "user", content: "hello" },
           { role: "assistant", content: "response" },
@@ -337,7 +333,8 @@ describe("derive type inference", () => {
       >(
         "ChatbotWithMessages",
         () => {
-          const messagesRef = cell<BuiltInLLMMessage[]>();
+          const messagesRef = Cell.of<BuiltInLLMMessage[]>()
+            .getAsOpaqueRefProxy();
           messagesRef.set([
             { role: "user", content: "hello" },
             { role: "assistant", content: "response" },
@@ -367,11 +364,10 @@ describe("derive type inference", () => {
         active: boolean;
       }
 
-      const profileSource = cell<UserProfile>();
-      profileSource.set({ name: "Ada", active: true });
-      const profileCell = profileSource as unknown as Cell<UserProfile>;
+      const profileCell = Cell.of<UserProfile>();
+      profileCell.set({ name: "Ada", active: true });
 
-      it("should unwrap Cell<T> inputs directly", () => {
+      it("should unwrap Cell.of<T> inputs directly", () => {
         const result = derive(profileCell, (profile) => {
           const _typeCheck: Cell<UserProfile> = profile;
           return profile === profile ? 1 : 0;
@@ -416,7 +412,7 @@ describe("derive type inference", () => {
 
     it("should honor explicit derive<In, Out> typing", () => {
       type ExplicitInput = { role: "user"; text: string };
-      const explicitCell = cell<ExplicitInput>();
+      const explicitCell = Cell.of<ExplicitInput>().getAsOpaqueRefProxy();
       explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive<ExplicitInput, number>(
@@ -432,7 +428,7 @@ describe("derive type inference", () => {
 
     it("should honor explicit parameter typing", () => {
       type ExplicitInput = { role: "user"; text: string };
-      const explicitCell = cell<ExplicitInput>();
+      const explicitCell = Cell.of<ExplicitInput>().getAsOpaqueRefProxy();
       explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive(
@@ -448,7 +444,7 @@ describe("derive type inference", () => {
 
     it("should honor explicit Cell<T> inputs", () => {
       type ExplicitInput = { role: "user"; text: string };
-      const explicitCell = cell<Cell<ExplicitInput>>();
+      const explicitCell = Cell.of<Cell<ExplicitInput>>().getAsOpaqueRefProxy();
       explicitCell.set({ role: "user", text: "hello" });
 
       const derived = derive(

@@ -9,11 +9,11 @@ export default function TestDerive() {
         properties: {
             value: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             },
             prefix: {
                 type: "string",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["value", "prefix"]

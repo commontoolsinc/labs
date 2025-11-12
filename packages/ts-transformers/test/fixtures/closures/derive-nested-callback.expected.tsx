@@ -13,24 +13,25 @@ export default function TestDerive() {
                 items: {
                     type: "number"
                 },
-                asOpaque: true
+                asCell: true
             },
             multiplier: {
                 type: "number",
-                asOpaque: true
+                asCell: true
             }
         },
         required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "array",
-        items: {
-            type: "number"
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.map(n => n * multiplier.get()));
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe<{
+        element: number;
+        params: {
+            multiplier: __ctHelpers.Cell<number>;
+        };
+    }>(({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+        multiplier: multiplier
+    }));
     return result;
 }
 // @ts-ignore: Internals

@@ -117,7 +117,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
       );
       const actual = targetCell.get();
       expect(actual, `${name}:${stepIndex}:${assertion.path}`)
-        .toEqualIgnoringSymbols(assertion.value);
+        .toEqual(assertion.value);
     }
   }
 

@@ -6,7 +6,7 @@ export default recipe(() => {
   const b = cell(20);
 
   const sum = computed(() => a.get() + b.get());
-  const doubled = computed(() => sum.get() * 2);
+  const doubled = computed(() => sum * 2);
 
   return doubled;
 });
