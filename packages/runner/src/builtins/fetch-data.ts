@@ -203,6 +203,13 @@ export function fetchData(
 
           const { url, mode, options } = inputs;
 
+          // Clear any previous result/error when starting a new fetch
+          // This ensures observers see a clean pending state
+          runtime.editWithRetry((tx) => {
+            result.withTx(tx).set(undefined);
+            error.withTx(tx).set(undefined);
+          });
+
           // Check if URL became empty while waiting for mutex
           if (!url) {
             // Release the lock and clear state
