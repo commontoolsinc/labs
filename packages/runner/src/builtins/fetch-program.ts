@@ -287,14 +287,20 @@ async function startResolve(
 
     await runtime.idle();
 
-    // Always write error and clear pending
+    // Write error and clear pending - guard inputHash write to prevent stale errors
     await runtime.editWithRetry((tx) => {
+      const currentHash = computeInputHash(tx, inputsCell);
+
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
       error.withTx(tx).set(
         err instanceof Error ? err.message : String(err),
       );
-      internal.withTx(tx).update({ inputHash });
+
+      // Only update inputHash if inputs haven't changed
+      if (currentHash === inputHash) {
+        internal.withTx(tx).update({ inputHash });
+      }
     });
   }
 }

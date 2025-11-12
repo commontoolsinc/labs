@@ -304,24 +304,18 @@ async function startFetch(
 
     await runtime.idle();
 
-    // Always write error and clear pending - use try/catch to ensure this completes
-    try {
-      await runtime.editWithRetry((tx) => {
-        pending.withTx(tx).set(false);
-        result.withTx(tx).set(undefined);
-        error.withTx(tx).set(err);
+    // Write error and clear pending - guard inputHash write to prevent stale errors
+    await runtime.editWithRetry((tx) => {
+      const currentHash = computeInputHash(tx, inputsCell);
+
+      pending.withTx(tx).set(false);
+      result.withTx(tx).set(undefined);
+      error.withTx(tx).set(err);
+
+      // Only update inputHash if inputs haven't changed
+      if (currentHash === inputHash) {
         internal.withTx(tx).update({ inputHash });
-      });
-    } catch (writeErr) {
-      // If we can't write the error, at least clear pending
-      console.error("Failed to write error state:", writeErr);
-      const tx = runtime.edit();
-      try {
-        pending.withTx(tx).set(false);
-        tx.commit();
-      } catch {
-        tx.abort();
       }
-    }
+    });
   }
 }
