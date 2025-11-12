@@ -928,6 +928,7 @@ export type BuiltInGenerateTextParams =
     system?: string;
     model?: string;
     maxTokens?: number;
+    tools?: Record<string, BuiltInLLMTool>;
   }
   | {
     prompt?: never;
@@ -935,6 +936,7 @@ export type BuiltInGenerateTextParams =
     system?: string;
     model?: string;
     maxTokens?: number;
+    tools?: Record<string, BuiltInLLMTool>;
   };
 
 export interface BuiltInGenerateTextState {
