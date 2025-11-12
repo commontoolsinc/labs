@@ -1413,7 +1413,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         frame.runtime,
         {
           path: [],
-          ...(schema && { schema, rootSchema: schema }),
+          ...(schema !== undefined && { schema, rootSchema: schema }),
           ...(frame.space && { space: frame.space }),
         },
         frame.tx,
