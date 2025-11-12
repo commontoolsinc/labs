@@ -2,7 +2,32 @@
 
 This guide demonstrates common patterns for building recipes, organized by complexity. Each pattern builds on concepts from previous sections.
 
-## 🌟 Golden Rule: Prefer Bidirectional Binding
+## Core Principles
+
+### Cell<> is for Write Access Only
+
+**The most important rule:** Only declare `Cell<>` in signatures when you need to **mutate** the value.
+
+```typescript
+// ✅ Read-only - No Cell<> needed (still reactive!)
+interface ReadOnlyInput {
+  count: number;        // Just display it
+  items: Item[];        // Just map/display
+}
+
+// ✅ Write access - Cell<> required
+interface WritableInput {
+  count: Cell<number>;  // Will call count.set()
+  items: Cell<Item[]>;  // Will call items.push()
+}
+```
+
+**Remember:** Everything is reactive whether you use `Cell<>` or not. `Cell<>` only indicates you'll call `.set()`, `.update()`, `.push()`, or `.key()`.
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed reactivity guide.
+See [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md) for type system details.
+
+### 🌟 Golden Rule: Prefer Bidirectional Binding
 
 **Before writing any handler, ask yourself**: "Am I just syncing UI ↔ data with no additional logic?"
 

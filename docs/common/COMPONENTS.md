@@ -6,7 +6,7 @@ A styled button component matching the regular `button` API. You can use inline 
 
 ```tsx
 interface Input {
-  count: Cell<number>;
+  count: Cell<number>;  // Cell<> only needed for write access
 }
 
 const MyRecipe = recipe<Input>(({ count }) => {
@@ -21,7 +21,20 @@ const MyRecipe = recipe<Input>(({ count }) => {
 });
 ```
 
-**Key point:** Declare `count` as `Cell<number>` in your input type to use it in inline handlers.
+**Key point:** Declare `count` as `Cell<number>` in your input type **only when you need to call `.set()`, `.update()`, or other mutation methods**. For read-only display, omit `Cell<>`:
+
+```tsx
+// Read-only - No Cell<> needed
+interface ReadOnlyInput {
+  count: number;  // Just display, no mutation
+}
+
+const MyRecipe = recipe<ReadOnlyInput>(({ count }) => {
+  return {
+    [UI]: <div>Count: {count}</div>,  // Still reactive!
+  };
+});
+```
 
 ## Using handler() for Complex Logic
 
