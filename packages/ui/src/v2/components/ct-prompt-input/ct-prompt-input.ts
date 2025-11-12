@@ -920,6 +920,13 @@ export class CTPromptInput extends BaseElement {
          * This ensures the select element shows the correct selected option
          */
         private _applyModelValueToDom() {
+          // Re-query if we don't have a reference (e.g., model picker appeared after first render)
+          if (!this._modelSelectElement) {
+            this._modelSelectElement = this.shadowRoot?.querySelector(
+              ".model-select",
+            ) as HTMLSelectElement;
+          }
+
           if (!this._modelSelectElement) return;
 
           const currentValue = this._modelController.getValue();
