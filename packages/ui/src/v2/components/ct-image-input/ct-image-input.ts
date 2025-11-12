@@ -227,7 +227,7 @@ export class CTImageInput extends BaseElement {
   disabled = false;
 
   @property({ type: Number })
-  maxSizeBytes?: number;
+  maxSizeBytes?: number = 5 * 1024 * 1024; // Default to 5MB
 
   @property({ type: Array })
   images: Cell<ImageData[]> | ImageData[] = [];
@@ -352,50 +352,68 @@ export class CTImageInput extends BaseElement {
   private async _processFile(file: File): Promise<ImageData> {
     const id = this._generateId();
 
+    console.log(
+      `Processing file: ${file.name}, size: ${
+        formatFileSize(file.size)
+      }, maxSizeBytes: ${this.maxSizeBytes}`,
+    );
+
     // Compress if maxSizeBytes is set and file exceeds it
     let fileToProcess: Blob = file;
     if (this.maxSizeBytes && file.size > this.maxSizeBytes) {
+      console.log(`File exceeds limit, starting compression...`);
       try {
         fileToProcess = await this._compressImage(file, this.maxSizeBytes);
+        console.log(
+          `Compression complete: ${formatFileSize(fileToProcess.size)}`,
+        );
       } catch (error) {
         console.error("Compression failed, using original file:", error);
         // Continue with original file if compression fails
       }
+    } else {
+      console.log(`File is small enough, skipping compression`);
     }
 
     return new Promise((resolve, reject) => {
+      console.log(
+        `Converting compressed file to data URL (${
+          formatFileSize(fileToProcess.size)
+        })...`,
+      );
       const reader = new FileReader();
 
       reader.onload = () => {
-        try {
-          const dataUrl = reader.result as string;
+        const dataUrl = reader.result as string;
+        console.log(
+          `Data URL ready (${formatFileSize(dataUrl.length)} as string)`,
+        );
 
-          // Get image dimensions
-          const img = new Image();
-          img.onload = () => {
-            const imageData: ImageData = {
-              id,
-              name: file.name || `Photo-${Date.now()}.jpg`,
-              url: dataUrl,
-              data: dataUrl,
-              timestamp: Date.now(),
-              width: img.width,
-              height: img.height,
-              size: fileToProcess.size, // Use compressed size
-              type: fileToProcess.type || file.type,
-            };
+        // Get image dimensions from the data URL
+        const img = new Image();
+        img.onload = () => {
+          console.log(`Dimensions: ${img.width}x${img.height}`);
 
-            resolve(imageData);
+          const imageData: ImageData = {
+            id,
+            name: file.name || `Photo-${Date.now()}.jpg`,
+            url: dataUrl,
+            data: dataUrl,
+            timestamp: Date.now(),
+            width: img.width,
+            height: img.height,
+            size: fileToProcess.size, // Use compressed size
+            type: fileToProcess.type || file.type,
           };
 
-          img.onerror = () => {
-            reject(new Error("Failed to load image"));
-          };
+          resolve(imageData);
+        };
 
-          img.src = dataUrl;
-        } catch (error) {
-          reject(error);
-        }
+        img.onerror = () => {
+          reject(new Error("Failed to load image"));
+        };
+
+        img.src = dataUrl;
       };
 
       reader.onerror = () => {
