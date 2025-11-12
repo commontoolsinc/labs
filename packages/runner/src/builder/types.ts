@@ -15,6 +15,7 @@ import type {
   ComputedFunction,
   DeriveFunction,
   FetchDataFunction,
+  FetchProgramFunction,
   GenerateObjectFunction,
   GenerateTextFunction,
   GetRecipeEnvironmentFunction,
@@ -254,6 +255,7 @@ export interface BuilderFunctionsAndConstants {
   generateObject: GenerateObjectFunction;
   generateText: GenerateTextFunction;
   fetchData: FetchDataFunction;
+  fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
   navigateTo: NavigateToFunction;

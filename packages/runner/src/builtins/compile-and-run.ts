@@ -140,6 +140,27 @@ export function compileAndRun(
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
     if (hash === previousCallHash) return;
+
+    // Check if inputs are undefined/empty (e.g., during rehydration before cells load)
+    const hasValidInputs = program.main && program.files &&
+      program.files.length > 0;
+
+    // Special case: if inputs are invalid AND this is the hash for empty inputs,
+    // the user intentionally cleared them - proceed to clear outputs
+    const emptyInputsHash = refer({ files: [], main: "" }).toString();
+    const isIntentionallyEmpty = !hasValidInputs && hash === emptyInputsHash;
+
+    // If we have a previous valid result and inputs are currently invalid (likely rehydrating),
+    // don't clear the outputs - just wait for real inputs to load
+    // BUT if inputs are intentionally empty, we should clear
+    if (
+      !hasValidInputs && previousCallHash && previousCallHash !== hash &&
+      !isIntentionallyEmpty
+    ) {
+      // Don't update previousCallHash - we'll wait for valid inputs
+      return;
+    }
+
     previousCallHash = hash;
 
     // Abort any in-flight compilation before starting a new one
@@ -153,7 +174,7 @@ export function compileAndRun(
     errorsWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
-    if (!program.main || !program.files) {
+    if (!hasValidInputs) {
       pendingWithLog.set(false);
       return;
     }
