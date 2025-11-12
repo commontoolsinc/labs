@@ -2,16 +2,20 @@
 import {
   Cell,
   cell,
+  compileAndRun,
   derive,
+  fetchProgram,
   handler,
   ifElse,
   NAME,
+  navigateTo,
   recipe,
   UI,
 } from "commontools";
 import Chatbot from "./chatbot.tsx";
 import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 import { MentionableCharm } from "./backlinks-index.tsx";
+import { linkTool } from "./link-tool.tsx";
 
 interface OmniboxFABInput {
   mentionable: Cell<MentionableCharm[]>;
@@ -35,9 +39,27 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
+const fetchAndRunPattern = handler<
+  { url: string },
+  { mentionable: Cell<MentionableCharm[]> }
+>(({ url }, { mentionable: _mentionable }) => {
+  const { pending: _fetchPending, result: program, error: _fetchError } =
+    fetchProgram({ url });
+
+  const compileParams = derive(program, (p) => ({
+    files: p?.files ?? [],
+    main: p?.main ?? "",
+    input: { value: 10 },
+  }));
+  const { pending: _compilePending, result, error: _compileError } =
+    compileAndRun(compileParams);
+
+  return navigateTo(result);
+});
+
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
-  ({ mentionable: _mentionable }) => {
+  ({ mentionable }) => {
     const omnibot = Chatbot({
       system:
         "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
@@ -51,6 +73,15 @@ export default recipe<OmniboxFABInput>(
         },
         calculator: {
           pattern: calculator,
+        },
+        fetchAndRunPattern: {
+          description: "Fetch a pattern from the URL, compile it and run it.",
+          handler: fetchAndRunPattern({ mentionable }),
+        },
+        createLink: {
+          description:
+            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
+          handler: linkTool({ mentionable }),
         },
       },
     });
