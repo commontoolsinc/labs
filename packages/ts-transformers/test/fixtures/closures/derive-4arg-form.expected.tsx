@@ -5,7 +5,6 @@ export default function TestDerive() {
     const multiplier = cell(2);
     // Explicit 4-arg form with schemas - should still transform captures
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -19,7 +18,6 @@ export default function TestDerive() {
         },
         required: ["value", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value,

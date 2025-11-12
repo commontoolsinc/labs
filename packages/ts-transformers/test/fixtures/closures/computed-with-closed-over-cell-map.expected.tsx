@@ -8,7 +8,6 @@ export default function TestComputedWithClosedOverCellMap() {
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
     const doubled = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             numbers: {
@@ -24,7 +23,13 @@ export default function TestComputedWithClosedOverCellMap() {
             }
         },
         required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "number"
+        },
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
     }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe<{

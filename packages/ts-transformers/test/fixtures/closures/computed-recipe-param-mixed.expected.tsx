@@ -19,7 +19,6 @@ export default recipe({
     const offset = 5; // non-cell local
     const threshold = cell(15); // cell local
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             value: {
@@ -49,7 +48,6 @@ export default recipe({
         },
         required: ["value", "config", "offset", "threshold"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         value: value,

@@ -144,7 +144,6 @@ export default recipe({
                 items: state.items,
                 threshold: state.threshold
             } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 element: {
@@ -222,7 +221,6 @@ export default recipe({
         {/* Map with chained operations inside */}
         <ul>
           {state.names.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
@@ -296,7 +294,6 @@ export default recipe({
         {/* Map with conditional logic */}
         <ul>
           {state.users.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

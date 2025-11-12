@@ -15,7 +15,6 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (_state) => {
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {}
         } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, __ct_handler_params) => console.log("hi"))({})}>

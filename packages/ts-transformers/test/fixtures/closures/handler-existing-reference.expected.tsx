@@ -11,7 +11,6 @@ interface State {
     count: number;
 }
 const existing = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         state: {

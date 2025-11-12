@@ -5,7 +5,6 @@ export default function TestDerive() {
     const multiplier = cell(2);
     // Nested callback - inner array map should not capture outer multiplier
     const result = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             numbers: {
@@ -21,7 +20,13 @@ export default function TestDerive() {
             }
         },
         required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "number"
+        },
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
     }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe<{

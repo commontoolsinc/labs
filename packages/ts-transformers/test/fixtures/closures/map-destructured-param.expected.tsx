@@ -9,7 +9,6 @@ interface State {
     scale: number;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         points: {
@@ -42,7 +41,6 @@ export default recipe({
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
         {state.points.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

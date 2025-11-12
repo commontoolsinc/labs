@@ -5,7 +5,6 @@ export default function TestDeriveWithClosedOverOpaqueRefMap() {
     // Explicit derive with closed-over OpaqueRef
     // .map on a closed-over OpaqueRef should NOT be transformed to mapWithPattern
     const doubled = __ctHelpers.derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: {
             items: {
@@ -17,7 +16,13 @@ export default function TestDeriveWithClosedOverOpaqueRefMap() {
             }
         },
         required: ["items"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map(n => n * 2));
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "number"
+        },
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map(n => n * 2));
     return doubled;
 }
 // @ts-ignore: Internals

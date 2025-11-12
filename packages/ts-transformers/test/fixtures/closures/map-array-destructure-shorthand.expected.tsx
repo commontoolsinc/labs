@@ -8,7 +8,6 @@ interface State {
     items: ItemTuple[];
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -37,7 +36,6 @@ export default recipe({
         {/* Array destructured parameter - without fix, 'item' would be
                 incorrectly captured in params due to shorthand usage in JSX */}
         {items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {
@@ -65,7 +63,6 @@ export default recipe({
 
         {/* Multiple array destructured params */}
         {items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

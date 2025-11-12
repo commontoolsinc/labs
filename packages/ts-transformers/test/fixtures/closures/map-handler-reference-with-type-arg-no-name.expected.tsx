@@ -29,7 +29,6 @@ interface State {
     count: Cell<number>;
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         items: {
@@ -63,7 +62,6 @@ export default recipe({
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
         {state.items.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

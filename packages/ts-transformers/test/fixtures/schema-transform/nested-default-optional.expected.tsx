@@ -15,7 +15,6 @@ interface NestedOptionalArgs {
     state: Default<NestedOptionalState, {}>;
 }
 const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         state: {
@@ -62,7 +61,6 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
     context.state.set({ nested: { branch: { counter } } });
 });
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         state: {

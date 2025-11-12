@@ -25,7 +25,6 @@ export default recipe({
     const recordMap = state.records;
     return {
         [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            $schema: "https://json-schema.org/draft/2020-12/schema",
             type: "object",
             properties: {
                 recordMap: {

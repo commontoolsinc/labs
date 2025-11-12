@@ -24,7 +24,6 @@ export default recipe({
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__ctHelpers.recipe({
-                $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",
                 properties: {
                     element: {

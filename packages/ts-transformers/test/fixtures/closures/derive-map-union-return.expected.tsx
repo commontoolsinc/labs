@@ -13,7 +13,6 @@ interface State {
     messages: Message[];
 }
 export default recipe({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     properties: {
         messages: {
@@ -66,7 +65,6 @@ export default recipe({
     // caused type inference to fail, resulting in a 'true' schema instead of
     // the correct union type schema.
     const latestMessage = derive({
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         type: "array",
         items: {
             $ref: "#/$defs/Message"
