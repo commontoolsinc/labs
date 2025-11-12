@@ -343,6 +343,7 @@ export class CTPromptInput extends BaseElement {
         declare theme?: CTTheme;
 
         private _textareaElement?: HTMLElement;
+        private _modelSelectElement?: HTMLSelectElement;
 
         // Attachment management
         private attachments: Map<string, PromptAttachment> = new Map();
@@ -415,7 +416,11 @@ export class CTPromptInput extends BaseElement {
           this._textareaElement = this.shadowRoot?.querySelector(
             "textarea",
           ) as HTMLTextAreaElement;
+          this._modelSelectElement = this.shadowRoot?.querySelector(
+            ".model-select",
+          ) as HTMLSelectElement;
           this._updateThemeProperties();
+          this._applyModelValueToDom();
         }
 
         override updated(
@@ -437,6 +442,9 @@ export class CTPromptInput extends BaseElement {
           }
           if (changedProperties.has("model") && this.model != null) {
             this._modelController.bind(this.model);
+          }
+          if (changedProperties.has("model") || changedProperties.has("modelItems")) {
+            this._applyModelValueToDom();
           }
 
           // Manage mentions overlay based on controller state
@@ -737,7 +745,6 @@ export class CTPromptInput extends BaseElement {
                     ? html`
                       <select
                         class="model-select"
-                        .value="${this._modelController.getValue() || ""}"
                         @change="${this._handleModelChange}"
                         ?disabled="${this.disabled || this.pending}"
                         title="Select model"
@@ -902,6 +909,19 @@ export class CTPromptInput extends BaseElement {
           // When model is a plain string (not bound to Cell), update it directly
           if (typeof this.model === "string") {
             this.model = newValue;
+          }
+        }
+
+        /**
+         * Apply the current model value to the DOM select element
+         * This ensures the select element shows the correct selected option
+         */
+        private _applyModelValueToDom() {
+          if (!this._modelSelectElement) return;
+
+          const currentValue = this._modelController.getValue();
+          if (currentValue != null) {
+            this._modelSelectElement.value = String(currentValue);
           }
         }
 
