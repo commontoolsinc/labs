@@ -117,16 +117,16 @@ export async function compressImage(
       maxDim: number,
     ): Promise<{ blob: Blob; quality: number } | null> => {
       let bestBlob: Blob | null = null;
-      let bestQuality = maxQuality;
+      let bestQuality = minQuality;
 
-      // First check if even max quality is too large at this dimension
-      const maxQualityBlob = await compressAtSettings(maxDim, maxQuality);
-      if (maxQualityBlob.size > maxSizeBytes) {
-        // Need to reduce dimension
+      // First check if even min quality is too large at this dimension
+      const minQualityBlob = await compressAtSettings(maxDim, minQuality);
+      if (minQualityBlob.size > maxSizeBytes) {
+        // Even minimum quality is too large, need to reduce dimension
         return null;
       }
 
-      // Binary search for highest quality that still meets size requirement
+      // Binary search for HIGHEST quality (best visual quality) that still meets size requirement
       let low = minQuality;
       let high = maxQuality;
 
@@ -135,13 +135,13 @@ export async function compressImage(
         const blob = await compressAtSettings(maxDim, mid);
 
         if (blob.size <= maxSizeBytes) {
-          // This quality works, try going higher (less compression)
+          // File fits! Try HIGHER quality to maximize image quality
           bestBlob = blob;
           bestQuality = mid;
-          high = mid;
+          low = mid; // Move lower bound UP to search higher quality range
         } else {
-          // File too large, need lower quality (more compression)
-          low = mid;
+          // File too large, need LOWER quality (more compression)
+          high = mid; // Move upper bound DOWN to search lower quality range
         }
       }
 
@@ -150,10 +150,10 @@ export async function compressImage(
         return { blob: bestBlob, quality: bestQuality };
       }
 
-      // Otherwise, try with the high quality setting one more time
-      const finalBlob = await compressAtSettings(maxDim, high);
+      // Otherwise, try with the low quality setting one more time
+      const finalBlob = await compressAtSettings(maxDim, low);
       if (finalBlob.size <= maxSizeBytes) {
-        return { blob: finalBlob, quality: high };
+        return { blob: finalBlob, quality: low };
       }
 
       return null;
