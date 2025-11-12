@@ -43,7 +43,7 @@ const fetchAndRunPattern = handler<
   { url: string },
   { mentionable: Cell<MentionableCharm[]> }
 >(({ url }, { mentionable }) => {
-  const { pending: fetchPending, result: program, error: _fetchError } =
+  const { pending: _fetchPending, result: program, error: _fetchError } =
     fetchProgram({ url });
 
   const compileParams = derive(program, (p) => ({
@@ -59,7 +59,7 @@ const fetchAndRunPattern = handler<
 
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
-  ({ mentionable }) => {
+  ({ mentionable: _mentionable }) => {
     const omnibot = Chatbot({
       system:
         "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
