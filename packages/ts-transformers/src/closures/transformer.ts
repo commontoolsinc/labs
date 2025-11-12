@@ -759,16 +759,110 @@ function buildHandlerStateTypeNode(
 }
 
 /**
+ * Check if a node is inside a derive or computed callback.
+ * Returns the callback function and the derive/computed call if found.
+ */
+function findContainingDeriveCallback(
+  node: ts.Node,
+  context: TransformationContext,
+): { callback: ts.FunctionLikeDeclaration; deriveCall: ts.CallExpression } | undefined {
+  let current: ts.Node = node;
+
+  // Walk up the tree to find if we're inside a function expression/arrow function
+  while (current.parent) {
+    // Check if current is a function-like node
+    if (isFunctionLikeExpression(current)) {
+      // Check if this function is an argument to a derive/computed call
+      const parent = current.parent;
+      if (ts.isCallExpression(parent)) {
+        const callKind = detectCallKind(parent, context.checker);
+        // Check for both derive and computed (which becomes derive)
+        if (callKind?.kind === "derive" ||
+            (callKind?.kind === "builder" && callKind.builderName === "computed")) {
+          return { callback: current, deriveCall: parent };
+        }
+      }
+    }
+    current = current.parent;
+  }
+
+  return undefined;
+}
+
+/**
+ * Check if a map call target is a captured identifier (not a parameter).
+ * Returns true if the target will be captured and unwrapped by a derive transformation.
+ */
+function isMapOnCapturedIdentifier(
+  mapCall: ts.CallExpression,
+  callback: ts.FunctionLikeDeclaration,
+  checker: ts.TypeChecker,
+): boolean {
+  // Get the target of the map call (e.g., `items` in `items.map(...)`)
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+    return false;
+  }
+
+  const target = mapCall.expression.expression;
+
+  // For now, only handle simple identifiers
+  // Property access chains (e.g., state.items.map) are more complex
+  if (!ts.isIdentifier(target)) {
+    return false;
+  }
+
+  // Check if this identifier is a parameter of the callback
+  const paramNames = new Set(
+    callback.parameters.flatMap((p) => extractBindingNames(p.name))
+  );
+
+  if (paramNames.has(target.text)) {
+    // It's a parameter, not a capture
+    return false;
+  }
+
+  // Check if it's a captured variable (defined outside the callback)
+  const symbol = checker.getSymbolAtLocation(target);
+  if (!symbol) return false;
+
+  const declarations = symbol.getDeclarations();
+  if (!declarations || declarations.length === 0) return false;
+
+  // Check if any declaration is outside the callback
+  const hasExternalDeclaration = declarations.some((decl) =>
+    !isDeclaredWithinFunction(decl, callback)
+  );
+
+  return hasExternalDeclaration;
+}
+
+/**
  * Check if a map call should be transformed to mapWithPattern.
  * Returns false if the map will end up inside a derive (where the array is unwrapped).
  *
  * This happens when the map is nested inside a larger expression with opaque refs,
  * e.g., `list.length > 0 && list.map(...)` becomes `derive(list, list => ...)`
+ *
+ * It also returns false if the map is inside a derive/computed callback and operates
+ * on a captured identifier, because the identifier will be unwrapped by the derive.
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
+  const { checker } = context;
+
+  // Check if we're inside a derive/computed callback with a captured identifier
+  const deriveContext = findContainingDeriveCallback(mapCall, context);
+  if (deriveContext) {
+    const { callback } = deriveContext;
+    if (isMapOnCapturedIdentifier(mapCall, callback, checker)) {
+      // The map target is a captured identifier that will be unwrapped
+      // Don't transform to mapWithPattern
+      return false;
+    }
+  }
+
   // Find the closest containing JSX expression
   let node: ts.Node = mapCall;
   let closestJsxExpression: ts.JsxExpression | undefined;
