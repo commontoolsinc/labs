@@ -35,11 +35,15 @@ export function computeInputHash<T extends Record<string, any>>(
 /**
  * Attempts to claim the mutex for a request. Only claims if no other
  * request is active or if the previous request has timed out.
+ * When claiming, sets pending=true and clears result/error to maintain
+ * the invariant that result/error are undefined while pending.
  */
 export async function tryClaimMutex<T extends Record<string, any>>(
   runtime: IRuntime,
   inputsCell: Cell<T>,
   pending: Cell<boolean>,
+  result: Cell<any>,
+  error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   timeout: number = REQUEST_TIMEOUT,
@@ -55,10 +59,24 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
+    const currentResult = result.withTx(tx).get();
     const now = Date.now();
 
     inputs = inputsCell.getAsQueryResult([], tx);
     inputHash = computeInputHash(tx, inputsCell);
+
+    // Don't claim if we already have a valid result for these inputs
+    const hasValidResult = currentResult !== undefined &&
+                           currentInternal.inputHash === inputHash;
+
+    if (hasValidResult) {
+      // Clean up stuck pending state if we have a valid result
+      if (isPending) {
+        pending.withTx(tx).set(false);
+      }
+      claimed = false;
+      return;
+    }
 
     // Can claim if:
     // 1. Nothing is pending, OR
@@ -70,6 +88,10 @@ export async function tryClaimMutex<T extends Record<string, any>>(
 
     if (canClaim) {
       pending.withTx(tx).set(true);
+      // Clear result and error when starting a new request to maintain
+      // the invariant that they're undefined while pending
+      result.withTx(tx).set(undefined);
+      error.withTx(tx).set(undefined);
       internal.withTx(tx).set({
         requestId,
         lastActivity: now,

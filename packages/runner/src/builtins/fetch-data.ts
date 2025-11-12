@@ -128,25 +128,64 @@ export function fetchData(
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
-      error.withTx(tx).set(undefined);
+      // Only update if values actually need to change to reduce transaction conflicts
+      const currentPending = pending.withTx(tx).get();
+      const currentResult = result.withTx(tx).get();
+      const currentError = error.withTx(tx).get();
+      const currentInternal = internal.withTx(tx).get();
+
+      if (currentPending !== false) pending.withTx(tx).set(false);
+      if (currentResult !== undefined) result.withTx(tx).set(undefined);
+      if (currentError !== undefined) error.withTx(tx).set(undefined);
+      // Clear internal state when URL is empty so we don't think we have cached results
+      if (currentInternal.inputHash !== "") {
+        internal.withTx(tx).set({
+          requestId: "",
+          lastActivity: 0,
+          inputHash: "",
+        });
+      }
       return;
     }
 
-    // Check if inputs changed - if so, abort any in-flight request
+    // Check if inputs changed
     const currentInternal = internal.withTx(tx).get();
-    if (myRequestId && currentInternal?.inputHash !== inputHash) {
-      abortController?.abort("Inputs changed");
-      myRequestId = undefined;
+    const inputsChanged = currentInternal?.inputHash !== inputHash;
+
+    if (inputsChanged) {
+      // Abort any in-flight request
+      if (myRequestId) {
+        abortController?.abort("Inputs changed");
+        myRequestId = undefined;
+      }
+
+      // Clear stale outputs immediately when inputs change
+      result.withTx(tx).set(undefined);
+      error.withTx(tx).set(undefined);
     }
 
-    // Try to start a new request
-    if (!myRequestId) {
+    // Check if we already have a result for these inputs
+    let currentPending = pending.withTx(tx).get();
+    const currentResult = result.withTx(tx).get();
+
+    // Clean up stuck pending state: if we have a valid result for current inputs
+    // but pending is still true (e.g., app was shut down during a request),
+    // clear the pending flag
+    if (!inputsChanged && currentResult !== undefined && currentPending === true) {
+      pending.withTx(tx).set(false);
+      currentPending = false;
+    }
+
+    const hasResult = !inputsChanged &&
+                      currentResult !== undefined &&
+                      currentPending === false;
+
+    // Try to start a new request only if we don't have a result and not currently pending
+    if (!myRequestId && !hasResult && !currentPending) {
       const newRequestId = crypto.randomUUID();
 
       // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(runtime, inputsCell, pending, internal, newRequestId).then(
+      tryClaimMutex(runtime, inputsCell, pending, result, error, internal, newRequestId).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
             // Another tab is handling this, we're done
