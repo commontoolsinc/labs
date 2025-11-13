@@ -151,23 +151,26 @@ export function fetchData(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching
+      // Try to transition to fetching (CAS - only one runtime wins)
       const requestId = crypto.randomUUID();
-      transitionToFetching(cache, inputHash, requestId, tx);
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
-      // Start fetch asynchronously
-      myRequestId = requestId;
-      abortController = new AbortController();
-      startFetch(
-        runtime,
-        cache,
-        inputHash,
-        url,
-        inputsCell.withTx(tx).key("mode").get(),
-        inputsCell.withTx(tx).key("options").get(),
-        requestId,
-        abortController.signal,
-      );
+      if (didStart) {
+        // We won the race - start fetch asynchronously
+        myRequestId = requestId;
+        abortController = new AbortController();
+        startFetch(
+          runtime,
+          cache,
+          inputHash,
+          url,
+          inputsCell.withTx(tx).key("mode").get(),
+          inputsCell.withTx(tx).key("options").get(),
+          requestId,
+          abortController.signal,
+        );
+      }
+      // else: Another runtime is already fetching, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout
       if (isTimedOut(state, DATA_REQUEST_TIMEOUT)) {

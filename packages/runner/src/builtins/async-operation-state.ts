@@ -37,26 +37,38 @@ export const asyncOperationCacheSchema = {
 } as const satisfies JSONSchema;
 
 /**
- * Transition the state machine to "fetching" state.
- * Creates a new cache entry with the given requestId and current timestamp.
+ * Attempt to transition the state machine to "fetching" state using CAS.
+ * Only succeeds if the current state is "idle" (or non-existent).
+ * This prevents multiple runtimes from starting duplicate work.
  *
  * @param cache - The cache cell to update
  * @param inputHash - Hash of the inputs for this operation
  * @param requestId - Unique ID for this request
  * @param tx - Transaction to perform the update in
+ * @returns boolean - true if the transition succeeded (this runtime should start the fetch)
  */
 export function transitionToFetching<T, E = string>(
   cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
   inputHash: string,
   requestId: string,
   tx: IExtendedStorageTransaction,
-): void {
-  cache.withTx(tx).update({
-    [inputHash]: {
-      inputHash,
-      state: { type: "fetching", requestId, startTime: Date.now() },
-    },
-  });
+): boolean {
+  const allEntries = cache.withTx(tx).get();
+  const entry = allEntries[inputHash];
+
+  // Only transition if currently idle (or non-existent)
+  // This implements CAS to prevent duplicate work across multiple runtimes
+  if (!entry || entry.state.type === "idle") {
+    cache.withTx(tx).update({
+      [inputHash]: {
+        inputHash,
+        state: { type: "fetching", requestId, startTime: Date.now() },
+      },
+    });
+    return true; // We won the race to start fetching
+  }
+
+  return false; // Someone else is already fetching
 }
 
 /**

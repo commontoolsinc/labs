@@ -147,35 +147,39 @@ export function llm(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching
+      // Try to transition to fetching (CAS - only one runtime wins)
       const requestId = crypto.randomUUID();
-      transitionToFetching(cache, inputHash, requestId, tx);
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
-      const llmParams: LLMRequest = {
-        system: system ?? "",
-        messages: messages ?? [],
-        stop: stop ?? "",
-        maxTokens: maxTokens ?? 4096,
-        stream: true,
-        model: model ?? DEFAULT_MODEL_NAME,
-        metadata: {
-          // FIXME(ja): how do we get the context of space/charm id here
-          // bf: I also do not know... this one is tricky
-          context: "charm",
-        },
-        cache: true,
-        // tools will be added below if present
-      };
+      if (didStart) {
+        // We won the race - start LLM call asynchronously
+        const llmParams: LLMRequest = {
+          system: system ?? "",
+          messages: messages ?? [],
+          stop: stop ?? "",
+          maxTokens: maxTokens ?? 4096,
+          stream: true,
+          model: model ?? DEFAULT_MODEL_NAME,
+          metadata: {
+            // FIXME(ja): how do we get the context of space/charm id here
+            // bf: I also do not know... this one is tricky
+            context: "charm",
+          },
+          cache: true,
+          // tools will be added below if present
+        };
 
-      startLLM(
-        runtime,
-        cache,
-        inputHash,
-        llmParams,
-        messages,
-        tools ? inputsCell.key("tools") : undefined,
-        requestId,
-      );
+        startLLM(
+          runtime,
+          cache,
+          inputHash,
+          llmParams,
+          messages,
+          tools ? inputsCell.key("tools") : undefined,
+          requestId,
+        );
+      }
+      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (60 seconds for LLM requests with potential tool execution)
       if (isTimedOut(state, 60000)) {
@@ -424,15 +428,16 @@ export function generateText(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching
+      // Try to transition to fetching (CAS - only one runtime wins)
       const requestId = crypto.randomUUID();
-      transitionToFetching(cache, inputHash, requestId, tx);
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
-      // Convert prompt to messages if provided, otherwise use messages directly
-      const requestMessages: BuiltInLLMMessage[] = messages ||
-        [{ role: "user", content: prompt! }];
+      if (didStart) {
+        // Convert prompt to messages if provided, otherwise use messages directly
+        const requestMessages: BuiltInLLMMessage[] = messages ||
+          [{ role: "user", content: prompt! }];
 
-      const llmParams: LLMRequest = {
+        const llmParams: LLMRequest = {
         system: system ?? "",
         messages: requestMessages,
         stop: "",
@@ -446,15 +451,17 @@ export function generateText(
         // tools will be added below if present
       };
 
-      startGenerateText(
-        runtime,
-        cache,
-        inputHash,
-        llmParams,
-        requestMessages,
-        tools ? inputsCell.key("tools") : undefined,
-        requestId,
-      );
+        startGenerateText(
+          runtime,
+          cache,
+          inputHash,
+          llmParams,
+          requestMessages,
+          tools ? inputsCell.key("tools") : undefined,
+          requestId,
+        );
+      }
+      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (60 seconds for LLM requests with potential tool execution)
       if (isTimedOut(state, 60000)) {
@@ -706,19 +713,20 @@ export function generateObject<T extends Record<string, unknown>>(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching
+      // Try to transition to fetching (CAS - only one runtime wins)
       const requestId = crypto.randomUUID();
-      transitionToFetching(cache, inputHash, requestId, tx);
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
-      const readyMetadata = metadata
-        ? JSON.parse(JSON.stringify(metadata))
-        : {};
+      if (didStart) {
+        const readyMetadata = metadata
+          ? JSON.parse(JSON.stringify(metadata))
+          : {};
 
-      // Convert prompt to messages if provided, otherwise use messages directly
-      const requestMessages: BuiltInLLMMessage[] = messages ||
-        [{ role: "user", content: prompt! }];
+        // Convert prompt to messages if provided, otherwise use messages directly
+        const requestMessages: BuiltInLLMMessage[] = messages ||
+          [{ role: "user", content: prompt! }];
 
-      const generateObjectParams: LLMGenerateObjectRequest = {
+        const generateObjectParams: LLMGenerateObjectRequest = {
         messages: requestMessages,
         maxTokens: maxTokens ?? 8192,
         schema: JSON.parse(JSON.stringify(schema)),
@@ -730,17 +738,19 @@ export function generateObject<T extends Record<string, unknown>>(
         cache: cacheParam ?? true,
       };
 
-      if (system) {
-        generateObjectParams.system = system;
-      }
+        if (system) {
+          generateObjectParams.system = system;
+        }
 
-      startGenerateObject(
-        runtime,
-        cache,
-        inputHash,
-        generateObjectParams,
-        requestId,
-      );
+        startGenerateObject(
+          runtime,
+          cache,
+          inputHash,
+          generateObjectParams,
+          requestId,
+        );
+      }
+      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (30 seconds for LLM requests)
       if (isTimedOut(state, 30000)) {
