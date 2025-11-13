@@ -11,6 +11,7 @@ import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import {
   createQueryResultProxy,
+  getCellOrThrow,
   isQueryResultForDereferencing,
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
@@ -327,7 +328,6 @@ export function validateAndTransformNew(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
-  _seen: Array<[string, any]> = [],
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
   // create temporary transactions to read. The main reason we use transactions
@@ -366,13 +366,9 @@ export function validateAndTransformNew(
     schema: resolvedSchema,
     rootSchema,
   };
-  console.log("VATNew link", link, schema);
 
   if (resolvedSchema === undefined) {
-    const rv = createQueryResultProxy(runtime, tx, link);
-    console.log("Returning rv", clearRuntime(rv));
-    return rv;
-    //return createQueryResultProxy(runtime, tx, link);
+    return createQueryResultProxy(runtime, tx, link);
   }
 
   const objectCreator = new TransformObjectCreator(runtime, tx!);
@@ -386,7 +382,7 @@ export function validateAndTransformNew(
     path: doc.address.path,
     schemaContext: { schema: combinedSchema, rootSchema: rootSchema! },
   };
-  // TODO: these constructor parameters are complex enough that we should
+  // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
@@ -395,6 +391,7 @@ export function validateAndTransformNew(
     undefined,
     undefined,
     objectCreator,
+    false,
     false,
   );
   const result = traverser.traverse(doc);
@@ -414,16 +411,16 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
     _key: string,
     _value: JSONValue,
   ) {
+    //console.log("TOC.AOP");
     //obj[key] = value;
   }
-  // TODO: this interface should probably be combined with createObject call
-  // since there's a lot of overlap.
   applyDefault<T>(
     link: NormalizedFullLink,
-    value: T,
-  ): T {
+    value: T | undefined,
+  ): T | undefined {
     return processDefaultValue(this.runtime, this.tx, link, value);
   }
+
   // This is an early pass to see if we should just create a proxy or cell
   // If not, we will actually resolve our links to get to our values.
   createObject(
@@ -441,11 +438,8 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
     } else if (isObject(link.schema)) {
       const { asCell, asStream, ...restSchema } = link.schema;
       if (asCell || asStream) {
-        // FIXME: wrong type cast -- Cell<T>
-        // TODO: deal with anyOf/oneOf with asCell/asStream
-        // TODO:: Figure out if we should purge asCell/asStream from restSchema children
-        //console.log("create cell link", link);
-        console.log("Calling create cell with schema:", restSchema);
+        // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
+        // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
@@ -458,6 +452,7 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
         return createQueryResultProxy(this.runtime, this.tx, link);
       }
     }
+    // link.schema is not true, and not asCell/asStream
     if (isObject(link.schema)) {
       // If we're undefined, check for a default and apply that
       if (link.schema.default !== undefined && value === undefined) {
@@ -484,16 +479,77 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
                 ...link,
                 path: [...link.path, propName],
                 schema: propSchema,
-              }, propSchema.default);
+              }, undefined);
             }
           }
         }
+        //} else if (Array.isArray(value)) {
+        // FIXME(@ubik2): Pick up the createDataURI change from main
+        // value = value.map((item, index) => {
+        //   const itemSchema = this.runtime.cfc.schemaAtPath(
+        //     link.schema!,
+        //     [index.toString()],
+        //     link.rootSchema,
+        //   );
+        //   return this.postProcessArrayElement(link, item, index, itemSchema);
+        // });
       }
-      // TODO: What if we're an array? Is it possible to have undefined
+      // TODO(@ubik2): What if we're an array? Is it possible to have undefined
       // elements in our array?
     }
-    console.log("AWBTCS", link);
     return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
+  }
+
+  private _postProcessArrayElement(
+    link: NormalizedFullLink,
+    value: any[],
+    index: number,
+    elementSchema: JSONSchema,
+  ) {
+    // If the element on the array is a link, we follow that link so the
+    // returned object is the current item at that location (otherwise the
+    // link would refer to "Nth element"). This is important when turning
+    // returned objects back into cells: We want to then refer to the actual
+    // object by default, not the array location.
+    //
+    // This makes
+    // ```ts
+    // const array = [...cell.get()];
+    // array.splice(index, 1);
+    // cell.set(array);
+    // ```
+    // work as expected.
+    let elementLink: NormalizedFullLink = {
+      ...link,
+      path: [...link.path, String(index)],
+      schema: elementSchema,
+    };
+    const maybeLink = readMaybeLink(this.tx, elementLink);
+    if (maybeLink) {
+      const newLink = {
+        ...maybeLink,
+        schema: elementLink.schema,
+        rootSchema: elementLink.rootSchema,
+      };
+      if (!isCell(value)) {
+        console.log("Should replace", elementLink, "with", newLink, value);
+        if (isQueryResultForDereferencing(value)) {
+          const testCell = getCellOrThrow(value);
+          console.log(
+            "value[toCell]().link:",
+            testCell.getAsNormalizedFullLink(),
+          );
+        }
+      } else {
+        console.log("Should replace cell", elementLink, "with", newLink, value);
+      }
+      elementLink = newLink;
+      // I can copy value and replace the toCell method, but we really need
+      // to re-walk the children too, since our path is likely a component
+      // in the paths of our children.
+    }
+    // It wasn't a link
+    return value;
   }
 }
 
@@ -512,14 +568,17 @@ export function validateAndTransform(
   link: NormalizedFullLink,
   seen: Array<[string, any]> = [],
 ): any {
-  console.log("Calling VAT with", link);
-  const rv = validateAndTransformNew(runtime, tx, link, seen);
-  //const rv = validateAndTransformOrig(runtime, tx, link, seen);
-  //console.log("VAT rv", clearRuntime(rv), link.schema, link.rootSchema);
-  return rv;
+  //console.log("Calling VAT with", link);
+  let useNew = false;
+  useNew = true;
+  if (useNew) {
+    return validateAndTransformNew(runtime, tx, link);
+  }
+  return validateAndTransformOrig(runtime, tx, link, seen);
 }
 
-export function validateAndTransformOrig(
+// TODO: remove this when done debugging
+function validateAndTransformOrig(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
@@ -857,7 +916,7 @@ export function validateAndTransformOrig(
           (isRecord(value) ||
             (isObject(childSchema) && childSchema.default !== undefined))
         ) {
-          console.log("VATOrig: childSchema", childSchema, link);
+          //console.log("VATOrig: childSchema", childSchema, link);
           result[key] = validateAndTransform(
             runtime,
             tx,
@@ -961,6 +1020,7 @@ export function validateAndTransformOrig(
         schema: elementSchema,
       };
       const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
+      // const debugLink = { ...elementLink };
       if (maybeLink) {
         elementLink = {
           ...maybeLink,
@@ -975,6 +1035,9 @@ export function validateAndTransformOrig(
         elementLink,
         seen,
       );
+      // if (maybeLink) {
+      //   console.log("Replaced", debugLink, "with", elementLink, result[i]);
+      // }
     }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }

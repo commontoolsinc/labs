@@ -414,6 +414,7 @@ export abstract class BaseObjectTraverser<
     public objectCreator: IObjectCreator<JSONValue> =
       new StandardObjectCreator(),
     protected traverseCells = true,
+    protected verbose = false,
   ) {}
   abstract traverse(doc: IAttestation): V | JSONValue | undefined;
   /**
@@ -479,15 +480,17 @@ export abstract class BaseObjectTraverser<
       for (const v of entries) {
         newValue.push(v);
       }
-      return this.objectCreator.createObject(
-        getNormalizedLink(doc.address, space, true, true),
-        newValue,
-      );
+      // TODO: We may wan the link to be to the top of a chain,
+      // while here it's pointing to the bottom of the chain
+      const newLink = getNormalizedLink(doc.address, space, true, true);
+      return this.objectCreator.createObject(newLink, newValue);
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
         // FIXME: A cell link with a schema needs to go back into traverseSchema behavior
-        console.log("Encountered cell link in traverseDAG", doc.value);
+        if (this.verbose) {
+          console.log("Encountered cell link in traverseDAG", doc.value);
+        }
         const [newDoc, _] = getAtPath(
           this.tx,
           doc,
@@ -540,10 +543,10 @@ export abstract class BaseObjectTraverser<
             newValue[k] = v;
           }
         }
-        return this.objectCreator.createObject(
-          getNormalizedLink(doc.address, space, true, true),
-          newValue,
-        );
+        // TODO: We may wan the link to be to the top of a chain,
+        // while here it's pointing to the bottom of the chain
+        const newLink = getNormalizedLink(doc.address, space, true, true);
+        return this.objectCreator.createObject(newLink, newValue);
       }
     } else {
       logger.error(() => ["Encountered unexpected object: ", doc.value]);
@@ -679,7 +682,6 @@ function followPointer(
   includeSource?: boolean,
 ): [IAttestation, SchemaPathSelector | undefined] {
   const link = parseLink(doc.value)!;
-  console.log("Called FP", doc.value);
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceAddress = (link.id !== undefined)
@@ -704,20 +706,11 @@ function followPointer(
     const linkSchemaContext = link.schema !== undefined
       ? { schema: link.schema, rootSchema: link.rootSchema ?? link.schema }
       : undefined;
-    //console.log("selector.schemaContext", selector.schemaContext);
     // When traversing links, we combine the schema
     selector.schemaContext = combineSchemaContext(
       selector.schemaContext,
       linkSchemaContext,
     );
-    // console.log(
-    //   "selector.schemaContext",
-    //   selector.schemaContext,
-    //   "linkSchemaContext",
-    //   linkSchemaContext,
-    //   "doc.value",
-    //   doc.value,
-    // );
   }
   using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
   if (t === null) {
@@ -853,7 +846,52 @@ function combineSchemaContext(
     parentSchemaContext.schema,
     linkSchemaContext.schema,
   );
-  return { schema: schema, rootSchema: schema };
+  // Collect $defs from each schema for our new root schema
+  // There's the possibility of collisions here
+  let newRootSchema = {};
+  if (isObject(parentSchemaContext.rootSchema)) {
+    newRootSchema = mergeDefs(parentSchemaContext.rootSchema, newRootSchema);
+  }
+  if (isObject(linkSchemaContext.rootSchema)) {
+    newRootSchema = mergeDefs(linkSchemaContext.rootSchema, newRootSchema);
+  }
+  return { schema: schema, rootSchema: newRootSchema };
+}
+
+/**
+ * Add any $defs or definitions from sourceSchema to destSchema
+ * and return the result. The destSchema is not modified.
+ *
+ * If a definition exists in both sourceSchema and destSchema, the version
+ * in destsSchema will be used.
+ *
+ * @param sourceSchema
+ * @param destSchema
+ * @returns the result of merging definitions from sourceSchema into
+ *   destSchema.
+ */
+function mergeDefs(sourceSchema: JSONSchemaObj, destSchema: JSONSchemaObj) {
+  const rv = { ...destSchema };
+  if (sourceSchema.$defs !== undefined && destSchema.$defs !== undefined) {
+    rv.$defs = {
+      ...sourceSchema.$defs,
+      ...destSchema.$defs,
+    };
+  } else if (sourceSchema.$defs !== undefined) {
+    rv.$defs = sourceSchema.$defs;
+  }
+  if (
+    sourceSchema.definitions !== undefined &&
+    destSchema.definitions !== undefined
+  ) {
+    rv.definitions = {
+      ...sourceSchema.definitions,
+      ...destSchema.definitions,
+    };
+  } else if (sourceSchema.definitions !== undefined) {
+    rv.definitions = sourceSchema.definitions;
+  }
+  return rv;
 }
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
@@ -1015,7 +1053,12 @@ export function combineSchema(
       parentSchema.items,
       linkSchema.items,
     );
-    return { type: "array", items: mergedSchemaItems };
+    // this isn't great, but at least grab the flags from parent schema
+    return mergeSchemaFlags(parentSchema, {
+      ...linkSchema,
+      type: "array",
+      items: mergedSchemaItems,
+    });
   } else if (isObject(linkSchema) && isObject(parentSchema)) {
     // this isn't great, but at least grab the flags from parent schema
     return mergeSchemaFlags(parentSchema, linkSchema);
@@ -1165,8 +1208,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
     >(deepEqual),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,
+    verbose?: boolean,
   ) {
     super(tx, undefined, objectCreator, traverseCells);
+    if (verbose !== undefined) this.verbose = verbose;
   }
 
   override traverse(
@@ -1253,6 +1298,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
     return schemaContext;
   }
 
+  // Generally handles anyOf
+  // TODO: Need to break this up -- it's too long
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
@@ -1264,12 +1311,79 @@ export class SchemaObjectTraverser<V extends JSONValue>
       schemaContext.schema,
       schemaContext.rootSchema,
     );
-    console.log("Calling TWSC with", debugLink);
+    if (this.verbose) {
+      console.log("Calling TWSC with", debugLink, doc.value);
+    }
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
       return undefined;
     }
     schemaContext = resolved;
+    // Do some partial anyOf handling -- this should be improved later
+    if (isObject(schemaContext.schema)) {
+      if (schemaContext.schema.anyOf) {
+        const { anyOf, ...restSchema } = schemaContext.schema;
+        // Consider items without asCell or asStream first, since if we aren't
+        // traversing cells, we consider them a match.
+        const sortedAnyOf = [
+          ...anyOf.filter((option) =>
+            !SchemaObjectTraverser.asCellOrStream(option)
+          ),
+          ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
+        ];
+        for (const optionSchema of sortedAnyOf) {
+          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+            continue;
+          }
+          // TODO: This merge isn't quite right.
+          // A {type: object, anyOf: [{type: string}]} schema should never match
+          const mergedSchema = isObject(optionSchema)
+            ? { ...restSchema, ...optionSchema }
+            : optionSchema
+            ? restSchema // optionSchema === true
+            : false; // optionSchema === false
+          const val = this.traverseWithSchemaContext(doc, {
+            schema: mergedSchema,
+            rootSchema: schemaContext.rootSchema,
+          });
+          if (val !== undefined) {
+            return val;
+          }
+        }
+        // None of the anyOf patterns matched
+        return undefined;
+      } else if (schemaContext.schema.allOf) {
+        let lastVal;
+        const { allOf, ...restSchema } = schemaContext.schema;
+        for (const optionSchema of allOf) {
+          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+            return undefined;
+          }
+          // TODO: This merge isn't quite right.
+          // A {type: object, allOf: [{type: string}]} schema should never match
+          const mergedSchema = isObject(optionSchema)
+            ? { ...restSchema, ...optionSchema }
+            : optionSchema
+            ? restSchema // optionSchema === true
+            : false; // optionSchema === false
+          const val = this.traverseWithSchemaContext(doc, {
+            schema: mergedSchema,
+            rootSchema: schemaContext.rootSchema,
+          });
+          if (val !== undefined) {
+            // TODO: these should be merged?
+            lastVal = val;
+          } else {
+            // One of the allOf patterns failed to match
+            return undefined;
+          }
+        }
+        if (allOf.length > 0) {
+          return lastVal;
+        }
+        // If we have allOf: [], just ignore it and continue
+      }
+    }
     if (
       ContextualFlowControl.isTrueSchema(schemaContext.schema) &&
       !SchemaObjectTraverser.asCellOrStream(schemaContext.schema)
@@ -1279,7 +1393,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
         : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      console.log("Switching to traverseDAG for", debugLink);
+      if (this.verbose) {
+        console.log("Switching to traverseDAG for", debugLink);
+      }
       return this.traverseDAG(
         doc,
         this.space,
@@ -1335,15 +1451,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
         for (const item of entries) {
           newValue.push(item);
         }
-        return this.objectCreator.createObject(
-          getNormalizedLink(
-            doc.address,
-            this.space,
-            schemaObj,
-            schemaContext.rootSchema,
-          ),
-          newValue,
+        // TODO: We may want the link to be to the top of a chain,
+        // while here it's pointing to the bottom of the chain
+        const newLink = getNormalizedLink(
+          doc.address,
+          this.space,
+          schemaObj,
+          schemaContext.rootSchema,
         );
+        return this.objectCreator.createObject(newLink, newValue);
       }
       return undefined;
     } else if (isObject(doc.value)) {
@@ -1368,15 +1484,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
         for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
         }
-        return this.objectCreator.createObject(
-          getNormalizedLink(
-            doc.address,
-            this.space,
-            schemaObj,
-            schemaContext.rootSchema,
-          ),
-          newValue,
+        // TODO: We may want the link to be to the top of a chain,
+        // while here it's pointing to the bottom of the chain
+        const newLink = getNormalizedLink(
+          doc.address,
+          this.space,
+          schemaObj,
+          schemaContext.rootSchema,
         );
+        return this.objectCreator.createObject(newLink, newValue);
       }
     }
   }
@@ -1391,13 +1507,52 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return false;
     }
     const schemaObj = schema as JSONSchemaObj;
+    // Check the top level type flag
     if ("type" in schemaObj) {
       if (Array.isArray(schemaObj["type"])) {
-        return schemaObj["type"].includes(valueType);
+        if (!schemaObj["type"].includes(valueType)) {
+          return false;
+        }
       } else if (isString(schemaObj["type"])) {
-        return schemaObj["type"] === valueType;
+        if (schemaObj["type"] !== valueType) {
+          return false;
+        }
       } else {
         // invalid schema type
+        return false;
+      }
+    }
+    if (schemaObj.allOf) {
+      // Special limited allOf handling here
+      for (const option of schemaObj.allOf) {
+        if (!this.isValidType(option, valueType)) {
+          return false;
+        }
+      }
+    }
+    if (schemaObj.anyOf) {
+      let validOptions = false;
+      // Special limited anyOf handling here
+      for (const option of schemaObj.anyOf) {
+        if (this.isValidType(option, valueType)) {
+          validOptions = true;
+          break;
+        }
+      }
+      if (!validOptions) {
+        return false;
+      }
+    }
+    if (schemaObj.oneOf) {
+      let validOptions = 0;
+      // Special limited oneOf handling here
+      for (const option of schemaObj.oneOf) {
+        if (this.isValidType(option, valueType)) {
+          validOptions++;
+          break;
+        }
+      }
+      if (validOptions !== 1) {
         return false;
       }
     }
@@ -1481,7 +1636,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
         rootSchema: schemaContext.rootSchema,
       });
       if (val !== undefined) {
-        console.log("merging", propKey, val);
         filteredObj[propKey] = val;
       }
     }
@@ -1582,12 +1736,14 @@ export class SchemaObjectTraverser<V extends JSONValue>
     normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
       ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
       : schemaContext.rootSchema;
-    console.log(
-      "Encountered cell link in traverseWithSchemaContext",
-      doc.value,
-      normalizedLink,
-      schemaContext,
-    );
+    if (this.verbose) {
+      console.log(
+        "Encountered cell link in traverseWithSchemaContext",
+        doc.value,
+        normalizedLink,
+        schemaContext,
+      );
+    }
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object.
     // For the memory system, where we do traverse cells, we will
@@ -1597,7 +1753,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       !this.traverseCells &&
       SchemaObjectTraverser.asCellOrStream(normalizedLink.schema)
     ) {
-      console.log("TPWS creating object");
+      if (this.verbose) console.log("TPWS creating object");
       return this.objectCreator.createObject(normalizedLink, undefined);
     }
     // FIXME: we should use the schema from normalizedLink here too
@@ -1665,7 +1821,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IAttestation,
     schema: JSONSchema,
   ): JSONValue | undefined {
-    console.log("SOT.AD", doc.value, schema);
+    if (this.verbose) console.log("SOT.AD", doc.value, schema);
     if (isObject(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(
         doc.address,
