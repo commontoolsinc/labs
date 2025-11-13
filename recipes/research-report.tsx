@@ -6,10 +6,12 @@ const InputSchema = {
     title: {
       type: "string",
       default: "Untitled Research Report",
+      asCell: true,
     },
     content: {
       type: "string",
       default: "",
+      asCell: true,
     },
   },
   required: ["title", "content"],

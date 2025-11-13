@@ -2,8 +2,8 @@
 import { Cell, Default, handler, ifElse, NAME, recipe, UI } from "commontools";
 
 interface CheckboxDemoInput {
-  simpleEnabled: Default<boolean, false>;
-  trackedEnabled: Default<boolean, false>;
+  simpleEnabled: Cell<Default<boolean, false>>;
+  trackedEnabled: Cell<Default<boolean, false>>;
 }
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}

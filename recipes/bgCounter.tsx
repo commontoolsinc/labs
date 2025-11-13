@@ -33,7 +33,7 @@ const updateError = handler<
 );
 
 export default recipe<
-  { error: Default<string, "">; counter: Default<number, 0> }
+  { error: Cell<Default<string, "">>; counter: Cell<Default<number, 0>> }
 >(
   "bgCounter",
   ({ counter, error }) => {

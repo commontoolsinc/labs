@@ -29,9 +29,9 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   theme?: {
-    accentColor: Default<string, "#3b82f6">;
-    fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
-    borderRadius: Default<string, "0.5rem">;
+    accentColor: Cell<Default<string, "#3b82f6">>;
+    fontFace: Cell<Default<string, "system-ui, -apple-system, sans-serif">>;
+    borderRadius: Cell<Default<string, "0.5rem">>;
   };
 };
 
@@ -128,10 +128,7 @@ const populateChatList = lift(
     if (charmsList.length === 0) {
       const isInitialized = Cell.of(false);
       return storeCharm({
-        charm: Chat({
-          title: "New Chat",
-          messages: [],
-        }),
+        charm: Chat({}),
         selectedCharm,
         charmsList,
         allCharms,
@@ -154,10 +151,7 @@ const createChatRecipe = handler<
   (_, { selectedCharm, charmsList, allCharms }) => {
     const isInitialized = Cell.of(false);
 
-    const charm = Chat({
-      title: "New Chat",
-      messages: [],
-    });
+    const charm = Chat({});
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
       charm,
