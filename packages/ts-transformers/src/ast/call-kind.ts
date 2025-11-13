@@ -4,6 +4,7 @@ import { isCommonToolsSymbol } from "../core/mod.ts";
 
 const BUILDER_SYMBOL_NAMES = new Set([
   "recipe",
+  "pattern",
   "handler",
   "lift",
   "computed",

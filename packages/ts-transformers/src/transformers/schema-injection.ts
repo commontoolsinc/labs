@@ -243,6 +243,75 @@ export class SchemaInjectionTransformer extends Transformer {
         }
       }
 
+      if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const argsArray = Array.from(node.arguments);
+
+        // Get the function argument (should be the first and only argument)
+        const patternFunction = argsArray[0];
+        if (
+          !patternFunction ||
+          !(ts.isFunctionExpression(patternFunction) ||
+            ts.isArrowFunction(patternFunction))
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        // Use type arguments as a hint for inference
+        const typeArgHints: ts.Type[] = [];
+        if (typeArgs) {
+          for (const typeArg of typeArgs) {
+            const type = checker.getTypeFromTypeNode(typeArg);
+            typeArgHints.push(type);
+          }
+        }
+
+        // Collect inferred types from the function
+        const inferred = collectFunctionSchemaTypeNodes(
+          patternFunction,
+          checker,
+          sourceFile,
+          typeArgHints[0], // Pass first type arg as fallback for parameter inference
+        );
+
+        // Infer types from the function signature and type arguments
+        const argumentTypeNode = inferred.argument;
+        const argumentType = inferred.argumentType;
+        const resultTypeNode = inferred.result;
+        const resultType = inferred.resultType;
+
+        // Build the new arguments array: [fn, argSchema?, resSchema?]
+        const newArgs: ts.Expression[] = [patternFunction];
+
+        if (argumentTypeNode) {
+          const argSchemaCall = createToSchemaCall(context, argumentTypeNode);
+          if (argumentType && typeRegistry) {
+            typeRegistry.set(argSchemaCall, argumentType);
+          }
+          newArgs.push(argSchemaCall);
+        }
+
+        if (resultTypeNode) {
+          const resSchemaCall = createToSchemaCall(context, resultTypeNode);
+          if (resultType && typeRegistry) {
+            typeRegistry.set(resSchemaCall, resultType);
+          }
+          newArgs.push(resSchemaCall);
+        }
+
+        // Only transform if we have at least one schema
+        if (newArgs.length > 1) {
+          const updated = factory.createCallExpression(
+            node.expression,
+            undefined,
+            newArgs,
+          );
+
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
       if (
         callKind?.kind === "builder" && callKind.builderName === "handler"
       ) {

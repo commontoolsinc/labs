@@ -22,7 +22,7 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { recipe } from "./recipe.ts";
+import { pattern, recipe } from "./recipe.ts";
 import { byRef, computed, derive, handler, lift } from "./module.ts";
 import {
   compileAndRun,
@@ -98,6 +98,7 @@ export const createBuilder = (): {
       compileAndRun,
       navigateTo,
       wish,
+      pattern,
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,
