@@ -402,40 +402,4 @@ describe("wish built-in", () => {
       console.error = originalError;
     }
   });
-
-  it("does not use provided default when target cell exists but result is undefined", async () => {
-    const fallback = [{ name: "Fallback" }];
-
-    // Set up space cell with an empty default pattern
-    const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
-      tx,
-    );
-    defaultPatternCell.set({}); // Empty default pattern
-    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
-
-    await tx.commit();
-    await runtime.idle();
-    tx = runtime.edit();
-
-    const wishRecipe = recipe("wish default", () => {
-      const missing = wish("/missing", fallback);
-      return { missing };
-    });
-
-    const resultCell = runtime.getCell<{ missing?: unknown }>(
-      space,
-      "wish built-in default",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
-    await tx.commit();
-    await runtime.idle();
-    tx = runtime.edit();
-
-    await runtime.idle();
-
-    expect(result.key("missing").get()).toBeUndefined();
-  });
 });

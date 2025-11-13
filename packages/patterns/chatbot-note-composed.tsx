@@ -27,7 +27,7 @@ import {
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
 function schemaifyWish<T>(path: string, def: T) {
-  return derive<T, T>(wish<T>(path, def), (i) => i ?? def);
+  return derive(wish<T>(path) as T, (i) => i ?? def);
 }
 
 type ChatbotNoteInput = {
