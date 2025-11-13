@@ -15,6 +15,14 @@ export default pattern((input: MyInput) => {
         }
     },
     required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        result: {
+            type: "number"
+        }
+    },
+    required: ["result"]
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
