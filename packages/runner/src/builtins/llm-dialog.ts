@@ -284,26 +284,21 @@ const RUN_TOOL_NAME = "run";
 const SCHEMA_TOOL_NAME = "schema";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
-  anyOf: [{
-    type: "string",
-    description: "Target path in the form Charm/child/grandchild.",
-  }, {
-    type: "object",
-    properties: {
-      target: {
-        type: "string",
-        description: "Target path in the form Charm/child/grandchild.",
-      },
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "Target path in the form Charm/child/grandchild.",
     },
-    required: ["target"],
-    additionalProperties: false,
-  }],
+  },
+  required: ["path"],
+  additionalProperties: false,
 };
 
 const RUN_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
-    target: {
+    path: {
       type: "string",
       description: "Target handler path in the form Charm/handler/path.",
     },
@@ -312,25 +307,20 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
       description: "Arguments passed to the handler.",
     },
   },
-  required: ["target"],
+  required: ["path"],
   additionalProperties: true,
 };
 
 const SCHEMA_INPUT_SCHEMA: JSONSchema = {
-  anyOf: [{
-    type: "string",
-    description: "Name of the attached charm.",
-  }, {
-    type: "object",
-    properties: {
-      charm: {
-        type: "string",
-        description: "Name of the attached charm.",
-      },
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "Name of the attached charm.",
     },
-    required: ["charm"],
-    additionalProperties: false,
-  }],
+  },
+  required: ["path"],
+  additionalProperties: false,
 };
 
 function ensureString(
@@ -385,7 +375,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
     if (obj.args && typeof obj.args === "object") {
       return obj.args as Record<string, any>;
     }
-    const { target: _target, ...rest } = obj;
+    const { path: _path, ...rest } = obj;
     return rest as Record<string, any>;
   }
   return {};
@@ -551,7 +541,7 @@ function resolveToolCall(
     if (name === SCHEMA_TOOL_NAME) {
       const charmName = extractStringField(
         toolCallPart.input,
-        "charm",
+        "path",
         "Charm",
       );
       const charm = catalog.charmMap.get(charmName);
@@ -568,7 +558,7 @@ function resolveToolCall(
 
     const target = extractStringField(
       toolCallPart.input,
-      "target",
+      "path",
       "Charm/path",
     );
     const { charmName, pathSegments } = parseTargetString(target);
@@ -590,7 +580,7 @@ function resolveToolCall(
     if (name === READ_TOOL_NAME) {
       const ref = runtime.getCellFromLink(link);
       if (isStream(ref)) {
-        throw new Error('target resolves to a handler; use run("Charm/path").');
+        throw new Error('path resolves to a handler; use run("Charm/path").');
       }
       return {
         charmMeta: {
@@ -598,7 +588,7 @@ function resolveToolCall(
           mode: "read",
           targetSegments: pathSegments,
         },
-        call: { id, name, input: { target } },
+        call: { id, name, input: { path: target } },
       };
     }
 
