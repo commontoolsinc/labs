@@ -434,12 +434,12 @@ function flattenTools(
         availability,
       inputSchema: RUN_INPUT_SCHEMA,
     };
-    flattened[SCHEMA_TOOL_NAME] = {
-      description:
-        "Return the JSON schema for an attached charm to understand " +
-        "available fields and handlers. " + availability,
-      inputSchema: SCHEMA_INPUT_SCHEMA,
-    };
+    // flattened[SCHEMA_TOOL_NAME] = {
+    //   description:
+    //     "Return the JSON schema for an attached charm to understand " +
+    //     "available fields and handlers. " + availability,
+    //   inputSchema: SCHEMA_INPUT_SCHEMA,
+    // };
   }
 
   return flattened;
@@ -480,29 +480,64 @@ async function buildToolCatalog(
     const availability = list
       ? `Available charms: ${list}.`
       : "No charms attached.";
-    const explorationHint =
-      'Call schema("Charm") to inspect structure before using read/run.';
 
     llmTools[READ_TOOL_NAME] = {
-      description: "Read data from an attached charm using a target like " +
-        '"Charm/result/path". ' + availability + " " + explorationHint,
+      description: "Read data from an attached charm using a path like " +
+        '"Charm/result/path". Charm schemas are provided in the system prompt. ' +
+        availability,
       inputSchema: READ_INPUT_SCHEMA,
     };
     llmTools[RUN_TOOL_NAME] = {
       description:
-        "Run a handler on an attached charm. Provide the target like " +
-        '"Charm/handlers/doThing" and optionally args. ' + availability,
+        "Run a handler on an attached charm. Provide the path like " +
+        '"Charm/handlers/doThing" and optionally args. Charm schemas are ' +
+        "provided in the system prompt. " + availability,
       inputSchema: RUN_INPUT_SCHEMA,
     };
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
         "Return the JSON schema for an attached charm to discover its " +
-        "fields and handlers. " + availability,
+        "fields and handlers. Note: schemas are also provided in the system " +
+        "prompt for convenience. " + availability,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
   }
 
   return { llmTools, legacyToolCells, charmMap };
+}
+
+/**
+ * Build a formatted documentation string describing all attached charm schemas.
+ * This is appended to the system prompt so the LLM has immediate context about
+ * available charms without needing to call schema() first.
+ */
+async function buildCharmSchemasDocumentation(
+  runtime: IRuntime,
+  charmMap: Map<string, Cell<any>>,
+): Promise<string> {
+  if (charmMap.size === 0) {
+    return "";
+  }
+
+  const schemaEntries: string[] = [];
+
+  for (const [charmName, charm] of charmMap.entries()) {
+    try {
+      const schema = await getCharmResultSchemaAsync(runtime, charm);
+      if (schema) {
+        const schemaJson = JSON.stringify(schema, null, 2);
+        schemaEntries.push(`## ${charmName}\n\`\`\`json\n${schemaJson}\n\`\`\``);
+      }
+    } catch (e) {
+      logger.warn(`Failed to get schema for charm ${charmName}:`, e);
+    }
+  }
+
+  if (schemaEntries.length === 0) {
+    return "";
+  }
+
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools:\n\n${schemaEntries.join("\n\n")}`;
 }
 
 function resolveToolCall(
@@ -1169,8 +1204,15 @@ async function startRequest(
 
   const toolCatalog = await buildToolCatalog(runtime, toolsCell);
 
+  // Build charm schemas documentation and append to system prompt
+  const charmSchemasDocs = await buildCharmSchemasDocumentation(
+    runtime,
+    toolCatalog.charmMap,
+  );
+  const augmentedSystem = (system ?? "") + charmSchemasDocs;
+
   const llmParams: LLMRequest = {
-    system: system ?? "",
+    system: augmentedSystem,
     messages: messagesCell.withTx(tx).get() as BuiltInLLMMessage[],
     maxTokens: maxTokens,
     stream: true,
