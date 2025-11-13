@@ -607,13 +607,14 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools. Use the handle (e.g., of:bafyabc123) to reference charms:\n\n${
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (of:...), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
     schemaEntries.join("\n\n")
   }`;
 }
 
 function resolveToolCall(
   runtime: IRuntime,
+  space: MemorySpace,
   toolCallPart: BuiltInLLMToolCallPart,
   catalog: ToolCatalog,
 ): {
@@ -621,7 +622,8 @@ function resolveToolCall(
   toolDef?: Cell<Schema<typeof LLMToolSchema>>;
   charmMeta?: {
     handler?: any;
-    charm: Cell<any>;
+    charm?: Cell<any>; // Optional: may be undefined for arbitrary handles
+    cellRef?: Cell<any>; // Optional: the resolved cell for read operations
     extraParams?: Record<string, unknown>;
     pattern?: Readonly<Recipe>;
     mode: "read" | "run" | "schema" | "listAttachments";
@@ -682,26 +684,19 @@ function resolveToolCall(
     );
 
     const { handle, pathSegments } = parseHandleFromPath(target);
-    const charmEntry = catalog.handleMap.get(handle);
 
-    if (!charmEntry) {
-      const availableHandles = Array.from(catalog.handleMap.entries()).map(
-        ([h, { charmName }]) => `${charmName} (${h})`,
-      ).join(", ");
-      throw new Error(
-        `Unknown charm handle "${handle}". Available charms: ${availableHandles}. Use listAttachments() for details.`,
-      );
-    }
-
-    const { charm } = charmEntry;
-    const baseLink = charm.getAsNormalizedFullLink();
+    // Build link from the handle and path segments
+    // We support ANY valid handle, not just those in attachments
     const link = {
-      ...baseLink,
-      path: [
-        ...baseLink.path,
-        ...pathSegments.map((segment) => segment.toString()),
-      ],
+      id: handle as `${string}:${string}`,
+      path: pathSegments.map((segment) => segment.toString()),
+      space,
+      type: "link" as const,
     };
+
+    // Try to get the charm from attachments for metadata (optional)
+    const charmEntry = catalog.handleMap.get(handle);
+    const charm = charmEntry?.charm;
 
     if (name === READ_TOOL_NAME) {
       const ref = runtime.getCellFromLink(link);
@@ -711,6 +706,7 @@ function resolveToolCall(
       return {
         charmMeta: {
           charm,
+          cellRef: ref, // The actual cell to read from
           mode: "read",
           targetSegments: pathSegments,
         },
@@ -830,7 +826,7 @@ async function executeToolCalls(
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
-      const resolved = resolveToolCall(runtime, part, toolCatalog);
+      const resolved = resolveToolCall(runtime, space, part, toolCatalog);
       const resultValue = await invokeToolCall(
         runtime,
         space,
@@ -992,7 +988,8 @@ async function invokeToolCall(
   toolCall: LLMToolCall,
   charmMeta?: {
     handler?: any;
-    charm: Cell<any>;
+    charm?: Cell<any>; // Optional: may be undefined for arbitrary handles
+    cellRef?: Cell<any>; // Optional: the resolved cell for read operations
     extraParams?: Record<string, unknown>;
     pattern?: Readonly<Recipe>;
     mode: "read" | "run" | "schema" | "listAttachments";
@@ -1011,6 +1008,9 @@ async function invokeToolCall(
   }
 
   if (charmMeta?.mode === "schema") {
+    if (!charmMeta.charm) {
+      throw new Error("Schema mode requires an attached charm");
+    }
     const schema = await getCharmResultSchemaAsync(runtime, charmMeta.charm) ??
       {};
     const value = JSON.parse(JSON.stringify(schema ?? {}));
@@ -1018,8 +1018,13 @@ async function invokeToolCall(
   }
 
   if (charmMeta?.mode === "read") {
+    // Use the cellRef if available (for arbitrary handles), otherwise fall back to charm
+    const cellToRead = charmMeta.cellRef ?? charmMeta.charm;
+    if (!cellToRead) {
+      throw new Error("Read mode requires either cellRef or charm to be set");
+    }
     const segments = charmMeta.targetSegments ?? [];
-    const realized = charmMeta.charm.getAsQueryResult(segments);
+    const realized = cellToRead.getAsQueryResult(segments);
     const value = JSON.parse(JSON.stringify(realized));
     return { type: "json", value };
   }
@@ -1036,8 +1041,8 @@ async function invokeToolCall(
   const result = runtime.getCell<any>(space, toolCall.id);
 
   // ensure the charm this handler originates from is actually running
-  if (handler && !pattern && charmMeta) {
-    await ensureSourceCharmRunning(runtime, charmMeta);
+  if (handler && !pattern && charmMeta && charmMeta.charm) {
+    await ensureSourceCharmRunning(runtime, charmMeta as { handler?: any; charm: Cell<any> });
   }
 
   const { resolve, promise } = Promise.withResolvers<any>();
@@ -1053,7 +1058,7 @@ async function invokeToolCall(
         logger.info("Handler tx:", debugTransactionWrites(completedTx));
 
         const summary = formatTransactionSummary(completedTx, space);
-        const value = result.withTx(completedTx).get();
+        const value = result.withTx(completedTx);
 
         resolve({ value, summary });
       });
@@ -1062,25 +1067,18 @@ async function invokeToolCall(
     }
   });
 
-  // wait until we know we have the result of the tool call
-  // not just that the transaction has been comitted
-  const cancel = result.sink((r) => {
-    r !== undefined && resolve(r);
-  });
-  let resultValue = await promise;
-  cancel();
-
-  if (pattern) {
-    // stop it now that we have the result
-    runtime.runner.stop(result);
-  } else {
-    await runtime.idle(); // maybe pointless
+  // For handlers, wait for the transaction to complete
+  if (!pattern) {
+    await promise;
   }
 
-  // Prevent links being returned
-  resultValue = JSON.parse(JSON.stringify(resultValue ?? "OK"));
+  // Return link to the result cell instead of snapshotting
+  const link = result.getAsNormalizedFullLink();
+  const linkString = link.path.length > 0
+    ? `${link.id}/${link.path.join("/")}`
+    : link.id;
 
-  return { type: "json", value: resultValue };
+  return { type: "json", value: linkString };
 }
 
 /**
