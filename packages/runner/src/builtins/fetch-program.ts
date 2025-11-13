@@ -6,8 +6,8 @@ import { HttpProgramResolver } from "@commontools/js-runtime";
 import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
 import { computeInputHash } from "./fetch-utils.ts";
 import {
-  asyncOperationCacheSchema,
   type AsyncOperationCache,
+  asyncOperationCacheSchema,
   getState,
   isTimedOut,
   transitionToError,
