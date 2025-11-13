@@ -968,16 +968,16 @@ export interface BuiltInCompileAndRunState<T> {
 // Function type definitions
 export type PatternFunction = {
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: Required<T>) => Opaque<R>,
   ): RecipeFactory<T, R>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => unknown,
+    fn: (input: Required<T>) => unknown,
   ): RecipeFactory<T, ReturnType<typeof fn>>;
 
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
-      input: OpaqueRef<Required<Schema<IS>>>,
+      input: Required<Schema<IS>>,
     ) => Opaque<Schema<OS>>,
     argumentSchema: IS,
     resultSchema: OS,
@@ -988,45 +988,45 @@ export type PatternFunction = {
 export type RecipeFunction = {
   // Function-only overload
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: Required<T>) => Opaque<R>,
   ): RecipeFactory<T, R>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: Required<T>) => any,
   ): RecipeFactory<T, ReturnType<typeof fn>>;
 
   <S extends JSONSchema>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
-  ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
+    fn: (input: Required<Schema<S>>) => any,
+  ): RecipeFactory<Schema<S>, ReturnType<typeof fn>>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
-  ): RecipeFactory<SchemaWithoutCell<S>, R>;
+    fn: (input: Required<Schema<S>>) => Opaque<R>,
+  ): RecipeFactory<Schema<S>, R>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
     argumentSchema: S,
     resultSchema: RS,
     fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
-    ) => Opaque<SchemaWithoutCell<RS>>,
-  ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
+      input: Required<Schema<S>>,
+    ) => Opaque<Schema<RS>>,
+  ): RecipeFactory<Schema<S>, Schema<RS>>;
 
   <T>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: Required<T>) => any,
   ): RecipeFactory<T, ReturnType<typeof fn>>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: Required<T>) => Opaque<R>,
   ): RecipeFactory<T, R>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
     resultSchema: JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: Required<T>) => Opaque<R>,
   ): RecipeFactory<T, R>;
 };
 
@@ -1034,7 +1034,7 @@ export type PatternToolFunction = <
   T,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
-  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  fnOrRecipe: ((input: Required<T>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
 ) => OpaqueRef<Omit<T, keyof E>>;
 
