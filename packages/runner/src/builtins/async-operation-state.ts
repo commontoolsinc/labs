@@ -83,12 +83,16 @@ function casTransition<T, E = string>(
 
   // CAS succeeded - perform transition
   // Type cast needed because TypeScript can't prove state union correctness
-  (cache as any).withTx(tx).update({
-    [inputHash]: {
-      inputHash,
-      state: nextState,
-    },
-  });
+  if (nextState.type === "idle") {
+    (cache as any).withTx(tx).key(inputHash).set(undefined);
+  } else {
+    (cache as any).withTx(tx).update({
+      [inputHash]: {
+        inputHash,
+        state: nextState,
+      },
+    });
+  }
 
   return true;
 }
@@ -143,17 +147,29 @@ export function transitionToFetching<T, E = string>(
   requestId: string,
   tx: IExtendedStorageTransaction,
 ): boolean {
-  const allEntries = cache.withTx(tx).get();
-  const entry = allEntries[inputHash];
-  const expectedState = entry?.state.type === "idle" ? "idle" : null;
-
   return casTransition(
     cache,
     inputHash,
-    expectedState, // Expect idle or non-existent
+    null, // Expect idle or non-existent
     null,
     { type: "fetching", requestId, startTime: Date.now() },
     tx,
+  );
+}
+
+export async function transitionToFetchingAsync<T, E = string>(
+  runtime: IRuntime,
+  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
+  inputHash: string,
+  requestId: string,
+): Promise<boolean> {
+  return await casTransitionAsync(
+    runtime,
+    cache,
+    inputHash,
+    null,
+    null,
+    { type: "fetching", requestId, startTime: Date.now() },
   );
 }
 

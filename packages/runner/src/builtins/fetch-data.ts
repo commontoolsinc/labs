@@ -10,7 +10,7 @@ import {
   getState,
   isTimedOut,
   transitionToError,
-  transitionToFetching,
+  transitionToFetchingAsync,
   transitionToIdle,
   transitionToSuccess,
 } from "./async-operation-state.ts";
@@ -45,38 +45,35 @@ export function fetchData(
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<any, any>>>;
-  let myRequestId: string | undefined = undefined;
-  let abortController: AbortController | undefined = undefined;
+  const myRequestIds = new Map<string, string>();
+  const abortControllers = new Map<string, AbortController>();
+  const claimPromises = new Map<string, Promise<void>>();
 
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    abortController?.abort("Recipe stopped");
+    for (const controller of abortControllers.values()) {
+      controller.abort("Recipe stopped");
+    }
+    abortControllers.clear();
+    claimPromises.clear();
+    myRequestIds.clear();
 
     // Only try to update state if cells were initialized
-    if (!cellsInitialized || !myRequestId) return;
+    if (!cellsInitialized) return;
 
     const tx = runtime.edit();
 
     try {
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
-      const updates: Record<string, AsyncOperationCache<any, any>> = {};
-
       for (const [hash, entry] of Object.entries(currentCache)) {
         if (
           entry.state.type === "fetching" &&
-          entry.state.requestId === myRequestId
+          myRequestIds.get(hash) === entry.state.requestId
         ) {
-          updates[hash] = {
-            inputHash: hash,
-            state: { type: "idle" },
-          };
+          transitionToIdle(cache, hash, entry.state.requestId, tx);
         }
-      }
-
-      if (Object.keys(updates).length > 0) {
-        cache.withTx(tx).update(updates);
       }
 
       tx.commit();
@@ -140,6 +137,12 @@ export function fetchData(
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {
+      const controller = abortControllers.get(inputHash);
+      controller?.abort("empty url");
+      abortControllers.delete(inputHash);
+      myRequestIds.delete(inputHash);
+      claimPromises.delete(inputHash);
+
       // When URL is empty, clear outputs
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
@@ -153,56 +156,95 @@ export function fetchData(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching (CAS - only one runtime wins)
-      const requestId = crypto.randomUUID();
-      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
-
-      if (didStart) {
-        // We tentatively won the race - but need to wait for commit
-        // to confirm before starting the fetch
-        myRequestId = requestId;
-        abortController = new AbortController();
-
-        // Capture current inputs for the fetch
+      if (!claimPromises.has(inputHash)) {
+        const requestId = crypto.randomUUID();
         const urlToFetch = url;
         const modeToUse = inputsCell.withTx(tx).key("mode").get();
-        const optionsToUse = inputsCell.withTx(tx).key("options").get();
-        const signal = abortController.signal;
+        const optionsValue = inputsCell.withTx(tx).key("options").get();
+        const optionsToUse = optionsValue
+          ? structuredClone(optionsValue)
+          : undefined;
+        const claimHash = inputHash;
 
-        // Start fetch AFTER this transaction commits and CAS is confirmed
-        Promise.resolve().then(async () => {
-          await runtime.idle(); // Wait for current transaction to commit
+        const claimPromise = (async () => {
+          try {
+            await cache.sync();
 
-          // Re-check that we still own this requestId (CAS confirmation)
-          const confirmTx = runtime.edit();
-          const confirmedState = getState(cache, inputHash, confirmTx);
-          await confirmTx.commit();
-
-          if (
-            confirmedState.type === "fetching" &&
-            confirmedState.requestId === requestId
-          ) {
-            // Confirmed - we won the CAS race, start the fetch
-            startFetch(
+            const didStart = await transitionToFetchingAsync(
               runtime,
               cache,
-              inputHash,
-              urlToFetch,
-              modeToUse,
-              optionsToUse,
+              claimHash,
               requestId,
-              signal,
             );
+
+            if (!didStart) {
+              return;
+            }
+
+            myRequestIds.set(claimHash, requestId);
+
+            await runtime.idle();
+
+            const confirmTx = runtime.edit();
+            const confirmedState = getState(cache, claimHash, confirmTx);
+            await confirmTx.commit();
+
+            if (
+              confirmedState.type === "fetching" &&
+              confirmedState.requestId === requestId
+            ) {
+              const controller = new AbortController();
+              abortControllers.set(claimHash, controller);
+              const signal = controller.signal;
+
+              try {
+                await startFetch(
+                  runtime,
+                  cache,
+                  claimHash,
+                  urlToFetch,
+                  modeToUse,
+                  optionsToUse,
+                  requestId,
+                  signal,
+                );
+              } finally {
+                if (abortControllers.get(claimHash) === controller) {
+                  abortControllers.delete(claimHash);
+                }
+                if (myRequestIds.get(claimHash) === requestId) {
+                  myRequestIds.delete(claimHash);
+                }
+              }
+            } else {
+              myRequestIds.delete(claimHash);
+            }
+          } catch (error) {
+            console.error("fetchData claim failed", error);
+            if (myRequestIds.get(claimHash) === requestId) {
+              myRequestIds.delete(claimHash);
+            }
+            abortControllers.delete(claimHash);
           }
-          // else: Another runtime won, don't start fetch
+        })();
+
+        claimPromises.set(inputHash, claimPromise);
+        claimPromise.finally(() => {
+          if (claimPromises.get(claimHash) === claimPromise) {
+            claimPromises.delete(claimHash);
+          }
         });
       }
-      // else: Another runtime is already fetching, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout
       if (isTimedOut(state, DATA_REQUEST_TIMEOUT)) {
         // Transition back to idle if timed out
         transitionToIdle(cache, inputHash, state.requestId, tx);
+        const controller = abortControllers.get(inputHash);
+        controller?.abort("timeout");
+        abortControllers.delete(inputHash);
+        myRequestIds.delete(inputHash);
+        claimPromises.delete(inputHash);
       }
     }
 

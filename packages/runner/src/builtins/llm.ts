@@ -25,7 +25,7 @@ import {
   getState,
   isTimedOut,
   transitionToError,
-  transitionToFetching,
+  transitionToFetchingAsync,
   transitionToIdle,
   transitionToSuccess,
   updatePartial,
@@ -71,6 +71,8 @@ export function llm(
   let cache: Cell<
     Record<string, AsyncOperationCache<LLMResponse["content"], string>>
   >;
+  const myRequestIds = new Map<string, string>();
+  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -149,43 +151,91 @@ export function llm(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching (CAS - only one runtime wins)
-      const requestId = crypto.randomUUID();
-      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
-
-      if (didStart) {
-        // We won the race - start LLM call asynchronously
+      if (!claimPromises.has(inputHash)) {
+        const requestId = crypto.randomUUID();
+        const initialMessages = Array.isArray(messages)
+          ? structuredClone(messages)
+          : [];
         const llmParams: LLMRequest = {
           system: system ?? "",
-          messages: messages ?? [],
+          messages: initialMessages,
           stop: stop ?? "",
           maxTokens: maxTokens ?? 4096,
           stream: true,
           model: model ?? DEFAULT_MODEL_NAME,
           metadata: {
-            // FIXME(ja): how do we get the context of space/charm id here
-            // bf: I also do not know... this one is tricky
             context: "charm",
           },
           cache: true,
-          // tools will be added below if present
         };
+        const toolsCellRef = tools ? inputsCell.key("tools") : undefined;
+        const claimHash = inputHash;
 
-        startLLM(
-          runtime,
-          cache,
-          inputHash,
-          llmParams,
-          messages,
-          tools ? inputsCell.key("tools") : undefined,
-          requestId,
-        );
+        const claimPromise = (async () => {
+          try {
+            await cache.sync();
+            const didStart = await transitionToFetchingAsync(
+              runtime,
+              cache,
+              claimHash,
+              requestId,
+            );
+
+            if (!didStart) {
+              return;
+            }
+
+            myRequestIds.set(claimHash, requestId);
+
+            await runtime.idle();
+
+            const confirmTx = runtime.edit();
+            const confirmedState = getState(cache, claimHash, confirmTx);
+            await confirmTx.commit();
+
+            if (
+              confirmedState.type === "fetching" &&
+              confirmedState.requestId === requestId
+            ) {
+              try {
+                await startLLM(
+                  runtime,
+                  cache,
+                  inputHash,
+                  llmParams,
+                  initialMessages,
+                  toolsCellRef,
+                  requestId,
+                );
+              } finally {
+                if (myRequestIds.get(claimHash) === requestId) {
+                  myRequestIds.delete(claimHash);
+                }
+              }
+            } else {
+              myRequestIds.delete(claimHash);
+            }
+          } catch (error) {
+            console.error("llm claim failed", error);
+            if (myRequestIds.get(claimHash) === requestId) {
+              myRequestIds.delete(claimHash);
+            }
+          }
+        })();
+
+        claimPromises.set(inputHash, claimPromise);
+        claimPromise.finally(() => {
+          if (claimPromises.get(claimHash) === claimPromise) {
+            claimPromises.delete(claimHash);
+          }
+        });
       }
-      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (60 seconds for LLM requests with potential tool execution)
       if (isTimedOut(state, 60000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
+        myRequestIds.delete(inputHash);
+        claimPromises.delete(inputHash);
       }
     }
 
@@ -355,6 +405,8 @@ export function generateText(
   let partial: Cell<string | undefined>;
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<string, string>>>;
+  const myRequestIds = new Map<string, string>();
+  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -432,44 +484,92 @@ export function generateText(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching (CAS - only one runtime wins)
-      const requestId = crypto.randomUUID();
-      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
-
-      if (didStart) {
-        // Convert prompt to messages if provided, otherwise use messages directly
-        const requestMessages: BuiltInLLMMessage[] = messages ||
-          [{ role: "user", content: prompt! }];
+      if (!claimPromises.has(inputHash)) {
+        const requestId = crypto.randomUUID();
+        const requestMessages: BuiltInLLMMessage[] = messages
+          ? structuredClone(messages)
+          : [{ role: "user", content: prompt! }];
 
         const llmParams: LLMRequest = {
-        system: system ?? "",
-        messages: requestMessages,
-        stop: "",
-        maxTokens: maxTokens ?? 4096,
-        stream: true,
-        model: model ?? DEFAULT_MODEL_NAME,
-        metadata: {
-          context: "charm",
-        },
-        cache: true,
-        // tools will be added below if present
-      };
+          system: system ?? "",
+          messages: requestMessages,
+          stop: "",
+          maxTokens: maxTokens ?? 4096,
+          stream: true,
+          model: model ?? DEFAULT_MODEL_NAME,
+          metadata: {
+            context: "charm",
+          },
+          cache: true,
+        };
+        const toolsCellRef = tools ? inputsCell.key("tools") : undefined;
+        const claimHash = inputHash;
 
-        startGenerateText(
-          runtime,
-          cache,
-          inputHash,
-          llmParams,
-          requestMessages,
-          tools ? inputsCell.key("tools") : undefined,
-          requestId,
-        );
+        const claimPromise = (async () => {
+          try {
+            await cache.sync();
+            const didStart = await transitionToFetchingAsync(
+              runtime,
+              cache,
+              claimHash,
+              requestId,
+            );
+
+            if (!didStart) {
+              return;
+            }
+
+            myRequestIds.set(claimHash, requestId);
+
+            await runtime.idle();
+
+            const confirmTx = runtime.edit();
+            const confirmedState = getState(cache, claimHash, confirmTx);
+            await confirmTx.commit();
+
+            if (
+              confirmedState.type === "fetching" &&
+              confirmedState.requestId === requestId
+            ) {
+              try {
+                await startGenerateText(
+                  runtime,
+                  cache,
+                  inputHash,
+                  llmParams,
+                  requestMessages,
+                  toolsCellRef,
+                  requestId,
+                );
+              } finally {
+                if (myRequestIds.get(claimHash) === requestId) {
+                  myRequestIds.delete(claimHash);
+                }
+              }
+            } else {
+              myRequestIds.delete(claimHash);
+            }
+          } catch (error) {
+            console.error("generateText claim failed", error);
+            if (myRequestIds.get(claimHash) === requestId) {
+              myRequestIds.delete(claimHash);
+            }
+          }
+        })();
+
+        claimPromises.set(inputHash, claimPromise);
+        claimPromise.finally(() => {
+          if (claimPromises.get(claimHash) === claimPromise) {
+            claimPromises.delete(claimHash);
+          }
+        });
       }
-      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (60 seconds for LLM requests with potential tool execution)
       if (isTimedOut(state, 60000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
+        myRequestIds.delete(inputHash);
+        claimPromises.delete(inputHash);
       }
     }
 
@@ -634,6 +734,8 @@ export function generateObject<T extends Record<string, unknown>>(
   let partial: Cell<string | undefined>;
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<T, string>>>;
+  const myRequestIds = new Map<string, string>();
+  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -719,48 +821,95 @@ export function generateObject<T extends Record<string, unknown>>(
 
     // State machine transitions
     if (state.type === "idle") {
-      // Try to transition to fetching (CAS - only one runtime wins)
-      const requestId = crypto.randomUUID();
-      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
-
-      if (didStart) {
+      if (!claimPromises.has(inputHash)) {
+        const requestId = crypto.randomUUID();
         const readyMetadata = metadata
           ? JSON.parse(JSON.stringify(metadata))
           : {};
-
-        // Convert prompt to messages if provided, otherwise use messages directly
-        const requestMessages: BuiltInLLMMessage[] = messages ||
-          [{ role: "user", content: prompt! }];
+        const requestMessages: BuiltInLLMMessage[] = messages
+          ? structuredClone(messages)
+          : [{ role: "user", content: prompt! }];
 
         const generateObjectParams: LLMGenerateObjectRequest = {
-        messages: requestMessages,
-        maxTokens: maxTokens ?? 8192,
-        schema: JSON.parse(JSON.stringify(schema)),
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
-        metadata: {
-          ...readyMetadata,
-          context: "charm",
-        },
-        cache: cacheParam ?? true,
-      };
+          messages: requestMessages,
+          maxTokens: maxTokens ?? 8192,
+          schema: JSON.parse(JSON.stringify(schema)),
+          model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+          metadata: {
+            ...readyMetadata,
+            context: "charm",
+          },
+          cache: cacheParam ?? true,
+        };
 
         if (system) {
           generateObjectParams.system = system;
         }
+        const claimHash = inputHash;
 
-        startGenerateObject(
-          runtime,
-          cache,
-          inputHash,
-          generateObjectParams,
-          requestId,
-        );
+        const claimPromise = (async () => {
+          try {
+            await cache.sync();
+            const didStart = await transitionToFetchingAsync(
+              runtime,
+              cache,
+              claimHash,
+              requestId,
+            );
+
+            if (!didStart) {
+              return;
+            }
+
+            myRequestIds.set(claimHash, requestId);
+
+            await runtime.idle();
+
+            const confirmTx = runtime.edit();
+            const confirmedState = getState(cache, claimHash, confirmTx);
+            await confirmTx.commit();
+
+            if (
+              confirmedState.type === "fetching" &&
+              confirmedState.requestId === requestId
+            ) {
+              try {
+                await startGenerateObject(
+                  runtime,
+                  cache,
+                  claimHash,
+                  generateObjectParams,
+                  requestId,
+                );
+              } finally {
+                if (myRequestIds.get(claimHash) === requestId) {
+                  myRequestIds.delete(claimHash);
+                }
+              }
+            } else {
+              myRequestIds.delete(claimHash);
+            }
+          } catch (error) {
+            console.error("generateObject claim failed", error);
+            if (myRequestIds.get(claimHash) === requestId) {
+              myRequestIds.delete(claimHash);
+            }
+          }
+        })();
+
+        claimPromises.set(inputHash, claimPromise);
+        claimPromise.finally(() => {
+          if (claimPromises.get(claimHash) === claimPromise) {
+            claimPromises.delete(claimHash);
+          }
+        });
       }
-      // else: Another runtime is already calling LLM, we'll see the result on next eval
     } else if (state.type === "fetching") {
       // Check for timeout (30 seconds for LLM requests)
       if (isTimedOut(state, 30000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
+        myRequestIds.delete(inputHash);
+        claimPromises.delete(inputHash);
       }
     }
 
