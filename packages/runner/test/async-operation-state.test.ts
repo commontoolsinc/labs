@@ -104,6 +104,37 @@ describe("async-operation-state", () => {
       const state = getState(cache, inputHash, tx);
       expect(state.type).toBe("success"); // State unchanged
     });
+
+    it("should allow re-fetching after returning to idle", () => {
+      const inputHash = "test-hash";
+      const initialRequestId = "req-1";
+      const nextRequestId = "req-2";
+
+      const firstStart = transitionToFetching(
+        cache,
+        inputHash,
+        initialRequestId,
+        tx,
+      );
+      expect(firstStart).toBe(true);
+
+      const wentIdle = transitionToIdle(cache, inputHash, initialRequestId, tx);
+      expect(wentIdle).toBe(true);
+
+      const secondStart = transitionToFetching(
+        cache,
+        inputHash,
+        nextRequestId,
+        tx,
+      );
+      expect(secondStart).toBe(true);
+
+      const state = getState(cache, inputHash, tx);
+      expect(state.type).toBe("fetching");
+      if (state.type === "fetching") {
+        expect(state.requestId).toBe(nextRequestId);
+      }
+    });
   });
 
   describe("transitionToSuccess (CAS)", () => {

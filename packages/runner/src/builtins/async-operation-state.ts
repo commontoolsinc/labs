@@ -143,10 +143,14 @@ export function transitionToFetching<T, E = string>(
   requestId: string,
   tx: IExtendedStorageTransaction,
 ): boolean {
+  const allEntries = cache.withTx(tx).get();
+  const entry = allEntries[inputHash];
+  const expectedState = entry?.state.type === "idle" ? "idle" : null;
+
   return casTransition(
     cache,
     inputHash,
-    null, // Expect idle or non-existent
+    expectedState, // Expect idle or non-existent
     null,
     { type: "fetching", requestId, startTime: Date.now() },
     tx,
