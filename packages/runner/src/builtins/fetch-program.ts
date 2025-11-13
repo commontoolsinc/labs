@@ -4,10 +4,10 @@ import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { HttpProgramResolver } from "@commontools/js-runtime";
 import { resolveProgram, TARGET } from "@commontools/js-runtime/typescript";
-import { computeInputHash } from "./fetch-utils.ts";
 import {
   type AsyncOperationCache,
   asyncOperationCacheSchema,
+  computeInputHash,
   getState,
   isTimedOut,
   transitionToError,

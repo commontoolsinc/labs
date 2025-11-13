@@ -3,10 +3,10 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { getRecipeEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { computeInputHash } from "./fetch-utils.ts";
 import {
   type AsyncOperationCache,
   asyncOperationCacheSchema,
+  computeInputHash,
   getState,
   isTimedOut,
   transitionToError,

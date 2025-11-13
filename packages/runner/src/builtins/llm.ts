@@ -18,10 +18,10 @@ import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
-import { computeInputHash } from "./fetch-utils.ts";
 import {
   type AsyncOperationCache,
   asyncOperationCacheSchema,
+  computeInputHash,
   getState,
   isTimedOut,
   transitionToError,
@@ -150,9 +150,6 @@ export function llm(
       // Try to transition to fetching
       const requestId = crypto.randomUUID();
       transitionToFetching(cache, inputHash, requestId, tx);
-
-      // Start generation asynchronously
-      myRequestId = requestId;
 
       const llmParams: LLMRequest = {
         system: system ?? "",
@@ -430,9 +427,6 @@ export function generateText(
       // Try to transition to fetching
       const requestId = crypto.randomUUID();
       transitionToFetching(cache, inputHash, requestId, tx);
-
-      // Start generation asynchronously
-      myRequestId = requestId;
 
       // Convert prompt to messages if provided, otherwise use messages directly
       const requestMessages: BuiltInLLMMessage[] = messages ||
@@ -715,9 +709,6 @@ export function generateObject<T extends Record<string, unknown>>(
       // Try to transition to fetching
       const requestId = crypto.randomUUID();
       transitionToFetching(cache, inputHash, requestId, tx);
-
-      // Start generation asynchronously
-      myRequestId = requestId;
 
       const readyMetadata = metadata
         ? JSON.parse(JSON.stringify(metadata))

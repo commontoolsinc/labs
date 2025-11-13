@@ -1,3 +1,4 @@
+import { refer } from "merkle-reference/json";
 import type { Cell } from "../cell.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -238,4 +239,19 @@ export async function updatePartial<T, E = string>(
       });
     }
   });
+}
+
+/**
+ * Computes a hash of inputs for comparison.
+ * Excludes the 'result' field which is used only as a TypeScript type hint,
+ * not as an actual input parameter.
+ */
+export function computeInputHash<T extends Record<string, any>>(
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<T>,
+): string {
+  const inputs = inputsCell.getAsQueryResult([], tx);
+  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
+  const { result: _result, ...inputsOnly } = inputs;
+  return refer(inputsOnly).toString();
 }
