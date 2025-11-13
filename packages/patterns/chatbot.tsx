@@ -195,17 +195,6 @@ const navigateToAttachment = handler<
   return navigateTo(attachment?.charm);
 });
 
-const listAttachments = handler<
-  { result: Cell<string> },
-  { allAttachments: Array<PromptAttachment> }
->(({ result }, { allAttachments }) => {
-  result.set(JSON.stringify(allAttachments.map((attachment) => ({
-    id: attachment.id,
-    name: attachment.name,
-    type: attachment.type,
-  }))));
-});
-
 const addAttachmentTool = handler<
   {
     mentionableName: string;
@@ -354,11 +343,6 @@ export default recipe<ChatInput, ChatOutput>(
         handler: navigateToAttachment({
           allAttachments: attachmentsWithRecent,
         }),
-      },
-      listAttachments: {
-        description:
-          "List attachment names to use with schema(), read(), and run().",
-        handler: listAttachments({ allAttachments: attachmentsWithRecent }),
       },
       listMentionable: {
         description: "List all mentionable NAMEs in the space.",
