@@ -45,6 +45,13 @@ export class CommonToolsFormatter implements TypeFormatter {
       return true;
     }
 
+    // Check if union contains wrapper types via node inspection
+    // This must come before the blanket union rejection to handle
+    // cases like OpaqueRef<T> | undefined without expanding conditionals
+    if (this.isWrapperUnion(type, context)) {
+      return true; // Take ownership of wrapper unions
+    }
+
     if ((type.flags & ts.TypeFlags.Union) !== 0) {
       return false;
     }
@@ -57,6 +64,16 @@ export class CommonToolsFormatter implements TypeFormatter {
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const n = context.typeNode;
 
+    // Handle wrapper unions first (before Opaque<T> union check)
+    // This catches cases like OpaqueRef<T> | undefined and processes them
+    // via node inspection to avoid conditional type expansion
+    if (
+      (type.flags & ts.TypeFlags.Union) !== 0 &&
+      this.isWrapperUnion(type, context)
+    ) {
+      return this.formatWrapperUnion(type as ts.UnionType, context);
+    }
+
     // Check if this is an Opaque<T> union and handle it first
     // This prevents the UnionFormatter from creating an anyOf
     const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
@@ -68,13 +85,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         undefined, // Don't pass typeNode since we're working with the unwrapped type
       );
 
-      // Handle boolean schemas
-      if (typeof innerSchema === "boolean") {
-        return innerSchema === false
-          ? { asOpaque: true, not: true } as SchemaDefinition // false = "no value is valid"
-          : { asOpaque: true } as SchemaDefinition; // true = "any value is valid"
-      }
-      return { ...innerSchema, asOpaque: true } as SchemaDefinition;
+      return this.applyWrapperSemantics(innerSchema, "OpaqueRef");
     }
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
@@ -210,7 +221,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Stream<T>: do not reflect inner Cell-ness; only mark asStream
     if (wrapperKind === "Stream") {
       const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
-      return { ...(rest as any), asStream: true } as SchemaDefinition;
+      return this.applyWrapperSemantics(rest as SchemaDefinition, "Stream");
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
@@ -223,18 +234,8 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
-    // Determine the property name to add based on wrapper kind
-    // TODO(gideon): Consider updating as[Cell,Opaque,Stream] properties to use an array of brands
-    // instead of boolean values, to support multiple brands like ["cell", "comparable"]
-    const propertyName = wrapperKind === "Cell" ? "asCell" : "asOpaque";
-
-    // Handle case where innerSchema might be boolean (per JSON Schema spec)
-    if (typeof innerSchema === "boolean") {
-      return innerSchema === false
-        ? { [propertyName]: true, not: true } // false = "no value is valid"
-        : { [propertyName]: true }; // true = "any value is valid"
-    }
-    return { ...innerSchema, [propertyName]: true };
+    // Apply wrapper semantics (asCell/asOpaque) to the inner schema
+    return this.applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
   /**
@@ -697,5 +698,165 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     return undefined;
+  }
+
+  /**
+   * Check if a type is the undefined type.
+   * Extracted for clarity and consistency with UnionFormatter.
+   */
+  private isUndefinedType(type: ts.Type): boolean {
+    return (type.flags & ts.TypeFlags.Undefined) !== 0;
+  }
+
+  /**
+   * Apply wrapper semantics to a schema, handling boolean schemas correctly.
+   * Boolean schemas (true/false) can't have properties spread into them.
+   */
+  private applyWrapperSemantics(
+    schema: SchemaDefinition,
+    wrapperKind: WrapperKind,
+  ): SchemaDefinition {
+    const propertyName = wrapperKind === "Stream"
+      ? "asStream"
+      : wrapperKind === "Cell"
+      ? "asCell"
+      : "asOpaque";
+
+    if (typeof schema === "boolean") {
+      return schema === false
+        ? { [propertyName]: true, not: true } as SchemaDefinition
+        : { [propertyName]: true } as SchemaDefinition;
+    }
+
+    return { ...schema, [propertyName]: true };
+  }
+
+  /**
+   * Return a single schema or wrap multiple schemas in anyOf.
+   * Handles empty array by returning true (any value is valid).
+   */
+  private maybeWrapInAnyOf(schemas: SchemaDefinition[]): SchemaDefinition {
+    if (schemas.length === 0) {
+      return true as SchemaDefinition;
+    } else if (schemas.length === 1) {
+      return schemas[0]!;
+    } else {
+      return { anyOf: schemas };
+    }
+  }
+
+  /**
+   * Format a union type that contains wrapper types (Cell/OpaqueRef/Stream).
+   * Handles cases like: OpaqueRef<T> | undefined, Cell<T> | null, etc.
+   * Uses nodes when available to preserve named type hoisting.
+   */
+  private formatWrapperUnion(
+    unionType: ts.UnionType,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const members = unionType.types;
+    const schemas: SchemaDefinition[] = [];
+
+    // Check if we have a UnionTypeNode with member nodes
+    const hasUnionNode = context.typeNode &&
+      ts.isUnionTypeNode(context.typeNode);
+    const unionNode = hasUnionNode
+      ? context.typeNode as ts.UnionTypeNode
+      : undefined;
+
+    // Process each union member
+    for (let i = 0; i < members.length; i++) {
+      const memberType = members[i]!;
+      const memberNode = unionNode?.types[i];
+
+      // Skip undefined (optionality handled via JSON Schema required array)
+      if (this.isUndefinedType(memberType)) {
+        continue;
+      }
+
+      // Skip conditional types - they come from type expansion internals and shouldn't be formatted
+      // Example: T extends (infer U)[] ? Opaque<U>[] : T extends object ? { [K in keyof T]: Opaque<T[K]>; } : T
+      if ((memberType.flags & ts.TypeFlags.Conditional) !== 0) {
+        continue;
+      }
+
+      // Skip type parameters - they're generic placeholders, not concrete types
+      if ((memberType.flags & ts.TypeFlags.TypeParameter) !== 0) {
+        continue;
+      }
+
+      // Handle null - it should be included in the schema as { type: "null" }
+      if ((memberType.flags & ts.TypeFlags.Null) !== 0) {
+        schemas.push({ type: "null" });
+        continue;
+      }
+
+      // Check if this member is a wrapper type via type structure
+      const wrapperInfo = getCellWrapperInfo(memberType, context.typeChecker);
+
+      if (wrapperInfo) {
+        // Format as a wrapper type
+        // Try to get the wrapper node for better processing
+        const wrapperNodeInfo = memberNode
+          ? resolveWrapperNode(memberNode, context.typeChecker)
+          : undefined;
+
+        const schema = this.formatWrapperType(
+          wrapperInfo.typeRef,
+          wrapperNodeInfo?.node, // Pass node if available for proper name hoisting
+          context,
+          wrapperInfo.kind,
+        );
+        schemas.push(schema);
+      } else {
+        // Not a wrapper - use standard formatting
+        // Pass the member node if available to preserve named type hoisting
+        const schema = this.schemaGenerator.formatChildType(
+          memberType,
+          context,
+          memberNode, // Pass node to preserve named type information
+        );
+        schemas.push(schema);
+      }
+    }
+
+    return this.maybeWrapInAnyOf(schemas);
+  }
+
+  /**
+   * Check if a union type contains ANY wrapper types (Cell/OpaqueRef/Stream).
+   * Uses type-based detection which handles complex cases like intersection types
+   * and conditional type expansions.
+   * Returns true for unions like: OpaqueRef<T> | undefined, (OpaqueCell<T> & T) | null, etc.
+   */
+  private isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {
+    // Must be a union type
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      return false;
+    }
+
+    const unionType = type as ts.UnionType;
+
+    // Check if ANY member has wrapper info (Cell/OpaqueRef/Stream)
+    // This handles all cases including:
+    // - Simple: OpaqueRef<T> | undefined
+    // - Nullable: Cell<T> | null
+    // - Intersection: (OpaqueCell<T> & T) | undefined
+    // - Complex expansions from conditional types
+    return unionType.types.some((memberType) => {
+      // Skip undefined (not a concrete type, just marks optionality)
+      if (this.isUndefinedType(memberType)) {
+        return false;
+      }
+
+      // Skip null (it's a concrete value, but not a wrapper)
+      if ((memberType.flags & ts.TypeFlags.Null) !== 0) {
+        return false;
+      }
+
+      // Check if this member has wrapper info
+      const wrapperInfo = getCellWrapperInfo(memberType, context.typeChecker);
+      return wrapperInfo !== undefined;
+    });
   }
 }
