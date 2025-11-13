@@ -403,7 +403,7 @@ describe("wish built-in", () => {
     }
   });
 
-  it("uses provided default when target is missing", async () => {
+  it("does not use provided default when target cell exists but result is undefined", async () => {
     const fallback = [{ name: "Fallback" }];
 
     // Set up space cell with an empty default pattern
@@ -436,6 +436,6 @@ describe("wish built-in", () => {
 
     await runtime.idle();
 
-    expect(result.key("missing").get()).toEqual(fallback);
+    expect(result.key("missing").get()).toBeUndefined();
   });
 });
