@@ -243,7 +243,7 @@ type CharmToolEntry = {
   name: string;
   charm: Cell<any>;
   charmName: string;
-  handle: string; // e.g., "/bafyabc123"
+  handle: string; // e.g., "of:bafyabc123"
 };
 
 type ToolCatalog = {
@@ -268,7 +268,7 @@ function collectToolEntries(
 
       // Extract handle from link
       const link = charm.getAsNormalizedFullLink();
-      const handle = "/" + link.id.replace(/^of:/, ""); // Convert "of:bafyabc123" to "/bafyabc123"
+      const handle = link.id; // Keep the "of:..." format as the internal handle
 
       charms.push({ name, charm, charmName, handle });
       continue;
@@ -297,7 +297,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path in the form /handle/child/grandchild (e.g., /bafyabc123/result/content).",
+        "Target path in the form handle/child/grandchild (e.g., of:bafyabc123/result/content).",
     },
   },
   required: ["path"],
@@ -310,7 +310,7 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target handler path in the form /handle/handler/path (e.g., /bafyabc123/handlers/doThing).",
+        "Target handler path in the form handle/handler/path (e.g., of:bafyabc123/handlers/doThing).",
     },
     args: {
       type: "object",
@@ -379,7 +379,7 @@ function parseTargetString(
 
   if (cleaned.length === 0) {
     return {
-      error: 'Target must include a charm handle, e.g. "/bafyabc123/path".',
+      error: 'Target must include a charm handle, e.g. "of:bafyabc123/path".',
     };
   }
 
@@ -388,15 +388,16 @@ function parseTargetString(
   // Check if first segment looks like a CID/handle by length
   // CIDs are long encoded strings (typically 40+ chars), whereas human names are short
   // Use a conservative threshold to distinguish handles from human-readable names
+  // Handle format is "of:..." (the internal storage format)
   if (firstSegment.length >= 20) {
-    const handle = "/" + firstSegment;
+    const handle = firstSegment;
     return { handle, pathSegments };
   }
 
   // If it doesn't look like a handle, assume user tried to use a human name
   return {
     error:
-      `Charm references must use handles (e.g., "/bafyabc123/path"), not human names (e.g., "${firstSegment}"). Use listAttachments() to see available charm handles and their names.`,
+      `Charm references must use handles (e.g., "of:bafyabc123/path"), not human names (e.g., "${firstSegment}"). Use listAttachments() to see available charm handles and their names.`,
   };
 }
 
@@ -471,13 +472,13 @@ function flattenTools(
     flattened[READ_TOOL_NAME] = {
       description:
         "Read data from an attached charm using a handle path like " +
-        '"/bafyabc123/result/path". ' + availability,
+        '"of:bafyabc123/result/path". ' + availability,
       inputSchema: READ_INPUT_SCHEMA,
     };
     flattened[RUN_TOOL_NAME] = {
       description:
         "Invoke a handler on an attached charm. Provide the handle " +
-        'path like "/bafyabc123/handlers/doThing" plus args if required. ' +
+        'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
         availability,
       inputSchema: RUN_INPUT_SCHEMA,
     };
@@ -540,14 +541,14 @@ function buildToolCatalog(
     llmTools[READ_TOOL_NAME] = {
       description:
         "Read data from an attached charm using a handle path like " +
-        '"/bafyabc123/result/path". Charm schemas are provided in the system prompt. ' +
+        '"of:bafyabc123/result/path". Charm schemas are provided in the system prompt. ' +
         availability,
       inputSchema: READ_INPUT_SCHEMA,
     };
     llmTools[RUN_TOOL_NAME] = {
       description:
         "Run a handler on an attached charm. Provide the handle path like " +
-        '"/bafyabc123/handlers/doThing" and optionally args. Charm schemas are ' +
+        '"of:bafyabc123/handlers/doThing" and optionally args. Charm schemas are ' +
         "provided in the system prompt. " + availability,
       inputSchema: RUN_INPUT_SCHEMA,
     };
@@ -606,7 +607,7 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools. Use the handle (e.g., /bafyabc123) to reference charms:\n\n${
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools. Use the handle (e.g., of:bafyabc123) to reference charms:\n\n${
     schemaEntries.join("\n\n")
   }`;
 }
@@ -677,7 +678,7 @@ function resolveToolCall(
     const target = extractStringField(
       toolCallPart.input,
       "path",
-      "/bafyabc123/path",
+      "of:bafyabc123/path",
     );
 
     const { handle, pathSegments } = parseHandleFromPath(target);
