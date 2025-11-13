@@ -132,6 +132,23 @@ export default recipe<Input>(({ emails }) => {
 
 Use `generateObject` for structured data that matches a TypeScript type. **The system automatically infers the JSON schema from your TypeScript type parameter.**
 
+### ⚠️ CRITICAL: Schema Root Must Be Object Type
+
+**The schema root MUST be `type: "object"`, NOT `type: "array"`.** This is an OpenAI API requirement.
+
+```typescript
+// ❌ WRONG - Array at root will fail with HTTP 400
+generateObject<CalendarEntry[]>({...})  // Error: "schema must be 'type: object'"
+
+// ✅ CORRECT - Wrap array in object property
+interface CalendarResponse {
+  entries: CalendarEntry[];
+}
+generateObject<CalendarResponse>({...})  // Works!
+```
+
+**Rule:** If you need an array, wrap it in an object with a property. Access with `result.entries`.
+
 ### Basic Usage with Type Inference
 
 ```typescript
@@ -273,7 +290,7 @@ export default recipe<Input>(({ text }) => {
 
 ### Example: Array Generation
 
-`generateObject` works with arrays too:
+To generate arrays, wrap them in an object property:
 
 ```typescript
 interface TodoItem {
@@ -282,16 +299,21 @@ interface TodoItem {
   estimatedMinutes: number;
 }
 
-const todos = generateObject<TodoItem[]>({
+// ⚠️ Must wrap array in object
+interface TodoListResponse {
+  todos: TodoItem[];
+}
+
+const response = generateObject<TodoListResponse>({
   prompt: "Generate 5 todos for launching a new product",
   system: "Create a prioritized task list.",
 });
 
-// todos.result is TodoItem[] when complete
-{todos.pending ? (
+// Access via response.result.todos when complete
+{response.pending ? (
   <div>Generating tasks...</div>
 ) : (
-  todos.result.map((todo) => (
+  response.result.todos.map((todo) => (
     <div>
       <strong>{todo.title}</strong> - {todo.priority} - {todo.estimatedMinutes}min
     </div>

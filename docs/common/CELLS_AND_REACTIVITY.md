@@ -74,21 +74,60 @@ Think of `Cell<>` as a permission declaration:
 
 ## Cell Basics
 
-### Creating Cells
+### Creating Cells with Cell.of()
 
-Use `Cell.of()` to create reactive state containers:
+Use `Cell.of()` to create NEW reactive cells in your recipe body or return values.
+
+This is rare. Generally prefer to add additional input parameters instead of
+creating internal cells.
+
+**When to use Cell.of():**
+
+- Creating new cells inside a recipe that can't be input parameters.
+- Creating local state that handlers will mutate
+
+**When NOT to use Cell.of():**
+
+- Input parameters (they're already cells if declared with `Cell<>`)
+- Values you won't mutate
 
 ```typescript
-// Cell with initial value
-const count = Cell.of(0);
-const name = Cell.of("Alice");
-const items = Cell.of<Item[]>([]);
+// ✅ Creating new cells in recipe body
+export default recipe(({ inputItems }) => {
+  // Create new cells for local state
+  const filteredItems = Cell.of<Item[]>([]);
+  const searchQuery = Cell.of("");
+  const selectedItem = Cell.of<Item | null>(null);
 
-// Typed cell with no initial value
-const user = Cell.of<User>();
+  return {
+    [UI]: <div>...</div>,
+    // Return cells so they're reactive and mutable
+    filteredItems,
+    searchQuery,
+    selectedItem,
+  };
+});
 
-// Typed cell with initial value
-const config = Cell.of<Config>({ theme: "dark" });
+// ✅ Common patterns
+const count = Cell.of(0);                           // Number
+const name = Cell.of("Alice");                      // String
+const items = Cell.of<Item[]>([]);                  // Empty array with type
+const user = Cell.of<User>();                       // Optional value
+const config = Cell.of<Config>({ theme: "dark" });  // Object with initial value
+```
+
+**Common mistake:**
+
+```typescript
+// ❌ WRONG - Plain array, not a cell
+return {
+  outputData: [],  // Not reactive! Can't mutate!
+};
+
+// ✅ CORRECT - Use Cell.of()
+return {
+  outputData: Cell.of<Item[]>([]),  // Reactive and mutable!
+};
 ```
 
 ### Cell Methods
@@ -148,6 +187,8 @@ const removeItem = (items: Cell<Item[]>, item: Cell<Item>) => {
 ## Reactive Computations with computed()
 
 `computed()` creates reactive derived values that update when their dependencies change.
+
+**Note:** You may see `derive()` in some docs or error messages - it's the same thing as `computed()`. Use `computed()` in your code.
 
 ### Basic Usage
 

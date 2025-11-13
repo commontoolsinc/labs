@@ -4,6 +4,35 @@ This guide demonstrates common patterns for building recipes, organized by compl
 
 ## Core Principles
 
+### ⚠️ CRITICAL: Never Directly Access Cell Data in Recipe Body
+
+**You cannot read or manipulate cell data directly in the recipe body.** Always use `computed()` for data transformations.
+
+```typescript
+// ❌ WRONG - Direct data access
+export default recipe(({ entries }) => {
+  const entriesByDate = {};
+  for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
+    entriesByDate[entry.date] = entry;
+  }
+});
+
+// ✅ CORRECT - Use computed()
+export default recipe(({ entries }) => {
+  const entriesByDate = computed(() => {
+    const grouped = {};
+    for (const entry of entries) {
+      grouped[entry.date] = entry;
+    }
+    return grouped;
+  });
+});
+```
+
+**Why?** Cell references in recipe bodies are "opaque refs" - placeholders for future values. They can't be read directly; they must be transformed through `computed()` which creates reactive computations.
+
+See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed explanation of opaque refs and reactivity.
+
 ### Cell<> is for Write Access Only
 
 **The most important rule:** Only declare `Cell<>` in signatures when you need to **mutate** the value.
@@ -943,6 +972,191 @@ const categories = computed(() => Object.keys(groupedItems).sort());
 - ✅ No intermediate `computed()` needed for simple property access
 - ✅ Type inference works automatically, even in nested maps!
 
+## Common Pitfalls and How to Avoid Them
+
+This section covers mistakes that will cost you hours of debugging. Read this before building your first pattern!
+
+### Pitfall 1: Direct Data Access
+
+❌ **WRONG - Trying to loop/transform data directly:**
+
+```typescript
+export default recipe(({ entries }) => {
+  // Error: "Tried to directly access an opaque value. Use `derive` instead"
+  const grouped = {};
+  for (const entry of entries) {
+    grouped[entry.date] = entry;
+  }
+});
+```
+
+✅ **CORRECT - Wrap ALL data transformations in computed():**
+
+```typescript
+export default recipe(({ entries }) => {
+  const grouped = computed(() => {
+    const result = {};
+    for (const entry of entries) {
+      result[entry.date] = entry;
+    }
+    return result;
+  });
+});
+```
+
+**Rule:** NEVER directly read or iterate cell data in recipe body. Always use `computed()`.
+
+### Pitfall 2: Creating Cells Without Cell.of()
+
+❌ **WRONG - Returning plain arrays/objects:**
+
+```typescript
+return {
+  myData: [],           // Not a cell!
+  myCount: 0,          // Not a cell!
+}
+
+// Later trying to mutate:
+onClick={handler({ myData: [] })}  // Won't work!
+```
+
+✅ **CORRECT - Use Cell.of() for new cells:**
+
+```typescript
+return {
+  myData: Cell.of<Item[]>([]),     // Now a cell!
+  myCount: Cell.of(0),             // Now a cell!
+}
+
+// Now mutation works:
+onClick={handler({ myData })}
+```
+
+**Rule:** Use `Cell.of()` when creating NEW cells in recipe body or return values. Input cells are already cells.
+
+### Pitfall 3: Accessing Cells in Template Strings
+
+❌ **WRONG - Direct access in template string:**
+
+```typescript
+const seed = Cell.of(42);
+const prompt = `Generate with seed: ${seed}`;  // Error: "Accessing an opaque ref via closure"
+```
+
+✅ **CORRECT - Use computed() or .get():**
+
+```typescript
+const seed = Cell.of(42);
+
+// Option 1: Wrap in computed()
+const prompt = computed(() => `Generate with seed: ${seed}`);
+
+// Option 2: Use .get() in handler/inline
+const generateWithSeed = () => {
+  const promptText = `Generate with seed: ${seed.get()}`;
+  // Use promptText...
+};
+```
+
+**Rule:** Can't close over cells in strings/functions. Use `computed()` or `.get()` in handlers.
+
+### Pitfall 4: HTML Event Attribute Names
+
+❌ **WRONG - Lowercase HTML-style:**
+
+```typescript
+<button onclick={handler}>      // TypeScript error!
+<input onchange={handler}>      // TypeScript error!
+<div onmouseenter={handler}>    // TypeScript error!
+```
+
+✅ **CORRECT - camelCase React-style:**
+
+```typescript
+<button onClick={handler}>      // ✅ Works
+<input onChange={handler}>      // ✅ Works
+<div onMouseEnter={handler}>    // ✅ Works
+```
+
+**Rule:** JSX uses camelCase for all event handlers (onClick, onChange, onInput, onMouseEnter, etc.)
+
+### Pitfall 5: Plain Arrays in Return Values
+
+❌ **WRONG - Mixing cells and plain values:**
+
+```typescript
+export default recipe(({ inputData }) => {
+  return {
+    [UI]: <div>...</div>,
+    outputData: [],        // Plain array, not reactive!
+  };
+});
+```
+
+✅ **CORRECT - Use Cell.of() for output data:**
+
+```typescript
+export default recipe(({ inputData }) => {
+  const outputData = Cell.of<Item[]>([]);
+
+  return {
+    [UI]: <div>...</div>,
+    outputData,            // Now a reactive cell!
+  };
+});
+```
+
+**Rule:** Output values should be cells if you want them reactive and mutable.
+
+### Pitfall 6: Forgetting computed() for Filters/Sorts
+
+❌ **WRONG - Direct filter in JSX:**
+
+```typescript
+{items.filter(item => !item.done).map(item => ...)}  // Won't update reactively!
+```
+
+✅ **CORRECT - Use computed() outside JSX:**
+
+```typescript
+const activeItems = computed(() => items.filter(item => !item.done));
+{activeItems.map(item => ...)}  // Updates reactively!
+```
+
+**Rule:** Any data transformation (filter, sort, group, etc.) needs `computed()` outside JSX.
+
+### Pitfall 7: Using Ternary for Conditional Rendering
+
+❌ **WRONG - Ternary for elements:**
+
+```typescript
+{showDetails ? <div>Details</div> : null}  // Won't work!
+```
+
+✅ **CORRECT - Use ifElse():**
+
+```typescript
+{ifElse(showDetails, <div>Details</div>, null)}  // Works!
+```
+
+**Note:** Ternaries DO work for simple attribute values:
+```typescript
+<span style={item.done ? { textDecoration: "line-through" } : {}}>  // ✅ This is fine
+```
+
+**Rule:** Use `ifElse()` for conditional rendering, not ternaries.
+
+### Quick Reference: Common Fixes
+
+| Problem | Error Message | Fix |
+|---------|---------------|-----|
+| Direct data access | "Tried to directly access an opaque value" | Wrap in `computed()` |
+| Template string access | "Accessing an opaque ref via closure" | Use `computed()` or `.get()` |
+| Handler mutation fails | "Property 'set' does not exist" | Use `Cell.of()` to create cell |
+| Filter doesn't update | UI not reactive | Use `computed()` outside JSX |
+| Event handler error | "'onclick' does not exist" | Change to camelCase: `onClick` |
+| Conditional rendering | Element doesn't show/hide | Use `ifElse()` not ternary |
+
 ## Summary
 
 **Level 1 patterns:**
@@ -967,8 +1181,9 @@ const categories = computed(() => Object.keys(groupedItems).sort());
 - Shared cell references between patterns
 
 **Key principles:**
-1. Use bidirectional binding when possible
-2. Use handlers for side effects and structural changes
-3. Use `computed()` for reactive transformations (but not in JSX - it's automatic there)
-4. Keep it simple - don't over-engineer
-5. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`
+1. Use `computed()` for ALL data transformations in recipe body
+2. Use `Cell.of()` when creating new cells
+3. Use bidirectional binding when possible
+4. Use handlers for side effects and structural changes
+5. Keep it simple - don't over-engineer
+6. Test incrementally with `deno task ct dev` and `deno task ct charm setsrc`
