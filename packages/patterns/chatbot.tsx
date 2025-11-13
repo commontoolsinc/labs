@@ -328,21 +328,23 @@ export default recipe<ChatInput, ChatOutput>(
       return attachments;
     });
 
-    // Derive tools from attachments (including auto-attached recent charm)
+    // Surface attached charms so the LLM can use read/run/schema helpers.
     const dynamicTools = computed(() => {
-      const tools: Record<string, any> = {};
+      const attached: Record<string, any> = {};
 
       for (const attachment of attachmentsWithRecent || []) {
-        if (attachment.type === "mention" && attachment.charm) {
-          const charmName = attachment.charm[NAME] || "Charm";
-          tools[charmName] = {
-            charm: attachment.charm,
-            description: `Handlers from ${charmName}`,
-          };
-        }
+        if (attachment.type !== "mention" || !attachment.charm) continue;
+        const charmName = attachment.charm[NAME] || "Charm";
+        attached[charmName] = {
+          charm: attachment.charm,
+          description:
+            `Attached charm ${charmName}. Use schema("${charmName}") to ` +
+            `inspect it, then read("${charmName}/path") or ` +
+            `run("${charmName}/handler").`,
+        };
       }
 
-      return tools;
+      return attached;
     });
 
     const attachmentTools = {
@@ -354,7 +356,8 @@ export default recipe<ChatInput, ChatOutput>(
         }),
       },
       listAttachments: {
-        description: "List all attachments in the attachments array.",
+        description:
+          "List attachment names to use with schema(), read(), and run().",
         handler: listAttachments({ allAttachments: attachmentsWithRecent }),
       },
       listMentionable: {
