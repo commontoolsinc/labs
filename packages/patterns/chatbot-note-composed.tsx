@@ -31,8 +31,8 @@ function schemaifyWish<T>(path: string, def: T) {
 }
 
 type ChatbotNoteInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
 };
 
 type ChatbotNoteResult = {
@@ -55,13 +55,10 @@ const newNote = handler<
 >(
   (args, _) => {
     try {
-      const n = Note({
-        title: args.title,
-        content: args.content || "",
-      });
+      const n = Note({});
 
       args.result.set(
-        `Created note ${args.title}!`,
+        `Created note!`,
       );
 
       // TODO(bf): we have to navigate here until DX1 lands
@@ -170,7 +167,9 @@ type BacklinksIndex = {
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  ({ title, messages }) => {
+  (input) => {
+    const title = input.title || Cell.of("LLM Test");
+    const messages = input.messages || Cell.of<Array<BuiltInLLMMessage>>([]);
     const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
     const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
       mentionable: [],

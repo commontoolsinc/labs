@@ -79,10 +79,10 @@ export const Page = recipe<PageInput>(
 );
 
 type LLMTestInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-  expandChat: Default<boolean, false>;
-  outline: Default<
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  expandChat?: Cell<Default<boolean, false>>;
+  outline?: Default<
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
   >;
@@ -121,7 +121,11 @@ const appendOutlinerNode = handler<
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "Outliner",
-  ({ title, expandChat, messages, outline }) => {
+  (input) => {
+    const title = input.title || Cell.of("LLM Test");
+    const expandChat = input.expandChat || Cell.of(false);
+    const messages = input.messages || Cell.of<Array<BuiltInLLMMessage>>([]);
+    const outline = input.outline || { root: { body: "", children: [], attachments: [] } };
     const tools = {
       appendOutlinerNode: {
         description: "Add a new outliner node.",

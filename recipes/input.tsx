@@ -7,6 +7,7 @@ const InputSchema = {
     content: {
       type: "string",
       default: "",
+      asCell: true,
     },
   },
   required: ["content"],

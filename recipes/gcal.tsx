@@ -105,11 +105,13 @@ const GcalImporterInputs = {
           type: "string",
           description: "Calendar ID to fetch events from",
           default: "primary",
+          asCell: true,
         },
         limit: {
           type: "number",
           description: "number of events to import",
           default: 250,
+          asCell: true,
         },
         syncToken: {
           type: "string",
@@ -222,8 +224,8 @@ const calendarUpdater = handler(
     const settings = state.settings.get();
     const result = await fetchCalendar(
       state.auth,
-      settings.limit,
-      settings.calendarId,
+      settings.limit.get(),
+      settings.calendarId.get(),
       settings.syncToken,
       state,
     );

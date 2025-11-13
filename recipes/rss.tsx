@@ -14,7 +14,7 @@ import {
 import { type FeedItem, parseRSSFeed } from "./rss-utils.ts";
 
 interface Settings {
-  feedUrl: Default<string, "">;
+  feedUrl: Cell<Default<string, "">>;
   limit: Default<number, 100>;
 }
 
@@ -43,7 +43,7 @@ const feedUpdater = handler<never, {
 });
 
 export default recipe<
-  { settings: Default<Settings, { feedUrl: ""; limit: 100 }> }
+  { settings: Settings }
 >(
   "rss importer",
   ({ settings }) => {
@@ -76,7 +76,6 @@ export default recipe<
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
                 />
               </div>
-              <common-updater $state={settings} integration="rss" />
             </common-vstack>
           </common-hstack>
           <div>

@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Default, ifElse, NAME, recipe, UI } from "commontools";
+import { Cell, Default, ifElse, NAME, recipe, UI } from "commontools";
 
 interface CheckboxSimpleInput {
-  enabled: Default<boolean, false>;
+  enabled: Cell<Default<boolean, false>>;
 }
 
 interface CheckboxSimpleOutput extends CheckboxSimpleInput {}

@@ -50,7 +50,7 @@ const updaterSchema = {
 const inputSchema = schema({
   type: "object",
   properties: {
-    values: { type: "array", items: { type: "string" }, asCell: true },
+    values: { type: "array", items: { type: "string" } },
   },
   default: { values: [] },
 });
