@@ -30,7 +30,7 @@ Deno.test("parseTargetString throws when charm name missing", () => {
 
 Deno.test("extractStringField returns value from string input", () => {
   assertEquals(
-    extractStringField("Charm/path", "target", "Charm/path"),
+    extractStringField("Charm/path", "path", "Charm/path"),
     "Charm/path",
   );
 });
@@ -50,16 +50,16 @@ Deno.test("extractStringField throws on missing field", () => {
 
 Deno.test("extractRunArguments prioritizes nested args object", () => {
   const args = extractRunArguments({
-    target: "Charm/run",
+    path: "Charm/run",
     args: { foo: "bar" },
     extra: 1,
   });
   assertEquals(args, { foo: "bar" });
 });
 
-Deno.test("extractRunArguments removes target key when no args provided", () => {
+Deno.test("extractRunArguments removes path key when no args provided", () => {
   const args = extractRunArguments({
-    target: "Charm/run",
+    path: "Charm/run",
     mode: "test",
   });
   assertEquals(args, { mode: "test" });
