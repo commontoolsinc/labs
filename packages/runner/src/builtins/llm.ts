@@ -25,13 +25,28 @@ import {
   getState,
   isTimedOut,
   transitionToError,
-  transitionToFetchingAsync,
+  transitionToFetching,
   transitionToIdle,
   transitionToSuccess,
   updatePartial,
 } from "./async-operation-state.ts";
 
 const client = new LLMClient();
+
+function cloneMessages(
+  messages: BuiltInLLMMessage[] | undefined,
+): BuiltInLLMMessage[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((message) => ({
+    ...message,
+    content: Array.isArray(message.content)
+      ? message.content.map((part) => {
+        if (typeof part === "string") return part;
+        return { ...part };
+      })
+      : message.content,
+  }));
+}
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
@@ -153,9 +168,7 @@ export function llm(
       const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
       if (didStart) {
-        const initialMessagesCopy: BuiltInLLMMessage[] = Array.isArray(messages)
-          ? structuredClone(messages)
-          : [];
+        const initialMessagesCopy = cloneMessages(messages);
         const llmParams: LLMRequest = {
           system: system ?? "",
           messages: initialMessagesCopy,
@@ -378,7 +391,6 @@ export function generateText(
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<string, string>>>;
   const myRequestIds = new Map<string, string>();
-  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -455,15 +467,12 @@ export function generateText(
 
     // State machine transitions
     if (state.type === "idle") {
-      if (!claimPromises.has(inputHash)) {
-        const requestId = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
+
+      if (didStart) {
         const requestMessages: BuiltInLLMMessage[] = messages
-          ? messages.map((msg) => ({
-            ...msg,
-            content: Array.isArray(msg.content)
-              ? msg.content.map((part) => ({ ...part }))
-              : msg.content,
-          }))
+          ? cloneMessages(messages)
           : [{ role: "user", content: prompt! }];
 
         const llmParams: LLMRequest = {
@@ -479,64 +488,37 @@ export function generateText(
           cache: true,
         };
         const toolsCellRef = tools ? inputsCell.key("tools") : undefined;
-        const claimHash = inputHash;
 
-        const claimPromise = (async () => {
-          try {
-            await cache.sync();
-            const didStart = await transitionToFetchingAsync(
-              runtime,
-              cache,
-              claimHash,
-              requestId,
-            );
+        myRequestIds.set(inputHash, requestId);
 
-            if (!didStart) {
-              return;
-            }
+        Promise.resolve().then(async () => {
+          await runtime.idle();
 
-            myRequestIds.set(claimHash, requestId);
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
 
-            await runtime.idle();
-
-            const confirmTx = runtime.edit();
-            const confirmedState = getState(cache, claimHash, confirmTx);
-            await confirmTx.commit();
-
-            if (
-              confirmedState.type === "fetching" &&
-              confirmedState.requestId === requestId
-            ) {
-              try {
-                await startGenerateText(
-                  runtime,
-                  cache,
-                  inputHash,
-                  llmParams,
-                  requestMessages,
-                  toolsCellRef,
-                  requestId,
-                );
-              } finally {
-                if (myRequestIds.get(claimHash) === requestId) {
-                  myRequestIds.delete(claimHash);
-                }
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            try {
+              await startGenerateText(
+                runtime,
+                cache,
+                inputHash,
+                llmParams,
+                requestMessages,
+                toolsCellRef,
+                requestId,
+              );
+            } finally {
+              if (myRequestIds.get(inputHash) === requestId) {
+                myRequestIds.delete(inputHash);
               }
-            } else {
-              myRequestIds.delete(claimHash);
             }
-          } catch (error) {
-            console.error("generateText claim failed", error);
-            if (myRequestIds.get(claimHash) === requestId) {
-              myRequestIds.delete(claimHash);
-            }
-          }
-        })();
-
-        claimPromises.set(inputHash, claimPromise);
-        claimPromise.finally(() => {
-          if (claimPromises.get(claimHash) === claimPromise) {
-            claimPromises.delete(claimHash);
+          } else {
+            myRequestIds.delete(inputHash);
           }
         });
       }
@@ -545,7 +527,6 @@ export function generateText(
       if (isTimedOut(state, 60000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
         myRequestIds.delete(inputHash);
-        claimPromises.delete(inputHash);
       }
     }
 
@@ -711,7 +692,6 @@ export function generateObject<T extends Record<string, unknown>>(
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<T, string>>>;
   const myRequestIds = new Map<string, string>();
-  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -796,18 +776,15 @@ export function generateObject<T extends Record<string, unknown>>(
 
     // State machine transitions
     if (state.type === "idle") {
-      if (!claimPromises.has(inputHash)) {
-        const requestId = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
+
+      if (didStart) {
         const readyMetadata = metadata
           ? JSON.parse(JSON.stringify(metadata))
           : {};
         const requestMessages: BuiltInLLMMessage[] = messages
-          ? messages.map((msg) => ({
-            ...msg,
-            content: Array.isArray(msg.content)
-              ? msg.content.map((part) => ({ ...part }))
-              : msg.content,
-          }))
+          ? cloneMessages(messages)
           : [{ role: "user", content: prompt! }];
 
         const generateObjectParams: LLMGenerateObjectRequest = {
@@ -825,62 +802,35 @@ export function generateObject<T extends Record<string, unknown>>(
         if (system) {
           generateObjectParams.system = system;
         }
-        const claimHash = inputHash;
 
-        const claimPromise = (async () => {
-          try {
-            await cache.sync();
-            const didStart = await transitionToFetchingAsync(
-              runtime,
-              cache,
-              claimHash,
-              requestId,
-            );
+        myRequestIds.set(inputHash, requestId);
 
-            if (!didStart) {
-              return;
-            }
+        Promise.resolve().then(async () => {
+          await runtime.idle();
 
-            myRequestIds.set(claimHash, requestId);
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
 
-            await runtime.idle();
-
-            const confirmTx = runtime.edit();
-            const confirmedState = getState(cache, claimHash, confirmTx);
-            await confirmTx.commit();
-
-            if (
-              confirmedState.type === "fetching" &&
-              confirmedState.requestId === requestId
-            ) {
-              try {
-                await startGenerateObject(
-                  runtime,
-                  cache,
-                  claimHash,
-                  generateObjectParams,
-                  requestId,
-                );
-              } finally {
-                if (myRequestIds.get(claimHash) === requestId) {
-                  myRequestIds.delete(claimHash);
-                }
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            try {
+              await startGenerateObject(
+                runtime,
+                cache,
+                inputHash,
+                generateObjectParams,
+                requestId,
+              );
+            } finally {
+              if (myRequestIds.get(inputHash) === requestId) {
+                myRequestIds.delete(inputHash);
               }
-            } else {
-              myRequestIds.delete(claimHash);
             }
-          } catch (error) {
-            console.error("generateObject claim failed", error);
-            if (myRequestIds.get(claimHash) === requestId) {
-              myRequestIds.delete(claimHash);
-            }
-          }
-        })();
-
-        claimPromises.set(inputHash, claimPromise);
-        claimPromise.finally(() => {
-          if (claimPromises.get(claimHash) === claimPromise) {
-            claimPromises.delete(claimHash);
+          } else {
+            myRequestIds.delete(inputHash);
           }
         });
       }
@@ -889,7 +839,6 @@ export function generateObject<T extends Record<string, unknown>>(
       if (isTimedOut(state, 30000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
         myRequestIds.delete(inputHash);
-        claimPromises.delete(inputHash);
       }
     }
 

@@ -52,7 +52,8 @@ export function fetchProgram(
 
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
-    for (const { controller } of activeRequests.values()) {
+    const activeEntries = Array.from(activeRequests.entries());
+    for (const [, { controller }] of activeEntries) {
       controller.abort("Recipe stopped");
     }
     activeRequests.clear();
@@ -64,7 +65,7 @@ export function fetchProgram(
     try {
       const currentCache = cache.withTx(tx).get();
       for (const [hash, entry] of Object.entries(currentCache)) {
-        const active = activeRequests.get(hash);
+        const active = activeEntries.find(([k]) => k === hash)?.[1];
         if (
           entry.state.type === "fetching" &&
           active?.requestId === entry.state.requestId
