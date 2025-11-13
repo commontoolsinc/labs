@@ -25,6 +25,7 @@ export {
 } from "./iframe/static.ts";
 export {
   addGithubRecipe,
+  addRecipeFromUrl,
   castSpellAsCharm,
   createDataCharm,
   fixItCharm,

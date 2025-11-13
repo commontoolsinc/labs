@@ -35,12 +35,55 @@ export function bundleAMDOutput(config: BundleAMDOutputConfig): string {
   // which is AMD module boilerplate anyway).
   output += BUNDLE_PRE;
   if (config.injectedScript) output += stripNewLines(config.injectedScript);
-  output += stripSourceMappingUrl(config.source) + "\n";
+
+  // Fix AMD define names for URL-based modules before adding to bundle
+  let processedSource = fixUrlModuleDefines(config.source, config.exportModuleExports || []);
+  output += stripSourceMappingUrl(processedSource) + "\n";
   output += returnValue(config);
   output += BUNDLE_POST + "\n";
   output += sourceMappingUrl(config.sourceMap);
   output += sourceUrl(config.filename);
   return output;
+}
+
+// Fix AMD define statements and imports for URL-based modules
+// TypeScript compiles "https://.../aside.tsx" to define("aside", ...)
+// and imports like "./counter-handlers.ts" to require("counter-handlers")
+// We need to replace these with full URLs
+function fixUrlModuleDefines(source: string, sourceFiles: string[]): string {
+  for (const file of sourceFiles) {
+    if (file.startsWith("http://") || file.startsWith("https://")) {
+      // Extract the filename without path or extension (what TypeScript uses)
+      const match = file.match(/\/([^\/]+)\.(tsx?|jsx?)$/);
+      if (match) {
+        const tsShortName = match[1]; // e.g., "aside" or "counter-handlers"
+        const fullName = file;         // e.g., "https://.../aside.tsx"
+
+        // Replace define("aside", with define("https://.../aside.tsx",
+        const definePattern = new RegExp(`define\\("${escapeRegex(tsShortName)}"\\s*,`, 'g');
+        source = source.replace(definePattern, `define("${fullName}",`);
+
+        // Also fix imports/requires: "counter-handlers" -> "https://.../counter-handlers.ts"
+        // This handles: ["require", "exports", "counter-handlers"]
+        const requirePattern = new RegExp(`"${escapeRegex(tsShortName)}"`, 'g');
+        source = source.replace(requirePattern, (match, offset) => {
+          // Check if this is in a module dependency array (not in a define call we already fixed)
+          // Simple heuristic: if preceded by a comma or opening bracket, it's likely a dependency
+          const before = source.substring(Math.max(0, offset - 10), offset);
+          if (before.includes('[') || before.includes(',')) {
+            return `"${fullName}"`;
+          }
+          return match;
+        });
+      }
+    }
+  }
+  return source;
+}
+
+// Escape special regex characters in a string
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // We track module names rooted with `/`, like
@@ -49,7 +92,15 @@ export function bundleAMDOutput(config: BundleAMDOutputConfig): string {
 // into `main`, and `utils/foo`, stripping prefix `/`
 // and the suffix extension. This could cause collisions
 // with non-local files.
+//
+// NOTE: For URL-based modules (http:// or https://), we keep the full URL
+// including the extension, as the URL itself is the unique identifier.
 function mapModuleName(name: string): string {
+  // Don't transform URL module names - keep them as-is including extension
+  if (name.startsWith("http://") || name.startsWith("https://")) {
+    return name;
+  }
+
   if (name.startsWith("/")) name = name.substring(1);
   if (
     name.endsWith(".tsx") ||
