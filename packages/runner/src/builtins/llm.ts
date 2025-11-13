@@ -102,9 +102,11 @@ export function llm(
         tx,
       );
 
+      // Cache is shared across ALL llm operations (not per-recipe)
+      // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        { llm: { cache: cause } },
+        "llm-global-cache",
         asyncOperationCacheSchema,
         tx,
       ) as Cell<
@@ -384,9 +386,11 @@ export function generateText(
         tx,
       );
 
+      // Cache is shared across ALL generateText operations (not per-recipe)
+      // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        { generateText: { cache: cause } },
+        "generateText-global-cache",
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<string, string>>>;
@@ -661,9 +665,11 @@ export function generateObject<T extends Record<string, unknown>>(
         tx,
       );
 
+      // Cache is shared across ALL generateObject operations (not per-recipe)
+      // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        { generateObject: { cache: cause } },
+        "generateObject-global-cache",
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<T, string>>>;

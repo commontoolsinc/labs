@@ -459,37 +459,28 @@ describe("async-operation-state", () => {
       expect(state.type).toBe("success");
     });
 
-    it("should prevent old request from overwriting new one", async () => {
+    it("should prevent new request when already fetching (deduplication)", async () => {
       const inputHash = "test-hash";
-      const oldRequestId = "req-1";
-      const newRequestId = "req-2";
+      const firstRequestId = "req-1";
+      const secondRequestId = "req-2";
 
-      // Setup: start with old request
-      transitionToFetching(cache, inputHash, oldRequestId, tx);
+      // First runtime starts fetching
+      const didStart1 = transitionToFetching(cache, inputHash, firstRequestId, tx);
+      expect(didStart1).toBe(true); // First one wins
       await tx.commit();
 
-      // Simulate new request starting (input changed)
+      // Second runtime tries to start (should fail - already fetching)
       tx = runtime.edit();
-      transitionToFetching(cache, inputHash, newRequestId, tx);
+      const didStart2 = transitionToFetching(cache, inputHash, secondRequestId, tx);
+      expect(didStart2).toBe(false); // Second one loses
       await tx.commit();
 
-      // Old request tries to write its result
-      const oldSuccess = await transitionToSuccess(
-        runtime,
-        cache,
-        inputHash,
-        "old-data",
-        oldRequestId,
-      );
-
-      expect(oldSuccess).toBe(false);
-
-      // Verify state is still fetching with new requestId
+      // Verify state is still fetching with first requestId
       tx = runtime.edit();
       const state = getState(cache, inputHash, tx);
       expect(state.type).toBe("fetching");
       if (state.type === "fetching") {
-        expect(state.requestId).toBe(newRequestId);
+        expect(state.requestId).toBe(firstRequestId); // Original request still active
       }
     });
   });

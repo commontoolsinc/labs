@@ -113,9 +113,11 @@ export function fetchData(
         tx,
       );
 
+      // Cache is shared across ALL fetchData operations (not per-recipe)
+      // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        { fetchData: { cache: cause } },
+        "fetchData-global-cache",
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<any, any>>>;
@@ -156,19 +158,44 @@ export function fetchData(
       const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
       if (didStart) {
-        // We won the race - start fetch asynchronously
+        // We tentatively won the race - but need to wait for commit
+        // to confirm before starting the fetch
         myRequestId = requestId;
         abortController = new AbortController();
-        startFetch(
-          runtime,
-          cache,
-          inputHash,
-          url,
-          inputsCell.withTx(tx).key("mode").get(),
-          inputsCell.withTx(tx).key("options").get(),
-          requestId,
-          abortController.signal,
-        );
+
+        // Capture current inputs for the fetch
+        const urlToFetch = url;
+        const modeToUse = inputsCell.withTx(tx).key("mode").get();
+        const optionsToUse = inputsCell.withTx(tx).key("options").get();
+        const signal = abortController.signal;
+
+        // Start fetch AFTER this transaction commits and CAS is confirmed
+        Promise.resolve().then(async () => {
+          await runtime.idle(); // Wait for current transaction to commit
+
+          // Re-check that we still own this requestId (CAS confirmation)
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
+
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            // Confirmed - we won the CAS race, start the fetch
+            startFetch(
+              runtime,
+              cache,
+              inputHash,
+              urlToFetch,
+              modeToUse,
+              optionsToUse,
+              requestId,
+              signal,
+            );
+          }
+          // else: Another runtime won, don't start fetch
+        });
       }
       // else: Another runtime is already fetching, we'll see the result on next eval
     } else if (state.type === "fetching") {
