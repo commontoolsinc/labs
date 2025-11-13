@@ -122,6 +122,7 @@ export function fetchData(
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
+      cache.setSourceCell(parentCell);
       // Kick off sync in the background
       pending.sync();
       result.sync();

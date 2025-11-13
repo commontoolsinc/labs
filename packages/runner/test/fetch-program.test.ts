@@ -107,6 +107,62 @@ describe("fetchProgram State Machine", () => {
       expect(data.error).toBeUndefined();
     });
 
+    it("should set pending true before program resolves on first run", async () => {
+      const url = "http://example.com/pending.ts";
+      mockPrograms.set(url, "export default () => 'pending';");
+
+      let resolveFetch: (() => void) | undefined;
+      globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+        const finalUrl = typeof input === "string"
+          ? input
+          : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+        if (finalUrl === url) {
+          return await new Promise<Response>((resolve) => {
+            resolveFetch = () =>
+              resolve(
+                new Response(mockPrograms.get(url) ?? "", {
+                  status: 200,
+                  headers: { "Content-Type": "text/typescript" },
+                }),
+              );
+          });
+        }
+
+        return new Response(mockPrograms.get(finalUrl) ?? "", {
+          status: 200,
+          headers: { "Content-Type": "text/typescript" },
+        });
+      };
+
+      const fetchProgram = byRef("fetchProgram");
+      const testRecipe = recipe("Pending Program", () => fetchProgram({ url }));
+
+      const resultCell = runtime.getCell(space, "pending-program", undefined, tx);
+      const result = runtime.run(tx, testRecipe, {}, resultCell);
+      tx.commit();
+
+      await runtime.idle();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
+
+      const interim = result.get() as { pending?: boolean; result?: any };
+      expect(interim.pending).toBe(true);
+      expect(interim.result).toBeUndefined();
+
+      resolveFetch?.();
+
+      await runtime.idle();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await runtime.idle();
+
+      const finalData = result.get() as { pending?: boolean; result?: any };
+      expect(finalData.pending).toBe(false);
+      expect(finalData.result).toBeDefined();
+    });
+
     it("should transition: idle -> fetching -> error", async () => {
       shouldError = true;
       errorMessage = "Network error";

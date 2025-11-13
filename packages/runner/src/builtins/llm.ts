@@ -119,6 +119,7 @@ export function llm(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
+      cache.setSourceCell(parentCell);
       // Kick off sync in the background
       pending.sync();
       result.sync();
@@ -454,6 +455,7 @@ export function generateText(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
+      cache.setSourceCell(parentCell);
       // Kick off sync in the background
       pending.sync();
       result.sync();
@@ -786,6 +788,7 @@ export function generateObject<T extends Record<string, unknown>>(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
+      cache.setSourceCell(parentCell);
       // Kick off sync in the background
       pending.sync();
       result.sync();
