@@ -3,8 +3,8 @@ import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const {
-  createCharmToolDefinitions,
-  normalizeCharmPathSegments,
+  parseTargetString,
+  extractStringField,
   extractRunArguments,
   extractToolCallParts,
   buildAssistantMessage,
@@ -12,38 +12,54 @@ const {
   hasValidContent,
 } = llmDialogTestHelpers;
 
-Deno.test("createCharmToolDefinitions slugifies charm names and returns tool metadata", () => {
-  const defs = createCharmToolDefinitions("My Charm!", '{ "type": "object" }');
-  assertEquals(defs.read.name, "My_Charm_read");
-  assertEquals(defs.run.name, "My_Charm_run");
-  const readSchema = defs.read.inputSchema as any;
-  const runSchema = defs.run.inputSchema as any;
-  assertEquals(readSchema.properties.path.type, "array");
-  assertEquals(runSchema.required, ["path"]);
-  assert(defs.read.description.includes("My Charm!"));
+Deno.test("parseTargetString splits charm name and path segments", () => {
+  const parsed = parseTargetString("Charm/foo/bar");
+  assertEquals(parsed.charmName, "Charm");
+  assertEquals(parsed.pathSegments, ["foo", "bar"]);
 });
 
-Deno.test("normalizeCharmPathSegments returns sanitized segments", () => {
-  const segments = normalizeCharmPathSegments({ path: ["foo", 1, "bar", ""] });
-  assertEquals(segments, ["foo", "1", "bar"]);
+Deno.test("parseTargetString handles whitespace and empty segments", () => {
+  const parsed = parseTargetString("  Charm  /  foo / ");
+  assertEquals(parsed.charmName, "Charm");
+  assertEquals(parsed.pathSegments, ["foo"]);
 });
 
-Deno.test("normalizeCharmPathSegments throws when path is missing", () => {
-  assertThrows(() => normalizeCharmPathSegments({}));
+Deno.test("parseTargetString throws when charm name missing", () => {
+  assertThrows(() => parseTargetString("   "));
+});
+
+Deno.test("extractStringField returns value from string input", () => {
+  assertEquals(
+    extractStringField("Charm/path", "target", "Charm/path"),
+    "Charm/path",
+  );
+});
+
+Deno.test("extractStringField returns value from object field", () => {
+  const value = extractStringField(
+    { charm: "Charm" },
+    "charm",
+    "Charm",
+  );
+  assertEquals(value, "Charm");
+});
+
+Deno.test("extractStringField throws on missing field", () => {
+  assertThrows(() => extractStringField({ wrong: "Charm" }, "charm", "Charm"));
 });
 
 Deno.test("extractRunArguments prioritizes nested args object", () => {
   const args = extractRunArguments({
-    path: ["demo"],
+    target: "Charm/run",
     args: { foo: "bar" },
     extra: 1,
   });
   assertEquals(args, { foo: "bar" });
 });
 
-Deno.test("extractRunArguments removes path key when no args provided", () => {
+Deno.test("extractRunArguments removes target key when no args provided", () => {
   const args = extractRunArguments({
-    path: ["demo"],
+    target: "Charm/run",
     mode: "test",
   });
   assertEquals(args, { mode: "test" });
