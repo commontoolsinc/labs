@@ -2,6 +2,7 @@
 import {
   Cell,
   Default,
+  derive,
   handler,
   ID,
   ifElse,
@@ -236,7 +237,10 @@ const extractLocalMentionable = lift<
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, theme }) => {
-    const allCharms = wish<MentionableCharm[]>("#allCharms", []);
+    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
+      wish<MentionableCharm[]>("#allCharms"),
+      (c) => c ?? [],
+    );
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
     populateChatList({

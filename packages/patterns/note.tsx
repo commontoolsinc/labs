@@ -100,8 +100,8 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
   },
 );
 
-function schemaifyWish<T>(path: string, def: T | Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def as Opaque<T>), (i) => i);
+function schemaifyWish<T>(path: string, def: T) {
+  return derive<T, T>(wish<T>(path, def), (i) => i ?? def);
 }
 
 const Note = recipe<Input, Output>(
