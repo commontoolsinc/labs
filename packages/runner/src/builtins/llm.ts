@@ -13,7 +13,6 @@ import {
   BuiltInLLMMessage,
   BuiltInLLMParams,
 } from "@commontools/api";
-import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
@@ -72,7 +71,6 @@ export function llm(
   let cache: Cell<
     Record<string, AsyncOperationCache<LLMResponse["content"], string>>
   >;
-  let myRequestId: string | undefined = undefined;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -354,7 +352,6 @@ export function generateText(
   let partial: Cell<string | undefined>;
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<string, string>>>;
-  let myRequestId: string | undefined = undefined;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -632,7 +629,6 @@ export function generateObject<T extends Record<string, unknown>>(
   let partial: Cell<string | undefined>;
   let error: Cell<string | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<T, string>>>;
-  let myRequestId: string | undefined = undefined;
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
