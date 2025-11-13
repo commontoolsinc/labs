@@ -119,8 +119,6 @@ export function llm(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
-
       // Kick off sync in the background
       pending.sync();
       result.sync();
@@ -154,7 +152,12 @@ export function llm(
       if (!claimPromises.has(inputHash)) {
         const requestId = crypto.randomUUID();
         const initialMessages = Array.isArray(messages)
-          ? structuredClone(messages)
+          ? messages.map((msg) => ({
+            ...msg,
+            content: Array.isArray(msg.content)
+              ? msg.content.map((part) => ({ ...part }))
+              : msg.content,
+          }))
           : [];
         const llmParams: LLMRequest = {
           system: system ?? "",
@@ -451,8 +454,6 @@ export function generateText(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
-
       // Kick off sync in the background
       pending.sync();
       result.sync();
@@ -487,7 +488,12 @@ export function generateText(
       if (!claimPromises.has(inputHash)) {
         const requestId = crypto.randomUUID();
         const requestMessages: BuiltInLLMMessage[] = messages
-          ? structuredClone(messages)
+          ? messages.map((msg) => ({
+            ...msg,
+            content: Array.isArray(msg.content)
+              ? msg.content.map((part) => ({ ...part }))
+              : msg.content,
+          }))
           : [{ role: "user", content: prompt! }];
 
         const llmParams: LLMRequest = {
@@ -780,8 +786,6 @@ export function generateObject<T extends Record<string, unknown>>(
       result.setSourceCell(parentCell);
       partial.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
-
       // Kick off sync in the background
       pending.sync();
       result.sync();
@@ -827,7 +831,12 @@ export function generateObject<T extends Record<string, unknown>>(
           ? JSON.parse(JSON.stringify(metadata))
           : {};
         const requestMessages: BuiltInLLMMessage[] = messages
-          ? structuredClone(messages)
+          ? messages.map((msg) => ({
+            ...msg,
+            content: Array.isArray(msg.content)
+              ? msg.content.map((part) => ({ ...part }))
+              : msg.content,
+          }))
           : [{ role: "user", content: prompt! }];
 
         const generateObjectParams: LLMGenerateObjectRequest = {

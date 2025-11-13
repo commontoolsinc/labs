@@ -117,8 +117,6 @@ export function fetchProgram(
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
-
       pending.sync();
       result.sync();
       error.sync();
