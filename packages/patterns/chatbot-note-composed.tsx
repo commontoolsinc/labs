@@ -8,7 +8,6 @@ import {
   handler,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
   wish,
