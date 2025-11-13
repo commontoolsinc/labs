@@ -1806,12 +1806,37 @@ export class SchemaObjectTraverser<V extends JSONValue>
     }
   }
 
+  /**
+   * Check whether the schema specifies asCell or asStream
+   *
+   * This handling gets a little blurry with anyOf or oneOf schemas, and
+   * in those cases, we base the value on whether every option has the flag.
+   *
+   * A future improvement is to operate on pre-processed schemas, where the
+   * asCell and asStream flags are factored out when possible.
+   *
+   * We do not resolve references in the anyOf or oneOf options, which means
+   * we don't need to worry about cycles, but it also means we may miss some
+   * references that should be asCell or asStream.
+   *
+   * @param schema
+   * @returns
+   */
   static asCellOrStream(schema: JSONSchema): boolean {
     if (typeof schema === "boolean") {
       return false;
     }
-    // TODO: Handle anyOf
-    if ("asCell" in schema || "asStream" in schema) {
+    if (
+      schema.asCell || schema.asStream ||
+      (Array.isArray(schema.anyOf) &&
+        schema.anyOf.every((option) =>
+          SchemaObjectTraverser.asCellOrStream(option)
+        )) ||
+      (Array.isArray(schema.oneOf) &&
+        schema.oneOf.every((option) =>
+          SchemaObjectTraverser.asCellOrStream(option)
+        ))
+    ) {
       return true;
     }
     return false;
