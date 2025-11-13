@@ -12,26 +12,67 @@ const {
   hasValidContent,
 } = llmDialogTestHelpers;
 
-Deno.test("parseTargetString splits charm name and path segments", () => {
-  const parsed = parseTargetString("Charm/foo/bar");
-  assertEquals(parsed.charmName, "Charm");
-  assertEquals(parsed.pathSegments, ["foo", "bar"]);
+Deno.test("parseTargetString recognizes handle format", () => {
+  const parsed = parseTargetString(
+    "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo/bar",
+  );
+  assert(!("error" in parsed));
+  if (!("error" in parsed)) {
+    assertEquals(
+      parsed.handle,
+      "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
+    );
+    assertEquals(parsed.pathSegments, ["foo", "bar"]);
+  }
 });
 
-Deno.test("parseTargetString handles whitespace and empty segments", () => {
-  const parsed = parseTargetString("  Charm  /  foo / ");
-  assertEquals(parsed.charmName, "Charm");
-  assertEquals(parsed.pathSegments, ["foo"]);
+Deno.test("parseTargetString handles whitespace in handle paths", () => {
+  const parsed = parseTargetString(
+    "  /bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai  /  foo / ",
+  );
+  assert(!("error" in parsed));
+  if (!("error" in parsed)) {
+    assertEquals(
+      parsed.handle,
+      "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
+    );
+    assertEquals(parsed.pathSegments, ["foo"]);
+  }
 });
 
-Deno.test("parseTargetString throws when charm name missing", () => {
-  assertThrows(() => parseTargetString("   "));
+Deno.test("parseTargetString recognizes baed prefix CIDs", () => {
+  const parsed = parseTargetString(
+    "/baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q/content",
+  );
+  assert(!("error" in parsed));
+  if (!("error" in parsed)) {
+    assertEquals(
+      parsed.handle,
+      "/baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q",
+    );
+    assertEquals(parsed.pathSegments, ["content"]);
+  }
+});
+
+Deno.test("parseTargetString errors on human name", () => {
+  const result = parseTargetString("CharmName/foo/bar");
+  assert("error" in result);
+  if ("error" in result) {
+    assert(result.error.includes("must use handles"));
+  }
+});
+
+Deno.test("parseTargetString errors when path is empty", () => {
+  const result = parseTargetString("   ");
+  assert("error" in result);
 });
 
 Deno.test("extractStringField returns value from string input", () => {
+  const testPath =
+    "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/path";
   assertEquals(
-    extractStringField("Charm/path", "path", "Charm/path"),
-    "Charm/path",
+    extractStringField(testPath, "path", testPath),
+    testPath,
   );
 });
 
@@ -50,7 +91,7 @@ Deno.test("extractStringField throws on missing field", () => {
 
 Deno.test("extractRunArguments prioritizes nested args object", () => {
   const args = extractRunArguments({
-    path: "Charm/run",
+    path: "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/run",
     args: { foo: "bar" },
     extra: 1,
   });
@@ -59,7 +100,7 @@ Deno.test("extractRunArguments prioritizes nested args object", () => {
 
 Deno.test("extractRunArguments removes path key when no args provided", () => {
   const args = extractRunArguments({
-    path: "Charm/run",
+    path: "/bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/run",
     mode: "test",
   });
   assertEquals(args, { mode: "test" });

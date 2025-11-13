@@ -243,12 +243,14 @@ type CharmToolEntry = {
   name: string;
   charm: Cell<any>;
   charmName: string;
+  handle: string; // e.g., "/bafyabc123"
 };
 
 type ToolCatalog = {
   llmTools: Record<string, { description: string; inputSchema: JSONSchema }>;
   legacyToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
   charmMap: Map<string, Cell<any>>;
+  handleMap: Map<string, { charm: Cell<any>; charmName: string }>;
 };
 
 function collectToolEntries(
@@ -263,7 +265,12 @@ function collectToolEntries(
       const charm: Cell<any> = tool.charm;
       const charmValue = charm.get();
       const charmName = String(charmValue?.[NAME] ?? name);
-      charms.push({ name, charm, charmName });
+
+      // Extract handle from link
+      const link = charm.getAsNormalizedFullLink();
+      const handle = "/" + link.id.replace(/^of:/, ""); // Convert "of:bafyabc123" to "/bafyabc123"
+
+      charms.push({ name, charm, charmName, handle });
       continue;
     }
 
@@ -282,13 +289,15 @@ function collectToolEntries(
 const READ_TOOL_NAME = "read";
 const RUN_TOOL_NAME = "run";
 const SCHEMA_TOOL_NAME = "schema";
+const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
       type: "string",
-      description: "Target path in the form Charm/child/grandchild.",
+      description:
+        "Target path in the form /handle/child/grandchild (e.g., /bafyabc123/result/content).",
     },
   },
   required: ["path"],
@@ -300,7 +309,8 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
   properties: {
     path: {
       type: "string",
-      description: "Target handler path in the form Charm/handler/path.",
+      description:
+        "Target handler path in the form /handle/handler/path (e.g., /bafyabc123/handlers/doThing).",
     },
     args: {
       type: "object",
@@ -320,6 +330,12 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
     },
   },
   required: ["path"],
+  additionalProperties: false,
+};
+
+const LIST_ATTACHMENTS_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {},
   additionalProperties: false,
 };
 
@@ -357,16 +373,41 @@ function extractStringField(
 
 function parseTargetString(
   target: string,
-): { charmName: string; pathSegments: string[] } {
+): { handle: string; pathSegments: string[] } | { error: string } {
   const cleaned = target.split("/").map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
+
   if (cleaned.length === 0) {
-    throw new Error(
-      'target must include a charm name, e.g. "Charm/path".',
-    );
+    return {
+      error: 'Target must include a charm handle, e.g. "/bafyabc123/path".',
+    };
   }
-  const [charmName, ...pathSegments] = cleaned;
-  return { charmName, pathSegments };
+
+  const [firstSegment, ...pathSegments] = cleaned;
+
+  // Check if first segment looks like a CID/handle by length
+  // CIDs are long encoded strings (typically 40+ chars), whereas human names are short
+  // Use a conservative threshold to distinguish handles from human-readable names
+  if (firstSegment.length >= 20) {
+    const handle = "/" + firstSegment;
+    return { handle, pathSegments };
+  }
+
+  // If it doesn't look like a handle, assume user tried to use a human name
+  return {
+    error:
+      `Charm references must use handles (e.g., "/bafyabc123/path"), not human names (e.g., "${firstSegment}"). Use listAttachments() to see available charm handles and their names.`,
+  };
+}
+
+function parseHandleFromPath(
+  path: string,
+): { handle: string; pathSegments: string[] } {
+  const result = parseTargetString(path);
+  if ("error" in result) {
+    throw new Error(result.error);
+  }
+  return result;
 }
 
 function extractRunArguments(input: unknown): Record<string, any> {
@@ -398,7 +439,12 @@ function flattenTools(
     handler?: any;
     description: string;
     inputSchema?: JSONSchema;
-    internal?: { kind: ToolKind; path: string[]; charmName: string };
+    internal?: {
+      kind: ToolKind;
+      path: string[];
+      charmName: string;
+      handle?: string;
+    };
   }
 > {
   const flattened: Record<string, any> = {};
@@ -415,24 +461,29 @@ function flattenTools(
   }
 
   if (charms.length > 0) {
-    const names = charms.map((entry) => entry.charmName);
-    const list = names.join(", ");
-    const availability = list
-      ? `Available charms: ${list}.`
+    const handleList = charms.map((e) => `${e.charmName} (${e.handle})`).join(
+      ", ",
+    );
+    const availability = handleList
+      ? `Available charms: ${handleList}.`
       : "No charms attached.";
 
     flattened[READ_TOOL_NAME] = {
       description:
-        "Read data from an attached charm using a target path like " +
-        '"Charm/result/path". ' + availability,
+        "Read data from an attached charm using a handle path like " +
+        '"/bafyabc123/result/path". ' + availability,
       inputSchema: READ_INPUT_SCHEMA,
     };
     flattened[RUN_TOOL_NAME] = {
       description:
-        "Invoke a handler on an attached charm. Provide the target " +
-        'path like "Charm/handlers/doThing" plus args if required. ' +
+        "Invoke a handler on an attached charm. Provide the handle " +
+        'path like "/bafyabc123/handlers/doThing" plus args if required. ' +
         availability,
       inputSchema: RUN_INPUT_SCHEMA,
+    };
+    flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
+      description: "List all attached charms with their handles and names.",
+      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
     };
     // flattened[SCHEMA_TOOL_NAME] = {
     //   description:
@@ -454,6 +505,7 @@ function buildToolCatalog(
   const llmTools: ToolCatalog["llmTools"] = {};
   const legacyToolCells = new Map<string, Cell<Schema<typeof LLMToolSchema>>>();
   const charmMap = new Map<string, Cell<any>>();
+  const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
   for (const entry of legacy) {
     const toolValue: any = entry.tool ?? {};
@@ -469,28 +521,33 @@ function buildToolCatalog(
     legacyToolCells.set(entry.name, entry.cell);
   }
 
-  const charmNames: string[] = [];
   for (const entry of charms) {
     charmMap.set(entry.charmName, entry.charm);
-    charmNames.push(entry.charmName);
+    handleMap.set(entry.handle, {
+      charm: entry.charm,
+      charmName: entry.charmName,
+    });
   }
 
-  if (charmNames.length > 0) {
-    const list = charmNames.join(", ");
-    const availability = list
-      ? `Available charms: ${list}.`
+  if (charms.length > 0) {
+    const handleList = charms.map((e) => `${e.charmName} (${e.handle})`).join(
+      ", ",
+    );
+    const availability = handleList
+      ? `Available charms: ${handleList}.`
       : "No charms attached.";
 
     llmTools[READ_TOOL_NAME] = {
-      description: "Read data from an attached charm using a path like " +
-        '"Charm/result/path". Charm schemas are provided in the system prompt. ' +
+      description:
+        "Read data from an attached charm using a handle path like " +
+        '"/bafyabc123/result/path". Charm schemas are provided in the system prompt. ' +
         availability,
       inputSchema: READ_INPUT_SCHEMA,
     };
     llmTools[RUN_TOOL_NAME] = {
       description:
-        "Run a handler on an attached charm. Provide the path like " +
-        '"Charm/handlers/doThing" and optionally args. Charm schemas are ' +
+        "Run a handler on an attached charm. Provide the handle path like " +
+        '"/bafyabc123/handlers/doThing" and optionally args. Charm schemas are ' +
         "provided in the system prompt. " + availability,
       inputSchema: RUN_INPUT_SCHEMA,
     };
@@ -501,9 +558,16 @@ function buildToolCatalog(
         "prompt for convenience. " + availability,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
+    llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
+      description:
+        "List all attached charms with their handles and human-readable names. " +
+        "Use this to discover which charms are available and their handles for " +
+        "use with read() and run().",
+      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+    };
   }
 
-  return { llmTools, legacyToolCells, charmMap };
+  return { llmTools, legacyToolCells, charmMap, handleMap };
 }
 
 /**
@@ -513,25 +577,28 @@ function buildToolCatalog(
  */
 async function buildCharmSchemasDocumentation(
   runtime: IRuntime,
-  charmMap: Map<string, Cell<any>>,
+  handleMap: Map<string, { charm: Cell<any>; charmName: string }>,
 ): Promise<string> {
-  if (charmMap.size === 0) {
+  if (handleMap.size === 0) {
     return "";
   }
 
   const schemaEntries: string[] = [];
 
-  for (const [charmName, charm] of charmMap.entries()) {
+  for (const [handle, { charm, charmName }] of handleMap.entries()) {
     try {
       const schema = await getCharmResultSchemaAsync(runtime, charm);
       if (schema) {
         const schemaJson = JSON.stringify(schema, null, 2);
         schemaEntries.push(
-          `## ${charmName}\n\`\`\`json\n${schemaJson}\n\`\`\``,
+          `## ${charmName} (${handle})\n\`\`\`json\n${schemaJson}\n\`\`\``,
         );
       }
     } catch (e) {
-      logger.warn(`Failed to get schema for charm ${charmName}:`, e);
+      logger.warn(
+        `Failed to get schema for charm ${charmName} (${handle}):`,
+        e,
+      );
     }
   }
 
@@ -539,7 +606,7 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools:\n\n${
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools. Use the handle (e.g., /bafyabc123) to reference charms:\n\n${
     schemaEntries.join("\n\n")
   }`;
 }
@@ -556,7 +623,7 @@ function resolveToolCall(
     charm: Cell<any>;
     extraParams?: Record<string, unknown>;
     pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema";
+    mode: "read" | "run" | "schema" | "listAttachments";
     targetSegments?: string[];
   };
 } {
@@ -572,11 +639,23 @@ function resolveToolCall(
 
   if (
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME
+    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME
   ) {
-    if (catalog.charmMap.size === 0) {
+    if (catalog.handleMap.size === 0 && catalog.charmMap.size === 0) {
       throw new Error("No charm attachments available.");
     }
+
+    // Handle listAttachments
+    if (name === LIST_ATTACHMENTS_TOOL_NAME) {
+      return {
+        charmMeta: {
+          charm: null as any, // Not needed for this operation
+          mode: "listAttachments",
+        },
+        call: { id, name, input: {} },
+      };
+    }
+
     if (name === SCHEMA_TOOL_NAME) {
       const charmName = extractStringField(
         toolCallPart.input,
@@ -586,7 +665,7 @@ function resolveToolCall(
       const charm = catalog.charmMap.get(charmName);
       if (!charm) {
         throw new Error(
-          `Unknown charm "${charmName}". Use listAttachments for options.`,
+          `Unknown charm "${charmName}". Use listAttachments() for options.`,
         );
       }
       return {
@@ -598,15 +677,22 @@ function resolveToolCall(
     const target = extractStringField(
       toolCallPart.input,
       "path",
-      "Charm/path",
+      "/bafyabc123/path",
     );
-    const { charmName, pathSegments } = parseTargetString(target);
-    const charm = catalog.charmMap.get(charmName);
-    if (!charm) {
+
+    const { handle, pathSegments } = parseHandleFromPath(target);
+    const charmEntry = catalog.handleMap.get(handle);
+
+    if (!charmEntry) {
+      const availableHandles = Array.from(catalog.handleMap.entries()).map(
+        ([h, { charmName }]) => `${charmName} (${h})`,
+      ).join(", ");
       throw new Error(
-        `Unknown charm "${charmName}". Use listAttachments for options.`,
+        `Unknown charm handle "${handle}". Available charms: ${availableHandles}. Use listAttachments() for details.`,
       );
     }
+
+    const { charm } = charmEntry;
     const baseLink = charm.getAsNormalizedFullLink();
     const link = {
       ...baseLink,
@@ -619,7 +705,7 @@ function resolveToolCall(
     if (name === READ_TOOL_NAME) {
       const ref = runtime.getCellFromLink(link);
       if (isStream(ref)) {
-        throw new Error('path resolves to a handler; use run("Charm/path").');
+        throw new Error(`Path resolves to a handler; use run("${target}").`);
       }
       return {
         charmMeta: {
@@ -750,6 +836,7 @@ async function executeToolCalls(
         resolved.toolDef,
         resolved.call,
         resolved.charmMeta,
+        toolCatalog,
       );
       results.push({
         id: part.toolCallId,
@@ -907,10 +994,21 @@ async function invokeToolCall(
     charm: Cell<any>;
     extraParams?: Record<string, unknown>;
     pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema";
+    mode: "read" | "run" | "schema" | "listAttachments";
     targetSegments?: string[];
   },
+  catalog?: ToolCatalog,
 ) {
+  if (charmMeta?.mode === "listAttachments") {
+    if (!catalog?.handleMap) {
+      return { type: "json", value: [] };
+    }
+    const attachments = Array.from(catalog.handleMap.entries()).map(
+      ([handle, { charmName }]) => ({ handle, name: charmName }),
+    );
+    return { type: "json", value: attachments };
+  }
+
   if (charmMeta?.mode === "schema") {
     const schema = await getCharmResultSchemaAsync(runtime, charmMeta.charm) ??
       {};
@@ -1211,7 +1309,7 @@ async function startRequest(
   // Build charm schemas documentation and append to system prompt
   const charmSchemasDocs = await buildCharmSchemasDocumentation(
     runtime,
-    toolCatalog.charmMap,
+    toolCatalog.handleMap,
   );
   const augmentedSystem = (system ?? "") + charmSchemasDocs;
 
