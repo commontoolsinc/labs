@@ -1,21 +1,19 @@
 {
   "$defs": {
-    "MyCell": {
-      "asCell": true,
-      "type": "number"
-    },
     "NullableCell": {
       "anyOf": [
         {
           "type": "null"
         },
         {
-          "$ref": "#/$defs/MyCell"
+          "asCell": true,
+          "type": "string"
         }
       ]
     },
     "OptionalCell": {
-      "$ref": "#/$defs/MyCell"
+      "asCell": true,
+      "type": "number"
     }
   },
   "properties": {
