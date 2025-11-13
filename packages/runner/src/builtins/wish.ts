@@ -201,10 +201,6 @@ export function wish(
       : parsed.path;
     const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
 
-    if (resolvedCell.get() !== undefined) {
-      sendResult(tx, resolvedCell);
-    } else {
-      sendResult(tx, hasDefault ? defaultCell : undefined);
-    }
+    sendResult(tx, resolvedCell);
   };
 }

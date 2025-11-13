@@ -1228,13 +1228,9 @@ export type CompileAndRunFunction = <T = any, S = any>(
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<string>;
-export type WishFunction = {
-  <T = unknown>(target: Opaque<string>): OpaqueRef<T | undefined>;
-  <T = unknown>(
-    target: Opaque<string>,
-    defaultValue: Opaque<T>,
-  ): OpaqueRef<T>;
-};
+export type WishFunction = <T = unknown>(
+  target: Opaque<string>,
+) => OpaqueRef<T>;
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
