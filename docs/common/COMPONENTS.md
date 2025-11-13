@@ -760,9 +760,9 @@ To enable `[[` references, you need three props:
 ```tsx
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
-const mentionable = derive<MentionableCharm[], MentionableCharm[]>(
-  wish<MentionableCharm[]>("#mentionable", []),
-  (i) => i,
+const mentionable = derive(
+  wish<MentionableCharm[]>("#mentionable") as MentionableCharm[],
+  (i) => i ?? [],
 );
 const mentioned = cell<MentionableCharm[]>([]);
 const pattern = derive(undefined, () => JSON.stringify(MyPattern));

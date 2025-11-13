@@ -86,9 +86,9 @@ Alternative: Use a `hasAnalyzed` flag that only gets set when user explicitly cl
 
 ```tsx
 // Get all charms in the space
-const allCharms = derive<any[], any[]>(
-  wish<any[]>("#allCharms", []),
-  (c) => c,
+const allCharms = derive(
+  wish<any[]>("#allCharms") as any[],
+  (c) => c ?? [],
 );
 
 // Filter for specific charm types
@@ -100,9 +100,9 @@ const personCharms = derive(allCharms, (charms) =>
 ```
 
 Common wishes:
-- `wish("#allCharms", [])` - all charms in space
-- `wish("#mentionable", [])` - charms available for `[[` references
-- `wish("#recentCharms", [])` - recently viewed charms
+- `wish("#allCharms")` - all charms in space
+- `wish("#mentionable")` - charms available for `[[` references
+- `wish("#recentCharms")` - recently viewed charms
 
 ## Default Pattern Setup Required
 
