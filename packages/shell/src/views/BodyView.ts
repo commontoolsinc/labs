@@ -85,6 +85,8 @@ export class XBodyView extends BaseView {
       await DefaultPattern.create(this.rt.cc());
     } catch (error) {
       console.error("Could not create default pattern:", error);
+      // Re-throw to expose errors instead of swallowing them
+      throw error;
     } finally {
       this.creatingDefaultPattern = false;
       this._charms.run();
