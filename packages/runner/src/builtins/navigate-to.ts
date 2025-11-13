@@ -1,8 +1,7 @@
-import { type Cell, isCell } from "../cell.ts";
+import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getCellOrThrow } from "../query-result-proxy.ts";
 
 export function navigateTo(
   inputsCell: Cell<any>,
@@ -21,13 +20,8 @@ export function navigateTo(
       throw new Error("navigateCallback is not set");
     }
 
-    if (isCell(target)) {
-      if (target && target.get()) {
-        runtime.navigateCallback(target);
-      }
-    } else {
-      const sourceCell = getCellOrThrow(target);
-      runtime.navigateCallback(sourceCell);
+    if (target && target.get()) {
+      runtime.navigateCallback(target);
     }
   };
 }

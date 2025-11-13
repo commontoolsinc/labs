@@ -367,7 +367,11 @@ export function validateAndTransformNew(
     rootSchema,
   };
 
-  if (resolvedSchema === undefined) {
+  // If we don't have a schema, and we aren't asCell/asStream, use a proxy
+  if (
+    (schema === undefined || !SchemaObjectTraverser.asCellOrStream(schema)) &&
+    resolvedSchema === undefined
+  ) {
     return createQueryResultProxy(runtime, tx, link);
   }
 
@@ -376,11 +380,13 @@ export function validateAndTransformNew(
   const { id, type, path } = link;
   const address = { id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(link) };
-  const combinedSchema = combineSchema(schema!, resolvedSchema);
+  const combinedSchema = resolvedSchema !== undefined
+    ? combineSchema(schema!, resolvedSchema)
+    : schema;
   // We need the asCell that's in the original schema to be passed into the traverser so it knows the top level obj is a cell
   const selector = {
     path: doc.address.path,
-    schemaContext: { schema: combinedSchema, rootSchema: rootSchema! },
+    schemaContext: { schema: combinedSchema!, rootSchema: rootSchema! },
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
