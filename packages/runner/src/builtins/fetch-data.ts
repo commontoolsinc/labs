@@ -10,7 +10,7 @@ import {
   getState,
   isTimedOut,
   transitionToError,
-  transitionToFetchingAsync,
+  transitionToFetching,
   transitionToIdle,
   transitionToSuccess,
 } from "./async-operation-state.ts";
@@ -45,19 +45,18 @@ export function fetchData(
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<any, any>>>;
-  const myRequestIds = new Map<string, string>();
-  const abortControllers = new Map<string, AbortController>();
-  const claimPromises = new Map<string, Promise<void>>();
+  const activeRequests = new Map<
+    string,
+    { requestId: string; controller: AbortController }
+  >();
 
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    for (const controller of abortControllers.values()) {
+    for (const { controller } of activeRequests.values()) {
       controller.abort("Recipe stopped");
     }
-    abortControllers.clear();
-    claimPromises.clear();
-    myRequestIds.clear();
+    activeRequests.clear();
 
     // Only try to update state if cells were initialized
     if (!cellsInitialized) return;
@@ -68,9 +67,10 @@ export function fetchData(
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
       for (const [hash, entry] of Object.entries(currentCache)) {
+        const active = activeRequests.get(hash);
         if (
           entry.state.type === "fetching" &&
-          myRequestIds.get(hash) === entry.state.requestId
+          active?.requestId === entry.state.requestId
         ) {
           transitionToIdle(cache, hash, entry.state.requestId, tx);
         }
@@ -114,7 +114,7 @@ export function fetchData(
       // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        "fetchData-global-cache",
+        { fetchData: { cache: cause } },
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<any, any>>>;
@@ -136,11 +136,9 @@ export function fetchData(
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {
-      const controller = abortControllers.get(inputHash);
-      controller?.abort("empty url");
-      abortControllers.delete(inputHash);
-      myRequestIds.delete(inputHash);
-      claimPromises.delete(inputHash);
+      const active = activeRequests.get(inputHash);
+      active?.controller.abort("empty url");
+      activeRequests.delete(inputHash);
 
       // When URL is empty, clear outputs
       pending.withTx(tx).set(false);
@@ -155,82 +153,49 @@ export function fetchData(
 
     // State machine transitions
     if (state.type === "idle") {
-      if (!claimPromises.has(inputHash)) {
-        const requestId = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
+
+      if (didStart) {
+        const controller = new AbortController();
+        activeRequests.set(inputHash, { requestId, controller });
+
         const urlToFetch = url;
         const modeToUse = inputsCell.withTx(tx).key("mode").get();
         const optionsValue = inputsCell.withTx(tx).key("options").get();
         const optionsToUse = optionsValue
           ? structuredClone(optionsValue)
           : undefined;
-        const claimHash = inputHash;
+        const signal = controller.signal;
 
-        const claimPromise = (async () => {
-          try {
-            await cache.sync();
+        Promise.resolve().then(async () => {
+          await runtime.idle();
 
-            const didStart = await transitionToFetchingAsync(
-              runtime,
-              cache,
-              claimHash,
-              requestId,
-            );
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
 
-            if (!didStart) {
-              return;
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            try {
+              await startFetch(
+                runtime,
+                cache,
+                inputHash,
+                urlToFetch,
+                modeToUse,
+                optionsToUse,
+                requestId,
+                signal,
+              );
+            } finally {
+              activeRequests.delete(inputHash);
             }
-
-            myRequestIds.set(claimHash, requestId);
-
-            await runtime.idle();
-
-            const confirmTx = runtime.edit();
-            const confirmedState = getState(cache, claimHash, confirmTx);
-            await confirmTx.commit();
-
-            if (
-              confirmedState.type === "fetching" &&
-              confirmedState.requestId === requestId
-            ) {
-              const controller = new AbortController();
-              abortControllers.set(claimHash, controller);
-              const signal = controller.signal;
-
-              try {
-                await startFetch(
-                  runtime,
-                  cache,
-                  claimHash,
-                  urlToFetch,
-                  modeToUse,
-                  optionsToUse,
-                  requestId,
-                  signal,
-                );
-              } finally {
-                if (abortControllers.get(claimHash) === controller) {
-                  abortControllers.delete(claimHash);
-                }
-                if (myRequestIds.get(claimHash) === requestId) {
-                  myRequestIds.delete(claimHash);
-                }
-              }
-            } else {
-              myRequestIds.delete(claimHash);
-            }
-          } catch (error) {
-            console.error("fetchData claim failed", error);
-            if (myRequestIds.get(claimHash) === requestId) {
-              myRequestIds.delete(claimHash);
-            }
-            abortControllers.delete(claimHash);
-          }
-        })();
-
-        claimPromises.set(inputHash, claimPromise);
-        claimPromise.finally(() => {
-          if (claimPromises.get(claimHash) === claimPromise) {
-            claimPromises.delete(claimHash);
+          } else {
+            activeRequests.delete(inputHash);
+            controller.abort("Request superseded");
           }
         });
       }
@@ -239,11 +204,11 @@ export function fetchData(
       if (isTimedOut(state, DATA_REQUEST_TIMEOUT)) {
         // Transition back to idle if timed out
         transitionToIdle(cache, inputHash, state.requestId, tx);
-        const controller = abortControllers.get(inputHash);
-        controller?.abort("timeout");
-        abortControllers.delete(inputHash);
-        myRequestIds.delete(inputHash);
-        claimPromises.delete(inputHash);
+        const active = activeRequests.get(inputHash);
+        if (active?.requestId === state.requestId) {
+          active.controller.abort("timeout");
+          activeRequests.delete(inputHash);
+        }
       }
     }
 

@@ -13,6 +13,7 @@ import {
   transitionToIdle,
   transitionToSuccess,
   updatePartial,
+  type AsyncOperationCache,
 } from "../src/builtins/async-operation-state.ts";
 import { type Cell } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -512,6 +513,184 @@ describe("async-operation-state", () => {
       expect(state.type).toBe("fetching");
       if (state.type === "fetching") {
         expect(state.requestId).toBe(firstRequestId); // Original request still active
+      }
+    });
+  });
+
+  describe("invariant coverage", () => {
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let cache: Cell<Record<string, AsyncOperationCache<any, any>>>;
+
+    function withRuntimeTx<T>(
+      fn: (tx: IExtendedStorageTransaction) => T,
+    ): T {
+      const tx = runtime.edit();
+      try {
+        const result = fn(tx);
+        tx.commit();
+        return result;
+      } catch (err) {
+        tx.abort();
+        throw err;
+      }
+    }
+
+    function startOperation(
+      inputHash: string,
+    ): { didStart: boolean; requestId: string } {
+      const requestId = crypto.randomUUID();
+      const didStart = withRuntimeTx((tx) =>
+        transitionToFetching(cache, inputHash, requestId, tx)
+      );
+      return { didStart, requestId };
+    }
+
+    function readState(inputHash: string) {
+      return withRuntimeTx((tx) => getState(cache, inputHash, tx));
+    }
+
+    function releaseToIdle(inputHash: string, requestId: string) {
+      withRuntimeTx((tx) => {
+        transitionToIdle(cache, inputHash, requestId, tx);
+      });
+    }
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({
+        as: signer,
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      withRuntimeTx((tx) => {
+      cache = runtime.getCell(
+        space,
+        "invariants-cache",
+        asyncOperationCacheSchema,
+        tx,
+      ) as Cell<Record<string, AsyncOperationCache<any, any>>>;
+      });
+    });
+
+    afterEach(async () => {
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("starts processing immediately when idle and receives success", async () => {
+      const inputHash = "hash-success";
+
+      const { didStart, requestId } = startOperation(inputHash);
+      expect(didStart).toBe(true);
+
+      const fetchingState = readState(inputHash);
+      expect(fetchingState.type).toBe("fetching");
+      if (fetchingState.type === "fetching") {
+        expect(fetchingState.requestId).toBe(requestId);
+      }
+
+      await transitionToSuccess(
+        runtime,
+        cache,
+        inputHash,
+        { payload: "data" },
+        requestId,
+      );
+
+      const finalState = readState(inputHash);
+      expect(finalState.type).toBe("success");
+      if (finalState.type === "success") {
+        expect(finalState.data).toEqual({ payload: "data" });
+      }
+    });
+
+    it("does not start a duplicate operation when success already exists", async () => {
+      const inputHash = "hash-duplicate";
+      const first = startOperation(inputHash);
+      expect(first.didStart).toBe(true);
+
+      await transitionToSuccess(
+        runtime,
+        cache,
+        inputHash,
+        "first-result",
+        first.requestId,
+      );
+
+      const { didStart: secondDidStart } = startOperation(inputHash);
+      expect(secondDidStart).toBe(false);
+
+      const state = readState(inputHash);
+      expect(state.type).toBe("success");
+      if (state.type === "success") {
+        expect(state.data).toBe("first-result");
+      }
+    });
+
+    it("releases the fetching lock on timeout allowing retries", async () => {
+      const inputHash = "hash-timeout";
+      const { requestId } = startOperation(inputHash);
+
+      releaseToIdle(inputHash, requestId);
+
+      const retry = startOperation(inputHash);
+      expect(retry.didStart).toBe(true);
+    });
+
+    it("records errors while leaving the cache in a non-fetching state", async () => {
+      const inputHash = "hash-error";
+      const { requestId } = startOperation(inputHash);
+
+      await transitionToError(
+        runtime,
+        cache,
+        inputHash,
+        "boom",
+        requestId,
+      );
+
+      const state = readState(inputHash);
+      expect(state.type).toBe("error");
+
+      const retryAttempt = startOperation(inputHash);
+      expect(retryAttempt.didStart).toBe(false);
+    });
+
+    it("stores results per input hash without collision", async () => {
+      const hashA = "hash-A";
+      const hashB = "hash-B";
+
+      const reqA = startOperation(hashA);
+      const reqB = startOperation(hashB);
+
+      await transitionToSuccess(
+        runtime,
+        cache,
+        hashA,
+        { value: "A" },
+        reqA.requestId,
+      );
+      await transitionToSuccess(
+        runtime,
+        cache,
+        hashB,
+        { value: "B" },
+        reqB.requestId,
+      );
+
+      const stateA = readState(hashA);
+      const stateB = readState(hashB);
+
+      expect(stateA.type).toBe("success");
+      expect(stateB.type).toBe("success");
+
+      if (stateA.type === "success") {
+        expect(stateA.data).toEqual({ value: "A" });
+      }
+      if (stateB.type === "success") {
+        expect(stateB.data).toEqual({ value: "B" });
       }
     });
   });

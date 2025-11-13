@@ -11,7 +11,7 @@ import {
   getState,
   isTimedOut,
   transitionToError,
-  transitionToFetchingAsync,
+  transitionToFetching,
   transitionToIdle,
   transitionToSuccess,
 } from "./async-operation-state.ts";
@@ -45,18 +45,17 @@ export function fetchProgram(
   let result: Cell<ProgramResult | undefined>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, AsyncOperationCache<ProgramResult, string>>>;
-  const myRequestIds = new Map<string, string>();
-  const abortControllers = new Map<string, AbortController>();
-  const claimPromises = new Map<string, Promise<void>>();
+  const activeRequests = new Map<
+    string,
+    { requestId: string; controller: AbortController }
+  >();
 
   // This is called when the recipe containing this node is being stopped.
   addCancel(() => {
-    for (const controller of abortControllers.values()) {
+    for (const { controller } of activeRequests.values()) {
       controller.abort("Recipe stopped");
     }
-    abortControllers.clear();
-    myRequestIds.clear();
-    claimPromises.clear();
+    activeRequests.clear();
 
     if (!cellsInitialized) return;
 
@@ -65,9 +64,10 @@ export function fetchProgram(
     try {
       const currentCache = cache.withTx(tx).get();
       for (const [hash, entry] of Object.entries(currentCache)) {
+        const active = activeRequests.get(hash);
         if (
           entry.state.type === "fetching" &&
-          myRequestIds.get(hash) === entry.state.requestId
+          active?.requestId === entry.state.requestId
         ) {
           transitionToIdle(cache, hash, entry.state.requestId, tx);
         }
@@ -109,7 +109,7 @@ export function fetchProgram(
       // Cache is shared across ALL fetchProgram operations (not per-recipe)
       cache = runtime.getCell(
         parentCell.space,
-        "fetchProgram-global-cache",
+        { fetchProgram: { cache: cause } },
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<ProgramResult, string>>>;
@@ -130,11 +130,9 @@ export function fetchProgram(
     const inputHash = computeInputHash(tx, inputsCell);
 
     if (!url) {
-      const controller = abortControllers.get(inputHash);
-      controller?.abort("empty url");
-      abortControllers.delete(inputHash);
-      myRequestIds.delete(inputHash);
-      claimPromises.delete(inputHash);
+      const active = activeRequests.get(inputHash);
+      active?.controller.abort("empty url");
+      activeRequests.delete(inputHash);
 
       pending.withTx(tx).set(false);
       result.withTx(tx).set(undefined);
@@ -146,83 +144,52 @@ export function fetchProgram(
     const state = getState(cache, inputHash, tx);
 
     if (state.type === "idle") {
-      if (!claimPromises.has(inputHash)) {
-        const requestId = crypto.randomUUID();
-        const claimHash = inputHash;
+      const requestId = crypto.randomUUID();
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
 
-        const claimPromise = (async () => {
-          try {
-            await cache.sync();
+      if (didStart) {
+        const controller = new AbortController();
+        activeRequests.set(inputHash, { requestId, controller });
+        const signal = controller.signal;
+        const urlToFetch = url;
 
-            const didStart = await transitionToFetchingAsync(
-              runtime,
-              cache,
-              claimHash,
-              requestId,
-            );
+        Promise.resolve().then(async () => {
+          await runtime.idle();
 
-            if (!didStart) return;
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
 
-            myRequestIds.set(claimHash, requestId);
-
-            await runtime.idle();
-
-            const confirmTx = runtime.edit();
-            const confirmedState = getState(cache, claimHash, confirmTx);
-            await confirmTx.commit();
-
-            if (
-              confirmedState.type === "fetching" &&
-              confirmedState.requestId === requestId
-            ) {
-              const controller = new AbortController();
-              abortControllers.set(claimHash, controller);
-              const signal = controller.signal;
-
-              try {
-                await startFetchProgram(
-                  runtime,
-                  cache,
-                  claimHash,
-                  url,
-                  requestId,
-                  signal,
-                );
-              } finally {
-                if (abortControllers.get(claimHash) === controller) {
-                  abortControllers.delete(claimHash);
-                }
-                if (myRequestIds.get(claimHash) === requestId) {
-                  myRequestIds.delete(claimHash);
-                }
-              }
-            } else {
-              myRequestIds.delete(claimHash);
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            try {
+              await startFetchProgram(
+                runtime,
+                cache,
+                inputHash,
+                urlToFetch,
+                requestId,
+                signal,
+              );
+            } finally {
+              activeRequests.delete(inputHash);
             }
-          } catch (error) {
-            console.error("fetchProgram claim failed", error);
-            if (myRequestIds.get(claimHash) === requestId) {
-              myRequestIds.delete(claimHash);
-            }
-            abortControllers.delete(claimHash);
-          }
-        })();
-
-        claimPromises.set(inputHash, claimPromise);
-        claimPromise.finally(() => {
-          if (claimPromises.get(claimHash) === claimPromise) {
-            claimPromises.delete(claimHash);
+          } else {
+            activeRequests.delete(inputHash);
+            controller.abort("Request superseded");
           }
         });
       }
     } else if (state.type === "fetching") {
       if (isTimedOut(state, PROGRAM_REQUEST_TIMEOUT)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
-        const controller = abortControllers.get(inputHash);
-        controller?.abort("timeout");
-        abortControllers.delete(inputHash);
-        myRequestIds.delete(inputHash);
-        claimPromises.delete(inputHash);
+        const active = activeRequests.get(inputHash);
+        if (active?.requestId === state.requestId) {
+          active.controller.abort("timeout");
+          activeRequests.delete(inputHash);
+        }
       }
     }
 

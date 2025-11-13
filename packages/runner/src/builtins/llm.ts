@@ -72,7 +72,6 @@ export function llm(
     Record<string, AsyncOperationCache<LLMResponse["content"], string>>
   >;
   const myRequestIds = new Map<string, string>();
-  const claimPromises = new Map<string, Promise<void>>();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -108,7 +107,7 @@ export function llm(
       // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        "llm-global-cache",
+        { llm: { cache: cause } },
         asyncOperationCacheSchema,
         tx,
       ) as Cell<
@@ -150,19 +149,16 @@ export function llm(
 
     // State machine transitions
     if (state.type === "idle") {
-      if (!claimPromises.has(inputHash)) {
-        const requestId = crypto.randomUUID();
-        const initialMessages = Array.isArray(messages)
-          ? messages.map((msg) => ({
-            ...msg,
-            content: Array.isArray(msg.content)
-              ? msg.content.map((part) => ({ ...part }))
-              : msg.content,
-          }))
+      const requestId = crypto.randomUUID();
+      const didStart = transitionToFetching(cache, inputHash, requestId, tx);
+
+      if (didStart) {
+        const initialMessagesCopy: BuiltInLLMMessage[] = Array.isArray(messages)
+          ? structuredClone(messages)
           : [];
         const llmParams: LLMRequest = {
           system: system ?? "",
-          messages: initialMessages,
+          messages: initialMessagesCopy,
           stop: stop ?? "",
           maxTokens: maxTokens ?? 4096,
           stream: true,
@@ -173,64 +169,37 @@ export function llm(
           cache: true,
         };
         const toolsCellRef = tools ? inputsCell.key("tools") : undefined;
-        const claimHash = inputHash;
 
-        const claimPromise = (async () => {
-          try {
-            await cache.sync();
-            const didStart = await transitionToFetchingAsync(
-              runtime,
-              cache,
-              claimHash,
-              requestId,
-            );
+        myRequestIds.set(inputHash, requestId);
 
-            if (!didStart) {
-              return;
-            }
+        Promise.resolve().then(async () => {
+          await runtime.idle();
 
-            myRequestIds.set(claimHash, requestId);
+          const confirmTx = runtime.edit();
+          const confirmedState = getState(cache, inputHash, confirmTx);
+          await confirmTx.commit();
 
-            await runtime.idle();
-
-            const confirmTx = runtime.edit();
-            const confirmedState = getState(cache, claimHash, confirmTx);
-            await confirmTx.commit();
-
-            if (
-              confirmedState.type === "fetching" &&
-              confirmedState.requestId === requestId
-            ) {
-              try {
-                await startLLM(
-                  runtime,
-                  cache,
-                  inputHash,
-                  llmParams,
-                  initialMessages,
-                  toolsCellRef,
-                  requestId,
-                );
-              } finally {
-                if (myRequestIds.get(claimHash) === requestId) {
-                  myRequestIds.delete(claimHash);
-                }
+          if (
+            confirmedState.type === "fetching" &&
+            confirmedState.requestId === requestId
+          ) {
+            try {
+              await startLLM(
+                runtime,
+                cache,
+                inputHash,
+                llmParams,
+                initialMessagesCopy,
+                toolsCellRef,
+                requestId,
+              );
+            } finally {
+              if (myRequestIds.get(inputHash) === requestId) {
+                myRequestIds.delete(inputHash);
               }
-            } else {
-              myRequestIds.delete(claimHash);
             }
-          } catch (error) {
-            console.error("llm claim failed", error);
-            if (myRequestIds.get(claimHash) === requestId) {
-              myRequestIds.delete(claimHash);
-            }
-          }
-        })();
-
-        claimPromises.set(inputHash, claimPromise);
-        claimPromise.finally(() => {
-          if (claimPromises.get(claimHash) === claimPromise) {
-            claimPromises.delete(claimHash);
+          } else {
+            myRequestIds.delete(inputHash);
           }
         });
       }
@@ -239,7 +208,6 @@ export function llm(
       if (isTimedOut(state, 60000)) {
         transitionToIdle(cache, inputHash, state.requestId, tx);
         myRequestIds.delete(inputHash);
-        claimPromises.delete(inputHash);
       }
     }
 
@@ -446,7 +414,7 @@ export function generateText(
       // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        "generateText-global-cache",
+        { generateText: { cache: cause } },
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<string, string>>>;
@@ -779,7 +747,7 @@ export function generateObject<T extends Record<string, unknown>>(
       // This enables deduplication across different runtimes/recipes
       cache = runtime.getCell(
         parentCell.space,
-        "generateObject-global-cache",
+        { generateObject: { cache: cause } },
         asyncOperationCacheSchema,
         tx,
       ) as Cell<Record<string, AsyncOperationCache<T, string>>>;

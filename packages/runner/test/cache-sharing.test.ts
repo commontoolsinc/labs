@@ -48,7 +48,7 @@ describe("Global Cache Sharing", () => {
     await storageManager?.close();
   });
 
-  it("should share fetchData cache across different recipe instances", async () => {
+  it("should cache fetchData per node without cross-node bleed", async () => {
     const url = "http://example.com/data";
     const fetchData = byRef("fetchData");
 
@@ -75,11 +75,20 @@ describe("Global Cache Sharing", () => {
     expect(data1.result).toBeDefined();
     expect(data2.result).toBeDefined();
 
-    // KEY TEST: Only ONE fetch should happen because cache is shared
-    expect(fetchCallCount).toBe(1);
+    // Each node has its own cache, so both should issue a network request
+    expect(fetchCallCount).toBe(2);
+
+    // Re-running the first recipe should hit its cache
+    tx = runtime.edit();
+    runtime.run(tx, recipe1, {}, result1);
+    await tx.commit();
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
+    expect(fetchCallCount).toBe(2);
   });
 
-  it("should share fetchProgram cache across different recipe instances", async () => {
+  it("should cache fetchProgram per node without cross-node bleed", async () => {
     const url = "http://example.com/program.ts";
 
     // Override fetch for program resolution
@@ -117,11 +126,20 @@ describe("Global Cache Sharing", () => {
     expect(data1.result).toBeDefined();
     expect(data2.result).toBeDefined();
 
-    // Only ONE fetch should happen
-    expect(fetchCallCount).toBe(1);
+    // Each node fetches independently
+    expect(fetchCallCount).toBe(2);
+
+    // Re-run first recipe to confirm cache reuse within the node
+    tx = runtime.edit();
+    runtime.run(tx, recipe1, {}, result1);
+    await tx.commit();
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
+    expect(fetchCallCount).toBe(2);
   });
 
-  it("should share generateText cache across different recipe instances", async () => {
+  it("should cache generateText per node without cross-node bleed", async () => {
     const { LLMClient } = await import("@commontools/llm");
     const originalSendRequest = LLMClient.prototype.sendRequest;
     let llmCallCount = 0;
@@ -164,8 +182,17 @@ describe("Global Cache Sharing", () => {
     expect(data1.result).toBe("Test response");
     expect(data2.result).toBe("Test response");
 
-    // Only ONE LLM call should happen
-    expect(llmCallCount).toBe(1);
+    // Each node performs its own call
+    expect(llmCallCount).toBe(2);
+
+    // Re-run first recipe to ensure per-node cache reuse
+    tx = runtime.edit();
+    runtime.run(tx, recipe1, {}, result1);
+    await tx.commit();
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await runtime.idle();
+    expect(llmCallCount).toBe(2);
 
     LLMClient.prototype.sendRequest = originalSendRequest;
   });
