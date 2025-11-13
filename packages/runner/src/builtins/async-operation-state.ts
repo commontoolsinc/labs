@@ -9,12 +9,13 @@ import type { JSONSchema } from "../builder/types.ts";
  * States:
  * - idle: No operation in progress, no cached result
  * - fetching: Operation in progress (with requestId and startTime for timeout tracking)
+ *   - partial: Optional streaming/incremental data (for LLM text generation, etc.)
  * - success: Operation completed successfully with data
  * - error: Operation failed with error message
  */
 export type AsyncOperationState<T, E = string> =
   | { type: "idle" }
-  | { type: "fetching"; requestId: string; startTime: number }
+  | { type: "fetching"; requestId: string; startTime: number; partial?: string }
   | { type: "success"; data: T }
   | { type: "error"; error: E };
 
@@ -197,4 +198,44 @@ export function getState<T, E = string>(
   const allEntries = cache.withTx(tx).get();
   const entry = allEntries[inputHash];
   return entry?.state ?? { type: "idle" };
+}
+
+/**
+ * Update the partial field in a "fetching" state (for streaming operations).
+ * Only updates if the current state is "fetching" with the expected requestId.
+ *
+ * @param runtime - Runtime for creating transactions
+ * @param cache - The cache cell to update
+ * @param inputHash - Hash of the inputs for this operation
+ * @param partial - The partial/streaming data to update
+ * @param requestId - Expected requestId (for CAS check)
+ */
+export async function updatePartial<T, E = string>(
+  runtime: IRuntime,
+  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
+  inputHash: string,
+  partial: string,
+  requestId: string,
+): Promise<void> {
+  await runtime.editWithRetry((tx) => {
+    const allEntries = cache.withTx(tx).get();
+    const entry = allEntries[inputHash];
+    if (
+      entry?.state.type === "fetching" &&
+      entry.state.requestId === requestId
+    ) {
+      // Cast to any to work around TypeScript's complex union type inference
+      (cache as any).withTx(tx).update({
+        [inputHash]: {
+          inputHash,
+          state: {
+            type: "fetching",
+            requestId: entry.state.requestId,
+            startTime: entry.state.startTime,
+            partial,
+          },
+        },
+      });
+    }
+  });
 }

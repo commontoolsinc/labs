@@ -36,7 +36,7 @@ export function registerBuiltins(runtime: IRuntime) {
       pending: Cell<boolean>;
       result: Cell<Record<string, unknown> | undefined>;
       partial: Cell<string | undefined>;
-      requestHash: Cell<string | undefined>;
+      error: Cell<string | undefined>;
     }>(generateObject),
   );
   moduleRegistry.addModuleByRef(
@@ -45,7 +45,7 @@ export function registerBuiltins(runtime: IRuntime) {
       pending: Cell<boolean>;
       result: Cell<string | undefined>;
       partial: Cell<string | undefined>;
-      requestHash: Cell<string | undefined>;
+      error: Cell<string | undefined>;
     }>(generateText),
   );
   moduleRegistry.addModuleByRef("navigateTo", raw(navigateTo));
