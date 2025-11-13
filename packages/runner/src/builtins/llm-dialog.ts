@@ -391,7 +391,7 @@ function extractRunArguments(input: unknown): Record<string, any> {
  */
 function flattenTools(
   toolsCell: Cell<any>,
-  runtime?: IRuntime,
+  _runtime?: IRuntime,
 ): Record<
   string,
   {
@@ -445,10 +445,10 @@ function flattenTools(
   return flattened;
 }
 
-async function buildToolCatalog(
-  runtime: IRuntime,
+function buildToolCatalog(
+  _runtime: IRuntime,
   toolsCell: Cell<any>,
-): Promise<ToolCatalog> {
+): ToolCatalog {
   const { legacy, charms } = collectToolEntries(toolsCell);
 
   const llmTools: ToolCatalog["llmTools"] = {};
@@ -526,7 +526,9 @@ async function buildCharmSchemasDocumentation(
       const schema = await getCharmResultSchemaAsync(runtime, charm);
       if (schema) {
         const schemaJson = JSON.stringify(schema, null, 2);
-        schemaEntries.push(`## ${charmName}\n\`\`\`json\n${schemaJson}\n\`\`\``);
+        schemaEntries.push(
+          `## ${charmName}\n\`\`\`json\n${schemaJson}\n\`\`\``,
+        );
       }
     } catch (e) {
       logger.warn(`Failed to get schema for charm ${charmName}:`, e);
@@ -537,7 +539,9 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools:\n\n${schemaEntries.join("\n\n")}`;
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools:\n\n${
+    schemaEntries.join("\n\n")
+  }`;
 }
 
 function resolveToolCall(
@@ -1202,7 +1206,7 @@ async function startRequest(
 
   // No need to flatten here; UI handles flattened tools reactively
 
-  const toolCatalog = await buildToolCatalog(runtime, toolsCell);
+  const toolCatalog = buildToolCatalog(runtime, toolsCell);
 
   // Build charm schemas documentation and append to system prompt
   const charmSchemasDocs = await buildCharmSchemasDocumentation(
