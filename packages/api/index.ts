@@ -966,6 +966,25 @@ export interface BuiltInCompileAndRunState<T> {
 }
 
 // Function type definitions
+export type PatternFunction = {
+  <T, R>(
+    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  ): RecipeFactory<T, R>;
+
+  <T>(
+    fn: (input: OpaqueRef<Required<T>>) => unknown,
+  ): RecipeFactory<T, ReturnType<typeof fn>>;
+
+  <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
+    fn: (
+      input: OpaqueRef<Required<Schema<IS>>>,
+    ) => Opaque<Schema<OS>>,
+    argumentSchema: IS,
+    resultSchema: OS,
+  ): RecipeFactory<Schema<IS>, Schema<OS>>;
+};
+
+/** @deprecated Use pattern() instead */
 export type RecipeFunction = {
   // Function-only overload
   <T, R>(
@@ -1253,6 +1272,8 @@ export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
 
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
+export declare const pattern: PatternFunction;
+/** @deprecated Use pattern() instead */
 export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;

@@ -34,6 +34,7 @@ import type {
   NavigateToFunction,
   Opaque,
   OpaqueRef,
+  PatternFunction,
   PatternToolFunction,
   Recipe,
   RecipeFunction,
@@ -102,6 +103,7 @@ export type {
   Opaque,
   OpaqueCell,
   OpaqueRef,
+  PatternFunction,
   Props,
   Recipe,
   RecipeFactory,
@@ -238,6 +240,7 @@ export type Frame = {
 // Builder functions interface
 export interface BuilderFunctionsAndConstants {
   // Recipe creation
+  pattern: PatternFunction;
   recipe: RecipeFunction;
   patternTool: PatternToolFunction;
 

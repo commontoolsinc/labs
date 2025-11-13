@@ -9,6 +9,7 @@ import {
   type Opaque,
   type OpaqueCell,
   type OpaqueRef,
+  type PatternFunction,
   type Recipe,
   type RecipeFactory,
   type SchemaWithoutCell,
@@ -40,6 +41,31 @@ import {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
+
+export const pattern: PatternFunction = (
+  fn: (input: any) => any,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
+) => {
+  const frame = pushFrame();
+
+  const inputs = opaqueRef(undefined, argumentSchema);
+
+  const outputs = fn!(inputs);
+
+  applyInputIfcToOutput(inputs, outputs);
+
+  const result = factoryFromRecipe(
+    argumentSchema,
+    resultSchema,
+    inputs,
+    outputs,
+  );
+
+  popFrame(frame);
+
+  return result;
+};
 
 /** Declare a recipe
  *
