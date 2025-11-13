@@ -36,16 +36,106 @@ export const asyncOperationCacheSchema = {
   default: {},
 } as const satisfies JSONSchema;
 
+// ============================================================================
+// Core CAS Implementation
+// ============================================================================
+
 /**
- * Attempt to transition the state machine to "fetching" state using CAS.
- * Only succeeds if the current state is "idle" (or non-existent).
- * This prevents multiple runtimes from starting duplicate work.
+ * Core Compare-And-Swap (CAS) transition function.
+ * Only performs the transition if the current state matches expectations.
+ *
+ * This is the **single source of truth** for all state transitions.
+ * All other transition functions are built on top of this.
  *
  * @param cache - The cache cell to update
  * @param inputHash - Hash of the inputs for this operation
- * @param requestId - Unique ID for this request
+ * @param expectedState - Expected current state type (or null for non-existent/idle)
+ * @param expectedRequestId - Expected requestId (only checked for "fetching" state)
+ * @param nextState - The new state to transition to
  * @param tx - Transaction to perform the update in
- * @returns boolean - true if the transition succeeded (this runtime should start the fetch)
+ * @returns boolean - true if transition succeeded, false if state mismatch
+ */
+function casTransition<T, E = string>(
+  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
+  inputHash: string,
+  expectedState: AsyncOperationState<T, E>["type"] | null,
+  expectedRequestId: string | null,
+  nextState: AsyncOperationState<T, E>,
+  tx: IExtendedStorageTransaction,
+): boolean {
+  const allEntries = cache.withTx(tx).get();
+  const entry = allEntries[inputHash];
+  const currentStateType = entry?.state.type ?? null;
+
+  // Check if current state matches expected state
+  if (currentStateType !== expectedState) {
+    return false; // State changed, abort transition
+  }
+
+  // For fetching state, also verify requestId matches
+  if (
+    expectedState === "fetching" &&
+    entry?.state.type === "fetching" &&
+    entry.state.requestId !== expectedRequestId
+  ) {
+    return false; // Different request is in flight
+  }
+
+  // CAS succeeded - perform transition
+  // Type cast needed because TypeScript can't prove state union correctness
+  (cache as any).withTx(tx).update({
+    [inputHash]: {
+      inputHash,
+      state: nextState,
+    },
+  });
+
+  return true;
+}
+
+/**
+ * Async wrapper around casTransition using editWithRetry for cross-runtime safety.
+ * Use this when transitioning from outside a transaction (e.g., in async callbacks).
+ */
+async function casTransitionAsync<T, E = string>(
+  runtime: IRuntime,
+  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
+  inputHash: string,
+  expectedState: AsyncOperationState<T, E>["type"] | null,
+  expectedRequestId: string | null,
+  nextState: AsyncOperationState<T, E>,
+): Promise<boolean> {
+  let success = false;
+  await runtime.editWithRetry((tx) => {
+    success = casTransition(
+      cache,
+      inputHash,
+      expectedState,
+      expectedRequestId,
+      nextState,
+      tx,
+    );
+  });
+  return success;
+}
+
+// ============================================================================
+// Public API: High-Level Transition Functions
+// ============================================================================
+
+/**
+ * Attempt to transition from idle → fetching.
+ * Only succeeds if no other runtime has claimed this work.
+ *
+ * Use this at the START of an async operation to claim ownership.
+ * Returns true if this runtime won the race and should start the work.
+ *
+ * @example
+ * const requestId = crypto.randomUUID();
+ * const didStart = transitionToFetching(cache, inputHash, requestId, tx);
+ * if (didStart) {
+ *   // Start the async operation
+ * }
  */
 export function transitionToFetching<T, E = string>(
   cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
@@ -53,34 +143,28 @@ export function transitionToFetching<T, E = string>(
   requestId: string,
   tx: IExtendedStorageTransaction,
 ): boolean {
-  const allEntries = cache.withTx(tx).get();
-  const entry = allEntries[inputHash];
-
-  // Only transition if currently idle (or non-existent)
-  // This implements CAS to prevent duplicate work across multiple runtimes
-  if (!entry || entry.state.type === "idle") {
-    cache.withTx(tx).update({
-      [inputHash]: {
-        inputHash,
-        state: { type: "fetching", requestId, startTime: Date.now() },
-      },
-    });
-    return true; // We won the race to start fetching
-  }
-
-  return false; // Someone else is already fetching
+  return casTransition(
+    cache,
+    inputHash,
+    null, // Expect idle or non-existent
+    null,
+    { type: "fetching", requestId, startTime: Date.now() },
+    tx,
+  );
 }
 
 /**
- * Attempt to transition to "success" state using CAS (Compare-And-Swap).
- * Only succeeds if the current state is still "fetching" with the expected requestId.
+ * Complete an async operation with success.
+ * Only succeeds if still fetching with the expected requestId.
  *
- * @param runtime - Runtime for creating transactions
- * @param cache - The cache cell to update
- * @param inputHash - Hash of the inputs for this operation
- * @param data - The successful result data
- * @param requestId - Expected requestId (for CAS check)
- * @returns Promise<boolean> - true if the transition succeeded
+ * Use this at the END of a successful async operation.
+ * Returns true if the result was saved, false if another request superseded this one.
+ *
+ * @example
+ * const success = await transitionToSuccess(runtime, cache, inputHash, data, requestId);
+ * if (!success) {
+ *   // Another request won, discard our result
+ * }
  */
 export async function transitionToSuccess<T, E = string>(
   runtime: IRuntime,
@@ -89,37 +173,22 @@ export async function transitionToSuccess<T, E = string>(
   data: T,
   requestId: string,
 ): Promise<boolean> {
-  let success = false;
-  await runtime.editWithRetry((tx) => {
-    const allEntries = cache.withTx(tx).get();
-    const entry = allEntries[inputHash];
-    if (
-      entry?.state.type === "fetching" &&
-      entry.state.requestId === requestId
-    ) {
-      // Cast to any to work around TypeScript's complex union type inference
-      (cache as any).withTx(tx).update({
-        [inputHash]: {
-          inputHash,
-          state: { type: "success", data },
-        },
-      });
-      success = true;
-    }
-  });
-  return success;
+  return await casTransitionAsync(
+    runtime,
+    cache,
+    inputHash,
+    "fetching",
+    requestId,
+    { type: "success", data },
+  );
 }
 
 /**
- * Attempt to transition to "error" state using CAS (Compare-And-Swap).
- * Only succeeds if the current state is still "fetching" with the expected requestId.
+ * Complete an async operation with error.
+ * Only succeeds if still fetching with the expected requestId.
  *
- * @param runtime - Runtime for creating transactions
- * @param cache - The cache cell to update
- * @param inputHash - Hash of the inputs for this operation
- * @param error - The error that occurred
- * @param requestId - Expected requestId (for CAS check)
- * @returns Promise<boolean> - true if the transition succeeded
+ * Use this when an async operation fails.
+ * Returns true if the error was saved, false if another request superseded this one.
  */
 export async function transitionToError<T, E = string>(
   runtime: IRuntime,
@@ -128,80 +197,85 @@ export async function transitionToError<T, E = string>(
   error: E,
   requestId: string,
 ): Promise<boolean> {
-  let success = false;
-  await runtime.editWithRetry((tx) => {
-    const allEntries = cache.withTx(tx).get();
-    const entry = allEntries[inputHash];
-    if (
-      entry?.state.type === "fetching" &&
-      entry.state.requestId === requestId
-    ) {
-      // Cast to any to work around TypeScript's complex union type inference
-      (cache as any).withTx(tx).update({
-        [inputHash]: {
-          inputHash,
-          state: { type: "error", error },
-        },
-      });
-      success = true;
-    }
-  });
-  return success;
+  return await casTransitionAsync(
+    runtime,
+    cache,
+    inputHash,
+    "fetching",
+    requestId,
+    { type: "error", error },
+  );
 }
 
 /**
- * Transition to "idle" state if the current state is "fetching" with the expected requestId.
- * Used for timeout handling or abort scenarios.
+ * Cancel/timeout a fetch, returning to idle.
+ * Only succeeds if still fetching with the expected requestId.
  *
- * @param cache - The cache cell to update
- * @param inputHash - Hash of the inputs for this operation
- * @param requestId - Expected requestId (for CAS check)
- * @param tx - Transaction to perform the update in
+ * Use this for timeout handling or explicit cancellation.
+ * After this, another runtime can claim the work.
  */
 export function transitionToIdle<T, E = string>(
   cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
   inputHash: string,
   requestId: string,
   tx: IExtendedStorageTransaction,
-): void {
-  const allEntries = cache.withTx(tx).get();
-  const entry = allEntries[inputHash];
-  if (
-    entry?.state.type === "fetching" &&
-    entry.state.requestId === requestId
-  ) {
-    cache.withTx(tx).update({
-      [inputHash]: {
-        inputHash,
-        state: { type: "idle" },
-      },
-    });
-  }
-}
-
-/**
- * Check if a "fetching" state has timed out.
- *
- * @param state - The current state
- * @param timeout - Timeout in milliseconds
- * @returns boolean - true if the state is "fetching" and has exceeded the timeout
- */
-export function isTimedOut<T, E = string>(
-  state: AsyncOperationState<T, E>,
-  timeout: number,
 ): boolean {
-  return (
-    state.type === "fetching" && Date.now() - state.startTime > timeout
+  return casTransition(
+    cache,
+    inputHash,
+    "fetching",
+    requestId,
+    { type: "idle" },
+    tx,
   );
 }
 
 /**
- * Get the current state for a given input hash from the cache.
+ * Update partial/streaming data during fetch.
+ * Only succeeds if still fetching with the expected requestId.
  *
- * @param cache - The cache cell
- * @param inputHash - Hash of the inputs
- * @param tx - Transaction to read from
- * @returns The current state, or idle if not found
+ * Use this for streaming operations like LLM text generation.
+ * Preserves the existing requestId and startTime.
+ */
+export async function updatePartial<T, E = string>(
+  runtime: IRuntime,
+  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
+  inputHash: string,
+  partial: string,
+  requestId: string,
+): Promise<void> {
+  await runtime.editWithRetry((tx) => {
+    const allEntries = cache.withTx(tx).get();
+    const entry = allEntries[inputHash];
+
+    if (
+      entry?.state.type === "fetching" &&
+      entry.state.requestId === requestId
+    ) {
+      casTransition(
+        cache,
+        inputHash,
+        "fetching",
+        requestId,
+        {
+          type: "fetching",
+          requestId: entry.state.requestId,
+          startTime: entry.state.startTime,
+          partial,
+        },
+        tx,
+      );
+    }
+  });
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Get current state for a given input hash.
+ * Returns idle if no entry exists.
  */
 export function getState<T, E = string>(
   cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
@@ -214,56 +288,26 @@ export function getState<T, E = string>(
 }
 
 /**
- * Update the partial field in a "fetching" state (for streaming operations).
- * Only updates if the current state is "fetching" with the expected requestId.
- *
- * @param runtime - Runtime for creating transactions
- * @param cache - The cache cell to update
- * @param inputHash - Hash of the inputs for this operation
- * @param partial - The partial/streaming data to update
- * @param requestId - Expected requestId (for CAS check)
+ * Check if a "fetching" state has timed out.
  */
-export async function updatePartial<T, E = string>(
-  runtime: IRuntime,
-  cache: Cell<Record<string, AsyncOperationCache<T, E>>>,
-  inputHash: string,
-  partial: string,
-  requestId: string,
-): Promise<void> {
-  await runtime.editWithRetry((tx) => {
-    const allEntries = cache.withTx(tx).get();
-    const entry = allEntries[inputHash];
-    if (
-      entry?.state.type === "fetching" &&
-      entry.state.requestId === requestId
-    ) {
-      // Cast to any to work around TypeScript's complex union type inference
-      (cache as any).withTx(tx).update({
-        [inputHash]: {
-          inputHash,
-          state: {
-            type: "fetching",
-            requestId: entry.state.requestId,
-            startTime: entry.state.startTime,
-            partial,
-          },
-        },
-      });
-    }
-  });
+export function isTimedOut<T, E = string>(
+  state: AsyncOperationState<T, E>,
+  timeout: number,
+): boolean {
+  return (
+    state.type === "fetching" && Date.now() - state.startTime > timeout
+  );
 }
 
 /**
- * Computes a hash of inputs for comparison.
- * Excludes the 'result' field which is used only as a TypeScript type hint,
- * not as an actual input parameter.
+ * Compute input hash for deduplication.
+ * Excludes 'result' field which is just a type hint.
  */
 export function computeInputHash<T extends Record<string, any>>(
   tx: IExtendedStorageTransaction,
   inputsCell: Cell<T>,
 ): string {
   const inputs = inputsCell.getAsQueryResult([], tx);
-  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
   const { result: _result, ...inputsOnly } = inputs;
   return refer(inputsOnly).toString();
 }
