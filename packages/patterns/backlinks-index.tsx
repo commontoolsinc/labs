@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Cell, derive, lift, NAME, OpaqueRef, recipe, UI } from "commontools";
 
 export type MentionableCharm = {
   [NAME]?: string;
@@ -63,13 +63,10 @@ const BacklinksIndex = recipe<Input, Output>(
       allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
     });
 
-    // Compute mentionable list from allCharms via lift, then mirror that into
-    // a real Cell for downstream consumers that expect a Cell.
-    const computeMentionable = lift<
-      { allCharms: any[] },
-      MentionableCharm[]
-    >(({ allCharms }) => {
-      const cs = allCharms ?? [];
+    // Compute mentionable list from allCharms reactively
+    // Use derive instead of lift to track when allCharms changes
+    const mentionable = derive(allCharms, (charmList) => {
+      const cs = charmList ?? [];
       const out: MentionableCharm[] = [];
       for (const c of cs) {
         out.push(c);
@@ -90,7 +87,7 @@ const BacklinksIndex = recipe<Input, Output>(
     return {
       [NAME]: "BacklinksIndex",
       [UI]: undefined,
-      mentionable: computeMentionable({ allCharms }),
+      mentionable,
     };
   },
 );
