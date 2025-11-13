@@ -8,7 +8,6 @@ import {
   handler,
   NAME,
   navigateTo,
-  type Opaque,
   type OpaqueRef,
   patternTool,
   recipe,
