@@ -113,6 +113,65 @@ describe("fetch-data mutex mechanism", () => {
     expect(fetchCalls[0].url).toContain("/api/test");
   });
 
+  it("should mark pending true before fetch resolves on first run", async () => {
+    let resolveFetch: (() => void) | undefined;
+    globalThis.fetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+
+      fetchCalls.push({ url, init });
+
+      return await new Promise<Response>((resolve) => {
+        resolveFetch = () =>
+          resolve(
+            new Response(
+              JSON.stringify({ mocked: true, url, delayed: true }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+      });
+    };
+
+    const fetchData = byRef("fetchData");
+    const testRecipe = recipe<{ url: string }>(
+      "Pending Test",
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const resultCell = runtime.getCell(space, "pending-test", undefined, tx);
+    runtime.run(tx, testRecipe, {
+      url: "http://mock-test-server.local/api/pending",
+    }, resultCell);
+    tx.commit();
+
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.idle();
+
+    const interim = resultCell.get() as { pending?: boolean; result?: any };
+    expect(interim.pending).toBe(true);
+    expect(interim.result).toBeUndefined();
+
+    resolveFetch?.();
+
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
+
+    const finalData = resultCell.get() as { pending?: boolean; result?: any };
+    expect(finalData.pending).toBe(false);
+    expect(finalData.result).toBeDefined();
+  });
+
   it("should handle concurrent requests with same inputs (mutex test)", async () => {
     const fetchData = byRef("fetchData");
     const testRecipe = recipe<{ url: string }>(
