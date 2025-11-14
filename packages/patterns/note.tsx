@@ -85,11 +85,12 @@ const handleNewBacklink = handler<
 
 /** This edits the content */
 const handleEditContent = handler<
-  { detail: { value: string } },
+  { detail: { value: string }; result?: Cell<string> },
   { content: Cell<string> }
 >(
-  ({ detail }, { content }) => {
+  ({ detail, result }, { content }) => {
     content.set(detail.value);
+    result?.set("test!");
   },
 );
 
