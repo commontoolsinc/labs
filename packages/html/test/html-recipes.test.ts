@@ -5,7 +5,6 @@ import {
   type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
-  type OpaqueRef,
   Runtime,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -215,7 +214,7 @@ describe("recipes with HTML", () => {
             h(
               "ul",
               null,
-              entries(row).map((input: OpaqueRef<[string, unknown]>) =>
+              entries(row).map((input) =>
                 h("li", null, [input[0], ": ", str`${input[1]}`])
               ) as VNode[],
             )

@@ -1,11 +1,11 @@
 /// <cts-enable />
 
-import { Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, recipe, UI } from "commontools";
 
 type Input = {
-  selected: Default<string, "opt_1">;
-  numericChoice: Default<number, 1>;
-  category: Default<string, "Other">;
+  selected: Cell<Default<string, "opt_1">>;
+  numericChoice: Cell<Default<number, 1>>;
+  category: Cell<Default<string, "Other">>;
 };
 
 type Result = {

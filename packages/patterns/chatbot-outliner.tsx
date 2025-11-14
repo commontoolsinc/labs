@@ -79,10 +79,10 @@ export const Page = recipe<PageInput>(
 );
 
 type LLMTestInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-  expandChat: Default<boolean, false>;
-  outline: Default<
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  expandChat?: Cell<Default<boolean, false>>;
+  outline?: Default<
     Outliner,
     { root: { body: "Untitled Page"; children: []; attachments: [] } }
   >;

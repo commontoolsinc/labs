@@ -31,8 +31,8 @@ function schemaifyWish<T>(path: string, def: T) {
 }
 
 type ChatbotNoteInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
 };
 
 type ChatbotNoteResult = {
@@ -57,11 +57,11 @@ const newNote = handler<
     try {
       const n = Note({
         title: args.title,
-        content: args.content || "",
+        content: args.content ?? "",
       });
 
       args.result.set(
-        `Created note ${args.title}!`,
+        `Created note ${args.title}`,
       );
 
       // TODO(bf): we have to navigate here until DX1 lands

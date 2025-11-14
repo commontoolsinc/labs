@@ -77,9 +77,9 @@ type Email = {
 
 type Settings = {
   // Gmail filter query to use for fetching emails
-  gmailFilterQuery: Default<string, "in:INBOX">;
+  gmailFilterQuery: Cell<Default<string, "in:INBOX">>;
   // Maximum number of emails to fetch
-  limit: Default<number, 100>;
+  limit: Cell<Default<number, 100>>;
   // Gmail history ID for incremental sync
   historyId: Default<string, "">;
 };
@@ -809,11 +809,7 @@ const updateGmailFilterQuery = handler<
 );
 
 export default recipe<{
-  settings: Default<Settings, {
-    gmailFilterQuery: "in:INBOX";
-    limit: 100;
-    historyId: "";
-  }>;
+  settings: Settings;
   auth: Auth;
 }>(
   "gmail-importer",

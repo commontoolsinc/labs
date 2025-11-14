@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  Cell,
   Default,
   derive,
   fetchData,
@@ -151,7 +152,7 @@ function parseUrl(url: string): { org: string; user: string } {
 }
 
 export default recipe<
-  { repoUrl: Default<string, "https://github.com/vercel/next.js"> }
+  { repoUrl: Cell<Default<string, "https://github.com/vercel/next.js">> }
 >(
   "Github Fetcher Demo",
   (state) => {

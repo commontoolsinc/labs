@@ -118,8 +118,8 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-  tools: any;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  tools?: any;
   theme?: any;
   system?: string;
 };
