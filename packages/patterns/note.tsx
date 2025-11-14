@@ -85,7 +85,7 @@ const handleNewBacklink = handler<
 
 /** This edits the content */
 const handleEditContent = handler<
-  { detail: { value: string }, result?: Cell<string> },
+  { detail: { value: string }; result?: Cell<string> },
   { content: Cell<string> }
 >(
   ({ detail, result }, { content }) => {

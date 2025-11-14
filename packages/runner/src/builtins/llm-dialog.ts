@@ -20,10 +20,7 @@ import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import {
-  debugTransactionWrites,
-  formatTransactionSummary,
-} from "../storage/transaction-summary.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { parseLink } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
@@ -992,9 +989,9 @@ async function ensureSourceCharmRunning(
 /**
  * Handles the listAttachments tool call.
  */
-async function handleListAttachments(
+function handleListAttachments(
   catalog?: ToolCatalog,
-): Promise<{ type: string; value: any }> {
+): { type: string; value: any } {
   if (!catalog?.handleMap) {
     return { type: "json", value: [] };
   }
@@ -1020,10 +1017,10 @@ async function handleSchema(
 /**
  * Handles the read tool call.
  */
-async function handleRead(
+function handleRead(
   runtime: IRuntime,
   resolved: ResolvedToolCall & { type: "read" },
-): Promise<{ type: string; value: any }> {
+): { type: string; value: any } {
   // The cellRef already points to the full path from the link resolution
   const cellLink = resolved.cellRef.getAsNormalizedFullLink();
 
@@ -1079,7 +1076,7 @@ async function handleRun(
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
 
-  const editPromise = runtime.editWithRetry((tx) => {
+  runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
     result = runtime.getCell<any>(space, toolCall.id, undefined, tx);
 
