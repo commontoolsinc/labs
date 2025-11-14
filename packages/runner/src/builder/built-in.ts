@@ -105,10 +105,12 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     type: "ref",
     implementation: "ifElse",
   });
-  return ifElseFactory([condition, ifTrue, ifFalse]) as OpaqueRef<U | V>;
+  return ifElseFactory({ condition, ifTrue, ifFalse }) as OpaqueRef<U | V>;
 }
 
-let ifElseFactory: NodeFactory<[unknown, unknown, unknown], any> | undefined;
+let ifElseFactory:
+  | NodeFactory<{ condition: unknown; ifTrue: unknown; ifFalse: unknown }, any>
+  | undefined;
 
 export const navigateTo = createNodeFactory({
   type: "ref",
