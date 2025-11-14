@@ -471,14 +471,12 @@ function flattenTools(
     : "No charms currently attached, but you can still read/run any valid handle.";
 
   flattened[READ_TOOL_NAME] = {
-    description:
-      "Read data from ANY charm using a handle path like " +
+    description: "Read data from ANY charm using a handle path like " +
       '"of:bafyabc123/result/path". ' + availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[RUN_TOOL_NAME] = {
-    description:
-      "Invoke a handler on ANY charm. Provide the handle " +
+    description: "Invoke a handler on ANY charm. Provide the handle " +
       'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
@@ -542,15 +540,13 @@ function buildToolCatalog(
     : "No charms currently attached, but you can still read/run any valid handle.";
 
   llmTools[READ_TOOL_NAME] = {
-    description:
-      "Read data from ANY charm using a handle path like " +
+    description: "Read data from ANY charm using a handle path like " +
       '"of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
       availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   llmTools[RUN_TOOL_NAME] = {
-    description:
-      "Run a handler on ANY charm. Provide the handle path like " +
+    description: "Run a handler on ANY charm. Provide the handle path like " +
       '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
@@ -696,59 +692,32 @@ function resolveToolCall(
     const { handle, pathSegments } = parseHandleFromPath(target);
 
     // Build link from the handle and path segments
-    // We support ANY valid handle, not just those in attachments
     const link = {
       id: handle as `${string}:${string}`,
       path: pathSegments.map((segment) => segment.toString()),
       space,
-      type: "application/json" as const
+      type: "application/json" as const,
     };
-
-    logger.info(
-      `[resolveToolCall] Parsed target "${target}":`,
-      `handle=${handle}, pathSegments=[${pathSegments.join(", ")}]`,
-      `link.id=${link.id}, link.path=[${link.path.join(", ")}]`,
-    );
 
     // Try to get the charm from attachments for metadata (optional)
     const charmEntry = catalog.handleMap.get(handle);
     const charm = charmEntry?.charm;
 
     if (name === READ_TOOL_NAME) {
-      // If we have a charm from attachments, use it directly (it knows its path)
-      // Otherwise, resolve the handle to a cell for arbitrary handles
-      let cellRef: Cell<any> | undefined;
-      if (!charm) {
-        cellRef = runtime.getCellFromLink(link);
-        logger.info(
-          `[resolveToolCall READ] Got cell from link for arbitrary handle:`,
-          `ref=${!!cellRef}`,
-          `link=${JSON.stringify(link)}`,
+      // Get cell reference from the link - works for any valid handle
+      const cellRef = runtime.getCellFromLink(link);
+      if (!cellRef) {
+        throw new Error(
+          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
         );
-        if (!cellRef) {
-          throw new Error(
-            `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
-          );
-        }
-        if (isStream(cellRef)) {
-          throw new Error(`Path resolves to a handler; use run("${target}").`);
-        }
-        // DEBUG: Test if we can read the cell immediately (before sync)
-        const immediateValue = cellRef.get();
-        logger.info(
-          `[resolveToolCall READ] Immediate test read of cellRef (no sync yet):`,
-          `type=${typeof immediateValue}, value=${JSON.stringify(immediateValue)}`,
-        );
-      } else {
-        logger.info(
-          `[resolveToolCall READ] Using charm from attachments`,
-        );
+      }
+      if (isStream(cellRef)) {
+        throw new Error(`Path resolves to a handler; use run("${target}").`);
       }
 
       return {
         charmMeta: {
-          charm,
-          cellRef, // Only set for arbitrary handles
+          cellRef,
           mode: "read",
           targetSegments: pathSegments,
         },
@@ -1062,99 +1031,28 @@ async function invokeToolCall(
   if (charmMeta?.mode === "read") {
     const segments = charmMeta.targetSegments ?? [];
 
-    logger.info(
-      `[invokeToolCall READ] Reading from cell:`,
-      `cellRef=${!!charmMeta.cellRef}, charm=${!!charmMeta.charm}`,
-      `segments=[${segments.join(", ")}]`,
-    );
-
-    let realized: any;
-
-    if (charmMeta.charm) {
-      // TEST: For attached charms, go through link serialization to test if that works
-      const charmCell = charmMeta.charm;
-      const charmLink = charmCell.getAsNormalizedFullLink();
-
-      logger.info(
-        `[invokeToolCall READ CHARM TEST] Charm link:`,
-        `link=${charmLink.id}/${charmLink.path.join("/")}`,
-      );
-
-      // Add the target segments
-      const linkWithSegments = {
-        ...charmLink,
-        path: [...charmLink.path, ...segments],
-      };
-
-      logger.info(
-        `[invokeToolCall READ CHARM TEST] With segments:`,
-        `link=${linkWithSegments.id}/${linkWithSegments.path.join("/")}`,
-      );
-
-      // Resolve and read just like we do for cellRef
-      const resolvedLink = resolveLink(runtime.readTx(), linkWithSegments);
-
-      logger.info(
-        `[invokeToolCall READ CHARM TEST] Resolved to:`,
-        `resolved=${resolvedLink.id}/${resolvedLink.path.join("/")}`,
-      );
-
-      const resolvedCell = runtime.getCellFromLink(resolvedLink);
-      realized = resolvedCell.get();
-
-      logger.info(
-        `[invokeToolCall READ CHARM TEST] Read from resolved cell:`,
-        `type=${typeof realized}, value=${JSON.stringify(realized)}`,
-      );
-    } else if (charmMeta.cellRef) {
-      // For arbitrary handles, resolve the link and read from the resolved cell
-      const normalizedLink = charmMeta.cellRef.getAsNormalizedFullLink();
-
-      // Add the target segments to the link path
-      const linkWithSegments = {
-        ...normalizedLink,
-        path: [...normalizedLink.path, ...segments],
-      };
-
-      logger.info(
-        `[invokeToolCall READ] Resolving link:`,
-        `link=${linkWithSegments.id}/${linkWithSegments.path.join("/")}`,
-      );
-
-      // Resolve the link within a read transaction and get the value
-      const resolvedLink = resolveLink(runtime.readTx(), linkWithSegments);
-
-      logger.info(
-        `[invokeToolCall READ] Resolved to:`,
-        `resolved=${resolvedLink.id}/${resolvedLink.path.join("/")}`,
-      );
-
-      // Create a cell from the resolved link and read it
-      const resolvedCell = runtime.getCellFromLink(resolvedLink);
-      realized = resolvedCell.get();
-
-      logger.info(
-        `[invokeToolCall READ] Read from resolved cell:`,
-        `type=${typeof realized}, value=${JSON.stringify(realized)}`,
-      );
-    } else {
-      throw new Error("Read mode requires either cellRef or charm to be set");
+    if (!charmMeta.cellRef) {
+      throw new Error("Read mode requires cellRef to be set");
     }
 
-    logger.info(
-      `[invokeToolCall READ] Raw realized value:`,
-      `type=${typeof realized}, value=${JSON.stringify(realized)}`,
-    );
+    // Get the normalized link from the cell reference
+    const cellLink = charmMeta.cellRef.getAsNormalizedFullLink();
+
+    // Add the target segments to the link path
+    const linkWithSegments = {
+      ...cellLink,
+      path: [...cellLink.path, ...segments],
+    };
+
+    // Resolve any intermediate links and get the final cell
+    const resolvedLink = resolveLink(runtime.readTx(), linkWithSegments);
+    const resolvedCell = runtime.getCellFromLink(resolvedLink);
+    const realized = resolvedCell.get();
 
     // Handle undefined values gracefully - return null for undefined/null
     const value = realized === undefined || realized === null
       ? null
       : JSON.parse(JSON.stringify(realized));
-
-    logger.info(
-      `[invokeToolCall READ] Final value to return:`,
-      JSON.stringify(value),
-    );
 
     return { type: "json", value };
   }
@@ -1170,7 +1068,10 @@ async function invokeToolCall(
 
   // ensure the charm this handler originates from is actually running
   if (handler && !pattern && charmMeta && charmMeta.charm) {
-    await ensureSourceCharmRunning(runtime, charmMeta as { handler?: any; charm: Cell<any> });
+    await ensureSourceCharmRunning(
+      runtime,
+      charmMeta as { handler?: any; charm: Cell<any> },
+    );
   }
 
   const { resolve, promise } = Promise.withResolvers<any>();
@@ -1182,12 +1083,6 @@ async function invokeToolCall(
     // Create the result cell within the transaction context
     result = runtime.getCell<any>(space, toolCall.id, undefined, tx);
 
-    logger.info(
-      `[invokeToolCall] Created result cell in tx:`,
-      `toolCall.id=${toolCall.id}`,
-      `result link=${result.getAsNormalizedFullLink().id}`,
-    );
-
     if (pattern) {
       runtime.run(tx, pattern, { ...toolCall.input, ...extraParams }, result);
     } else if (handler) {
@@ -1195,11 +1090,8 @@ async function invokeToolCall(
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
-        logger.info("Handler tx:", debugTransactionWrites(completedTx));
-
         const summary = formatTransactionSummary(completedTx, space);
         const value = result.withTx(completedTx);
-
         resolve({ value, summary });
       });
     } else {
@@ -1211,56 +1103,17 @@ async function invokeToolCall(
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  const resultValue = await promise;
+  await promise;
   cancel();
 
   // Wait for the transaction to be fully committed before returning the link
-  const editResult = await editPromise;
+  await editPromise;
 
-  logger.info(
-    `[invokeToolCall] Transaction committed`,
-  );
-
-  // Verify the result cell can be read after commit
-  const verifyRead = result.get();
-  logger.info(
-    `[invokeToolCall] Verify result cell after commit:`,
-    `type=${typeof verifyRead}, value=${JSON.stringify(verifyRead)}`,
-  );
-
-  // DEBUG: Log the actual value that was resolved
-  logger.info(
-    `[invokeToolCall] Pattern/handler resolved with value:`,
-    JSON.stringify(resultValue, null, 2),
-  );
-
-  // DEBUG: Check what the result cell looks like
-  const resultLinkForDebug = result.getAsNormalizedFullLink();
-  logger.info(
-    `[invokeToolCall] Result cell details:`,
-    `result.space=${result.space}`,
-    `normalized id=${resultLinkForDebug.id}`,
-  );
-
-  // Return link to the result cell - use the cell's own link serialization
+  // Return link to the result cell
   const resultLink = result.getAsNormalizedFullLink();
   const linkString = resultLink.path.length > 0
     ? `${resultLink.id}/${resultLink.path.join("/")}`
     : resultLink.id;
-
-  logger.info(
-    `[invokeToolCall] Returning link from result cell:`,
-    `linkString=${linkString}`,
-    `resultLink.id=${resultLink.id}, resultLink.path=[${resultLink.path.join(", ")}]`,
-    `resultLink.space=${resultLink.space}`,
-  );
-
-  // DEBUG: Verify we can read it back immediately
-  const testRead = result.get();
-  logger.info(
-    `[invokeToolCall] Test reading result cell directly:`,
-    `type=${typeof testRead}, value=${JSON.stringify(testRead)}`,
-  );
 
   return { type: "json", value: linkString };
 }
