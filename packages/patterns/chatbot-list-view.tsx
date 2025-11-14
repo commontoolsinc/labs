@@ -129,7 +129,10 @@ const populateChatList = lift(
     if (charmsList.length === 0) {
       const isInitialized = Cell.of(false);
       return storeCharm({
-        charm: Chat({}),
+        charm: Chat({
+          title: "New Chat",
+          messages: [],
+        }),
         selectedCharm,
         charmsList,
         allCharms,
@@ -152,7 +155,10 @@ const createChatRecipe = handler<
   (_, { selectedCharm, charmsList, allCharms }) => {
     const isInitialized = Cell.of(false);
 
-    const charm = Chat({});
+    const charm = Chat({
+      title: "New Chat",
+      messages: [],
+    });
     // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
     return storeCharm({
       charm,

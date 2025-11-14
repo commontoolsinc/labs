@@ -74,16 +74,27 @@ const spawnChatList = handler<void, void>((_, __) => {
 
 const spawnChatbot = handler<void, void>((_, __) => {
   return navigateTo(Chatbot({
+    messages: [],
     tools: undefined,
   }));
 });
 
 const spawnChatbotOutliner = handler<void, void>((_, __) => {
-  return navigateTo(ChatbotOutliner({}));
+  return navigateTo(ChatbotOutliner({
+    title: "Chatbot Outliner",
+    expandChat: false,
+    messages: [],
+    outline: {
+      root: { body: "", children: [], attachments: [] },
+    },
+  }));
 });
 
 const spawnNote = handler<void, void>((_, __) => {
-  return navigateTo(Note({}));
+  return navigateTo(Note({
+    title: "New Note",
+    content: "",
+  }));
 });
 
 export default recipe<CharmsListInput, CharmsListOutput>(

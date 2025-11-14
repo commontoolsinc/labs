@@ -121,11 +121,7 @@ const appendOutlinerNode = handler<
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "Outliner",
-  (input) => {
-    const title = input.title || Cell.of("LLM Test");
-    const expandChat = input.expandChat || Cell.of(false);
-    const messages = input.messages || Cell.of<Array<BuiltInLLMMessage>>([]);
-    const outline = input.outline || { root: { body: "", children: [], attachments: [] } };
+  ({ title, expandChat, messages, outline }) => {
     const tools = {
       appendOutlinerNode: {
         description: "Add a new outliner node.",

@@ -55,10 +55,13 @@ const newNote = handler<
 >(
   (args, _) => {
     try {
-      const n = Note({});
+      const n = Note({
+        title: args.title,
+        content: args.content ?? "",
+      });
 
       args.result.set(
-        `Created note!`,
+        `Created note ${args.title}`,
       );
 
       // TODO(bf): we have to navigate here until DX1 lands
@@ -167,9 +170,7 @@ type BacklinksIndex = {
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
-  (input) => {
-    const title = input.title || Cell.of("LLM Test");
-    const messages = input.messages || Cell.of<Array<BuiltInLLMMessage>>([]);
+  ({ title, messages }) => {
     const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
     const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
       mentionable: [],

@@ -105,9 +105,7 @@ function schemaifyWish<T>(path: string, def: T) {
 
 const Note = recipe<Input, Output>(
   "Note",
-  (input) => {
-    const title = input.title || Cell.of("Untitled Note");
-    const content = input.content || Cell.of("");
+  ({ title, content }) => {
     const mentionable = schemaifyWish<MentionableCharm[]>(
       "#mentionable",
       [],

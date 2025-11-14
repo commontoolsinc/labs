@@ -288,12 +288,7 @@ const listRecent = handler<
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  (input) => {
-    const messages = input.messages || Cell.of<Array<BuiltInLLMMessage>>([]);
-    const tools = input.tools;
-    const theme = input.theme;
-    const system = input.system;
-
+  ({ messages, tools, theme, system }) => {
     const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
     const allAttachments = Cell.of<Array<PromptAttachment>>([]);
     const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
