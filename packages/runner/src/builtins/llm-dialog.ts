@@ -540,33 +540,6 @@ type Attachment = {
 // and internal runtime format (of:...). The LLM sees paths with a leading slash
 // to make it clear that strings are links.
 
-/**
- * Formats a link for the LLM using /of: prefix format.
- * @param handle - The handle (with or without 'of:' prefix)
- * @param pathSegments - Optional path segments to append
- * @returns Formatted path like '/of:bafyabc123' or '/of:bafyabc123/result/content'
- */
-function formatLinkForLLM(
-  handle: string,
-  pathSegments?: readonly string[],
-): string {
-  // Ensure handle starts with 'of:' (strip leading slash if present)
-  const normalizedHandle = handle.startsWith("/of:")
-    ? handle.slice(1)
-    : handle.startsWith("of:")
-    ? handle
-    : `of:${handle}`;
-
-  // Build the path with leading slash for LLM
-  const basePath = `/${normalizedHandle}`;
-
-  if (!pathSegments || pathSegments.length === 0) {
-    return basePath;
-  }
-
-  return `${basePath}/${pathSegments.join("/")}`;
-}
-
 function ensureString(
   value: unknown,
   field: string,
@@ -902,48 +875,6 @@ async function buildAttachmentsSchemaDocumentation(
   }
 
   return "\n\n# Attached Charms\n\n" + schemaEntries.join("\n\n");
-}
-
-/**
- * Build a formatted documentation string describing all attached charm schemas.
- * This is appended to the system prompt so the LLM has immediate context about
- * available charms without needing to call schema() first.
- * @deprecated Use buildAttachmentsSchemaDocumentation instead
- */
-async function buildCharmSchemasDocumentation(
-  runtime: IRuntime,
-  handleMap: Map<string, { charm: Cell<any>; charmName: string }>,
-): Promise<string> {
-  if (handleMap.size === 0) {
-    return "";
-  }
-
-  const schemaEntries: string[] = [];
-
-  for (const [handle, { charm, charmName }] of handleMap.entries()) {
-    try {
-      const schema = await getCharmResultSchemaAsync(runtime, charm);
-      if (schema) {
-        const schemaJson = JSON.stringify(schema, null, 2);
-        schemaEntries.push(
-          `## ${charmName} (${handle})\n\`\`\`json\n${schemaJson}\n\`\`\``,
-        );
-      }
-    } catch (e) {
-      logger.warn(
-        `Failed to get schema for charm ${charmName} (${handle}):`,
-        e,
-      );
-    }
-  }
-
-  if (schemaEntries.length === 0) {
-    return "";
-  }
-
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (/of:.../path), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "/of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "/of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "/of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "/of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
-    schemaEntries.join("\n\n")
-  }`;
 }
 
 // Discriminated union separating external tools from built-in tools
@@ -1609,7 +1540,7 @@ async function invokeToolCall(
   runtime: IRuntime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-  catalog?: ToolCatalog,
+  _catalog?: ToolCatalog,
   attachments?: Cell<Attachment[]>,
 ) {
   // Handle attachment tools

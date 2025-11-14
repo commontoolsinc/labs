@@ -1,7 +1,7 @@
 import { css, html, nothing, render } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { type Cell, isCell, NAME } from "@commontools/runner";
+import { type Cell, NAME } from "@commontools/runner";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   applyThemeToElement,

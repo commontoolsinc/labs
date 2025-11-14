@@ -1,5 +1,5 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import { type Cell, getEntityId, NAME } from "@commontools/runner";
 import { type Mentionable, type MentionableArray } from "./mentionable.ts";
 
 /**
