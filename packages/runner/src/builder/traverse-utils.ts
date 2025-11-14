@@ -1,5 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
-import { isOpaqueRef, isRecipe, isShadowRef, type Opaque } from "./types.ts";
+import { isOpaqueRef, isRecipe, type Opaque } from "./types.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
@@ -29,7 +29,6 @@ export function traverseValue(
     !isOpaqueRef(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
-    !isShadowRef(value) &&
     (isRecord(value) || isRecipe(value))
   ) {
     if (Array.isArray(value)) {
