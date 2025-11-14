@@ -906,6 +906,7 @@ export interface BuiltInLLMDialogState {
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
   flattenedTools: Record<string, any>;
+  attachments: Array<{ path: string; name: string }>;
 }
 
 export type BuiltInGenerateObjectParams =

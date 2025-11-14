@@ -350,6 +350,16 @@ const resultSchema = {
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
     flattenedTools: { type: "object", default: {} },
+    attachments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+    },
   },
   required: ["pending", "addMessage", "cancelGeneration"],
 } as const satisfies JSONSchema;
@@ -421,6 +431,8 @@ const RUN_TOOL_NAME = "run";
 const SCHEMA_TOOL_NAME = "schema";
 const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
 const NAVIGATE_TO_TOOL_NAME = "navigateTo";
+const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
+const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -481,6 +493,44 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
   },
   required: ["path"],
   additionalProperties: false,
+};
+
+const ADD_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description:
+        "Link to attach (e.g., /of:bafyabc123 or /of:bafyabc123/result).",
+    },
+    name: {
+      type: "string",
+      description: "Human-readable name for this attachment.",
+    },
+  },
+  required: ["path", "name"],
+  additionalProperties: false,
+};
+
+const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "Path of attachment to remove.",
+    },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+/**
+ * Represents an attachment in the conversation.
+ * Attachments are links of interest that the LLM can add/remove as a scratchpad.
+ */
+type Attachment = {
+  path: string; // e.g., "/of:bafyabc123" or "/of:bafyabc123/result"
+  name: string; // Human-readable name for display
 };
 
 // ============================================================================
@@ -618,18 +668,36 @@ function flattenTools(
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
+  flattened[NAVIGATE_TO_TOOL_NAME] = {
+    description:
+      "Navigate to ANY charm or path. Provide the handle path like " +
+      '"of:bafyabc123" or "of:bafyabc123/result".',
+    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
+  };
+  flattened[ADD_ATTACHMENT_TOOL_NAME] = {
+    description:
+      "Attach a link to the conversation for easy reference. Attached links " +
+      "show their name and can be inspected with read() or schema().",
+    inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
+  };
+  flattened[REMOVE_ATTACHMENT_TOOL_NAME] = {
+    description:
+      "Remove an attachment from the conversation when you no longer need it.",
+    inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
+  };
+  flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
+    description:
+      "List all currently attached links with their paths and names.",
+    inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+  };
 
   if (charms.length > 0) {
-    flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
-      description: "List all attached charms with their handles and names.",
-      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+    flattened[SCHEMA_TOOL_NAME] = {
+      description:
+        "Return the JSON schema for an attached charm to understand " +
+        "available fields and handlers. " + availability,
+      inputSchema: SCHEMA_INPUT_SCHEMA,
     };
-    // flattened[SCHEMA_TOOL_NAME] = {
-    //   description:
-    //     "Return the JSON schema for an attached charm to understand " +
-    //     "available fields and handlers. " + availability,
-    //   inputSchema: SCHEMA_INPUT_SCHEMA,
-    // };
   }
 
   return flattened;
@@ -749,8 +817,26 @@ function buildToolCatalog(
       availability,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
+  llmTools[ADD_ATTACHMENT_TOOL_NAME] = {
+    description:
+      "Attach a link to the conversation for easy reference. Attached links " +
+      "show their name and can be inspected with read() or schema(). Use this " +
+      "to keep track of important charms or data you're working with.",
+    inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
+  };
+  llmTools[REMOVE_ATTACHMENT_TOOL_NAME] = {
+    description:
+      "Remove an attachment from the conversation when you no longer need it.",
+    inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
+  };
+  llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
+    description:
+      "List all currently attached links with their paths and names. " +
+      "Use this to see what you've attached to the conversation.",
+    inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+  };
 
-  // Schema and listAttachments only work with attached charms
+  // Schema only works with attached charms
   if (charms.length > 0) {
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
@@ -759,22 +845,84 @@ function buildToolCatalog(
         "prompt for convenience. " + availability,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
-    llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
-      description:
-        "List all attached charms with their handles and human-readable names. " +
-        "Use this to discover which charms are available and their handles for " +
-        "use with read() and run().",
-      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
-    };
   }
 
   return { llmTools, dynamicToolCells, charmMap, handleMap };
 }
 
 /**
+ * Build a formatted documentation string describing all attached charm schemas
+ * from the attachments list. This is appended to the system prompt so the LLM
+ * has immediate context about available charms without needing to call schema() first.
+ */
+async function buildAttachmentsSchemaDocumentation(
+  runtime: IRuntime,
+  space: MemorySpace,
+  attachments: Cell<Attachment[]>,
+): Promise<string> {
+  const currentAttachments = attachments.get() || [];
+  if (currentAttachments.length === 0) {
+    return "";
+  }
+
+  const schemaEntries: string[] = [];
+
+  for (const attachment of currentAttachments) {
+    try {
+      // Parse the path to get handle and path segments
+      const parsed = parseTargetString(attachment.path);
+      if ("error" in parsed) {
+        logger.warn(
+          `Failed to parse attachment path ${attachment.path}: ${parsed.error}`,
+        );
+        continue;
+      }
+
+      // Build link from handle and path
+      const link = {
+        id: parsed.handle as `${string}:${string}`,
+        path: parsed.pathSegments.map((s) => s.toString()),
+        space,
+        type: "application/json" as const,
+      };
+
+      // Get cell from link
+      const cell = runtime.getCellFromLink(link);
+      if (!cell) {
+        logger.warn(
+          `Could not resolve attachment ${attachment.path} to a cell`,
+        );
+        continue;
+      }
+
+      // Get schema for the cell
+      const schema = await getCharmResultSchemaAsync(runtime, cell);
+      if (schema) {
+        const schemaJson = JSON.stringify(schema, null, 2);
+        schemaEntries.push(
+          `## ${attachment.name} (${attachment.path})\n\`\`\`json\n${schemaJson}\n\`\`\``,
+        );
+      }
+    } catch (e) {
+      logger.warn(
+        `Failed to get schema for attachment ${attachment.name} (${attachment.path}):`,
+        e,
+      );
+    }
+  }
+
+  if (schemaEntries.length === 0) {
+    return "";
+  }
+
+  return "\n\n# Attached Charms\n\n" + schemaEntries.join("\n\n");
+}
+
+/**
  * Build a formatted documentation string describing all attached charm schemas.
  * This is appended to the system prompt so the LLM has immediate context about
  * available charms without needing to call schema() first.
+ * @deprecated Use buildAttachmentsSchemaDocumentation instead
  */
 async function buildCharmSchemasDocumentation(
   runtime: IRuntime,
@@ -822,6 +970,8 @@ type ResolvedToolCall =
   }
   // Built-in tools provided by llm-dialog itself
   | { type: "listAttachments"; call: LLMToolCall }
+  | { type: "addAttachment"; call: LLMToolCall; path: string; name: string }
+  | { type: "removeAttachment"; call: LLMToolCall; path: string }
   | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
@@ -855,11 +1005,12 @@ function resolveToolCall(
   if (
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
-    name === NAVIGATE_TO_TOOL_NAME
+    name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
+    name === REMOVE_ATTACHMENT_TOOL_NAME
   ) {
-    // Schema and listAttachments require attachments, but read/run work with any handle
+    // Schema requires attachments, but read/run/listAttachments work with any handle
     if (
-      (name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME) &&
+      name === SCHEMA_TOOL_NAME &&
       catalog.handleMap.size === 0 && catalog.charmMap.size === 0
     ) {
       throw new Error("No charm attachments available.");
@@ -870,6 +1021,40 @@ function resolveToolCall(
       return {
         type: "listAttachments",
         call: { id, name, input: {} },
+      };
+    }
+
+    // Handle addAttachment
+    if (name === ADD_ATTACHMENT_TOOL_NAME) {
+      const path = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123",
+      );
+      const attachmentName = extractStringField(
+        toolCallPart.input,
+        "name",
+        "My Charm",
+      );
+      return {
+        type: "addAttachment",
+        call: { id, name, input: { path, name: attachmentName } },
+        path,
+        name: attachmentName,
+      };
+    }
+
+    // Handle removeAttachment
+    if (name === REMOVE_ATTACHMENT_TOOL_NAME) {
+      const path = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123",
+      );
+      return {
+        type: "removeAttachment",
+        call: { id, name, input: { path } },
+        path,
       };
     }
 
@@ -1049,6 +1234,7 @@ async function executeToolCalls(
   space: MemorySpace,
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
+  attachments?: Cell<Attachment[]>,
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -1059,6 +1245,7 @@ async function executeToolCalls(
         space,
         resolved,
         toolCatalog,
+        attachments,
       );
       results.push({
         id: part.toolCallId,
@@ -1197,21 +1384,71 @@ async function ensureSourceCharmRunning(
 }
 
 /**
+ * Handles the addAttachment tool call.
+ */
+function handleAddAttachment(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "addAttachment" },
+  attachments: Cell<Attachment[]>,
+): { type: string; value: any } {
+  const current = attachments.get() || [];
+
+  // Check if already attached
+  if (current.some((a) => a.path === resolved.path)) {
+    return {
+      type: "json",
+      value: { success: false, message: "Already attached" },
+    };
+  }
+
+  // Add new attachment using a transaction
+  runtime.editWithRetry((tx) => {
+    const currentInTx = attachments.withTx(tx).get() || [];
+    attachments.withTx(tx).set([
+      ...currentInTx,
+      { path: resolved.path, name: resolved.name },
+    ]);
+  });
+
+  return { type: "json", value: { success: true } };
+}
+
+/**
+ * Handles the removeAttachment tool call.
+ */
+function handleRemoveAttachment(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "removeAttachment" },
+  attachments: Cell<Attachment[]>,
+): { type: string; value: any } {
+  const current = attachments.get() || [];
+  const filtered = current.filter((a) => a.path !== resolved.path);
+
+  if (filtered.length === current.length) {
+    return {
+      type: "json",
+      value: { success: false, message: "Not found" },
+    };
+  }
+
+  // Remove attachment using a transaction
+  runtime.editWithRetry((tx) => {
+    const currentInTx = attachments.withTx(tx).get() || [];
+    const filteredInTx = currentInTx.filter((a) => a.path !== resolved.path);
+    attachments.withTx(tx).set(filteredInTx);
+  });
+
+  return { type: "json", value: { success: true } };
+}
+
+/**
  * Handles the listAttachments tool call.
  */
 function handleListAttachments(
-  catalog?: ToolCatalog,
+  attachments: Cell<Attachment[]>,
 ): { type: string; value: any } {
-  if (!catalog?.handleMap) {
-    return { type: "json", value: [] };
-  }
-  const attachments = Array.from(catalog.handleMap.entries()).map(
-    ([handle, { charmName }]) => ({
-      handle: formatLinkForLLM(handle),
-      name: charmName,
-    }),
-  );
-  return { type: "json", value: attachments };
+  const current = attachments.get() || [];
+  return { type: "json", value: current };
 }
 
 /**
@@ -1387,10 +1624,19 @@ async function invokeToolCall(
   space: MemorySpace,
   resolved: ResolvedToolCall,
   catalog?: ToolCatalog,
+  attachments?: Cell<Attachment[]>,
 ) {
-  // Handle simple query tools
+  // Handle attachment tools
+  if (resolved.type === "addAttachment") {
+    return handleAddAttachment(runtime, resolved, attachments!);
+  }
+
+  if (resolved.type === "removeAttachment") {
+    return handleRemoveAttachment(runtime, resolved, attachments!);
+  }
+
   if (resolved.type === "listAttachments") {
-    return await handleListAttachments(catalog);
+    return handleListAttachments(attachments!);
   }
 
   if (resolved.type === "schema") {
@@ -1445,6 +1691,7 @@ export function llmDialog(
   let cellsInitialized = false;
   let result: Cell<Schema<typeof resultSchema>>;
   let internal: Cell<Schema<typeof internalSchema>>;
+  let attachments: Cell<Attachment[]>;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -1492,11 +1739,31 @@ export function llmDialog(
       );
       internal.sync(); // Kick off sync, no need to await
 
+      // Create attachments cell to store the internal attachments state
+      const attachmentsSchema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            name: { type: "string" },
+          },
+          required: ["path", "name"],
+        },
+      } as const;
+      attachments = runtime.getCell(
+        parentCell.space,
+        { llmDialog: { attachments: cause } },
+        attachmentsSchema,
+        tx,
+      );
+      attachments.sync(); // Kick off sync, no need to await
+
       const pending = result.key("pending");
 
-      // Write the stream markers into the result cell. This write might fail
-      // (since the original data wasn't loaded yet), but that's ok, since in
-      // that case another instance already wrote these.
+      // Write the stream markers and attachments link into the result cell.
+      // This write might fail (since the original data wasn't loaded yet), but
+      // that's ok, since in that case another instance already wrote these.
       //
       // We are carrying the existing pending state over, in case the result
       // cell was already loaded. We don't want to overwrite it.
@@ -1504,6 +1771,7 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
+        attachments: attachments.getAsLink(),
       });
 
       // Declare `addMessage` handler and register
@@ -1557,6 +1825,7 @@ export function llmDialog(
             inputs,
             pending,
             internal,
+            attachments,
             requestId,
             abortController.signal,
           );
@@ -1620,6 +1889,7 @@ async function startRequest(
   inputs: Cell<Schema<typeof LLMParamsSchema>>,
   pending: Cell<boolean>,
   internal: Cell<Schema<typeof internalSchema>>,
+  attachments: Cell<Attachment[]>,
   requestId: string,
   abortSignal: AbortSignal,
 ) {
@@ -1632,12 +1902,18 @@ async function startRequest(
 
   const toolCatalog = buildToolCatalog(runtime, toolsCell);
 
-  // Build charm schemas documentation and append to system prompt
-  const charmSchemasDocs = await buildCharmSchemasDocumentation(
+  // Build charm schemas documentation from attachments and append to system prompt
+  const charmSchemasDocs = await buildAttachmentsSchemaDocumentation(
     runtime,
-    toolCatalog.handleMap,
+    space,
+    attachments,
   );
-  const augmentedSystem = (system ?? "") + charmSchemasDocs;
+
+  const listRecentHint =
+    "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
+    "call listRecent() to see recently viewed charms.";
+
+  const augmentedSystem = (system ?? "") + charmSchemasDocs + listRecentHint;
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,
@@ -1700,6 +1976,7 @@ async function startRequest(
             space,
             toolCatalog,
             toolCallParts,
+            attachments,
           );
 
           // Validate that we have a result for every tool call with matching IDs
@@ -1771,6 +2048,7 @@ async function startRequest(
               inputs,
               pending,
               internal,
+              attachments,
               requestId,
               abortSignal,
             );
