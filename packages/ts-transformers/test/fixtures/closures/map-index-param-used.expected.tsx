@@ -83,6 +83,27 @@ export default recipe({
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: index, params: { state } }) => (<div>
             Item #{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number",
+                        asOpaque: true
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            offset: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["offset"]
+                    }
+                },
+                required: ["index", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 index: index,
                 state: {
                     offset: state.offset

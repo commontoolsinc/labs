@@ -111,14 +111,84 @@ export default recipe({
         [UI]: (<div>
         <h3>Nested Element Access</h3>
         {/* Double indexing into matrix */}
-        <p>Matrix value: {__ctHelpers.derive({ state: {
+        <p>Matrix value: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        matrix: {
+                            type: "array",
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "number"
+                                }
+                            },
+                            asOpaque: true
+                        },
+                        row: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        col: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["matrix", "row", "col"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
             } }, ({ state }) => state.matrix[state.row][state.col])}</p>
 
         {/* Triple nested access */}
-        <p>Deep nested: {__ctHelpers.derive({ state: {
+        <p>Deep nested: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        nested: {
+                            type: "object",
+                            properties: {
+                                arrays: {
+                                    type: "array",
+                                    items: {
+                                        type: "array",
+                                        items: {
+                                            type: "string"
+                                        }
+                                    },
+                                    asOpaque: true
+                                },
+                                index: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["arrays", "index"]
+                        },
+                        row: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["nested", "row"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.nested.arrays,
                     index: state.nested.index
@@ -130,32 +200,152 @@ export default recipe({
         {/* Same array accessed multiple times with different indices */}
         <p>
           First and last: {state.items[0]} and{" "}
-          {__ctHelpers.derive({ state: {
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items[state.items.length - 1])}
         </p>
 
         {/* Array used in computation and access */}
-        <p>Sum of ends: {__ctHelpers.derive({ state: {
+        <p>Sum of ends: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
             } }, ({ state }) => state.arr[0] + state.arr[state.arr.length - 1])}</p>
 
         <h3>Computed Indices</h3>
         {/* Index from multiple state values */}
-        <p>Computed index: {__ctHelpers.derive({ state: {
+        <p>Computed index: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        },
+                        a: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        b: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr", "a", "b"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a,
                 b: state.b
             } }, ({ state }) => state.arr[state.a + state.b])}</p>
 
         {/* Index from computation involving array */}
-        <p>Modulo index: {__ctHelpers.derive({ state: {
+        <p>Modulo index: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        },
+                        row: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items", "row"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 row: state.row
             } }, ({ state }) => state.items[state.row % state.items.length])}</p>
 
         {/* Complex index expression */}
-        <p>Complex: {__ctHelpers.derive({ state: {
+        <p>Complex: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        },
+                        a: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr", "a"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a
             } }, ({ state }) => state.arr[Math.min(state.a * 2, state.arr.length - 1)])}</p>
@@ -164,7 +354,48 @@ export default recipe({
         {/* Element access returning array, then accessing that */}
         <p>
           User score:{" "}
-          {__ctHelpers.derive({ state: {
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        users: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    scores: {
+                                        type: "array",
+                                        items: {
+                                            type: "number"
+                                        }
+                                    }
+                                },
+                                required: ["name", "scores"]
+                            },
+                            asOpaque: true
+                        },
+                        selectedUser: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        selectedScore: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["users", "selectedUser", "selectedScore"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.users,
                 selectedUser: state.selectedUser,
                 selectedScore: state.selectedScore
@@ -172,19 +403,101 @@ export default recipe({
         </p>
 
         {/* Using one array element as index for another */}
-        <p>Indirect: {__ctHelpers.derive({ state: {
+        <p>Indirect: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        },
+                        indices: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items", "indices"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 indices: state.indices
             } }, ({ state }) => state.items[state.indices[0]])}</p>
 
         {/* Array element used as index for same array */}
-        <p>Self reference: {__ctHelpers.derive({ state: {
+        <p>Self reference: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
             } }, ({ state }) => state.arr[state.arr[0]])}</p>
 
         <h3>Mixed Property and Element Access</h3>
         {/* Property access followed by element access with computed index */}
-        <p>Mixed: {__ctHelpers.derive({ state: {
+        <p>Mixed: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        nested: {
+                            type: "object",
+                            properties: {
+                                arrays: {
+                                    type: "array",
+                                    items: {
+                                        type: "array",
+                                        items: {
+                                            type: "string"
+                                        }
+                                    },
+                                    asOpaque: true
+                                },
+                                index: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["arrays", "index"]
+                        }
+                    },
+                    required: ["nested"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.nested.arrays,
                     index: state.nested.index
@@ -192,7 +505,43 @@ export default recipe({
             } }, ({ state }) => state.nested.arrays[state.nested.index].length)}</p>
 
         {/* Element access followed by property access */}
-        <p>User name length: {__ctHelpers.derive({ state: {
+        <p>User name length: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        users: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    },
+                                    scores: {
+                                        type: "array",
+                                        items: {
+                                            type: "number"
+                                        }
+                                    }
+                                },
+                                required: ["name", "scores"]
+                            },
+                            asOpaque: true
+                        },
+                        selectedUser: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["users", "selectedUser"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.users,
                 selectedUser: state.selectedUser
             } }, ({ state }) => state.users[state.selectedUser].name.length)}</p>
@@ -201,10 +550,59 @@ export default recipe({
         {/* Element access in ternary */}
         <p>
           Conditional:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+          {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        },
+                        a: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr", "a"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a
-            } }, ({ state }) => state.arr[state.a] > 10), __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.arr[state.a] > 10), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        },
+                        b: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items", "b"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 b: state.b
             } }, ({ state }) => state.items[state.b]), state.items[0])}
@@ -212,7 +610,38 @@ export default recipe({
 
         {/* Element access in boolean expression */}
         <p>
-          Has value: {ifElse(__ctHelpers.derive({ state: {
+          Has value: {ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        matrix: {
+                            type: "array",
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "number"
+                                }
+                            },
+                            asOpaque: true
+                        },
+                        row: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        col: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["matrix", "row", "col"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.matrix,
                 row: state.row,
                 col: state.col
@@ -221,20 +650,95 @@ export default recipe({
 
         <h3>Element Access with Operators</h3>
         {/* Element access with arithmetic */}
-        <p>Product: {__ctHelpers.derive({ state: {
+        <p>Product: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        },
+                        a: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        b: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr", "a", "b"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a,
                 b: state.b
             } }, ({ state }) => state.arr[state.a] * state.arr[state.b])}</p>
 
         {/* Element access with string concatenation */}
-        <p>Concat: {__ctHelpers.derive({ state: {
+        <p>Concat: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        },
+                        indices: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items", "indices"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 indices: state.indices
             } }, ({ state }) => state.items[0] + " - " + state.items[state.indices[0]])}</p>
 
         {/* Multiple element accesses in single expression */}
-        <p>Sum: {__ctHelpers.derive({ state: {
+        <p>Sum: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        arr: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["arr"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
             } }, ({ state }) => state.arr[0] + state.arr[1] + state.arr[2])}</p>
       </div>),

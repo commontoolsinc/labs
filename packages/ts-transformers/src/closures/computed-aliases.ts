@@ -321,6 +321,7 @@ function createDerivedAliasExpression(
       factory,
       tsContext,
       ctHelpers,
+      context,
     },
   );
 

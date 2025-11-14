@@ -27,6 +27,24 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
       },
     } as unknown as CTHelpers;
 
+    // Create a minimal program for type checking
+    const program = ts.createProgram(["test.tsx"], {
+      target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.React,
+    });
+    const checker = program.getTypeChecker();
+
+    const transformContext = {
+      factory,
+      tsContext: context,
+      checker,
+      sourceFile: source,
+      ctHelpers,
+      options: {
+        typeRegistry: new WeakMap(),
+      },
+    } as any;
+
     const rootIdentifier = factory.createIdentifier("_v1");
     const fallbackExpr = factory.createParenthesizedExpression(rootIdentifier);
 
@@ -37,6 +55,7 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
       factory,
       tsContext: context,
       ctHelpers,
+      context: transformContext,
     });
 
     if (!derive) {

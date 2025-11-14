@@ -25,10 +25,19 @@ export default recipe({
             type: "object",
             properties: {
                 showHistory: {
-                    type: "boolean"
+                    anyOf: [{
+                            type: "boolean",
+                            enum: [false],
+                            asOpaque: true
+                        }, {
+                            type: "boolean",
+                            enum: [true],
+                            asOpaque: true
+                        }]
                 },
                 messageCount: {
-                    type: "number"
+                    type: "number",
+                    asOpaque: true
                 },
                 dismissedIndex: {
                     type: "number",
@@ -36,6 +45,8 @@ export default recipe({
                 }
             },
             required: ["showHistory", "messageCount", "dismissedIndex"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             showHistory: showHistory,
             messageCount: messageCount,
