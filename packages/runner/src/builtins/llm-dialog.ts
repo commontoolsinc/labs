@@ -617,31 +617,25 @@ async function buildCharmSchemasDocumentation(
   }`;
 }
 
-// Use discriminated unions instead of threading data through 'mode' fields
+// Discriminated union separating external tools from built-in tools
 type ResolvedToolCall =
+  // Tools provided from outside (by the pattern calling llm-dialog)
   | {
-    type: "dynamicTool";
+    type: "external";
     call: LLMToolCall;
     toolDef: Cell<Schema<typeof LLMToolSchema>>;
   }
+  // Built-in tools provided by llm-dialog itself
   | { type: "listAttachments"; call: LLMToolCall }
   | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | {
-    type: "read";
+    type: "run";
     call: LLMToolCall;
-    cellRef: Cell<any>;
-  }
-  | {
-    type: "runPattern";
-    call: LLMToolCall;
-    pattern: Readonly<Recipe>;
-    extraParams: Record<string, unknown>;
-    charm?: Cell<any>;
-  }
-  | {
-    type: "runHandler";
-    call: LLMToolCall;
-    handler: Stream<any>;
+    // Implementation details for how to invoke the target
+    pattern?: Readonly<Recipe>;
+    handler?: Stream<any>;
+    extraParams?: Record<string, unknown>;
     charm?: Cell<any>;
   };
 
@@ -653,11 +647,11 @@ function resolveToolCall(
 ): ResolvedToolCall {
   const name = toolCallPart.toolName;
   const id = toolCallPart.toolCallId;
-  const dynamicTool = catalog.dynamicToolCells.get(name);
-  if (dynamicTool) {
+  const externalTool = catalog.dynamicToolCells.get(name);
+  if (externalTool) {
     return {
-      type: "dynamicTool",
-      toolDef: dynamicTool,
+      type: "external",
+      toolDef: externalTool,
       call: { id, name, input: toolCallPart.input },
     };
   }
@@ -745,7 +739,7 @@ function resolveToolCall(
 
     if (isStream(ref)) {
       return {
-        type: "runHandler",
+        type: "run",
         handler: ref as any,
         charm,
         call: {
@@ -760,7 +754,7 @@ function resolveToolCall(
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
-        type: "runPattern",
+        type: "run",
         pattern,
         extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
         charm,
@@ -996,59 +990,65 @@ async function ensureSourceCharmRunning(
 }
 
 /**
- * Executes a tool call by invoking its handler function and returning the
- * result. Creates a new transaction, sends the tool call arguments to the
- * handler, and waits for the result to be available before returning it.
- *
- * @param runtime - The runtime instance for creating transactions and cells
- * @param parentCell - The parent cell context for the tool execution
- * @param toolDef - Cell containing the tool definition with handler
- * @param toolCall - The LLM tool call containing id, name, and arguments
- * @param charmHandler - Optional handler for charm-extracted tools
- * @returns Promise that resolves to the tool execution result
+ * Handles the listAttachments tool call.
  */
-async function invokeToolCall(
+async function handleListAttachments(
+  catalog?: ToolCatalog,
+): Promise<{ type: string; value: any }> {
+  if (!catalog?.handleMap) {
+    return { type: "json", value: [] };
+  }
+  const attachments = Array.from(catalog.handleMap.entries()).map(
+    ([handle, { charmName }]) => ({ handle, name: charmName }),
+  );
+  return { type: "json", value: attachments };
+}
+
+/**
+ * Handles the schema tool call.
+ */
+async function handleSchema(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "schema" },
+): Promise<{ type: string; value: any }> {
+  const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
+    {};
+  const value = JSON.parse(JSON.stringify(schema ?? {}));
+  return { type: "json", value };
+}
+
+/**
+ * Handles the read tool call.
+ */
+async function handleRead(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "read" },
+): Promise<{ type: string; value: any }> {
+  // The cellRef already points to the full path from the link resolution
+  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
+
+  // Resolve any intermediate links and get the final cell
+  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
+  const resolvedCell = runtime.getCellFromLink(resolvedLink);
+  const realized = resolvedCell.get();
+
+  // Handle undefined values gracefully - return null for undefined/null
+  const value = realized === undefined || realized === null
+    ? null
+    : JSON.parse(JSON.stringify(realized));
+
+  return { type: "json", value };
+}
+
+/**
+ * Handles the run tool call (both pattern and handler execution).
+ */
+async function handleRun(
   runtime: IRuntime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-  catalog?: ToolCatalog,
-) {
+): Promise<{ type: string; value: any }> {
   const toolCall = resolved.call;
-
-  // Handle simple query tools
-  if (resolved.type === "listAttachments") {
-    if (!catalog?.handleMap) {
-      return { type: "json", value: [] };
-    }
-    const attachments = Array.from(catalog.handleMap.entries()).map(
-      ([handle, { charmName }]) => ({ handle, name: charmName }),
-    );
-    return { type: "json", value: attachments };
-  }
-
-  if (resolved.type === "schema") {
-    const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
-      {};
-    const value = JSON.parse(JSON.stringify(schema ?? {}));
-    return { type: "json", value };
-  }
-
-  if (resolved.type === "read") {
-    // The cellRef already points to the full path from the link resolution
-    const cellLink = resolved.cellRef.getAsNormalizedFullLink();
-
-    // Resolve any intermediate links and get the final cell
-    const resolvedLink = resolveLink(runtime.readTx(), cellLink);
-    const resolvedCell = runtime.getCellFromLink(resolvedLink);
-    const realized = resolvedCell.get();
-
-    // Handle undefined values gracefully - return null for undefined/null
-    const value = realized === undefined || realized === null
-      ? null
-      : JSON.parse(JSON.stringify(realized));
-
-    return { type: "json", value };
-  }
 
   // Extract pattern/handler/params based on the resolved type
   let pattern: Readonly<Recipe> | undefined;
@@ -1056,17 +1056,15 @@ async function invokeToolCall(
   let handler: any;
   let charm: Cell<any> | undefined;
 
-  if (resolved.type === "dynamicTool") {
+  if (resolved.type === "external") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
       | Readonly<Recipe>
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
     handler = resolved.toolDef.key("handler");
-  } else if (resolved.type === "runPattern") {
+  } else if (resolved.type === "run") {
     pattern = resolved.pattern;
-    extraParams = resolved.extraParams;
-    charm = resolved.charm;
-  } else if (resolved.type === "runHandler") {
+    extraParams = resolved.extraParams ?? {};
     handler = resolved.handler;
     charm = resolved.charm;
   }
@@ -1108,12 +1106,60 @@ async function invokeToolCall(
   await promise;
   cancel();
 
-  // Wait for the transaction to be fully committed before returning the link
-  await editPromise;
+  // Get the actual entity ID from the result cell
+  const resultLink = result.getAsNormalizedFullLink();
+  const resultValue = result.get();
 
-  // Return link to the result cell we created (just the ID, no path)
-  // The pattern/handler writes to this cell, and any subpaths can be accessed by the LLM
-  return { type: "json", value: toolCall.id };
+  // Patterns always write to the result cell, so always return the link
+  if (pattern) {
+    return { type: "json", value: resultLink.id };
+  }
+
+  // Handlers may or may not write to the result cell
+  // Only return a link if the handler actually wrote something
+  if (handler) {
+    if (resultValue !== undefined && resultValue !== null) {
+      return { type: "json", value: resultLink.id };
+    }
+    // Handler didn't write anything, return null
+    return { type: "json", value: null };
+  }
+
+  throw new Error("Tool has neither pattern nor handler");
+}
+
+/**
+ * Executes a tool call by invoking its handler function and returning the
+ * result. Creates a new transaction, sends the tool call arguments to the
+ * handler, and waits for the result to be available before returning it.
+ *
+ * @param runtime - The runtime instance for creating transactions and cells
+ * @param space - The memory space for the tool execution
+ * @param resolved - The resolved tool call containing type and metadata
+ * @param catalog - Optional tool catalog for lookups
+ * @returns Promise that resolves to the tool execution result
+ */
+async function invokeToolCall(
+  runtime: IRuntime,
+  space: MemorySpace,
+  resolved: ResolvedToolCall,
+  catalog?: ToolCatalog,
+) {
+  // Handle simple query tools
+  if (resolved.type === "listAttachments") {
+    return await handleListAttachments(catalog);
+  }
+
+  if (resolved.type === "schema") {
+    return await handleSchema(runtime, resolved);
+  }
+
+  if (resolved.type === "read") {
+    return await handleRead(runtime, resolved);
+  }
+
+  // Handle run-type tools (dynamicTool, runPattern, runHandler)
+  return await handleRun(runtime, space, resolved);
 }
 
 /**
