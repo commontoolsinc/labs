@@ -824,10 +824,12 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Check if a union type contains ANY wrapper types (Cell/OpaqueRef/Stream).
+   * Check if this is a wrapper union (WrapperType | null/undefined).
    * Uses type-based detection which handles complex cases like intersection types
    * and conditional type expansions.
-   * Returns true for unions like: OpaqueRef<T> | undefined, (OpaqueCell<T> & T) | null, etc.
+   * Returns true ONLY for unions where ALL non-null/undefined members are wrapper types.
+   * Examples that return true: OpaqueRef<T> | undefined, Cell<T> | null, Stream<T> | null | undefined
+   * Examples that return false: string | Cell | null (mixed union, should use UnionFormatter)
    */
   private isWrapperUnion(type: ts.Type, context: GenerationContext): boolean {
     // Must be a union type
@@ -837,26 +839,39 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     const unionType = type as ts.UnionType;
 
-    // Check if ANY member has wrapper info (Cell/OpaqueRef/Stream)
-    // This handles all cases including:
-    // - Simple: OpaqueRef<T> | undefined
-    // - Nullable: Cell<T> | null
-    // - Intersection: (OpaqueCell<T> & T) | undefined
-    // - Complex expansions from conditional types
-    return unionType.types.some((memberType) => {
-      // Skip undefined (not a concrete type, just marks optionality)
-      if (this.isUndefinedType(memberType)) {
-        return false;
+    // Check if ALL non-null/undefined members are wrapper types
+    // This ensures we only handle patterns like `Cell<T> | null`, not mixed unions like `string | Cell | null`
+    let hasWrapperMember = false;
+    let hasNonWrapperMember = false;
+
+    for (const memberType of unionType.types) {
+      // Skip undefined and null - they're modifiers, not members
+      if (
+        this.isUndefinedType(memberType) ||
+        (memberType.flags & ts.TypeFlags.Null) !== 0
+      ) {
+        continue;
       }
 
-      // Skip null (it's a concrete value, but not a wrapper)
-      if ((memberType.flags & ts.TypeFlags.Null) !== 0) {
-        return false;
+      // Skip conditional types and type parameters (from type expansion internals)
+      if (
+        (memberType.flags & ts.TypeFlags.Conditional) !== 0 ||
+        (memberType.flags & ts.TypeFlags.TypeParameter) !== 0
+      ) {
+        continue;
       }
 
-      // Check if this member has wrapper info
+      // Check if this member is a wrapper type
       const wrapperInfo = getCellWrapperInfo(memberType, context.typeChecker);
-      return wrapperInfo !== undefined;
-    });
+      if (wrapperInfo !== undefined) {
+        hasWrapperMember = true;
+      } else {
+        hasNonWrapperMember = true;
+      }
+    }
+
+    // Only handle as wrapper union if we have wrapper members and NO non-wrapper members
+    // This excludes mixed unions like `string | number | Cell | Stream | null`
+    return hasWrapperMember && !hasNonWrapperMember;
   }
 }
