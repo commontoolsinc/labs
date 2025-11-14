@@ -24,9 +24,8 @@ import "../ct-chip/ct-chip.ts";
 export interface PromptAttachment {
   id: string; // UUID for reference
   name: string; // Display name
-  type: "file" | "clipboard" | "mention";
+  type: "file" | "clipboard";
   data?: File | Blob | string;
-  charm?: Cell<Mentionable>; // For mention-type attachments
 }
 
 /**
@@ -55,10 +54,10 @@ export interface ModelItem {
  * @attr {ModelItem[]} modelItems - Array of model options for the model picker
  * @attr {Cell<string>|string} model - Selected model value (supports Cell binding)
  *
- * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: Cell<Mentionable>[] }
+ * @fires ct-send - Fired when send button is clicked or Enter is pressed. detail: { text: string, attachments: PromptAttachment[], mentions: [] }
  * @fires ct-stop - Fired when stop button is clicked during pending state
  * @fires ct-input - Fired when textarea value changes. detail: { value: string }
- * @fires ct-attachment-add - Fired when an attachment is added (mention accepted, file uploaded, etc). detail: { attachment: PromptAttachment }
+ * @fires ct-attachment-add - Fired when an attachment is added (file uploaded, clipboard). detail: { attachment: PromptAttachment }
  * @fires ct-attachment-remove - Fired when an attachment is removed from the composer. detail: { id: string }
  *
  * @example
@@ -476,22 +475,19 @@ export class CTPromptInput extends BaseElement {
 
           const text = textarea.value;
 
-          // Get all attachments and derive mentions from mention attachments
+          // Get all attachments (file uploads, clipboard)
           const attachments = Array.from(this.attachments.values());
-          const mentions = attachments
-            .filter((a) => a.type === "mention" && a.charm)
-            .map((a) => a.charm as Cell<Mentionable>);
 
           // Clear the textarea and attachments
           textarea.value = "";
           this.value = "";
           this.attachments.clear();
 
-          // Emit the send event with new structure
+          // Emit the send event
           this.emit("ct-send", {
             text,
             attachments,
-            mentions,
+            mentions: [], // Mentions are now in the text as markdown links
             // Backward compatibility
             message: text,
           });
@@ -668,17 +664,6 @@ export class CTPromptInput extends BaseElement {
           this.value = beforeMention + markdownLink + afterMention;
           textarea.value = this.value;
 
-          // Create an attachment pill for the mention
-          const attachmentId = this._generateAttachmentId();
-          const attachment: PromptAttachment = {
-            id: attachmentId,
-            name,
-            type: "mention",
-            charm: mentionCell,
-          };
-
-          this.addAttachment(attachment);
-
           // Set cursor after the inserted mention
           const newCursorPos = beforeMention.length + markdownLink.length;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -824,8 +809,6 @@ export class CTPromptInput extends BaseElement {
          */
         private _getAttachmentIcon(type: PromptAttachment["type"]): string {
           switch (type) {
-            case "mention":
-              return "@";
             case "file":
               return "📎";
             case "clipboard":
@@ -839,8 +822,6 @@ export class CTPromptInput extends BaseElement {
           type: PromptAttachment["type"],
         ): "default" | "primary" | "accent" {
           switch (type) {
-            case "mention":
-              return "primary";
             case "clipboard":
               return "accent";
             case "file":
