@@ -324,6 +324,7 @@ export function createDeriveCallForExpression(
     factory: context.factory,
     tsContext: context.tsContext,
     ctHelpers: context.ctHelpers,
+    context: context,
   });
 
   return deriveCall;

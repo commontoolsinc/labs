@@ -296,6 +296,86 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, ({ element: aisleName, params: { groupedByAisle } }) => (<div>
               <h3>{aisleName}</h3>
               {(__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    groupedByAisle: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Assignment"
+                            }
+                        },
+                        asOpaque: true
+                    },
+                    aisleName: {
+                        type: "string",
+                        asOpaque: true
+                    }
+                },
+                required: ["groupedByAisle", "aisleName"],
+                $defs: {
+                    Assignment: {
+                        type: "object",
+                        properties: {
+                            aisle: {
+                                type: "string"
+                            },
+                            item: {
+                                $ref: "#/$defs/Item"
+                            }
+                        },
+                        required: ["aisle", "item"]
+                    },
+                    Item: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            done: {
+                                type: "boolean",
+                                asCell: true
+                            }
+                        },
+                        required: ["name", "done"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    $ref: "#/$defs/Assignment"
+                },
+                asOpaque: true,
+                $defs: {
+                    Assignment: {
+                        type: "object",
+                        properties: {
+                            aisle: {
+                                type: "string"
+                            },
+                            item: {
+                                $ref: "#/$defs/Item"
+                            }
+                        },
+                        required: ["aisle", "item"]
+                    },
+                    Item: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            done: {
+                                type: "boolean",
+                                asCell: true
+                            }
+                        },
+                        required: ["name", "done"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
                 groupedByAisle: groupedByAisle,
                 aisleName: aisleName
             }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName] ?? [])).mapWithPattern(__ctHelpers.recipe({
@@ -351,3 +431,4 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

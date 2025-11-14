@@ -149,20 +149,95 @@ export default recipe({
         </p>
 
         <h3>Property Access with Operations</h3>
-        <p>Age + 1: {__ctHelpers.derive({ state: {
+        <p>Age + 1: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.user.age
                 }
             } }, ({ state }) => state.user.age + 1)}</p>
         <p>Name length: {state.user.name.length}</p>
-        <p>Uppercase name: {__ctHelpers.derive({ state: {
+        <p>Uppercase name: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name
                 }
             } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
           Location includes city:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+          {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        location: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["location"]
+                                }
+                            },
+                            required: ["profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     profile: {
                         location: state.user.profile.location
@@ -172,15 +247,86 @@ export default recipe({
         </p>
 
         <h3>Array Element Access</h3>
-        <p>Item at index: {__ctHelpers.derive({ state: {
+        <p>Item at index: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        },
+                        index: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items", "index"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 index: state.index
             } }, ({ state }) => state.items[state.index])}</p>
         <p>First item: {state.items[0]}</p>
-        <p>Last item: {__ctHelpers.derive({ state: {
+        <p>Last item: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
-        <p>Number at index: {__ctHelpers.derive({ state: {
+        <p>Number at index: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        numbers: {
+                            type: "array",
+                            items: {
+                                type: "number"
+                            },
+                            asOpaque: true
+                        },
+                        index: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["numbers", "index"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 numbers: state.numbers,
                 index: state.index
             } }, ({ state }) => state.numbers[state.index])}</p>
@@ -188,7 +334,36 @@ export default recipe({
         <h3>Config Access with Styles</h3>
         <p style={{
             color: state.config.theme.primaryColor,
-            fontSize: __ctHelpers.derive({ state: {
+            fontSize: __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    state: {
+                        type: "object",
+                        properties: {
+                            config: {
+                                type: "object",
+                                properties: {
+                                    theme: {
+                                        type: "object",
+                                        properties: {
+                                            fontSize: {
+                                                type: "number",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["fontSize"]
+                                    }
+                                },
+                                required: ["theme"]
+                            }
+                        },
+                        required: ["config"]
+                    }
+                },
+                required: ["state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, { state: {
                     config: {
                         theme: {
                             fontSize: state.config.theme.fontSize
@@ -206,7 +381,40 @@ export default recipe({
         </div>
 
         <h3>Complex Property Chains</h3>
-        <p>{__ctHelpers.derive({ state: {
+        <p>{__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        location: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["location"]
+                                }
+                            },
+                            required: ["name", "profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name,
                     profile: {
@@ -214,7 +422,36 @@ export default recipe({
                     }
                 }
             } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
-        <p>Font size + 2: {__ctHelpers.derive({ state: {
+        <p>Font size + 2: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        fontSize: {
+                                            type: "number",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["fontSize"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
                         fontSize: state.config.theme.fontSize
@@ -223,7 +460,62 @@ export default recipe({
             } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
         <p>
           Has beta and dark mode:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+          {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                features: {
+                                    type: "object",
+                                    properties: {
+                                        beta: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        },
+                                        darkMode: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        }
+                                    },
+                                    required: ["beta", "darkMode"]
+                                }
+                            },
+                            required: ["features"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "boolean",
+                    enum: [false],
+                    asOpaque: true
+                }, {
+                    type: "boolean",
+                    enum: [true],
+                    asOpaque: true
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
                         beta: state.config.features.beta,

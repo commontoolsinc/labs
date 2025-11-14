@@ -44,7 +44,65 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {__ctHelpers.derive({ state: {
+        {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        items: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Item"
+                            },
+                            asOpaque: true
+                        }
+                    },
+                    required: ["items"]
+                }
+            },
+            required: ["state"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item",
+                asOpaque: true
+            },
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items
             .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
@@ -91,6 +149,33 @@ export default recipe({
             }
         } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
               Total: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                item: {
+                    type: "object",
+                    properties: {
+                        price: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["price"]
+                },
+                state: {
+                    type: "object",
+                    properties: {
+                        taxRate: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["taxRate"]
+                }
+            },
+            required: ["item", "state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
             item: {
                 price: item.price
             },

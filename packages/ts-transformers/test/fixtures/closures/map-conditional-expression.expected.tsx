@@ -88,6 +88,33 @@ export default recipe({
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
             Price: ${__ctHelpers.ifElse(__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["price"]
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            threshold: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["threshold"]
+                    }
+                },
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 item: {
                     price: item.price
                 },
@@ -95,6 +122,33 @@ export default recipe({
                     threshold: state.threshold
                 }
             }, ({ item, state }) => item.price > state.threshold), __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["price"]
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["discount"]
+                    }
+                },
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 item: {
                     price: item.price
                 },

@@ -87,6 +87,37 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    state: {
+                        type: "object",
+                        properties: {
+                            prefix: {
+                                type: "string",
+                                asOpaque: true
+                            },
+                            suffix: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["prefix", "suffix"]
+                    },
+                    item: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                required: ["state", "item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 state: {
                     prefix: state.prefix,
                     suffix: state.suffix

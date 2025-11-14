@@ -69,7 +69,24 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
-            Item: {__ctHelpers.derive({ item: {
+            Item: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["price"]
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
                     price: item.price
                 } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
           </div>)), {})}

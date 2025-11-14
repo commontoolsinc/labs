@@ -13,6 +13,11 @@ import {
   createPropertyParamNames,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
+import {
+  buildTypeElementsFromCaptureTree,
+  expressionToTypeNode,
+} from "../../ast/type-building.ts";
+import type { TransformationContext } from "../../core/mod.ts";
 
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -41,6 +46,7 @@ export interface DeriveCallOptions {
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
   readonly ctHelpers: CTHelpers;
+  readonly context: TransformationContext;
 }
 
 function planDeriveEntries(
@@ -163,7 +169,7 @@ export function createDeriveCall(
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
-  const { factory, tsContext, ctHelpers } = options;
+  const { factory, tsContext, ctHelpers, context } = options;
   const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
     refs,
   );
@@ -200,9 +206,82 @@ export function createDeriveCall(
     arrowFunction,
   ];
 
+  // Build input type node that preserves Cell<T> types
+  const inputTypeNode = buildInputTypeNode(
+    captureTree,
+    fallbackEntries,
+    context,
+  );
+
+  // Build result type node from expression type
+  const resultTypeNode = buildResultTypeNode(expression, context);
+
+  // Create derive call with type arguments for SchemaInjectionTransformer
   return factory.createCallExpression(
     deriveExpr,
-    undefined,
+    [inputTypeNode, resultTypeNode],
     deriveArgs,
   );
+}
+
+function buildInputTypeNode(
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory } = context;
+  const typeElements: ts.TypeElement[] = [];
+
+  // Add type elements from capture tree (preserves Cell<T>)
+  const captureTypeElements = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
+  );
+  typeElements.push(...captureTypeElements);
+
+  // Add type elements for fallback entries
+  for (const entry of fallbackEntries) {
+    const typeNode = expressionToTypeNode(entry.ref, context);
+    typeElements.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier(entry.propertyName),
+        undefined,
+        typeNode,
+      ),
+    );
+  }
+
+  const typeLiteral = factory.createTypeLiteralNode(typeElements);
+
+  return typeLiteral;
+}
+
+function buildResultTypeNode(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+
+  // Try to get the type of the result expression
+  const resultType = checker.getTypeAtLocation(expression);
+
+  // Convert to TypeNode, preserving Cell<T> if present
+  const resultTypeNode = checker.typeToTypeNode(
+    resultType,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
+  );
+
+  if (resultTypeNode) {
+    // Register the type in typeRegistry for SchemaGeneratorTransformer
+    if (context.options.typeRegistry) {
+      context.options.typeRegistry.set(resultTypeNode, resultType);
+    }
+    return resultTypeNode;
+  }
+
+  // Fallback to unknown if we can't infer
+  return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 }

@@ -17,8 +17,8 @@ export class CommonToolsTransformerPipeline extends Pipeline {
     super([
       new ComputedTransformer(ops),
       new ClosureTransformer(ops),
-      new SchemaInjectionTransformer(ops),
       new OpaqueRefJSXTransformer(ops),
+      new SchemaInjectionTransformer(ops),
       new SchemaGeneratorTransformer(ops),
     ]);
   }

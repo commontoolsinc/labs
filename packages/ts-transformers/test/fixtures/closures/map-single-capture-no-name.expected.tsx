@@ -30,6 +30,31 @@ export default recipe({
     return {
         [UI]: (<div>
         {state.items.map((item) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number"
+                            }
+                        },
+                        required: ["discount"]
+                    }
+                },
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 item: {
                     price: item.price
                 },
