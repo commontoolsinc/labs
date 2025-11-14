@@ -9,7 +9,6 @@ import {
   handler,
   llmDialog,
   NAME,
-  navigateTo,
   recipe,
   Stream,
   UI,
@@ -186,15 +185,6 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-const navigateToAttachment = handler<
-  { id: string },
-  { allAttachments: Array<PromptAttachment> }
->(({ id }, { allAttachments }) => {
-  const attachment = allAttachments.find((a) => a.id === id);
-
-  return navigateTo(attachment?.charm);
-});
-
 const addAttachmentTool = handler<
   {
     mentionableName: string;
@@ -337,13 +327,6 @@ export default recipe<ChatInput, ChatOutput>(
     });
 
     const attachmentTools = {
-      navigateToAttachment: {
-        description:
-          "Navigate to a mentionable by its ID in the attachments array.",
-        handler: navigateToAttachment({
-          allAttachments: attachmentsWithRecent,
-        }),
-      },
       listMentionable: {
         description: "List all mentionable NAMEs in the space.",
         handler: listMentionable({ mentionable }),

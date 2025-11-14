@@ -23,6 +23,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { parseLink } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
+import { navigateTo } from "./navigate-to.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
@@ -288,6 +289,7 @@ const READ_TOOL_NAME = "read";
 const RUN_TOOL_NAME = "run";
 const SCHEMA_TOOL_NAME = "schema";
 const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
+const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -334,6 +336,19 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
 const LIST_ATTACHMENTS_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {},
+  additionalProperties: false,
+};
+
+const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description:
+        "Target path to navigate to in the form handle/path (e.g., of:bafyabc123/result).",
+    },
+  },
+  required: ["path"],
   additionalProperties: false,
 };
 
@@ -495,6 +510,57 @@ function flattenTools(
   return flattened;
 }
 
+/**
+ * Compare two flattened tool objects to detect changes.
+ * Uses a heuristic approach that compares only serializable properties
+ * (description, inputSchema, internal) and excludes handler which may have
+ * circular references.
+ */
+function toolsHaveChanged(
+  newTools: Record<string, any>,
+  oldTools: Record<string, any> | undefined,
+): boolean {
+  if (!oldTools) return true;
+
+  const newKeys = Object.keys(newTools).sort();
+  const oldKeys = Object.keys(oldTools).sort();
+
+  // Check if the set of tools changed
+  if (newKeys.length !== oldKeys.length) return true;
+  if (newKeys.some((key, i) => key !== oldKeys[i])) return true;
+
+  // Check if any tool's serializable properties changed
+  for (const key of newKeys) {
+    const newTool = newTools[key];
+    const oldTool = oldTools[key];
+
+    // Compare description
+    if (newTool.description !== oldTool.description) return true;
+
+    // Compare inputSchema (safe to stringify as it's a JSON Schema)
+    try {
+      const newSchema = JSON.stringify(newTool.inputSchema);
+      const oldSchema = JSON.stringify(oldTool.inputSchema);
+      if (newSchema !== oldSchema) return true;
+    } catch {
+      // If schema has circular refs (unlikely), consider it changed
+      return true;
+    }
+
+    // Compare internal metadata
+    try {
+      const newInternal = JSON.stringify(newTool.internal);
+      const oldInternal = JSON.stringify(oldTool.internal);
+      if (newInternal !== oldInternal) return true;
+    } catch {
+      // If internal has circular refs (unlikely), consider it changed
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function buildToolCatalog(
   _runtime: IRuntime,
   toolsCell: Cell<any>,
@@ -550,6 +616,13 @@ function buildToolCatalog(
       '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
+  };
+  llmTools[NAVIGATE_TO_TOOL_NAME] = {
+    description:
+      "Navigate to ANY charm or path. Provide the handle path like " +
+      '"of:bafyabc123" or "of:bafyabc123/result". Works with any valid handle. ' +
+      availability,
+    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
 
   // Schema and listAttachments only work with attached charms
@@ -626,6 +699,7 @@ type ResolvedToolCall =
   | { type: "listAttachments"; call: LLMToolCall }
   | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
+  | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | {
     type: "run";
     call: LLMToolCall;
@@ -655,7 +729,8 @@ function resolveToolCall(
 
   if (
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME
+    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
+    name === NAVIGATE_TO_TOOL_NAME
   ) {
     // Schema and listAttachments require attachments, but read/run work with any handle
     if (
@@ -727,17 +802,33 @@ function resolveToolCall(
       };
     }
 
+    if (name === NAVIGATE_TO_TOOL_NAME) {
+      // Get cell reference from the link - works for any valid handle
+      const cellRef = runtime.getCellFromLink(link);
+      if (!cellRef) {
+        throw new Error(
+          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+        );
+      }
+
+      return {
+        type: "navigateTo",
+        cellRef,
+        call: { id, name, input: { path: target } },
+      };
+    }
+
     // For run(), resolve the cell and check if it's a handler or pattern
-    const ref: Cell<any> = runtime.getCellFromLink(link);
+    const cellRef: Cell<any> = runtime.getCellFromLink(link);
 
     // Get optional charm metadata for validation (only used for handlers)
     const charmEntry = catalog.handleMap.get(handle);
     const charm = charmEntry?.charm;
 
-    if (isStream(ref)) {
+    if (isStream(cellRef)) {
       return {
         type: "run",
-        handler: ref as any,
+        handler: cellRef as any,
         charm,
         call: {
           id,
@@ -747,13 +838,13 @@ function resolveToolCall(
       };
     }
 
-    const pattern = (ref as Cell<any>).key("pattern")
+    const pattern = (cellRef as Cell<any>).key("pattern")
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
         type: "run",
         pattern,
-        extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
+        extraParams: (cellRef as Cell<any>).key("extraParams").get() ?? {},
         charm,
         call: {
           id,
@@ -1038,6 +1129,38 @@ function handleRead(
 }
 
 /**
+ * Handles the navigateTo tool call.
+ */
+function handleNavigateTo(
+  runtime: IRuntime,
+  _space: MemorySpace,
+  resolved: ResolvedToolCall & { type: "navigateTo" },
+): { type: string; value: any } {
+  // The cellRef already points to the full path from the link resolution
+  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
+
+  // Resolve any intermediate links and get the final cell
+  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
+  const resolvedCell = runtime.getCellFromLink(resolvedLink);
+
+  // Call the navigateTo builtin with the resolved cell
+  runtime.editWithRetry((tx) => {
+    const action = navigateTo(
+      resolvedCell,
+      () => {},
+      () => {},
+      [],
+      resolvedCell,
+      runtime,
+    );
+    action(tx);
+  });
+
+  // Return null since navigation is a side effect, not a value
+  return { type: "json", value: null };
+}
+
+/**
  * Handles the run tool call (both pattern and handler execution).
  */
 async function handleRun(
@@ -1155,7 +1278,11 @@ async function invokeToolCall(
     return await handleRead(runtime, resolved);
   }
 
-  // Handle run-type tools (dynamicTool, runPattern, runHandler)
+  if (resolved.type === "navigateTo") {
+    return handleNavigateTo(runtime, space, resolved);
+  }
+
+  // Handle run-type tools (external, run with pattern/handler)
   return await handleRun(runtime, space, resolved);
 }
 
@@ -1344,10 +1471,9 @@ export function llmDialog(
 
     // Only write if changed to avoid concurrent write conflicts
     const currentFlattened = result.withTx(tx).key("flattenedTools").get();
-    const flattenedStr = JSON.stringify(flattened);
-    const currentStr = JSON.stringify(currentFlattened);
+    const hasChanged = toolsHaveChanged(flattened, currentFlattened);
 
-    if (flattenedStr !== currentStr) {
+    if (hasChanged) {
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
 
