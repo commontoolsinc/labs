@@ -22,11 +22,7 @@ import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import {
-  type NormalizedFullLink,
-  type NormalizedLink,
-  parseLink,
-} from "../link-utils.ts";
+import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { navigateTo } from "./navigate-to.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
@@ -173,7 +169,7 @@ function decodeJsonPointer(pointer: string): string[] {
 function parseLLMFriendlyLink(
   target: string,
   space: MemorySpace,
-): NormalizedLink {
+): NormalizedFullLink {
   target = target.trim();
 
   if (!matchLLMFriendlyLink.test(target)) {
@@ -222,7 +218,7 @@ function createLLMFriendlyLink(link: NormalizedFullLink): string {
 function traverseAndSerialize(value: unknown): unknown {
   if (isCell(value)) {
     const link = value.getAsNormalizedFullLink();
-    return { "/": encodeJsonPointer([link.id, ...link.path]) };
+    return { "/": encodeJsonPointer(["", link.id, ...link.path]) };
   }
   if (Array.isArray(value)) {
     return value.map(traverseAndSerialize);
@@ -909,7 +905,7 @@ function resolveToolCall(
     const cellRef: Cell<any> = runtime.getCellFromLink(link);
 
     // Get optional charm metadata for validation (only used for handlers)
-    const charmEntry = catalog.handleMap.get(id);
+    const charmEntry = catalog.handleMap.get(link.id);
     const charm = charmEntry?.charm;
 
     if (isStream(cellRef)) {
