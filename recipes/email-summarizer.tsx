@@ -260,18 +260,22 @@ export default recipe(
 
       // Create prompts using the str template literal for proper reactivity
       // This ensures the prompts update when settings change
-      const lengthInstructions = derive(settings.summaryLength, (length: "short" | "medium" | "long") =>
-        length === "short"
-          ? "in 1-2 sentences"
-          : length === "long"
-          ? "in 5-7 sentences"
-          : "in 3-4 sentences"
+      const lengthInstructions = derive(
+        settings.summaryLength,
+        (length: "short" | "medium" | "long") =>
+          length === "short"
+            ? "in 1-2 sentences"
+            : length === "long"
+            ? "in 5-7 sentences"
+            : "in 3-4 sentences",
       );
 
-      const tagInstructions = derive(settings.includeTags, (includeTags: boolean) =>
-        includeTags
-          ? "Include up to 3 relevant tags or keywords in the format #tag at the end of the summary."
-          : ""
+      const tagInstructions = derive(
+        settings.includeTags,
+        (includeTags: boolean) =>
+          includeTags
+            ? "Include up to 3 relevant tags or keywords in the format #tag at the end of the summary."
+            : "",
       );
 
       // Create system prompt with str to maintain reactivity

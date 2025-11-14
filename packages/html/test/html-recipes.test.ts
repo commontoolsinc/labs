@@ -5,7 +5,6 @@ import {
   type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
-  type OpaqueRef,
   Runtime,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
