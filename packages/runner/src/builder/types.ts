@@ -203,20 +203,6 @@ export function isRecipe(value: unknown): value is Recipe {
   );
 }
 
-export type ShadowRef = {
-  shadowOf: OpaqueRef<any> | ShadowRef;
-};
-
-export function isShadowRef(value: unknown): value is ShadowRef {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "shadowOf" in value &&
-    (isOpaqueRef((value as ShadowRef).shadowOf) ||
-      isShadowRef((value as ShadowRef).shadowOf))
-  );
-}
-
 export type UnsafeBinding = {
   recipe: Recipe;
   materialize: (path: readonly PropertyKey[]) => any;
