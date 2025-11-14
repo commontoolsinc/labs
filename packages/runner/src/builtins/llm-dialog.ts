@@ -1,3 +1,4 @@
+import { isRecord } from "@commontools/utils/types";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -15,13 +16,13 @@ import type {
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
-import { isStream } from "../cell.ts";
+import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
-import { parseLink } from "../link-utils.ts";
+import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { navigateTo } from "./navigate-to.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
@@ -105,20 +106,13 @@ function getLoadedRecipeResultSchema(
   runtime: IRuntime | undefined,
   charm: Cell<any>,
 ): JSONSchema | undefined {
-  try {
-    const source = charm.getSourceCell();
-    const recipeId = source?.get()?.[TYPE];
-    const recipe = recipeId
-      ? runtime?.recipeManager.recipeById(recipeId)
-      : undefined;
-    if (
-      recipe && typeof recipe.resultSchema === "object" &&
-      recipe.resultSchema && Object.keys(recipe.resultSchema).length > 0
-    ) {
-      return recipe.resultSchema;
-    }
-  } catch {
-    // ignore
+  const source = charm.getSourceCell();
+  const recipeId = source?.get()?.[TYPE];
+  const recipe = recipeId
+    ? runtime?.recipeManager.recipeById(recipeId)
+    : undefined;
+  if (recipe?.resultSchema !== undefined) {
+    return recipe.resultSchema;
   }
   return undefined;
 }
@@ -139,6 +133,143 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
     // ignore
   }
   return undefined;
+}
+
+/**
+ * Encodes a JSON Pointer path according to RFC 6901.
+ * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
+ * @param path - Array of path tokens to encode
+ * @returns The encoded JSON Pointer string
+ */
+function encodeJsonPointer(path: readonly string[]): string {
+  return path
+    .map((token) => token.replace(/~/g, "~0").replace(/\//g, "~1"))
+    .join("/");
+}
+
+/**
+ * Decodes a JSON Pointer string according to RFC 6901.
+ * Splits by / then replaces ~1 with / and ~0 with ~ in each token.
+ * @param pointer - The JSON Pointer string to decode
+ * @returns Array of decoded path tokens
+ */
+function decodeJsonPointer(pointer: string): string[] {
+  return pointer
+    .split("/")
+    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+/**
+ * Parses a LLM friendly link from a target string.
+ *
+ * @param target - The target string to parse
+ * @param space - The space to use to get the cells
+ * @returns The parsed LLM friendly link
+ */
+function parseLLMFriendlyLink(
+  target: string,
+  space: MemorySpace,
+): NormalizedFullLink {
+  target = target.trim();
+
+  if (!matchLLMFriendlyLink.test(target)) {
+    throw new Error(
+      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+    );
+  }
+
+  const [empty, id, ...path] = decodeJsonPointer(target);
+
+  if (empty !== "") {
+    throw new Error("Target must start with a slash.");
+  }
+
+  // Check if first segment looks like a CID/handle by length
+  //
+  // CIDs are long encoded strings (typically 40+ chars), whereas human names
+  // are short. Use a conservative threshold to distinguish handles from
+  // human-readable names Handle format is "/of:..." (the internal storage
+  // format)
+  if (id === undefined || id.length < 20) {
+    throw new Error(
+      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
+    );
+  }
+
+  return {
+    id: id as `${string}:${string}`,
+    path,
+    space,
+    type: "application/json",
+  };
+}
+
+function createLLMFriendlyLink(link: NormalizedFullLink): string {
+  return encodeJsonPointer(["", link.id, ...link.path]);
+}
+
+/**
+ * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
+ * link object format.
+ *
+ * @param value - The value to traverse and serialize
+ * @returns The serialized value
+ */
+function traverseAndSerialize(value: unknown): unknown {
+  if (isCell(value)) {
+    const link = value.getAsNormalizedFullLink();
+    return { "/": encodeJsonPointer(["", link.id, ...link.path]) };
+  }
+  if (Array.isArray(value)) {
+    return value.map(traverseAndSerialize);
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, value],
+      ) => [key, traverseAndSerialize(value)]),
+    );
+  }
+  return value;
+}
+
+const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
+
+/**
+ * Traverses a value and converts any of our LLM friendly JSON link object
+ * format cells mentioned to actual cells.
+ *
+ * @param runtime - The runtime to use to get the cells
+ * @param space - The space to use to get the cells
+ * @param value - The value to traverse and cellify
+ * @returns The cellified value
+ */
+function traverseAndCellify(
+  runtime: IRuntime,
+  space: MemorySpace,
+  value: unknown,
+): unknown {
+  // It's a valid link, if
+  // - it's a record with a single key "/"
+  // - the value of the "/" key is a string that matches the URI pattern
+  if (
+    isRecord(value) && typeof value["/"] === "string" &&
+    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["/"])
+  ) {
+    const link = parseLLMFriendlyLink(value["/"], space);
+    return runtime.getCellFromLink(link);
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => traverseAndCellify(runtime, space, v));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, value],
+      ) => [key, traverseAndCellify(runtime, space, value)]),
+    );
+  }
+  return value;
 }
 
 const LLMMessageSchema = {
@@ -242,7 +373,7 @@ type CharmToolEntry = {
   name: string;
   charm: Cell<any>;
   charmName: string;
-  handle: string; // e.g., "of:bafyabc123"
+  handle: string; // e.g., "/of:bafyabc123"
 };
 
 type ToolCatalog = {
@@ -267,7 +398,7 @@ function collectToolEntries(
 
       // Extract handle from link
       const link = charm.getAsNormalizedFullLink();
-      const handle = link.id; // Keep the "of:..." format as the internal handle
+      const handle = link.id; // Keep the "/of:..." format as the internal handle
 
       charms.push({ name, charm, charmName, handle });
       continue;
@@ -297,7 +428,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path in the form handle/child/grandchild (e.g., of:bafyabc123/result/content).",
+        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/result/content).",
     },
   },
   required: ["path"],
@@ -310,7 +441,7 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target handler path in the form handle/handler/path (e.g., of:bafyabc123/handlers/doThing).",
+        "Target handler path in the form handle/handler/path (e.g., /of:bafyabc123/handlers/doThing).",
     },
     args: {
       type: "object",
@@ -345,7 +476,7 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path to navigate to in the form handle/path (e.g., of:bafyabc123/result).",
+        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123/result).",
     },
   },
   required: ["path"],
@@ -382,46 +513,6 @@ function extractStringField(
     return ensureString(value, field, example);
   }
   throw new Error(`${field} must be a non-empty string, e.g. "${example}".`);
-}
-
-function parseTargetString(
-  target: string,
-): { handle: string; pathSegments: string[] } | { error: string } {
-  const cleaned = target.split("/").map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-
-  if (cleaned.length === 0) {
-    return {
-      error: 'Target must include a charm handle, e.g. "of:bafyabc123/path".',
-    };
-  }
-
-  const [firstSegment, ...pathSegments] = cleaned;
-
-  // Check if first segment looks like a CID/handle by length
-  // CIDs are long encoded strings (typically 40+ chars), whereas human names are short
-  // Use a conservative threshold to distinguish handles from human-readable names
-  // Handle format is "of:..." (the internal storage format)
-  if (firstSegment.length >= 20) {
-    const handle = firstSegment;
-    return { handle, pathSegments };
-  }
-
-  // If it doesn't look like a handle, assume user tried to use a human name
-  return {
-    error:
-      `Charm references must use handles (e.g., "of:bafyabc123/path"), not human names (e.g., "${firstSegment}"). Use listAttachments() to see available charm handles and their names.`,
-  };
-}
-
-function parseHandleFromPath(
-  path: string,
-): { handle: string; pathSegments: string[] } {
-  const result = parseTargetString(path);
-  if ("error" in result) {
-    throw new Error(result.error);
-  }
-  return result;
 }
 
 function extractRunArguments(input: unknown): Record<string, any> {
@@ -484,12 +575,12 @@ function flattenTools(
 
   flattened[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"of:bafyabc123/result/path". ' + availability,
+      '"/of:bafyabc123/result/path". ' + availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[RUN_TOOL_NAME] = {
     description: "Invoke a handler on ANY charm. Provide the handle " +
-      'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
+      'path like "/of:bafyabc123/handlers/doThing" plus args if required. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
@@ -607,20 +698,20 @@ function buildToolCatalog(
 
   llmTools[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
+      '"/of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
       availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   llmTools[RUN_TOOL_NAME] = {
     description: "Run a handler on ANY charm. Provide the handle path like " +
-      '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
+      '"/of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate to ANY charm or path. Provide the handle path like " +
-      '"of:bafyabc123" or "of:bafyabc123/result". Works with any valid handle. ' +
+      '"/of:bafyabc123" or "/of:bafyabc123/result". Works with any valid handle. ' +
       availability,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
@@ -682,7 +773,7 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (of:...), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (/of:.../path), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "/of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "/of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "/of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "/of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
     schemaEntries.join("\n\n")
   }`;
 }
@@ -752,7 +843,7 @@ function resolveToolCall(
       const charmName = extractStringField(
         toolCallPart.input,
         "path",
-        "Charm",
+        "/of:bafyabc123/path",
       );
       const charm = catalog.charmMap.get(charmName);
       if (!charm) {
@@ -770,25 +861,17 @@ function resolveToolCall(
     const target = extractStringField(
       toolCallPart.input,
       "path",
-      "of:bafyabc123/path",
+      "/of:bafyabc123/path",
     );
 
-    const { handle, pathSegments } = parseHandleFromPath(target);
-
-    // Build link from the handle and path segments
-    const link = {
-      id: handle as `${string}:${string}`,
-      path: pathSegments.map((segment) => segment.toString()),
-      space,
-      type: "application/json" as const,
-    };
+    const link = parseLLMFriendlyLink(target, space);
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
       const cellRef = runtime.getCellFromLink(link);
       if (!cellRef) {
         throw new Error(
-          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
         );
       }
       if (isStream(cellRef)) {
@@ -807,7 +890,7 @@ function resolveToolCall(
       const cellRef = runtime.getCellFromLink(link);
       if (!cellRef) {
         throw new Error(
-          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
         );
       }
 
@@ -822,7 +905,7 @@ function resolveToolCall(
     const cellRef: Cell<any> = runtime.getCellFromLink(link);
 
     // Get optional charm metadata for validation (only used for handlers)
-    const charmEntry = catalog.handleMap.get(handle);
+    const charmEntry = catalog.handleMap.get(link.id);
     const charm = charmEntry?.charm;
 
     if (isStream(cellRef)) {
@@ -989,7 +1072,9 @@ function createToolResultMessages(
 }
 
 export const llmDialogTestHelpers = {
-  parseTargetString,
+  parseLLMFriendlyLink,
+  traverseAndSerialize,
+  traverseAndCellify,
   extractStringField,
   extractRunArguments,
   extractToolCallParts,
@@ -1109,21 +1194,14 @@ async function handleSchema(
  * Handles the read tool call.
  */
 function handleRead(
-  runtime: IRuntime,
   resolved: ResolvedToolCall & { type: "read" },
 ): { type: string; value: any } {
-  // The cellRef already points to the full path from the link resolution
-  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
-
-  // Resolve any intermediate links and get the final cell
-  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
-  const resolvedCell = runtime.getCellFromLink(resolvedLink);
-  const realized = resolvedCell.get();
+  const serialized = traverseAndSerialize(resolved.cellRef.get());
 
   // Handle undefined values gracefully - return null for undefined/null
-  const value = realized === undefined || realized === null
+  const value = serialized === undefined || serialized === null
     ? null
-    : JSON.parse(JSON.stringify(realized));
+    : JSON.parse(JSON.stringify(serialized));
 
   return { type: "json", value };
 }
@@ -1194,6 +1272,8 @@ async function handleRun(
     await ensureSourceCharmRunning(runtime, { handler, charm });
   }
 
+  const input = traverseAndCellify(runtime, space, toolCall.input) as object;
+
   const { resolve, promise } = Promise.withResolvers<any>();
 
   // Create result cell reference that will be set in the transaction
@@ -1201,13 +1281,18 @@ async function handleRun(
 
   runtime.editWithRetry((tx) => {
     // Create the result cell within the transaction context
-    result = runtime.getCell<any>(space, toolCall.id, undefined, tx);
+    result = runtime.getCell<any>(
+      space,
+      toolCall.id,
+      pattern ? pattern.resultSchema : undefined,
+      tx,
+    );
 
     if (pattern) {
-      runtime.run(tx, pattern, { ...toolCall.input, ...extraParams }, result);
+      runtime.run(tx, pattern, { ...input, ...extraParams }, result);
     } else if (handler) {
       handler.withTx(tx).send({
-        ...toolCall.input,
+        ...input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
         const summary = formatTransactionSummary(completedTx, space);
@@ -1227,19 +1312,20 @@ async function handleRun(
   cancel();
 
   // Get the actual entity ID from the result cell
-  const resultLink = result.getAsNormalizedFullLink();
-  const resultValue = result.get();
+  const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
-    return { type: "json", value: resultLink.id };
+    return { type: "json", value: resultLink };
   }
 
   // Handlers may or may not write to the result cell
   // Only return a link if the handler actually wrote something
   if (handler) {
+    const resultValue = result.get();
+
     if (resultValue !== undefined && resultValue !== null) {
-      return { type: "json", value: resultLink.id };
+      return { type: "json", value: resultLink };
     }
     // Handler didn't write anything, return null
     return { type: "json", value: null };
@@ -1275,7 +1361,7 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "read") {
-    return await handleRead(runtime, resolved);
+    return handleRead(resolved);
   }
 
   if (resolved.type === "navigateTo") {
