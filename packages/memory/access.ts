@@ -1,4 +1,5 @@
 import {
+  ACL,
   AsyncResult,
   Authorization,
   AuthorizationError,
@@ -11,18 +12,22 @@ import { refer } from "merkle-reference";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
+import { checkACL } from "./acl.ts";
 
 /**
  * Claims access via provide authorization. Function either returns ok with
  * claimed access back or an error if authorization is invalid.
  *
- * Currently, we allow signing from `serviceDid`; in the future,
- * we'll want to handle this via delegation.
+ * Authorization is granted if:
+ * 1. The issuer is the space owner (subject === issuer)
+ * 2. The issuer is the service DID
+ * 3. The issuer has appropriate capability in the space ACL
  */
 export const claim = async <Access extends Invocation>(
   access: Access,
   authorization: Authorization<Invocation>,
   serviceDid: DID,
+  acl?: ACL,
 ): AsyncResult<Access, AuthorizationError> => {
   const claim = refer(access).toString();
   if (authorization.access[claim]) {
@@ -40,10 +45,7 @@ export const claim = async <Access extends Invocation>(
     if (result.error) {
       return result;
     } else {
-      // Right now we enforce issuer to be authorized by a subject only if
-      // subject space is a DID identifier. Furthermore we assume that the
-      // subject and issuer are the same DID. In the future we will add UCANs
-      // to allow delegations.
+      // Verify the issuer is authorized for this subject space
       const { ok: subject, error } = await fromDID(access.sub);
       if (error) {
         return {
@@ -52,18 +54,28 @@ export const claim = async <Access extends Invocation>(
           ),
         };
       }
+
+      // Space owner or service DID
       if (
         subject.did() === issuer.did() ||
         issuer.did() === serviceDid
       ) {
         return { ok: access };
-      } else {
-        return {
-          error: unauthorized(
-            `Principal ${issuer.did()} has no authority over ${subject.did()} space`,
-          ),
-        };
       }
+
+      // ACL-based authorization
+      if (acl) {
+        if (checkACL(acl, issuer.did(), access.cmd)) {
+          return { ok: access };
+        }
+        // fallthrough
+      }
+
+      return {
+        error: unauthorized(
+          `Principal ${issuer.did()} has no authority over ${subject.did()} space`,
+        ),
+      };
     }
   } else {
     return {

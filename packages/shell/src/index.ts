@@ -1,4 +1,5 @@
 import "core-js/proposals/explicit-resource-management";
+import "core-js/proposals/async-explicit-resource-management";
 import "@commontools/ui/v1";
 import "@commontools/ui/v2";
 import { setLLMUrl } from "@commontools/llm";

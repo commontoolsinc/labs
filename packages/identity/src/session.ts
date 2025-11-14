@@ -1,10 +1,9 @@
 import { Identity } from "./identity.ts";
 import { type DID } from "./interface.ts";
-export const ANYONE = "common user";
 
 export type Session = {
-  isPrivate: boolean;
   spaceName: string;
+  spaceIdentity?: Identity;
   space: DID;
   as: Identity;
 };
@@ -17,9 +16,7 @@ export const createSessionFromDid = (
     spaceName: string;
   },
 ): Promise<Session> => {
-  const isPrivate = spaceName.startsWith("~");
   return Promise.resolve({
-    isPrivate,
     spaceName,
     space,
     as: identity,
@@ -30,14 +27,14 @@ export const createSessionFromDid = (
 export const createSession = async (
   { identity, spaceName }: { identity: Identity; spaceName: string },
 ): Promise<Session> => {
-  const isPrivate = spaceName.startsWith("~");
-  const account = isPrivate ? identity : await Identity.fromPassphrase(ANYONE);
-
-  const user = await account.derive(spaceName);
+  const spaceIdentity = await (await Identity.fromPassphrase("common user"))
+    .derive(
+      spaceName,
+    );
   return {
-    isPrivate,
     spaceName,
-    space: user.did(),
-    as: user,
+    spaceIdentity,
+    space: spaceIdentity.did(),
+    as: identity,
   };
 };

@@ -722,6 +722,25 @@ export type DID = `did:${string}:${string}`;
 
 export type DIDKey = `did:key:${string}`;
 
+export type ANYONE = "*";
+
+export type ACLUser = DID | ANYONE;
+
+/**
+ * Capability levels for space access control.
+ * - READ: Can query and read data from the space
+ * - WRITE: Can read and transact (write) data to the space
+ * - OWNER: Full control including ACL management
+ */
+export type Capability = "READ" | "WRITE" | "OWNER";
+
+/**
+ * Access Control List entry mapping DIDs to their capabilities
+ */
+export type ACL = {
+  [user in ACLUser]?: Capability;
+};
+
 // Entity identifier (typically `of:<base32-digest>`, but sometimes `did:<something>`).
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'

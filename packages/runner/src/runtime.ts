@@ -424,6 +424,10 @@ export class Runtime implements IRuntime {
     // Removed setCurrentRuntime call - no longer using singleton pattern
   }
 
+  async [Symbol.asyncDispose]() {
+    await this.dispose();
+  }
+
   /**
    * Creates a storage transaction that can be used to read / write data into
    * locally replicated memory spaces. Transaction allows reading from many
