@@ -1,9 +1,10 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const {
-  parseTargetString,
+  parseLLMFriendlyLink,
   extractStringField,
   extractRunArguments,
   extractToolCallParts,
@@ -13,58 +14,52 @@ const {
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
-  const parsed = parseTargetString(
+  const parsed = parseLLMFriendlyLink(
     "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo/bar",
+    "did:test:123",
   );
   assert(!("error" in parsed));
   if (!("error" in parsed)) {
     assertEquals(
-      parsed.handle,
+      parsed.id,
       "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
     );
-    assertEquals(parsed.pathSegments, ["foo", "bar"]);
+    assertEquals(parsed.path, ["foo", "bar"]);
   }
 });
 
 Deno.test("parseTargetString handles whitespace in handle paths", () => {
-  const parsed = parseTargetString(
-    "  of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai  /  foo / ",
+  const parsed = parseLLMFriendlyLink(
+    "  of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo ",
+    "did:test:123",
   );
-  assert(!("error" in parsed));
-  if (!("error" in parsed)) {
-    assertEquals(
-      parsed.handle,
-      "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
-    );
-    assertEquals(parsed.pathSegments, ["foo"]);
-  }
+  assertEquals(
+    parsed.id,
+    "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
+  );
+  assertEquals(parsed.path, ["foo"]);
 });
 
-Deno.test("parseTargetString recognizes baed prefix CIDs", () => {
-  const parsed = parseTargetString(
-    "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q/content",
+Deno.test("parseTargetString recognizes ~ encoded path elements", () => {
+  const parsed = parseLLMFriendlyLink(
+    "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q/foo~1bar/~0/",
+    "did:test:123",
   );
-  assert(!("error" in parsed));
-  if (!("error" in parsed)) {
-    assertEquals(
-      parsed.handle,
-      "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q",
-    );
-    assertEquals(parsed.pathSegments, ["content"]);
-  }
+  assertEquals(
+    parsed.id,
+    "of:baedreidptbmcghfoqcb2xa3l3qsvype5gjcfuektmzdjalfb7yqztjda5q",
+  );
+  assertEquals(parsed.path, ["foo/bar", "~", ""]);
 });
 
 Deno.test("parseTargetString errors on human name", () => {
-  const result = parseTargetString("CharmName/foo/bar");
-  assert("error" in result);
-  if ("error" in result) {
-    assert(result.error.includes("must use handles"));
-  }
+  expect(() => parseLLMFriendlyLink("CharmName/foo/bar", "did:test:123"))
+    .toThrow("must include");
 });
 
 Deno.test("parseTargetString errors when path is empty", () => {
-  const result = parseTargetString("   ");
-  assert("error" in result);
+  expect(() => parseLLMFriendlyLink("   ", "did:test:123"))
+    .toThrow("must include");
 });
 
 Deno.test("extractStringField returns value from string input", () => {
