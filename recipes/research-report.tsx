@@ -24,7 +24,7 @@ export default recipe(
   OutputSchema,
   ({ title, content }) => {
     return {
-      [NAME]: title || "Untitled Research Report",
+      [NAME]: title,
       [UI]: (
         <div style="padding: 1rem; max-width: 1200px; margin: 0 auto;">
           <div style="margin-bottom: 1rem;">
