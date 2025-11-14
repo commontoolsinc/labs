@@ -461,27 +461,29 @@ function flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  if (charms.length > 0) {
-    const handleList = charms.map((e) => `${e.charmName} (${e.handle})`).join(
-      ", ",
-    );
-    const availability = handleList
-      ? `Available charms: ${handleList}.`
-      : "No charms attached.";
+  // Always add read/run tools since they work with ANY valid handle, not just attachments
+  const handleList = charms.length > 0
+    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
+    : "";
+  const availability = handleList
+    ? `Attached charms: ${handleList}.`
+    : "No charms currently attached, but you can still read/run any valid handle.";
 
-    flattened[READ_TOOL_NAME] = {
-      description:
-        "Read data from an attached charm using a handle path like " +
-        '"of:bafyabc123/result/path". ' + availability,
-      inputSchema: READ_INPUT_SCHEMA,
-    };
-    flattened[RUN_TOOL_NAME] = {
-      description:
-        "Invoke a handler on an attached charm. Provide the handle " +
-        'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
-        availability,
-      inputSchema: RUN_INPUT_SCHEMA,
-    };
+  flattened[READ_TOOL_NAME] = {
+    description:
+      "Read data from ANY charm using a handle path like " +
+      '"of:bafyabc123/result/path". ' + availability,
+    inputSchema: READ_INPUT_SCHEMA,
+  };
+  flattened[RUN_TOOL_NAME] = {
+    description:
+      "Invoke a handler on ANY charm. Provide the handle " +
+      'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
+      availability,
+    inputSchema: RUN_INPUT_SCHEMA,
+  };
+
+  if (charms.length > 0) {
     flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
       description: "List all attached charms with their handles and names.",
       inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
@@ -530,28 +532,31 @@ function buildToolCatalog(
     });
   }
 
-  if (charms.length > 0) {
-    const handleList = charms.map((e) => `${e.charmName} (${e.handle})`).join(
-      ", ",
-    );
-    const availability = handleList
-      ? `Available charms: ${handleList}.`
-      : "No charms attached.";
+  // Always add read/run tools since they work with ANY valid handle
+  const handleList = charms.length > 0
+    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
+    : "";
+  const availability = handleList
+    ? `Attached charms: ${handleList}.`
+    : "No charms currently attached, but you can still read/run any valid handle.";
 
-    llmTools[READ_TOOL_NAME] = {
-      description:
-        "Read data from an attached charm using a handle path like " +
-        '"of:bafyabc123/result/path". Charm schemas are provided in the system prompt. ' +
-        availability,
-      inputSchema: READ_INPUT_SCHEMA,
-    };
-    llmTools[RUN_TOOL_NAME] = {
-      description:
-        "Run a handler on an attached charm. Provide the handle path like " +
-        '"of:bafyabc123/handlers/doThing" and optionally args. Charm schemas are ' +
-        "provided in the system prompt. " + availability,
-      inputSchema: RUN_INPUT_SCHEMA,
-    };
+  llmTools[READ_TOOL_NAME] = {
+    description:
+      "Read data from ANY charm using a handle path like " +
+      '"of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
+      availability,
+    inputSchema: READ_INPUT_SCHEMA,
+  };
+  llmTools[RUN_TOOL_NAME] = {
+    description:
+      "Run a handler on ANY charm. Provide the handle path like " +
+      '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
+      availability,
+    inputSchema: RUN_INPUT_SCHEMA,
+  };
+
+  // Schema and listAttachments only work with attached charms
+  if (charms.length > 0) {
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
         "Return the JSON schema for an attached charm to discover its " +
@@ -644,7 +649,11 @@ function resolveToolCall(
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME
   ) {
-    if (catalog.handleMap.size === 0 && catalog.charmMap.size === 0) {
+    // Schema and listAttachments require attachments, but read/run work with any handle
+    if (
+      (name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME) &&
+      catalog.handleMap.size === 0 && catalog.charmMap.size === 0
+    ) {
       throw new Error("No charm attachments available.");
     }
 
@@ -700,6 +709,11 @@ function resolveToolCall(
 
     if (name === READ_TOOL_NAME) {
       const ref = runtime.getCellFromLink(link);
+      if (!ref) {
+        throw new Error(
+          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+        );
+      }
       if (isStream(ref)) {
         throw new Error(`Path resolves to a handler; use run("${target}").`);
       }
@@ -1024,8 +1038,17 @@ async function invokeToolCall(
       throw new Error("Read mode requires either cellRef or charm to be set");
     }
     const segments = charmMeta.targetSegments ?? [];
-    const realized = cellToRead.getAsQueryResult(segments);
-    const value = JSON.parse(JSON.stringify(realized));
+
+    // If there are no segments, get the cell value directly, otherwise query into it
+    const realized = segments.length === 0
+      ? cellToRead.get()
+      : cellToRead.getAsQueryResult(segments);
+
+    // Handle undefined values gracefully - return null for undefined/null
+    const value = realized === undefined || realized === null
+      ? null
+      : JSON.parse(JSON.stringify(realized));
+
     return { type: "json", value };
   }
 
@@ -1067,12 +1090,14 @@ async function invokeToolCall(
     }
   });
 
-  // For handlers, wait for the transaction to complete
-  if (!pattern) {
-    await promise;
-  }
+  // Wait for the pattern/handler to complete and write the result
+  const cancel = result.sink((r) => {
+    r !== undefined && resolve(r);
+  });
+  await promise;
+  cancel();
 
-  // Return link to the result cell instead of snapshotting
+  // Return link to the result cell instead of snapshotting the value
   const link = result.getAsNormalizedFullLink();
   const linkString = link.path.length > 0
     ? `${link.id}/${link.path.join("/")}`
