@@ -249,7 +249,7 @@ type CharmToolEntry = {
 
 type ToolCatalog = {
   llmTools: Record<string, { description: string; inputSchema: JSONSchema }>;
-  legacyToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
+  dynamicToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
   charmMap: Map<string, Cell<any>>;
   handleMap: Map<string, { charm: Cell<any>; charmName: string }>;
 };
@@ -505,7 +505,10 @@ function buildToolCatalog(
   const { legacy, charms } = collectToolEntries(toolsCell);
 
   const llmTools: ToolCatalog["llmTools"] = {};
-  const legacyToolCells = new Map<string, Cell<Schema<typeof LLMToolSchema>>>();
+  const dynamicToolCells = new Map<
+    string,
+    Cell<Schema<typeof LLMToolSchema>>
+  >();
   const charmMap = new Map<string, Cell<any>>();
   const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
@@ -520,7 +523,7 @@ function buildToolCatalog(
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
     llmTools[entry.name] = { description, inputSchema };
-    legacyToolCells.set(entry.name, entry.cell);
+    dynamicToolCells.set(entry.name, entry.cell);
   }
 
   for (const entry of charms) {
@@ -570,7 +573,7 @@ function buildToolCatalog(
     };
   }
 
-  return { llmTools, legacyToolCells, charmMap, handleMap };
+  return { llmTools, dynamicToolCells, charmMap, handleMap };
 }
 
 /**
@@ -617,7 +620,7 @@ async function buildCharmSchemasDocumentation(
 // Use discriminated unions instead of threading data through 'mode' fields
 type ResolvedToolCall =
   | {
-    type: "legacy";
+    type: "dynamicTool";
     call: LLMToolCall;
     toolDef: Cell<Schema<typeof LLMToolSchema>>;
   }
@@ -650,11 +653,11 @@ function resolveToolCall(
 ): ResolvedToolCall {
   const name = toolCallPart.toolName;
   const id = toolCallPart.toolCallId;
-  const legacyTool = catalog.legacyToolCells.get(name);
-  if (legacyTool) {
+  const dynamicTool = catalog.dynamicToolCells.get(name);
+  if (dynamicTool) {
     return {
-      type: "legacy",
-      toolDef: legacyTool,
+      type: "dynamicTool",
+      toolDef: dynamicTool,
       call: { id, name, input: toolCallPart.input },
     };
   }
@@ -1053,7 +1056,7 @@ async function invokeToolCall(
   let handler: any;
   let charm: Cell<any> | undefined;
 
-  if (resolved.type === "legacy") {
+  if (resolved.type === "dynamicTool") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
       | Readonly<Recipe>
       | undefined;
