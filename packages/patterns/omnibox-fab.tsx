@@ -67,10 +67,10 @@ const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
     main: p?.main ?? "",
     input: { value: 10 },
   }));
-  const { pending: _compilePending, result, error: _compileError } =
+  const { pending: _compilePending, result, error } =
     compileAndRun(compileParams);
 
-  return result;
+  return ifElse(pending, undefined, { result, error });
 });
 
 export default recipe<OmniboxFABInput>(
