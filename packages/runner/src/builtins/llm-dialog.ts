@@ -483,6 +483,40 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
   additionalProperties: false,
 };
 
+// ============================================================================
+// Path Utility Functions
+// ============================================================================
+// These utilities handle the conversion between LLM-facing path format (/of:...)
+// and internal runtime format (of:...). The LLM sees paths with a leading slash
+// to make it clear that strings are links.
+
+/**
+ * Formats a link for the LLM using /of: prefix format.
+ * @param handle - The handle (with or without 'of:' prefix)
+ * @param pathSegments - Optional path segments to append
+ * @returns Formatted path like '/of:bafyabc123' or '/of:bafyabc123/result/content'
+ */
+function formatLinkForLLM(
+  handle: string,
+  pathSegments?: readonly string[],
+): string {
+  // Ensure handle starts with 'of:' (strip leading slash if present)
+  const normalizedHandle = handle.startsWith("/of:")
+    ? handle.slice(1)
+    : handle.startsWith("of:")
+    ? handle
+    : `of:${handle}`;
+
+  // Build the path with leading slash for LLM
+  const basePath = `/${normalizedHandle}`;
+
+  if (!pathSegments || pathSegments.length === 0) {
+    return basePath;
+  }
+
+  return `${basePath}/${pathSegments.join("/")}`;
+}
+
 function ensureString(
   value: unknown,
   field: string,
@@ -1172,7 +1206,10 @@ function handleListAttachments(
     return { type: "json", value: [] };
   }
   const attachments = Array.from(catalog.handleMap.entries()).map(
-    ([handle, { charmName }]) => ({ handle, name: charmName }),
+    ([handle, { charmName }]) => ({
+      handle: formatLinkForLLM(handle),
+      name: charmName,
+    }),
   );
   return { type: "json", value: attachments };
 }
