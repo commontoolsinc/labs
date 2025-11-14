@@ -1,6 +1,7 @@
 # Types and Schemas Guide
 
-This guide explains CommonTools' type system, including when to use `Cell<>`, understanding `OpaqueRef<>`, working with the CTS (CommonTools TypeScript) system, and deciding when to use `[ID]`.
+This guide explains CommonTools' type system, including when to use `Cell<>`,
+and working with the CTS (CommonTools TypeScript) system.
 
 ## When to Use Cell<> in Signatures
 
@@ -164,82 +165,11 @@ export default recipe<WritableInput>(
 );
 ```
 
-## OpaqueRef\<T\> - Cell-Like References
-
-`OpaqueRef<T>` represents a **cell-like reference** to data within the reactive graph. You'll encounter it primarily in `.map()` operations.
-
-### Where OpaqueRef Appears
-
-**In `.map()` over reactive arrays:**
-
-```typescript
-// item's type is automatically inferred as OpaqueRef<ShoppingItem>
-{items.map((item) => (
-  <div>
-    {item.title}                           // Property access works
-    <ct-checkbox $checked={item.done} />   // Bidirectional binding works
-  </div>
-))}
-```
-
-**Why it matters:**
-
-`OpaqueRef<T>` maintains the connection to the Cell system, enabling:
-- **Bidirectional binding** (`$checked`, `$value`)
-- **Reactive updates** when the item changes
-- **Type-safe property access**
-
-### Type Annotation in .map()
-
-When using bidirectional binding, TypeScript sometimes needs help with type inference:
-
-```typescript
-// ✅ CORRECT - Type annotation for bidirectional binding
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-))}
-
-// ❌ May cause type errors without annotation
-{items.map((item) => (
-  <ct-checkbox $checked={item.done} />  // Type error!
-))}
-```
-
-**When to add the type annotation:**
-- Using `$checked`, `$value`, or other bidirectional bindings
-- TypeScript shows errors about property types
-- Working with complex nested objects
-
-**When you can skip it:**
-- Simple display (no bidirectional binding)
-- TypeScript infers correctly
-
-### OpaqueRef in Handler Parameters
-
-**Critical Rule:** Never use `OpaqueRef<>` in handler type signatures. Use `Cell<T[]>` instead:
-
-```typescript
-// ✅ CORRECT - Cell wraps the entire array
-const addItem = handler<
-  unknown,
-  { items: Cell<ShoppingItem[]> }  // ← Cell<ShoppingItem[]>
->((_event, { items }) => {
-  const currentItems = items.get();  // Returns ShoppingItem[]
-  items.push({ title: "New", done: false });
-});
-
-// ❌ WRONG - Don't use OpaqueRef in handler parameters
-const addItem = handler<
-  unknown,
-  { items: Cell<OpaqueRef<ShoppingItem>[]> }  // ← Wrong!
->(/* ... */);
-```
-
-## Cell\<T[]\> vs Cell\<Array\<Cell\<T\>\>\>
+## `Cell<T[]>` vs `Cell<Array<Cell<T>>>`
 
 Understanding when to use which array type:
 
-### Cell\<T[]\> - Most Common
+### `Cell<T[]>` - Most Common
 
 Use for most array operations:
 
@@ -255,7 +185,7 @@ const addItem = handler<
 });
 ```
 
-### Cell\<Array\<Cell\<T\>\>\> - Advanced
+### `Cell<Array<Cell<T>>>` - Advanced
 
 Use when you need Cell methods on individual array elements:
 
@@ -312,7 +242,7 @@ import { recipe, UI, NAME } from "commontools";
 
 This tells the CTS system to process TypeScript types in this file.
 
-## Default\<T, DefaultValue\> - Providing Defaults
+## `Default<T, DefaultValue>` - Providing Defaults
 
 Use `Default<>` to specify default values in your schemas:
 
@@ -346,109 +276,6 @@ interface TodoListInput {
   items: Default<TodoItem[], []>;     // Defaults to empty array
 }
 ```
-
-## When to Use [ID]
-
-**Start without [ID].** Only add it if you encounter specific bugs or have one of the use cases below.
-
-### The [ID] Symbol
-
-```typescript
-import { ID } from "commontools";
-
-interface Item {
-  [ID]: number;  // Only add this when you need it!
-  title: string;
-}
-```
-
-### When [ID] is NOT Needed (Most Cases)
-
-✅ **Use simple interfaces without [ID] for:**
-
-- Basic lists and CRUD operations
-- Items only displayed, not referenced elsewhere
-- Adding items to the end of arrays
-- Removing items by button click
-- Editing items in place
-- Most todo lists, shopping lists, simple data displays
-
-```typescript
-// ✅ SIMPLE - No [ID] needed
-interface ShoppingItem {
-  title: string;
-  done: Default<boolean, false>;
-  category: Default<string, "Uncategorized">;
-}
-
-const removeItem = handler<
-  unknown,
-  { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
->((_event, { items, item }) => {
-  const currentItems = items.get();
-  const index = currentItems.findIndex((el) => el.equals(item));
-  if (index >= 0) {
-    items.set(currentItems.toSpliced(index, 1));
-  }
-});
-```
-
-This works perfectly without [ID] because:
-- Items are added to the end
-- Removal uses item references with `.equals()`
-- No cross-reference tracking needed
-
-### When [ID] IS Needed (Specific Cases)
-
-❌ **Only add [ID] when you need:**
-
-#### Creating Referenceable Items in Reactive Contexts
-
-When creating items in `computed()` or handlers that need stable references:
-
-```typescript
-const generateItems = computed(() => {
-  return Array.from({ length: count }, (_, i) => ({
-    [ID]: i,  // Needed for stable references
-    title: `Item ${i}`,
-  }));
-});
-```
-
-#### Complex Reordering or Front-Insertion
-
-When inserting items at the beginning or complex drag-and-drop:
-
-```typescript
-interface ReorderableItem {
-  [ID]: number;  // Needed for stable identity during reordering
-  title: string;
-  position: number;
-}
-
-const insertAtStart = handler<unknown, { items: Cell<ReorderableItem[]> }>(
-  (_, { items }) => {
-    const current = items.get();
-    items.set([{ [ID]: Date.now(), title: "New", position: 0 }, ...current]);
-  }
-);
-```
-
-**Note:** Even for reordering, try without [ID] first. Many scenarios work fine without it.
-
-### Decision Matrix: Do You Need [ID]?
-
-| Use Case | Need [ID]? |
-|----------|------------|
-| Display list of items | ❌ No |
-| Add items to end of array | ❌ No |
-| Remove items by reference | ❌ No |
-| Edit items in place | ❌ No |
-| Simple sorting | ❌ No |
-| Creating items in computed() | ✅ Maybe |
-| Insert at beginning of array | ✅ Maybe |
-| Complex drag-and-drop | ✅ Maybe |
-| Cross-pattern references | ✅ Yes |
 
 ## Type Composition
 
@@ -603,65 +430,12 @@ const recipe = ({ count }: Input) => {
 };
 ```
 
-### Error: "Type 'OpaqueRef\<T\>' is not assignable to 'Cell\<T\>'"
-
-❌ **Problem:** Trying to bind the whole item instead of a property
-
-```typescript
-// Problem: Trying to bind the whole item
-<ct-checkbox $checked={item} />
-```
-
-✅ **Solution:** Bind the specific property
-
-```typescript
-<ct-checkbox $checked={item.done} />
-```
-
-### Error: "Property does not exist on type 'OpaqueRef\<unknown\>'"
-
-❌ **Problem:** Missing type annotation in `.map()`
-
-```typescript
-{items.map((item) => (
-  <ct-checkbox $checked={item.done} />  // Type error!
-))}
-```
-
-✅ **Solution:** Add `OpaqueRef<T>` type annotation
-
-```typescript
-{items.map((item: OpaqueRef<ShoppingItem>) => (
-  <ct-checkbox $checked={item.done} />
-))}
-```
-
-### Error: Using OpaqueRef in handler signature
-
-❌ **Problem:** Wrong type in handler parameters
-
-```typescript
-const handler = handler<unknown, { items: Cell<OpaqueRef<Item>[]> }>(
-  // Wrong!
-);
-```
-
-✅ **Solution:** Use `Cell<T[]>` instead
-
-```typescript
-const handler = handler<unknown, { items: Cell<Item[]> }>(
-  // Correct!
-);
-```
-
 ## Summary
 
 **Key Takeaways:**
 
 1. **Cell<> = Write Permission** - Only in signatures when you need `.set()`, `.update()`, `.push()`
-2. **OpaqueRef<T> in .map()** - Type annotation needed for bidirectional binding
-3. **Never OpaqueRef in Handlers** - Always use `Cell<T[]>`
-4. **CTS Handles Runtime** - Just write TypeScript types, validation is automatic
-5. **[ID] is Rarely Needed** - Start without it, add only if you hit specific use cases
-6. **Default<> for Defaults** - Clear, self-documenting default values
-7. **Compose Types** - Build complex types from simple, reusable parts
+2. **Never OpaqueRef in Handlers** - Always use `Cell<T[]>`
+3. **CTS Handles Runtime** - Just write TypeScript types, validation is automatic
+4. **Default<> for Defaults** - Clear, self-documenting default values
+5. **Compose Types** - Build complex types from simple, reusable parts
