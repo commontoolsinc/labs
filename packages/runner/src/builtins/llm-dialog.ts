@@ -614,29 +614,46 @@ async function buildCharmSchemasDocumentation(
   }`;
 }
 
+// Use discriminated unions instead of threading data through 'mode' fields
+type ResolvedToolCall =
+  | {
+    type: "legacy";
+    call: LLMToolCall;
+    toolDef: Cell<Schema<typeof LLMToolSchema>>;
+  }
+  | { type: "listAttachments"; call: LLMToolCall }
+  | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | {
+    type: "read";
+    call: LLMToolCall;
+    cellRef: Cell<any>;
+  }
+  | {
+    type: "runPattern";
+    call: LLMToolCall;
+    pattern: Readonly<Recipe>;
+    extraParams: Record<string, unknown>;
+    charm?: Cell<any>;
+  }
+  | {
+    type: "runHandler";
+    call: LLMToolCall;
+    handler: Stream<any>;
+    charm?: Cell<any>;
+  };
+
 function resolveToolCall(
   runtime: IRuntime,
   space: MemorySpace,
   toolCallPart: BuiltInLLMToolCallPart,
   catalog: ToolCatalog,
-): {
-  call: LLMToolCall;
-  toolDef?: Cell<Schema<typeof LLMToolSchema>>;
-  charmMeta?: {
-    handler?: any;
-    charm?: Cell<any>; // Optional: may be undefined for arbitrary handles
-    cellRef?: Cell<any>; // Optional: the resolved cell for read operations
-    extraParams?: Record<string, unknown>;
-    pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema" | "listAttachments";
-    targetSegments?: string[];
-  };
-} {
+): ResolvedToolCall {
   const name = toolCallPart.toolName;
   const id = toolCallPart.toolCallId;
   const legacyTool = catalog.legacyToolCells.get(name);
   if (legacyTool) {
     return {
+      type: "legacy",
       toolDef: legacyTool,
       call: { id, name, input: toolCallPart.input },
     };
@@ -657,10 +674,7 @@ function resolveToolCall(
     // Handle listAttachments
     if (name === LIST_ATTACHMENTS_TOOL_NAME) {
       return {
-        charmMeta: {
-          charm: null as any, // Not needed for this operation
-          mode: "listAttachments",
-        },
+        type: "listAttachments",
         call: { id, name, input: {} },
       };
     }
@@ -678,7 +692,8 @@ function resolveToolCall(
         );
       }
       return {
-        charmMeta: { charm, mode: "schema" },
+        type: "schema",
+        charm,
         call: { id, name, input: { charm: charmName } },
       };
     }
@@ -699,10 +714,6 @@ function resolveToolCall(
       type: "application/json" as const,
     };
 
-    // Try to get the charm from attachments for metadata (optional)
-    const charmEntry = catalog.handleMap.get(handle);
-    const charm = charmEntry?.charm;
-
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
       const cellRef = runtime.getCellFromLink(link);
@@ -716,19 +727,24 @@ function resolveToolCall(
       }
 
       return {
-        charmMeta: {
-          cellRef,
-          mode: "read",
-          targetSegments: pathSegments,
-        },
+        type: "read",
+        cellRef,
         call: { id, name, input: { path: target } },
       };
     }
 
+    // For run(), resolve the cell and check if it's a handler or pattern
     const ref: Cell<any> = runtime.getCellFromLink(link);
+
+    // Get optional charm metadata for validation (only used for handlers)
+    const charmEntry = catalog.handleMap.get(handle);
+    const charm = charmEntry?.charm;
+
     if (isStream(ref)) {
       return {
-        charmMeta: { handler: ref as any, charm, mode: "run" },
+        type: "runHandler",
+        handler: ref as any,
+        charm,
         call: {
           id,
           name,
@@ -741,12 +757,10 @@ function resolveToolCall(
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
-        charmMeta: {
-          pattern,
-          extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
-          charm,
-          mode: "run",
-        },
+        type: "runPattern",
+        pattern,
+        extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
+        charm,
         call: {
           id,
           name,
@@ -841,9 +855,7 @@ async function executeToolCalls(
       const resultValue = await invokeToolCall(
         runtime,
         space,
-        resolved.toolDef,
-        resolved.call,
-        resolved.charmMeta,
+        resolved,
         toolCatalog,
       );
       results.push({
@@ -995,20 +1007,13 @@ async function ensureSourceCharmRunning(
 async function invokeToolCall(
   runtime: IRuntime,
   space: MemorySpace,
-  toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
-  toolCall: LLMToolCall,
-  charmMeta?: {
-    handler?: any;
-    charm?: Cell<any>; // Optional: may be undefined for arbitrary handles
-    cellRef?: Cell<any>; // Optional: the resolved cell for read operations
-    extraParams?: Record<string, unknown>;
-    pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema" | "listAttachments";
-    targetSegments?: string[];
-  },
+  resolved: ResolvedToolCall,
   catalog?: ToolCatalog,
 ) {
-  if (charmMeta?.mode === "listAttachments") {
+  const toolCall = resolved.call;
+
+  // Handle simple query tools
+  if (resolved.type === "listAttachments") {
     if (!catalog?.handleMap) {
       return { type: "json", value: [] };
     }
@@ -1018,34 +1023,19 @@ async function invokeToolCall(
     return { type: "json", value: attachments };
   }
 
-  if (charmMeta?.mode === "schema") {
-    if (!charmMeta.charm) {
-      throw new Error("Schema mode requires an attached charm");
-    }
-    const schema = await getCharmResultSchemaAsync(runtime, charmMeta.charm) ??
+  if (resolved.type === "schema") {
+    const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
       {};
     const value = JSON.parse(JSON.stringify(schema ?? {}));
     return { type: "json", value };
   }
 
-  if (charmMeta?.mode === "read") {
-    const segments = charmMeta.targetSegments ?? [];
-
-    if (!charmMeta.cellRef) {
-      throw new Error("Read mode requires cellRef to be set");
-    }
-
-    // Get the normalized link from the cell reference
-    const cellLink = charmMeta.cellRef.getAsNormalizedFullLink();
-
-    // Add the target segments to the link path
-    const linkWithSegments = {
-      ...cellLink,
-      path: [...cellLink.path, ...segments],
-    };
+  if (resolved.type === "read") {
+    // The cellRef already points to the full path from the link resolution
+    const cellLink = resolved.cellRef.getAsNormalizedFullLink();
 
     // Resolve any intermediate links and get the final cell
-    const resolvedLink = resolveLink(runtime.readTx(), linkWithSegments);
+    const resolvedLink = resolveLink(runtime.readTx(), cellLink);
     const resolvedCell = runtime.getCellFromLink(resolvedLink);
     const realized = resolvedCell.get();
 
@@ -1057,21 +1047,30 @@ async function invokeToolCall(
     return { type: "json", value };
   }
 
-  const pattern = charmMeta?.pattern ??
-    toolDef?.key("pattern").getRaw() as unknown as
+  // Extract pattern/handler/params based on the resolved type
+  let pattern: Readonly<Recipe> | undefined;
+  let extraParams: Record<string, unknown> = {};
+  let handler: any;
+  let charm: Cell<any> | undefined;
+
+  if (resolved.type === "legacy") {
+    pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
       | Readonly<Recipe>
       | undefined;
-  const extraParams = charmMeta?.extraParams ??
-    toolDef?.key("extraParams").get() ??
-    {};
-  const handler = charmMeta?.handler ?? toolDef?.key("handler");
+    extraParams = resolved.toolDef.key("extraParams").get() ?? {};
+    handler = resolved.toolDef.key("handler");
+  } else if (resolved.type === "runPattern") {
+    pattern = resolved.pattern;
+    extraParams = resolved.extraParams;
+    charm = resolved.charm;
+  } else if (resolved.type === "runHandler") {
+    handler = resolved.handler;
+    charm = resolved.charm;
+  }
 
-  // ensure the charm this handler originates from is actually running
-  if (handler && !pattern && charmMeta && charmMeta.charm) {
-    await ensureSourceCharmRunning(
-      runtime,
-      charmMeta as { handler?: any; charm: Cell<any> },
-    );
+  // Ensure the charm this handler originates from is actually running
+  if (handler && !pattern && charm) {
+    await ensureSourceCharmRunning(runtime, { handler, charm });
   }
 
   const { resolve, promise } = Promise.withResolvers<any>();
@@ -1109,13 +1108,9 @@ async function invokeToolCall(
   // Wait for the transaction to be fully committed before returning the link
   await editPromise;
 
-  // Return link to the result cell
-  const resultLink = result.getAsNormalizedFullLink();
-  const linkString = resultLink.path.length > 0
-    ? `${resultLink.id}/${resultLink.path.join("/")}`
-    : resultLink.id;
-
-  return { type: "json", value: linkString };
+  // Return link to the result cell we created (just the ID, no path)
+  // The pattern/handler writes to this cell, and any subpaths can be accessed by the LLM
+  return { type: "json", value: toolCall.id };
 }
 
 /**
