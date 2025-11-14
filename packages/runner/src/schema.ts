@@ -11,7 +11,6 @@ import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import {
   createQueryResultProxy,
-  getCellOrThrow,
   isQueryResultForDereferencing,
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
@@ -446,6 +445,7 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
       if (asCell || asStream) {
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
+        console.log("Calling createCell for", { ...link, schema: restSchema });
         return createCell(
           this.runtime,
           { ...link, schema: restSchema },
@@ -489,83 +489,13 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
             }
           }
         }
-        //} else if (Array.isArray(value)) {
-        // FIXME(@ubik2): Pick up the createDataURI change from main
-        // value = value.map((item, index) => {
-        //   const itemSchema = this.runtime.cfc.schemaAtPath(
-        //     link.schema!,
-        //     [index.toString()],
-        //     link.rootSchema,
-        //   );
-        //   return this.postProcessArrayElement(link, item, index, itemSchema);
-        // });
       }
       // TODO(@ubik2): What if we're an array? Is it possible to have undefined
       // elements in our array?
     }
+    console.log("Calling annotated proxy for", link);
     return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
   }
-
-  private _postProcessArrayElement(
-    link: NormalizedFullLink,
-    value: any[],
-    index: number,
-    elementSchema: JSONSchema,
-  ) {
-    // If the element on the array is a link, we follow that link so the
-    // returned object is the current item at that location (otherwise the
-    // link would refer to "Nth element"). This is important when turning
-    // returned objects back into cells: We want to then refer to the actual
-    // object by default, not the array location.
-    //
-    // This makes
-    // ```ts
-    // const array = [...cell.get()];
-    // array.splice(index, 1);
-    // cell.set(array);
-    // ```
-    // work as expected.
-    let elementLink: NormalizedFullLink = {
-      ...link,
-      path: [...link.path, String(index)],
-      schema: elementSchema,
-    };
-    const maybeLink = readMaybeLink(this.tx, elementLink);
-    if (maybeLink) {
-      const newLink = {
-        ...maybeLink,
-        schema: elementLink.schema,
-        rootSchema: elementLink.rootSchema,
-      };
-      if (!isCell(value)) {
-        console.log("Should replace", elementLink, "with", newLink, value);
-        if (isQueryResultForDereferencing(value)) {
-          const testCell = getCellOrThrow(value);
-          console.log(
-            "value[toCell]().link:",
-            testCell.getAsNormalizedFullLink(),
-          );
-        }
-      } else {
-        console.log("Should replace cell", elementLink, "with", newLink, value);
-      }
-      elementLink = newLink;
-      // I can copy value and replace the toCell method, but we really need
-      // to re-walk the children too, since our path is likely a component
-      // in the paths of our children.
-    }
-    // It wasn't a link
-    return value;
-  }
-}
-
-// This is just used for removing the runtime before logging, so we have less noise
-function clearRuntime(obj: any): any {
-  if (isObject(obj) && "runtime" in obj) {
-    const { runtime: _runtime, ...rest } = obj;
-    return { runtime: "<removed>", ...rest };
-  }
-  return obj;
 }
 
 export function validateAndTransform(
@@ -1026,7 +956,6 @@ function validateAndTransformOrig(
         schema: elementSchema,
       };
       const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
-      // const debugLink = { ...elementLink };
       if (maybeLink) {
         elementLink = {
           ...maybeLink,

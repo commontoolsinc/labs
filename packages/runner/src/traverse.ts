@@ -21,7 +21,12 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import { isAnyCellLink, NormalizedFullLink, parseLink } from "./link-utils.ts";
+import {
+  isAnyCellLink,
+  isLink,
+  NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 import type {
   Activity,
   CommitError,
@@ -456,25 +461,41 @@ export abstract class BaseObjectTraverser<
       if (t === null) {
         return tracker.getExisting(doc.value, SchemaAll);
       }
-      const entries = doc.value.map((item, index) =>
-        this.traverseDAG(
-          {
-            ...doc,
-            address: {
-              ...doc.address,
-              path: [...doc.address.path, index.toString()],
-            },
-            value: item,
-          },
-          space,
-          tracker,
-          schemaTracker,
+      const entries = doc.value.map((item, index) => {
+        const itemDefault =
           isObject(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
             ? defaultValue[index]
-            : undefined,
-        )!
-      );
+            : undefined;
+        let docItem: IAttestation = {
+          ...doc,
+          address: {
+            ...doc.address,
+            path: [...doc.address.path, index.toString()],
+          },
+          value: item,
+        };
+        // TODO(@ubik2): We follow the first link in array elements so we
+        // don't have strangeness with setting item at 0 to item at 1
+        if (isLink(item)) {
+          const [next, _selector] = getAtPath(
+            this.tx,
+            docItem,
+            [],
+            tracker,
+            this.cfc,
+            space,
+          );
+          docItem = next;
+        }
+        return this.traverseDAG(
+          docItem,
+          space,
+          tracker,
+          schemaTracker,
+          itemDefault,
+        );
+      });
       // We copy the contents of our result into newValue so that if we have
       // a cycle, we can return newValue before we actually populate it.
       for (const v of entries) {
@@ -1571,8 +1592,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
     ) {
-      const itemSchema = schema["items"] ?? true;
-      const curDoc = {
+      const itemSchema = this.cfc.schemaAtPath(
+        schema,
+        [index.toString()],
+        schemaContext.rootSchema,
+      );
+      let curDoc: IAttestation = {
         ...doc,
         address: {
           ...doc.address,
@@ -1580,14 +1605,31 @@ export class SchemaObjectTraverser<V extends JSONValue>
         },
         value: item,
       };
-      const selector = {
+      let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schemaContext: {
           schema: itemSchema,
           rootSchema: schemaContext.rootSchema,
         },
       };
-      const val = this.traverseWithSelector(curDoc, selector);
+      // TODO(@ubik2): We follow the first link in array elements so we
+      // don't have strangeness with setting item at 0 to item at 1
+      if (isLink(item)) {
+        const [next, selector] = getAtPath(
+          this.tx,
+          curDoc,
+          [],
+          this.tracker,
+          this.cfc,
+          this.space,
+          this.schemaTracker,
+          curSelector,
+          this.traverseCells,
+        );
+        curDoc = next;
+        curSelector = selector!;
+      }
+      const val = this.traverseWithSelector(curDoc, curSelector);
       if (val === undefined) {
         // this array is invalid, since one or more items do not match the schema
         return undefined;
@@ -1610,6 +1652,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
       const schemaProperties = isObject(schema)
         ? schema["properties"]
         : undefined;
+      // TODO(@ubik2): It would be nice to consolidate this with the
+      // cfc.schemaAtPath code, but they have slightly different behavior
+      // with props that have no additionalProperties or properties entry.
       const propSchema =
         (isObject(schemaProperties) && propKey in schemaProperties)
           ? schemaProperties[propKey]
