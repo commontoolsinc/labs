@@ -18,6 +18,11 @@ const logger = getLogger("shell.telemetry", {
   level: "debug",
 });
 
+const identityLogger = getLogger("shell.telemetry", {
+  enabled: true,
+  level: "debug",
+});
+
 // RuntimeInternals bundles all of the lifetimes
 // of resources bound to an identity,host,space triplet,
 // containing runtime, inspector, and charm references.
@@ -86,6 +91,10 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<RuntimeInternals> {
     const session = await createSession({ identity, spaceName });
 
+    // Log user identity for debugging and sharing
+    identityLogger.log([`[Identity] User DID: ${session.as.did()}`]);
+    identityLogger.log([`[Identity] Space: ${spaceName} (${session.space})`]);
+
     // We're hoisting CharmManager so that
     // we can create it after the runtime, but still reference
     // its `getSpaceName` method in a runtime callback.
@@ -97,6 +106,7 @@ export class RuntimeInternals extends EventTarget {
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
+        spaceIdentity: session.spaceIdentity,
         address: new URL("/api/storage/memory", apiUrl),
       }),
       errorHandlers: [(error) => {

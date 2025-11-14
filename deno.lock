@@ -1787,10 +1787,13 @@
     }
   },
   "redirects": {
+    "https://esm.sh/core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.44.0/proposals/async-explicit-resource-management",
     "https://esm.sh/core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.44.0/proposals/explicit-resource-management"
   },
   "remote": {
+    "https://esm.sh/core-js@3.44.0/denonext/proposals/async-explicit-resource-management.mjs": "8fc19e1aaec982c8920a598a2e5cdc01a865f65bee8421b04edd7e5bb6c45564",
     "https://esm.sh/core-js@3.44.0/denonext/proposals/explicit-resource-management.mjs": "4850503a2650ba47368eb95b1aa2565b47bad32efe9738766811f6de75cf51e1",
+    "https://esm.sh/core-js@3.44.0/proposals/async-explicit-resource-management": "7298a78cddda0e6a5f0ee8cf6fd3ca963e7820daa5553469c2a52ead4be1cdb1",
     "https://esm.sh/core-js@3.44.0/proposals/explicit-resource-management": "06969d679705ab37fd058cc66a50cd7648f79bf5fd86fb13b29cb93c2667ebc7"
   },
   "workspace": {

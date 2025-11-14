@@ -1,5 +1,6 @@
 import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
+import { acl } from "./acl.ts";
 import { dev } from "./dev.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
@@ -20,6 +21,8 @@ export const main = new Command()
   // and cannot match. Still seeing IDE typing errors, but at least
   // deno checker is satisfied.
   .reset()
+  // @ts-ignore for the above type issue
+  .command("acl", acl)
   // @ts-ignore for the above type issue
   .command("charm", charm)
   .command("dev", dev)

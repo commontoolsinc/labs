@@ -49,6 +49,7 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
+      spaceIdentity: session.spaceIdentity,
     }),
     navigateCallback: (target) => {
       try {
