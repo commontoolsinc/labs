@@ -20,11 +20,10 @@ import { ID, NAME, type Recipe, TYPE } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import {
-  debugTransactionWrites,
-  formatTransactionSummary,
-} from "../storage/transaction-summary.ts";
+import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { parseLink } from "../link-utils.ts";
+import { resolveLink } from "../link-resolution.ts";
+import { navigateTo } from "./navigate-to.ts";
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
@@ -243,12 +242,14 @@ type CharmToolEntry = {
   name: string;
   charm: Cell<any>;
   charmName: string;
+  handle: string; // e.g., "of:bafyabc123"
 };
 
 type ToolCatalog = {
   llmTools: Record<string, { description: string; inputSchema: JSONSchema }>;
-  legacyToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
+  dynamicToolCells: Map<string, Cell<Schema<typeof LLMToolSchema>>>;
   charmMap: Map<string, Cell<any>>;
+  handleMap: Map<string, { charm: Cell<any>; charmName: string }>;
 };
 
 function collectToolEntries(
@@ -263,7 +264,12 @@ function collectToolEntries(
       const charm: Cell<any> = tool.charm;
       const charmValue = charm.get();
       const charmName = String(charmValue?.[NAME] ?? name);
-      charms.push({ name, charm, charmName });
+
+      // Extract handle from link
+      const link = charm.getAsNormalizedFullLink();
+      const handle = link.id; // Keep the "of:..." format as the internal handle
+
+      charms.push({ name, charm, charmName, handle });
       continue;
     }
 
@@ -282,13 +288,16 @@ function collectToolEntries(
 const READ_TOOL_NAME = "read";
 const RUN_TOOL_NAME = "run";
 const SCHEMA_TOOL_NAME = "schema";
+const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
+const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
       type: "string",
-      description: "Target path in the form Charm/child/grandchild.",
+      description:
+        "Target path in the form handle/child/grandchild (e.g., of:bafyabc123/result/content).",
     },
   },
   required: ["path"],
@@ -300,7 +309,8 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
   properties: {
     path: {
       type: "string",
-      description: "Target handler path in the form Charm/handler/path.",
+      description:
+        "Target handler path in the form handle/handler/path (e.g., of:bafyabc123/handlers/doThing).",
     },
     args: {
       type: "object",
@@ -317,6 +327,25 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description: "Name of the attached charm.",
+    },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+const LIST_ATTACHMENTS_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description:
+        "Target path to navigate to in the form handle/path (e.g., of:bafyabc123/result).",
     },
   },
   required: ["path"],
@@ -357,16 +386,42 @@ function extractStringField(
 
 function parseTargetString(
   target: string,
-): { charmName: string; pathSegments: string[] } {
+): { handle: string; pathSegments: string[] } | { error: string } {
   const cleaned = target.split("/").map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
+
   if (cleaned.length === 0) {
-    throw new Error(
-      'target must include a charm name, e.g. "Charm/path".',
-    );
+    return {
+      error: 'Target must include a charm handle, e.g. "of:bafyabc123/path".',
+    };
   }
-  const [charmName, ...pathSegments] = cleaned;
-  return { charmName, pathSegments };
+
+  const [firstSegment, ...pathSegments] = cleaned;
+
+  // Check if first segment looks like a CID/handle by length
+  // CIDs are long encoded strings (typically 40+ chars), whereas human names are short
+  // Use a conservative threshold to distinguish handles from human-readable names
+  // Handle format is "of:..." (the internal storage format)
+  if (firstSegment.length >= 20) {
+    const handle = firstSegment;
+    return { handle, pathSegments };
+  }
+
+  // If it doesn't look like a handle, assume user tried to use a human name
+  return {
+    error:
+      `Charm references must use handles (e.g., "of:bafyabc123/path"), not human names (e.g., "${firstSegment}"). Use listAttachments() to see available charm handles and their names.`,
+  };
+}
+
+function parseHandleFromPath(
+  path: string,
+): { handle: string; pathSegments: string[] } {
+  const result = parseTargetString(path);
+  if ("error" in result) {
+    throw new Error(result.error);
+  }
+  return result;
 }
 
 function extractRunArguments(input: unknown): Record<string, any> {
@@ -398,7 +453,12 @@ function flattenTools(
     handler?: any;
     description: string;
     inputSchema?: JSONSchema;
-    internal?: { kind: ToolKind; path: string[]; charmName: string };
+    internal?: {
+      kind: ToolKind;
+      path: string[];
+      charmName: string;
+      handle?: string;
+    };
   }
 > {
   const flattened: Record<string, any> = {};
@@ -414,25 +474,30 @@ function flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  if (charms.length > 0) {
-    const names = charms.map((entry) => entry.charmName);
-    const list = names.join(", ");
-    const availability = list
-      ? `Available charms: ${list}.`
-      : "No charms attached.";
+  // Always add read/run tools since they work with ANY valid handle, not just attachments
+  const handleList = charms.length > 0
+    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
+    : "";
+  const availability = handleList
+    ? `Attached charms: ${handleList}.`
+    : "No charms currently attached, but you can still read/run any valid handle.";
 
-    flattened[READ_TOOL_NAME] = {
-      description:
-        "Read data from an attached charm using a target path like " +
-        '"Charm/result/path". ' + availability,
-      inputSchema: READ_INPUT_SCHEMA,
-    };
-    flattened[RUN_TOOL_NAME] = {
-      description:
-        "Invoke a handler on an attached charm. Provide the target " +
-        'path like "Charm/handlers/doThing" plus args if required. ' +
-        availability,
-      inputSchema: RUN_INPUT_SCHEMA,
+  flattened[READ_TOOL_NAME] = {
+    description: "Read data from ANY charm using a handle path like " +
+      '"of:bafyabc123/result/path". ' + availability,
+    inputSchema: READ_INPUT_SCHEMA,
+  };
+  flattened[RUN_TOOL_NAME] = {
+    description: "Invoke a handler on ANY charm. Provide the handle " +
+      'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
+      availability,
+    inputSchema: RUN_INPUT_SCHEMA,
+  };
+
+  if (charms.length > 0) {
+    flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
+      description: "List all attached charms with their handles and names.",
+      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
     };
     // flattened[SCHEMA_TOOL_NAME] = {
     //   description:
@@ -445,6 +510,57 @@ function flattenTools(
   return flattened;
 }
 
+/**
+ * Compare two flattened tool objects to detect changes.
+ * Uses a heuristic approach that compares only serializable properties
+ * (description, inputSchema, internal) and excludes handler which may have
+ * circular references.
+ */
+function toolsHaveChanged(
+  newTools: Record<string, any>,
+  oldTools: Record<string, any> | undefined,
+): boolean {
+  if (!oldTools) return true;
+
+  const newKeys = Object.keys(newTools).sort();
+  const oldKeys = Object.keys(oldTools).sort();
+
+  // Check if the set of tools changed
+  if (newKeys.length !== oldKeys.length) return true;
+  if (newKeys.some((key, i) => key !== oldKeys[i])) return true;
+
+  // Check if any tool's serializable properties changed
+  for (const key of newKeys) {
+    const newTool = newTools[key];
+    const oldTool = oldTools[key];
+
+    // Compare description
+    if (newTool.description !== oldTool.description) return true;
+
+    // Compare inputSchema (safe to stringify as it's a JSON Schema)
+    try {
+      const newSchema = JSON.stringify(newTool.inputSchema);
+      const oldSchema = JSON.stringify(oldTool.inputSchema);
+      if (newSchema !== oldSchema) return true;
+    } catch {
+      // If schema has circular refs (unlikely), consider it changed
+      return true;
+    }
+
+    // Compare internal metadata
+    try {
+      const newInternal = JSON.stringify(newTool.internal);
+      const oldInternal = JSON.stringify(oldTool.internal);
+      if (newInternal !== oldInternal) return true;
+    } catch {
+      // If internal has circular refs (unlikely), consider it changed
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function buildToolCatalog(
   _runtime: IRuntime,
   toolsCell: Cell<any>,
@@ -452,8 +568,12 @@ function buildToolCatalog(
   const { legacy, charms } = collectToolEntries(toolsCell);
 
   const llmTools: ToolCatalog["llmTools"] = {};
-  const legacyToolCells = new Map<string, Cell<Schema<typeof LLMToolSchema>>>();
+  const dynamicToolCells = new Map<
+    string,
+    Cell<Schema<typeof LLMToolSchema>>
+  >();
   const charmMap = new Map<string, Cell<any>>();
+  const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
   for (const entry of legacy) {
     const toolValue: any = entry.tool ?? {};
@@ -466,34 +586,47 @@ function buildToolCatalog(
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
     llmTools[entry.name] = { description, inputSchema };
-    legacyToolCells.set(entry.name, entry.cell);
+    dynamicToolCells.set(entry.name, entry.cell);
   }
 
-  const charmNames: string[] = [];
   for (const entry of charms) {
     charmMap.set(entry.charmName, entry.charm);
-    charmNames.push(entry.charmName);
+    handleMap.set(entry.handle, {
+      charm: entry.charm,
+      charmName: entry.charmName,
+    });
   }
 
-  if (charmNames.length > 0) {
-    const list = charmNames.join(", ");
-    const availability = list
-      ? `Available charms: ${list}.`
-      : "No charms attached.";
+  // Always add read/run tools since they work with ANY valid handle
+  const handleList = charms.length > 0
+    ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
+    : "";
+  const availability = handleList
+    ? `Attached charms: ${handleList}.`
+    : "No charms currently attached, but you can still read/run any valid handle.";
 
-    llmTools[READ_TOOL_NAME] = {
-      description: "Read data from an attached charm using a path like " +
-        '"Charm/result/path". Charm schemas are provided in the system prompt. ' +
-        availability,
-      inputSchema: READ_INPUT_SCHEMA,
-    };
-    llmTools[RUN_TOOL_NAME] = {
-      description:
-        "Run a handler on an attached charm. Provide the path like " +
-        '"Charm/handlers/doThing" and optionally args. Charm schemas are ' +
-        "provided in the system prompt. " + availability,
-      inputSchema: RUN_INPUT_SCHEMA,
-    };
+  llmTools[READ_TOOL_NAME] = {
+    description: "Read data from ANY charm using a handle path like " +
+      '"of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
+      availability,
+    inputSchema: READ_INPUT_SCHEMA,
+  };
+  llmTools[RUN_TOOL_NAME] = {
+    description: "Run a handler on ANY charm. Provide the handle path like " +
+      '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
+      availability,
+    inputSchema: RUN_INPUT_SCHEMA,
+  };
+  llmTools[NAVIGATE_TO_TOOL_NAME] = {
+    description:
+      "Navigate to ANY charm or path. Provide the handle path like " +
+      '"of:bafyabc123" or "of:bafyabc123/result". Works with any valid handle. ' +
+      availability,
+    inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
+  };
+
+  // Schema and listAttachments only work with attached charms
+  if (charms.length > 0) {
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
         "Return the JSON schema for an attached charm to discover its " +
@@ -501,9 +634,16 @@ function buildToolCatalog(
         "prompt for convenience. " + availability,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
+    llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
+      description:
+        "List all attached charms with their handles and human-readable names. " +
+        "Use this to discover which charms are available and their handles for " +
+        "use with read() and run().",
+      inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+    };
   }
 
-  return { llmTools, legacyToolCells, charmMap };
+  return { llmTools, dynamicToolCells, charmMap, handleMap };
 }
 
 /**
@@ -513,25 +653,28 @@ function buildToolCatalog(
  */
 async function buildCharmSchemasDocumentation(
   runtime: IRuntime,
-  charmMap: Map<string, Cell<any>>,
+  handleMap: Map<string, { charm: Cell<any>; charmName: string }>,
 ): Promise<string> {
-  if (charmMap.size === 0) {
+  if (handleMap.size === 0) {
     return "";
   }
 
   const schemaEntries: string[] = [];
 
-  for (const [charmName, charm] of charmMap.entries()) {
+  for (const [handle, { charm, charmName }] of handleMap.entries()) {
     try {
       const schema = await getCharmResultSchemaAsync(runtime, charm);
       if (schema) {
         const schemaJson = JSON.stringify(schema, null, 2);
         schemaEntries.push(
-          `## ${charmName}\n\`\`\`json\n${schemaJson}\n\`\`\``,
+          `## ${charmName} (${handle})\n\`\`\`json\n${schemaJson}\n\`\`\``,
         );
       }
     } catch (e) {
-      logger.warn(`Failed to get schema for charm ${charmName}:`, e);
+      logger.warn(
+        `Failed to get schema for charm ${charmName} (${handle}):`,
+        e,
+      );
     }
   }
 
@@ -539,44 +682,72 @@ async function buildCharmSchemasDocumentation(
     return "";
   }
 
-  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and available via read() and run() tools:\n\n${
+  return `\n\n# Attached Charm Schemas\n\nThe following charms are attached and have schemas available. However, you can use read() and run() with ANY valid handle (of:...), not just the ones listed below.\n\n## Important: Tool Results and Links\n\nWhen you call run() or other tools (except read()), the result will be a link string in the format "of:bafyabc123/path/to/result". These links are NOT the actual values - they are references to cells containing the values.\n\nTo get the actual value from any "of:..." prefixed string, you MUST use the read() tool:\n\n1. Call a tool (e.g., run()): Result is "of:bafyabc123/result"\n2. Use read() to get the value: read({"path": "of:bafyabc123/result"})\n3. The read() result contains the actual data\n\nThis works for ANY valid handle - you can read/run handles that aren't in the attachments list below.\n\n${
     schemaEntries.join("\n\n")
   }`;
 }
 
+// Discriminated union separating external tools from built-in tools
+type ResolvedToolCall =
+  // Tools provided from outside (by the pattern calling llm-dialog)
+  | {
+    type: "external";
+    call: LLMToolCall;
+    toolDef: Cell<Schema<typeof LLMToolSchema>>;
+  }
+  // Built-in tools provided by llm-dialog itself
+  | { type: "listAttachments"; call: LLMToolCall }
+  | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
+  | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
+  | {
+    type: "run";
+    call: LLMToolCall;
+    // Implementation details for how to invoke the target
+    pattern?: Readonly<Recipe>;
+    handler?: Stream<any>;
+    extraParams?: Record<string, unknown>;
+    charm?: Cell<any>;
+  };
+
 function resolveToolCall(
   runtime: IRuntime,
+  space: MemorySpace,
   toolCallPart: BuiltInLLMToolCallPart,
   catalog: ToolCatalog,
-): {
-  call: LLMToolCall;
-  toolDef?: Cell<Schema<typeof LLMToolSchema>>;
-  charmMeta?: {
-    handler?: any;
-    charm: Cell<any>;
-    extraParams?: Record<string, unknown>;
-    pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema";
-    targetSegments?: string[];
-  };
-} {
+): ResolvedToolCall {
   const name = toolCallPart.toolName;
   const id = toolCallPart.toolCallId;
-  const legacyTool = catalog.legacyToolCells.get(name);
-  if (legacyTool) {
+  const externalTool = catalog.dynamicToolCells.get(name);
+  if (externalTool) {
     return {
-      toolDef: legacyTool,
+      type: "external",
+      toolDef: externalTool,
       call: { id, name, input: toolCallPart.input },
     };
   }
 
   if (
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
-    name === SCHEMA_TOOL_NAME
+    name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
+    name === NAVIGATE_TO_TOOL_NAME
   ) {
-    if (catalog.charmMap.size === 0) {
+    // Schema and listAttachments require attachments, but read/run work with any handle
+    if (
+      (name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME) &&
+      catalog.handleMap.size === 0 && catalog.charmMap.size === 0
+    ) {
       throw new Error("No charm attachments available.");
     }
+
+    // Handle listAttachments
+    if (name === LIST_ATTACHMENTS_TOOL_NAME) {
+      return {
+        type: "listAttachments",
+        call: { id, name, input: {} },
+      };
+    }
+
     if (name === SCHEMA_TOOL_NAME) {
       const charmName = extractStringField(
         toolCallPart.input,
@@ -586,11 +757,12 @@ function resolveToolCall(
       const charm = catalog.charmMap.get(charmName);
       if (!charm) {
         throw new Error(
-          `Unknown charm "${charmName}". Use listAttachments for options.`,
+          `Unknown charm "${charmName}". Use listAttachments() for options.`,
         );
       }
       return {
-        charmMeta: { charm, mode: "schema" },
+        type: "schema",
+        charm,
         call: { id, name, input: { charm: charmName } },
       };
     }
@@ -598,43 +770,66 @@ function resolveToolCall(
     const target = extractStringField(
       toolCallPart.input,
       "path",
-      "Charm/path",
+      "of:bafyabc123/path",
     );
-    const { charmName, pathSegments } = parseTargetString(target);
-    const charm = catalog.charmMap.get(charmName);
-    if (!charm) {
-      throw new Error(
-        `Unknown charm "${charmName}". Use listAttachments for options.`,
-      );
-    }
-    const baseLink = charm.getAsNormalizedFullLink();
+
+    const { handle, pathSegments } = parseHandleFromPath(target);
+
+    // Build link from the handle and path segments
     const link = {
-      ...baseLink,
-      path: [
-        ...baseLink.path,
-        ...pathSegments.map((segment) => segment.toString()),
-      ],
+      id: handle as `${string}:${string}`,
+      path: pathSegments.map((segment) => segment.toString()),
+      space,
+      type: "application/json" as const,
     };
 
     if (name === READ_TOOL_NAME) {
-      const ref = runtime.getCellFromLink(link);
-      if (isStream(ref)) {
-        throw new Error('path resolves to a handler; use run("Charm/path").');
+      // Get cell reference from the link - works for any valid handle
+      const cellRef = runtime.getCellFromLink(link);
+      if (!cellRef) {
+        throw new Error(
+          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+        );
       }
+      if (isStream(cellRef)) {
+        throw new Error(`Path resolves to a handler; use run("${target}").`);
+      }
+
       return {
-        charmMeta: {
-          charm,
-          mode: "read",
-          targetSegments: pathSegments,
-        },
+        type: "read",
+        cellRef,
         call: { id, name, input: { path: target } },
       };
     }
 
-    const ref: Cell<any> = runtime.getCellFromLink(link);
-    if (isStream(ref)) {
+    if (name === NAVIGATE_TO_TOOL_NAME) {
+      // Get cell reference from the link - works for any valid handle
+      const cellRef = runtime.getCellFromLink(link);
+      if (!cellRef) {
+        throw new Error(
+          `Could not resolve handle "${handle}" to a cell. The handle may not exist in this space.`,
+        );
+      }
+
       return {
-        charmMeta: { handler: ref as any, charm, mode: "run" },
+        type: "navigateTo",
+        cellRef,
+        call: { id, name, input: { path: target } },
+      };
+    }
+
+    // For run(), resolve the cell and check if it's a handler or pattern
+    const cellRef: Cell<any> = runtime.getCellFromLink(link);
+
+    // Get optional charm metadata for validation (only used for handlers)
+    const charmEntry = catalog.handleMap.get(handle);
+    const charm = charmEntry?.charm;
+
+    if (isStream(cellRef)) {
+      return {
+        type: "run",
+        handler: cellRef as any,
+        charm,
         call: {
           id,
           name,
@@ -643,16 +838,14 @@ function resolveToolCall(
       };
     }
 
-    const pattern = (ref as Cell<any>).key("pattern")
+    const pattern = (cellRef as Cell<any>).key("pattern")
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
-        charmMeta: {
-          pattern,
-          extraParams: (ref as Cell<any>).key("extraParams").get() ?? {},
-          charm,
-          mode: "run",
-        },
+        type: "run",
+        pattern,
+        extraParams: (cellRef as Cell<any>).key("extraParams").get() ?? {},
+        charm,
         call: {
           id,
           name,
@@ -743,13 +936,12 @@ async function executeToolCalls(
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
-      const resolved = resolveToolCall(runtime, part, toolCatalog);
+      const resolved = resolveToolCall(runtime, space, part, toolCatalog);
       const resultValue = await invokeToolCall(
         runtime,
         space,
-        resolved.toolDef,
-        resolved.call,
-        resolved.charmMeta,
+        resolved,
+        toolCatalog,
       );
       results.push({
         id: part.toolCallId,
@@ -886,64 +1078,131 @@ async function ensureSourceCharmRunning(
 }
 
 /**
- * Executes a tool call by invoking its handler function and returning the
- * result. Creates a new transaction, sends the tool call arguments to the
- * handler, and waits for the result to be available before returning it.
- *
- * @param runtime - The runtime instance for creating transactions and cells
- * @param parentCell - The parent cell context for the tool execution
- * @param toolDef - Cell containing the tool definition with handler
- * @param toolCall - The LLM tool call containing id, name, and arguments
- * @param charmHandler - Optional handler for charm-extracted tools
- * @returns Promise that resolves to the tool execution result
+ * Handles the listAttachments tool call.
  */
-async function invokeToolCall(
+function handleListAttachments(
+  catalog?: ToolCatalog,
+): { type: string; value: any } {
+  if (!catalog?.handleMap) {
+    return { type: "json", value: [] };
+  }
+  const attachments = Array.from(catalog.handleMap.entries()).map(
+    ([handle, { charmName }]) => ({ handle, name: charmName }),
+  );
+  return { type: "json", value: attachments };
+}
+
+/**
+ * Handles the schema tool call.
+ */
+async function handleSchema(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "schema" },
+): Promise<{ type: string; value: any }> {
+  const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
+    {};
+  const value = JSON.parse(JSON.stringify(schema ?? {}));
+  return { type: "json", value };
+}
+
+/**
+ * Handles the read tool call.
+ */
+function handleRead(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "read" },
+): { type: string; value: any } {
+  // The cellRef already points to the full path from the link resolution
+  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
+
+  // Resolve any intermediate links and get the final cell
+  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
+  const resolvedCell = runtime.getCellFromLink(resolvedLink);
+  const realized = resolvedCell.get();
+
+  // Handle undefined values gracefully - return null for undefined/null
+  const value = realized === undefined || realized === null
+    ? null
+    : JSON.parse(JSON.stringify(realized));
+
+  return { type: "json", value };
+}
+
+/**
+ * Handles the navigateTo tool call.
+ */
+function handleNavigateTo(
+  runtime: IRuntime,
+  _space: MemorySpace,
+  resolved: ResolvedToolCall & { type: "navigateTo" },
+): { type: string; value: any } {
+  // The cellRef already points to the full path from the link resolution
+  const cellLink = resolved.cellRef.getAsNormalizedFullLink();
+
+  // Resolve any intermediate links and get the final cell
+  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
+  const resolvedCell = runtime.getCellFromLink(resolvedLink);
+
+  // Call the navigateTo builtin with the resolved cell
+  runtime.editWithRetry((tx) => {
+    const action = navigateTo(
+      resolvedCell,
+      () => {},
+      () => {},
+      [],
+      resolvedCell,
+      runtime,
+    );
+    action(tx);
+  });
+
+  // Return null since navigation is a side effect, not a value
+  return { type: "json", value: null };
+}
+
+/**
+ * Handles the run tool call (both pattern and handler execution).
+ */
+async function handleRun(
   runtime: IRuntime,
   space: MemorySpace,
-  toolDef: Cell<Schema<typeof LLMToolSchema>> | undefined,
-  toolCall: LLMToolCall,
-  charmMeta?: {
-    handler?: any;
-    charm: Cell<any>;
-    extraParams?: Record<string, unknown>;
-    pattern?: Readonly<Recipe>;
-    mode: "read" | "run" | "schema";
-    targetSegments?: string[];
-  },
-) {
-  if (charmMeta?.mode === "schema") {
-    const schema = await getCharmResultSchemaAsync(runtime, charmMeta.charm) ??
-      {};
-    const value = JSON.parse(JSON.stringify(schema ?? {}));
-    return { type: "json", value };
-  }
+  resolved: ResolvedToolCall,
+): Promise<{ type: string; value: any }> {
+  const toolCall = resolved.call;
 
-  if (charmMeta?.mode === "read") {
-    const segments = charmMeta.targetSegments ?? [];
-    const realized = charmMeta.charm.getAsQueryResult(segments);
-    const value = JSON.parse(JSON.stringify(realized));
-    return { type: "json", value };
-  }
+  // Extract pattern/handler/params based on the resolved type
+  let pattern: Readonly<Recipe> | undefined;
+  let extraParams: Record<string, unknown> = {};
+  let handler: any;
+  let charm: Cell<any> | undefined;
 
-  const pattern = charmMeta?.pattern ??
-    toolDef?.key("pattern").getRaw() as unknown as
+  if (resolved.type === "external") {
+    pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
       | Readonly<Recipe>
       | undefined;
-  const extraParams = charmMeta?.extraParams ??
-    toolDef?.key("extraParams").get() ??
-    {};
-  const handler = charmMeta?.handler ?? toolDef?.key("handler");
-  // FIXME(bf): in practice, toolCall has toolCall.toolCallId not .id
-  const result = runtime.getCell<any>(space, toolCall.id);
+    extraParams = resolved.toolDef.key("extraParams").get() ?? {};
+    handler = resolved.toolDef.key("handler");
+  } else if (resolved.type === "run") {
+    pattern = resolved.pattern;
+    extraParams = resolved.extraParams ?? {};
+    handler = resolved.handler;
+    charm = resolved.charm;
+  }
 
-  // ensure the charm this handler originates from is actually running
-  if (handler && !pattern && charmMeta) {
-    await ensureSourceCharmRunning(runtime, charmMeta);
+  // Ensure the charm this handler originates from is actually running
+  if (handler && !pattern && charm) {
+    await ensureSourceCharmRunning(runtime, { handler, charm });
   }
 
   const { resolve, promise } = Promise.withResolvers<any>();
 
+  // Create result cell reference that will be set in the transaction
+  let result: Cell<any> = null as any;
+
   runtime.editWithRetry((tx) => {
+    // Create the result cell within the transaction context
+    result = runtime.getCell<any>(space, toolCall.id, undefined, tx);
+
     if (pattern) {
       runtime.run(tx, pattern, { ...toolCall.input, ...extraParams }, result);
     } else if (handler) {
@@ -951,11 +1210,8 @@ async function invokeToolCall(
         ...toolCall.input,
         result, // doesn't HAVE to be used, but can be
       }, (completedTx: IExtendedStorageTransaction) => {
-        logger.info("Handler tx:", debugTransactionWrites(completedTx));
-
         const summary = formatTransactionSummary(completedTx, space);
-        const value = result.withTx(completedTx).get();
-
+        const value = result.withTx(completedTx);
         resolve({ value, summary });
       });
     } else {
@@ -963,25 +1219,71 @@ async function invokeToolCall(
     }
   });
 
-  // wait until we know we have the result of the tool call
-  // not just that the transaction has been comitted
+  // Wait for the pattern/handler to complete and write the result
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  let resultValue = await promise;
+  await promise;
   cancel();
 
+  // Get the actual entity ID from the result cell
+  const resultLink = result.getAsNormalizedFullLink();
+  const resultValue = result.get();
+
+  // Patterns always write to the result cell, so always return the link
   if (pattern) {
-    // stop it now that we have the result
-    runtime.runner.stop(result);
-  } else {
-    await runtime.idle(); // maybe pointless
+    return { type: "json", value: resultLink.id };
   }
 
-  // Prevent links being returned
-  resultValue = JSON.parse(JSON.stringify(resultValue ?? "OK"));
+  // Handlers may or may not write to the result cell
+  // Only return a link if the handler actually wrote something
+  if (handler) {
+    if (resultValue !== undefined && resultValue !== null) {
+      return { type: "json", value: resultLink.id };
+    }
+    // Handler didn't write anything, return null
+    return { type: "json", value: null };
+  }
 
-  return { type: "json", value: resultValue };
+  throw new Error("Tool has neither pattern nor handler");
+}
+
+/**
+ * Executes a tool call by invoking its handler function and returning the
+ * result. Creates a new transaction, sends the tool call arguments to the
+ * handler, and waits for the result to be available before returning it.
+ *
+ * @param runtime - The runtime instance for creating transactions and cells
+ * @param space - The memory space for the tool execution
+ * @param resolved - The resolved tool call containing type and metadata
+ * @param catalog - Optional tool catalog for lookups
+ * @returns Promise that resolves to the tool execution result
+ */
+async function invokeToolCall(
+  runtime: IRuntime,
+  space: MemorySpace,
+  resolved: ResolvedToolCall,
+  catalog?: ToolCatalog,
+) {
+  // Handle simple query tools
+  if (resolved.type === "listAttachments") {
+    return await handleListAttachments(catalog);
+  }
+
+  if (resolved.type === "schema") {
+    return await handleSchema(runtime, resolved);
+  }
+
+  if (resolved.type === "read") {
+    return await handleRead(runtime, resolved);
+  }
+
+  if (resolved.type === "navigateTo") {
+    return handleNavigateTo(runtime, space, resolved);
+  }
+
+  // Handle run-type tools (external, run with pattern/handler)
+  return await handleRun(runtime, space, resolved);
 }
 
 /**
@@ -1169,10 +1471,9 @@ export function llmDialog(
 
     // Only write if changed to avoid concurrent write conflicts
     const currentFlattened = result.withTx(tx).key("flattenedTools").get();
-    const flattenedStr = JSON.stringify(flattened);
-    const currentStr = JSON.stringify(currentFlattened);
+    const hasChanged = toolsHaveChanged(flattened, currentFlattened);
 
-    if (flattenedStr !== currentStr) {
+    if (hasChanged) {
       result.withTx(tx).key("flattenedTools").set(flattened as any);
     }
 
@@ -1211,7 +1512,7 @@ async function startRequest(
   // Build charm schemas documentation and append to system prompt
   const charmSchemasDocs = await buildCharmSchemasDocumentation(
     runtime,
-    toolCatalog.charmMap,
+    toolCatalog.handleMap,
   );
   const augmentedSystem = (system ?? "") + charmSchemasDocs;
 

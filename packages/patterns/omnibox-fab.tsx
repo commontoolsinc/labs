@@ -9,6 +9,7 @@ import {
   ifElse,
   NAME,
   navigateTo,
+  pattern,
   recipe,
   UI,
 } from "commontools";
@@ -39,7 +40,7 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const fetchAndRunPattern = handler<
+const _fetchAndRunAndNavigateToPattern = handler<
   { url: string },
   { mentionable: Cell<MentionableCharm[]> }
 >(({ url }, { mentionable: _mentionable }) => {
@@ -55,6 +56,21 @@ const fetchAndRunPattern = handler<
     compileAndRun(compileParams);
 
   return navigateTo(result);
+});
+
+const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
+  const { pending: _fetchPending, result: program, error: _fetchError } =
+    fetchProgram({ url });
+
+  const compileParams = derive(program, (p) => ({
+    files: p?.files ?? [],
+    main: p?.main ?? "",
+    input: { value: 10 },
+  }));
+  const { pending: _compilePending, result, error: _compileError } =
+    compileAndRun(compileParams);
+
+  return result;
 });
 
 export default recipe<OmniboxFABInput>(
@@ -75,7 +91,7 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description: "Fetch a pattern from the URL, compile it and run it.",
-          handler: fetchAndRunPattern({ mentionable }),
+          pattern: fetchAndRunPattern,
         },
         createLink: {
           description:
