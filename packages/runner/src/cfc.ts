@@ -590,15 +590,17 @@ export class ContextualFlowControl {
         } else { // no additionalProperties field is the same as having one that is true
           cursor = true;
         }
-      } else if (cursor.type === "array" && cursor.items) {
+      } else if (cursor.type === "array") {
         const numericKeyValue = new Number(part).valueOf();
         if (Number.isInteger(numericKeyValue) && numericKeyValue >= 0) {
           if (
             cursor.prefixItems && numericKeyValue < cursor.prefixItems.length
           ) {
             cursor = cursor.prefixItems[numericKeyValue];
-          } else {
+          } else if (cursor.items) {
             cursor = cursor.items;
+          } else { // default is true
+            cursor = true;
           }
         } else {
           return false;
