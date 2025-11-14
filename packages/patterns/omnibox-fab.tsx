@@ -40,7 +40,7 @@ const dismissPeek = handler<
   peekDismissedIndex.set(assistantMessageCount);
 });
 
-const fetchAndRunAndNavigateToPattern = handler<
+const _fetchAndRunAndNavigateToPattern = handler<
   { url: string },
   { mentionable: Cell<MentionableCharm[]> }
 >(({ url }, { mentionable: _mentionable }) => {
