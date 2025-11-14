@@ -23,10 +23,12 @@ export default recipe("ElementAccessBothOpaque", (_state) => {
                 }
             },
             required: ["items", "index"]
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
             items: items,
             index: index
-        }, ({ items, index }) => items[index])}</p>
+        }, ({ items, index }) => items.get()[index.get()])}</p>
       </div>),
     };
 });
@@ -34,3 +36,4 @@ export default recipe("ElementAccessBothOpaque", (_state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

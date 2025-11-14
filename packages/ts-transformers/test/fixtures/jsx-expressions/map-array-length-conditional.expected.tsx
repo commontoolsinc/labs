@@ -121,7 +121,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.length > 0 && (<div>
+        } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0 && (<div>
             {list.map((name) => (<span>{name}</span>))}
           </div>))}
       </div>),
@@ -131,3 +131,4 @@ export default recipe("MapArrayLengthConditional", (_state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

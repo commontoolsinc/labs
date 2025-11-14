@@ -10,7 +10,7 @@ export default recipe("ElementAccessBothOpaque", (_state) => {
       <div>
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
-        <p>Selected item: {items[index]}</p>
+        <p>Selected item: {items.get()[index.get()]}</p>
       </div>
     ),
   };

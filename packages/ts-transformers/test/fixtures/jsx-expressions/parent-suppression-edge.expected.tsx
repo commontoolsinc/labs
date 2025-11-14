@@ -327,7 +327,44 @@ export default recipe({
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__ctHelpers.derive({ state: {
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        location: {
+                                            type: "string",
+                                            asOpaque: true
+                                        },
+                                        bio: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["location", "bio"]
+                                }
+                            },
+                            required: ["name", "profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name,
                     profile: {
@@ -341,12 +378,58 @@ export default recipe({
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__ctHelpers.derive({ state: {
+          Age calculation: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.user.age
                 }
             } }, ({ state }) => state.user.age * 12)} months, or{" "}
-          {__ctHelpers.derive({ state: {
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     age: state.user.age
                 }
@@ -415,7 +498,40 @@ export default recipe({
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({ state: {
+          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                settings: {
+                                    type: "object",
+                                    properties: {
+                                        theme: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["theme"]
+                                }
+                            },
+                            required: ["name", "settings"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name,
                     settings: {
@@ -423,7 +539,30 @@ export default recipe({
                     }
                 }
             } }, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme + " theme"), __ctHelpers.derive({ state: {
+            state.user.settings.theme + " theme"), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name
                 }
@@ -432,7 +571,50 @@ export default recipe({
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__ctHelpers.derive({ state: {
+          Spacing calc: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        spacing: {
+                                            type: "object",
+                                            properties: {
+                                                small: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                },
+                                                medium: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                },
+                                                large: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                }
+                                            },
+                                            required: ["small", "medium", "large"]
+                                        }
+                                    },
+                                    required: ["spacing"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
                         spacing: {
@@ -450,7 +632,62 @@ export default recipe({
         {/* Boolean expressions with multiple properties */}
         <p>
           Features:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+          {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                features: {
+                                    type: "object",
+                                    properties: {
+                                        darkMode: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        },
+                                        animations: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        }
+                                    },
+                                    required: ["darkMode", "animations"]
+                                }
+                            },
+                            required: ["features"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "boolean",
+                    enum: [false],
+                    asOpaque: true
+                }, {
+                    type: "boolean",
+                    enum: [true],
+                    asOpaque: true
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
                         darkMode: state.config.features.darkMode,
@@ -463,12 +700,58 @@ export default recipe({
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__ctHelpers.derive({ state: {
+          Formatted: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     name: state.user.name
                 }
             } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
-          {__ctHelpers.derive({ state: {
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                email: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["email"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     email: state.user.email
                 }
@@ -515,3 +798,4 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

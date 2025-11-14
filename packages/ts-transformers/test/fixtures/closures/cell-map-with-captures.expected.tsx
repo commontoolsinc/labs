@@ -48,6 +48,27 @@ export default recipe({
                 },
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element: value, params: { state } }) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    value: {
+                        type: "number",
+                        asOpaque: true
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["multiplier"]
+                    }
+                },
+                required: ["value", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 value: value,
                 state: {
                     multiplier: state.multiplier
