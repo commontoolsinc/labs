@@ -178,7 +178,7 @@ function parseLLMFriendlyLink(
 
   if (!matchLLMFriendlyLink.test(target)) {
     throw new Error(
-      'Target must include a charm handle, e.g. "of:bafyabc123/path".',
+      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
     );
   }
 
@@ -192,11 +192,11 @@ function parseLLMFriendlyLink(
   //
   // CIDs are long encoded strings (typically 40+ chars), whereas human names
   // are short. Use a conservative threshold to distinguish handles from
-  // human-readable names Handle format is "of:..." (the internal storage
+  // human-readable names Handle format is "/of:..." (the internal storage
   // format)
   if (id === undefined || id.length < 20) {
     throw new Error(
-      `Charm references must use handles (e.g., "of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
+      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
     );
   }
 
@@ -377,7 +377,7 @@ type CharmToolEntry = {
   name: string;
   charm: Cell<any>;
   charmName: string;
-  handle: string; // e.g., "of:bafyabc123"
+  handle: string; // e.g., "/of:bafyabc123"
 };
 
 type ToolCatalog = {
@@ -402,7 +402,7 @@ function collectToolEntries(
 
       // Extract handle from link
       const link = charm.getAsNormalizedFullLink();
-      const handle = link.id; // Keep the "of:..." format as the internal handle
+      const handle = link.id; // Keep the "/of:..." format as the internal handle
 
       charms.push({ name, charm, charmName, handle });
       continue;
@@ -432,7 +432,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path in the form handle/child/grandchild (e.g., of:bafyabc123/result/content).",
+        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/result/content).",
     },
   },
   required: ["path"],
@@ -445,7 +445,7 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target handler path in the form handle/handler/path (e.g., of:bafyabc123/handlers/doThing).",
+        "Target handler path in the form handle/handler/path (e.g., /of:bafyabc123/handlers/doThing).",
     },
     args: {
       type: "object",
@@ -480,7 +480,7 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path to navigate to in the form handle/path (e.g., of:bafyabc123/result).",
+        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123/result).",
     },
   },
   required: ["path"],
@@ -579,12 +579,12 @@ function flattenTools(
 
   flattened[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"of:bafyabc123/result/path". ' + availability,
+      '"/of:bafyabc123/result/path". ' + availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[RUN_TOOL_NAME] = {
     description: "Invoke a handler on ANY charm. Provide the handle " +
-      'path like "of:bafyabc123/handlers/doThing" plus args if required. ' +
+      'path like "/of:bafyabc123/handlers/doThing" plus args if required. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
@@ -702,20 +702,20 @@ function buildToolCatalog(
 
   llmTools[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
+      '"/of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
       availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   llmTools[RUN_TOOL_NAME] = {
     description: "Run a handler on ANY charm. Provide the handle path like " +
-      '"of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
+      '"/of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate to ANY charm or path. Provide the handle path like " +
-      '"of:bafyabc123" or "of:bafyabc123/result". Works with any valid handle. ' +
+      '"/of:bafyabc123" or "/of:bafyabc123/result". Works with any valid handle. ' +
       availability,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
@@ -847,7 +847,7 @@ function resolveToolCall(
       const charmName = extractStringField(
         toolCallPart.input,
         "path",
-        "of:bafyabc123/path",
+        "/of:bafyabc123/path",
       );
       const charm = catalog.charmMap.get(charmName);
       if (!charm) {
@@ -865,7 +865,7 @@ function resolveToolCall(
     const target = extractStringField(
       toolCallPart.input,
       "path",
-      "of:bafyabc123/path",
+      "/of:bafyabc123/path",
     );
 
     const link = parseLLMFriendlyLink(target, space);
