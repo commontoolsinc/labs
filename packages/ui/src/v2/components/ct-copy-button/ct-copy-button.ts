@@ -1,5 +1,6 @@
 import { html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { isCell, type Cell } from "@commontools/runner";
 
 /**
  * CTCopyButton - Copy to clipboard button with automatic visual feedback
@@ -56,12 +57,16 @@ export class CTCopyButton extends BaseElement {
     iconOnly: { type: Boolean, attribute: "icon-only", reflect: true },
   };
 
-  declare text: string;
+  declare text: string | Cell<string>;
   declare variant?: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill";
   declare size?: "default" | "sm" | "lg" | "icon" | "md";
   declare disabled: boolean;
   declare feedbackDuration: number;
   declare iconOnly: boolean;
+
+  private _getTextValue(): string {
+    return isCell(this.text) ? this.text.get() : this.text;
+  }
 
   private _copied = false;
   private _resetTimeout?: number;
@@ -80,17 +85,18 @@ export class CTCopyButton extends BaseElement {
     e.preventDefault();
     e.stopPropagation();
 
-    if (this.disabled || !this.text) return;
+    const textValue = this._getTextValue();
+    if (this.disabled || !textValue) return;
 
     try {
-      await navigator.clipboard.writeText(this.text);
+      await navigator.clipboard.writeText(textValue);
 
       this._copied = true;
       this.requestUpdate();
 
       this.emit("ct-copy-success", {
-        text: this.text,
-        length: this.text.length,
+        text: textValue,
+        length: textValue.length,
       });
 
       // Reset copied state after duration
@@ -104,7 +110,7 @@ export class CTCopyButton extends BaseElement {
     } catch (error) {
       this.emit("ct-copy-error", {
         error: error as Error,
-        text: this.text,
+        text: textValue,
       });
     }
   }
