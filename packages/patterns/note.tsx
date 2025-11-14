@@ -1,6 +1,6 @@
 /// <cts-enable />
 import {
-  type Cell,
+  Cell,
   cell,
   type Default,
   derive,
@@ -17,8 +17,8 @@ import {
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
 type Input = {
-  title: Default<string, "Untitled Note">;
-  content: Default<string, "">;
+  title?: Cell<Default<string, "Untitled Note">>;
+  content?: Cell<Default<string, "">>;
 };
 
 type Output = {

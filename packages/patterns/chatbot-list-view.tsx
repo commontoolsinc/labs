@@ -30,9 +30,9 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   theme?: {
-    accentColor: Default<string, "#3b82f6">;
-    fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
-    borderRadius: Default<string, "0.5rem">;
+    accentColor: Cell<Default<string, "#3b82f6">>;
+    fontFace: Cell<Default<string, "system-ui, -apple-system, sans-serif">>;
+    borderRadius: Cell<Default<string, "0.5rem">>;
   };
 };
 

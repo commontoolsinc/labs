@@ -1,13 +1,13 @@
 /// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, recipe, UI } from "commontools";
 
 interface Item {
   title: string;
 }
 
 interface ListInput {
-  title: Default<string, "My List">;
-  items: Default<Item[], []>;
+  title: Cell<Default<string, "My List">>;
+  items: Cell<Default<Item[], []>>;
 }
 
 interface ListOutput extends ListInput {}

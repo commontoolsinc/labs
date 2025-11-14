@@ -2,7 +2,7 @@
 
 - [x] Disable ShadowRef/unsafe_ and see what breaks, ideally remove it (will
   merge later as it'll break a few patterns)
-- [ ] Update Cell API types to already unify them
+- [x] Update Cell API types to already unify them
   - [x] Create an `BrandedCell<>` type with a symbol based brand, with the value
     be `string`
   - [x] Factor out parts of the cell interfaces along reading, writing, .send
@@ -19,9 +19,9 @@
   - [ ] Simplify most wrap/unwrap types to use `CellLike`. We need
     - [x] "Accept any T where any sub part of T can be wrapped in one or more
       `BrandedCell`" (for inputs to node factories)
-    - [ ] "Strip any `BrandedCell` from T and then wrap it in OpaqueRef<>" (for
+    - [x] "Strip any `BrandedCell` from T and then wrap it in OpaqueRef<>" (for
       outputs of node factories, where T is the output of the inner function)
-    - [ ] Make passing the output of the second into the first work. Tricky
+    - [x] Make passing the output of the second into the first work. Tricky
       because we're doing almost opposite expansions on the type.
 - [ ] Add ability to create a cell without a link yet.
   - [x] Merge StreamCell into RegularCell and rename RegularCell to CellImpl
