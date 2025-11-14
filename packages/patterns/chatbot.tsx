@@ -236,15 +236,14 @@ const listMentionable = handler<
     /** A cell to store the result text */
     result: Cell<string>;
   },
-  { mentionable: MentionableCharm[] }
+  { mentionable: Cell<MentionableCharm>[] }
 >(
   (args, state) => {
-    try {
-      const namesList = state.mentionable.map((charm) => charm[NAME]);
-      args.result.set(JSON.stringify(namesList));
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
+    const namesList = state.mentionable.map((charm) => ({
+      label: charm.get()[NAME],
+      cell: charm,
+    }));
+    args.result.set(JSON.stringify(namesList));
   },
 );
 
@@ -253,15 +252,14 @@ const listRecent = handler<
     /** A cell to store the result text */
     result: Cell<string>;
   },
-  { recentCharms: MentionableCharm[] }
+  { recentCharms: Cell<MentionableCharm>[] }
 >(
   (args, state) => {
-    try {
-      const namesList = state.recentCharms.map((charm) => charm[NAME]);
-      args.result.set(JSON.stringify(namesList));
-    } catch (error) {
-      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
-    }
+    const namesList = state.recentCharms.map((charm) => ({
+      label: charm.get()[NAME],
+      cell: charm,
+    }));
+    args.result.set(JSON.stringify(namesList));
   },
 );
 
@@ -328,11 +326,11 @@ export default recipe<ChatInput, ChatOutput>(
 
     const attachmentTools = {
       listMentionable: {
-        description: "List all mentionable NAMEs in the space.",
+        description: "List all mentionable items in the space, read() the result.",
         handler: listMentionable({ mentionable }),
       },
       listRecent: {
-        description: "List all recently viewed charms in the space.",
+        description: "List all recently viewed charms in the space, read() the result.",
         handler: listRecent({ recentCharms }),
       },
       addAttachment: {

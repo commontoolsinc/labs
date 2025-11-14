@@ -67,7 +67,7 @@ const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
     main: p?.main ?? "",
     input: { value: 10 },
   }));
-  const { pending: _compilePending, result, error } =
+  const { pending, result, error } =
     compileAndRun(compileParams);
 
   return ifElse(pending, undefined, { result, error });
@@ -90,7 +90,7 @@ export default recipe<OmniboxFABInput>(
           pattern: calculator,
         },
         fetchAndRunPattern: {
-          description: "Fetch a pattern from the URL, compile it and run it.",
+          description: "Fetch a pattern from the URL, compile it and run it. To read/navigate to the result, append `/result` to the returned link.",
           pattern: fetchAndRunPattern,
         },
         createLink: {
