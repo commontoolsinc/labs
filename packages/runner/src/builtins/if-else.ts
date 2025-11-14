@@ -22,9 +22,9 @@ export function ifElse(
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
 
-    const condition = inputsWithLog.key(0).get();
+    const condition = inputsWithLog.key("condition").get();
 
-    const ref = inputsWithLog.key(condition ? 1 : 2)
+    const ref = inputsWithLog.key(condition ? "ifTrue" : "ifFalse")
       .getAsLink({ base: result });
 
     // When writing links, we need to use setRaw
