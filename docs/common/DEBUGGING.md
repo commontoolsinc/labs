@@ -27,7 +27,7 @@ interface Input {
   count: number;  // Read-only!
 }
 
-export default recipe<Input>(({ count }) => {
+export default pattern<Input>(({ count }) => {
   return {
     [UI]: (
       <ct-button onClick={() => count.set(5)}>  {/* Error! */}
@@ -45,7 +45,7 @@ interface Input {
   count: Cell<number>;  // Write access
 }
 
-export default recipe<Input>(({ count }) => {
+export default pattern<Input>(({ count }) => {
   return {
     [UI]: (
       <ct-button onClick={() => count.set(5)}>  {/* Works! */}
@@ -360,7 +360,7 @@ const addItem = handler((_, { items, itemTitle }) => {
 
 **Error:** `generateText()` or `generateObject()` not available or doesn't work in handlers
 
-❌ **Problem:** Calling LLM functions outside recipe body
+❌ **Problem:** Calling LLM functions outside pattern body
 
 ```typescript
 const processItem = handler((_, { item }) => {
@@ -370,11 +370,11 @@ const processItem = handler((_, { item }) => {
 });
 ```
 
-✅ **Solution:** Call LLM functions in recipe body, use results in UI or handlers
+✅ **Solution:** Call LLM functions in pattern body, use results in UI or handlers
 
 ```typescript
-export default recipe(({ item }) => {
-  // Call generateText in recipe body
+export default pattern(({ item }) => {
+  // Call generateText in pattern body
   const llmResult = generateText({
     prompt: item.content,
   });
@@ -390,7 +390,7 @@ export default recipe(({ item }) => {
 });
 ```
 
-**Rule:** `generateText()` and `generateObject()` can only be called from recipe bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
+**Rule:** `generateText()` and `generateObject()` can only be called from pattern bodies, not handlers or `computed()`. See [LLM.md](LLM.md) for usage details.
 
 ### Using if Statements in Data Transformations
 

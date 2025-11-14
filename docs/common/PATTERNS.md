@@ -1,16 +1,16 @@
-# Common Recipe Patterns
+# Common Patterns
 
-This guide demonstrates common patterns for building recipes, organized by complexity. Each pattern builds on concepts from previous sections.
+This guide demonstrates common patterns for building patterns, organized by complexity. Each pattern builds on concepts from previous sections.
 
 ## Core Principles
 
-### ⚠️ CRITICAL: Never Directly Access Cell Data in Recipe Body
+### ⚠️ CRITICAL: Never Directly Access Cell Data in Pattern Body
 
-**You cannot read or manipulate cell data directly in the recipe body.** Always use `computed()` for data transformations.
+**You cannot read or manipulate cell data directly in the pattern body.** Always use `computed()` for data transformations.
 
 ```typescript
 // ❌ WRONG - Direct data access
-export default recipe(({ entries }) => {
+export default pattern(({ entries }) => {
   const entriesByDate = {};
   for (const entry of entries) {  // Error: "Tried to directly access an opaque value"
     entriesByDate[entry.date] = entry;
@@ -18,7 +18,7 @@ export default recipe(({ entries }) => {
 });
 
 // ✅ CORRECT - Use computed()
-export default recipe(({ entries }) => {
+export default pattern(({ entries }) => {
   const entriesByDate = computed(() => {
     const grouped = {};
     for (const entry of entries) {
@@ -29,7 +29,7 @@ export default recipe(({ entries }) => {
 });
 ```
 
-**Why?** Cell references in recipe bodies are "opaque refs" - placeholders for future values. They can't be read directly; they must be transformed through `computed()` which creates reactive computations.
+**Why?** Cell references in pattern bodies are "opaque refs" - placeholders for future values. They can't be read directly; they must be transformed through `computed()` which creates reactive computations.
 
 See [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md) for detailed explanation of opaque refs and reactivity.
 
@@ -108,7 +108,7 @@ The simplest and most common pattern: a list where users can check items and edi
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -123,8 +123,7 @@ interface ShoppingListOutput {
   items: Cell<ShoppingItem[]>;
 }
 
-export default recipe<ShoppingListInput, ShoppingListOutput>(
-  "Shopping List",
+export default pattern<ShoppingListInput, ShoppingListOutput>(
   ({ items }) => {
     return {
       [NAME]: "Shopping List",
@@ -190,7 +189,7 @@ Adding derived data transformations to create multiple views of the same data.
 
 ```typescript
 /// <cts-enable />
-import { Default, computed, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, computed, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -204,8 +203,7 @@ interface CategorizedListInput {
 
 interface CategorizedListOutput extends CategorizedListInput {}
 
-export default recipe<CategorizedListInput, CategorizedListOutput>(
-  "Shopping List (Categorized)",
+export default pattern<CategorizedListInput, CategorizedListOutput>(
   ({ items }) => {
     // Group items by category using computed
     const groupedItems = computed(() => {
@@ -260,13 +258,13 @@ export default recipe<CategorizedListInput, CategorizedListOutput>(
 
 ## Level 3: Linked Charms (Master-Detail Pattern)
 
-Two separate recipes sharing the same data through charm linking.
+Two separate patterns sharing the same data through charm linking.
 
 **Charm 1: Shopping List Editor**
 
 ```typescript
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Cell, Default, NAME, pattern, UI } from "commontools";
 
 interface ShoppingItem {
   title: string;
@@ -282,8 +280,7 @@ interface EditorOutput {
   items: Cell<ShoppingItem[]>;
 }
 
-export default recipe<EditorInput, EditorOutput>(
-  "Shopping List Editor",
+export default pattern<EditorInput, EditorOutput>(
   ({ items }) => {
     const newCategory = Cell.of("Uncategorized");
 
@@ -348,13 +345,13 @@ deno task ct charm link --identity key.json --api-url ... --space myspace \
 
 ## Level 4: Pattern Composition
 
-When you want to display multiple patterns together that share the same data **within a single recipe** (without deploying separate charms), use pattern composition.
+When you want to display multiple patterns together that share the same data **within a single pattern** (without deploying separate charms), use pattern composition.
 
 **Key Concept**: Just reference the other instances directly: {view}.
 
 ```typescript
 /// <cts-enable />
-import { recipe, UI, NAME, Default, OpaqueRef } from "commontools";
+import { pattern, UI, NAME, Default, OpaqueRef } from "commontools";
 import ShoppingList from "./shopping-list.tsx";
 import ShoppingListByCategory from "./shopping-list-by-category.tsx";
 
@@ -368,8 +365,7 @@ interface ComposedInput {
   items: Default<ShoppingItem[], []>;
 }
 
-export default recipe<ComposedInput, ComposedInput>(
-  "Shopping List - Both Views",
+export default pattern<ComposedInput, ComposedInput>(
   ({ items }) => {
     // Create pattern instances that share the same items cell
     const basicView = ShoppingList({ items });
@@ -401,7 +397,7 @@ export default recipe<ComposedInput, ComposedInput>(
 - ✅ Both patterns receive the same `items` cell reference
 - ✅ `<div>...{basicView}</div>` - note the `basicView` use
 - ✅ Changes in one view automatically update the other (they share the same cell)
-- ✅ No charm deployment needed - all composed within one recipe
+- ✅ No charm deployment needed - all composed within one pattern
 
 **When to use Pattern Composition vs Linked Charms:**
 
@@ -409,7 +405,7 @@ export default recipe<ComposedInput, ComposedInput>(
 |----------|-----|
 | Multiple views of same data in one UI | Pattern Composition (Level 4) |
 | Independent charms with data flow | Linked Charms (Level 3) |
-| Reusable components within a recipe | Pattern Composition (Level 4) |
+| Reusable components within a pattern | Pattern Composition (Level 4) |
 | Separate deployments that communicate | Linked Charms (Level 3) |
 
 ## Common Pattern: Search/Filter with Inline Logic
@@ -434,7 +430,7 @@ const searchQuery = Cell.of("");
 <ct-input $value={searchQuery} placeholder="Search..." />
 ```
 
-**Wait, this looks wrong!** The `.filter()` will execute during recipe definition, not reactively. Here's the **correct** way:
+**Wait, this looks wrong!** The `.filter()` will execute during pattern definition, not reactively. Here's the **correct** way:
 
 ```typescript
 const searchQuery = Cell.of("");
@@ -729,8 +725,7 @@ interface ShoppingItem {
   title: string;
 }
 
-export default recipe<{ items: Default<ShoppingItem[], []> }, any>(
-  "Shopping List",
+export default pattern<{ items: Default<ShoppingItem[], []> }, any>(
   ({ items }) => ({
     [NAME]: "Shopping List",
     [UI]: (
@@ -887,7 +882,7 @@ const addItem = handler<
 ### Mental Model
 
 Think of it this way:
-- **Cell<T[]>**: A box containing an array (handler params, recipe params, returns)
+- **Cell<T[]>**: A box containing an array (handler params, pattern params, returns)
 - **T[]**: The plain array inside the box (result of `.get()`)
 - **OpaqueRef<T>**: A cell-like reference to each item (in JSX `.map()`, auto-inferred!)
 
@@ -953,7 +948,7 @@ This section covers mistakes that will cost you hours of debugging. Read this be
 ❌ **WRONG - Trying to loop/transform data directly:**
 
 ```typescript
-export default recipe(({ entries }) => {
+export default pattern(({ entries }) => {
   // Error: "Tried to directly access an opaque value. Use `derive` instead"
   const grouped = {};
   for (const entry of entries) {
@@ -965,7 +960,7 @@ export default recipe(({ entries }) => {
 ✅ **CORRECT - Wrap ALL data transformations in computed():**
 
 ```typescript
-export default recipe(({ entries }) => {
+export default pattern(({ entries }) => {
   const grouped = computed(() => {
     const result = {};
     for (const entry of entries) {
@@ -976,7 +971,7 @@ export default recipe(({ entries }) => {
 });
 ```
 
-**Rule:** NEVER directly read or iterate cell data in recipe body. Always use `computed()`.
+**Rule:** NEVER directly read or iterate cell data in pattern body. Always use `computed()`.
 
 ### Pitfall 2: Creating Cells Without Cell.of()
 
@@ -1004,7 +999,7 @@ return {
 onClick={handler({ myData })}
 ```
 
-**Rule:** Use `Cell.of()` when creating NEW cells in recipe body or return values. Input cells are already cells.
+**Rule:** Use `Cell.of()` when creating NEW cells in pattern body or return values. Input cells are already cells.
 
 ### Pitfall 3: Accessing Cells in Template Strings
 
@@ -1057,7 +1052,7 @@ const generateWithSeed = () => {
 ❌ **WRONG - Mixing cells and plain values:**
 
 ```typescript
-export default recipe(({ inputData }) => {
+export default pattern(({ inputData }) => {
   return {
     [UI]: <div>...</div>,
     outputData: [],        // Plain array, not reactive!
@@ -1068,7 +1063,7 @@ export default recipe(({ inputData }) => {
 ✅ **CORRECT - Use Cell.of() for output data:**
 
 ```typescript
-export default recipe(({ inputData }) => {
+export default pattern(({ inputData }) => {
   const outputData = Cell.of<Item[]>([]);
 
   return {
@@ -1149,11 +1144,11 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 **Level 4 patterns:**
 - Pattern composition with ct-render
-- Multiple views in single recipe
+- Multiple views in single pattern
 - Shared cell references between patterns
 
 **Key principles:**
-1. Use `computed()` for ALL data transformations in recipe body
+1. Use `computed()` for ALL data transformations in pattern body
 2. Use `Cell.of()` when creating new cells
 3. Use bidirectional binding when possible
 4. Use handlers for side effects and structural changes
