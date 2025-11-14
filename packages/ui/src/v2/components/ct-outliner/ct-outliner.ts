@@ -1933,7 +1933,7 @@ export class CTOutliner extends BaseElement
                 this.mentionController.selectMention(index);
               }}"
             >
-              <div class="mention-name">${mention[NAME]}</div>
+              <div class="mention-name">${mention.get()[NAME]}</div>
             </div>
           `
         )}

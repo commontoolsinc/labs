@@ -869,22 +869,8 @@ async function buildAttachmentsSchemaDocumentation(
 
   for (const attachment of currentAttachments) {
     try {
-      // Parse the path to get handle and path segments
-      const parsed = parseTargetString(attachment.path);
-      if ("error" in parsed) {
-        logger.warn(
-          `Failed to parse attachment path ${attachment.path}: ${parsed.error}`,
-        );
-        continue;
-      }
-
-      // Build link from handle and path
-      const link = {
-        id: parsed.handle as `${string}:${string}`,
-        path: parsed.pathSegments.map((s) => s.toString()),
-        space,
-        type: "application/json" as const,
-      };
+      // Parse the path using the same parser as read/run tools
+      const link = parseLLMFriendlyLink(attachment.path, space);
 
       // Get cell from link
       const cell = runtime.getCellFromLink(link);
