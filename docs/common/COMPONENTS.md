@@ -125,7 +125,7 @@ interface ShoppingItem {
 // ❌ AVOID - Unnecessary handler for simple value update
 const toggle = handler<{detail: {checked: boolean}}, {item: Cell<Item>}>(
   ({detail}, {item}) => {
-    item.set({...item.get(), done: detail.checked});
+    item.key("done").set(detail.checked);
   }
 );
 <ct-checkbox checked={item.done} onct-change={toggle({item})} />

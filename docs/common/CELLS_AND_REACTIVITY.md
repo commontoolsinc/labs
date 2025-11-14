@@ -132,16 +132,14 @@ return {
 
 ### Cell Methods
 
-When you have `Cell<>` in your signature (write access), you can use these methods:
+When you have `Cell<>` in your signature (write access), you can use these methods in handlers or inline event handlers:
 
 ```typescript
-interface Input {
-  count: Cell<number>;
-  user: Cell<User>;
-  items: Cell<Item[]>;
-}
-
-export default recipe<Input>(({ count, user, items }) => {
+// In a handler - this is where you typically use cell methods
+const updateData = handler<
+  { detail: { value: string } },
+  { count: Cell<number>; user: Cell<User>; items: Cell<Item[]> }
+>(({ detail }, { count, user, items }) => {
   // Read current value
   const currentCount = count.get();
 
@@ -162,6 +160,14 @@ export default recipe<Input>(({ count, user, items }) => {
   items.set(items.get().filter(item => !item.done));
   items.set(items.get().toSpliced(index, 1));  // Remove at index
 });
+
+// Or in inline handlers
+<ct-button onClick={() => {
+  count.set(count.get() + 1);
+  items.push({ title: "New", done: false });
+}}>
+  Add
+</ct-button>
 ```
 
 ### Cell.equals()
