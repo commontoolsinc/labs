@@ -174,12 +174,18 @@ function parseLLMFriendlyLink(
   target: string,
   space: MemorySpace,
 ): NormalizedLink {
-  const [id, ...path] = decodeJsonPointer(target.trim());
+  target = target.trim();
 
-  if (id === undefined || !matchURI.test(id)) {
+  if (!matchLLMFriendlyLink.test(target)) {
     throw new Error(
       'Target must include a charm handle, e.g. "of:bafyabc123/path".',
     );
+  }
+
+  const [empty, id, ...path] = decodeJsonPointer(target);
+
+  if (empty !== "") {
+    throw new Error("Target must start with a slash.");
   }
 
   // Check if first segment looks like a CID/handle by length
@@ -188,7 +194,7 @@ function parseLLMFriendlyLink(
   // are short. Use a conservative threshold to distinguish handles from
   // human-readable names Handle format is "of:..." (the internal storage
   // format)
-  if (id.length < 20) {
+  if (id === undefined || id.length < 20) {
     throw new Error(
       `Charm references must use handles (e.g., "of:bafyabc123/path"), not human names (e.g., "${id}"). Use listAttachments() to see available charm handles and their names.`,
     );
@@ -203,7 +209,7 @@ function parseLLMFriendlyLink(
 }
 
 function createLLMFriendlyLink(link: NormalizedFullLink): string {
-  return encodeJsonPointer([link.id, ...link.path]);
+  return encodeJsonPointer(["", link.id, ...link.path]);
 }
 
 /**
@@ -231,7 +237,7 @@ function traverseAndSerialize(value: unknown): unknown {
   return value;
 }
 
-const matchURI = new RegExp("^[a-zA-Z0-9]+:");
+const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
 
 /**
  * Traverses a value and converts any of our LLM friendly JSON link object
@@ -252,7 +258,7 @@ function traverseAndCellify(
   // - the value of the "/" key is a string that matches the URI pattern
   if (
     isRecord(value) && typeof value["/"] === "string" &&
-    Object.keys(value).length === 1 && matchURI.test(value["/"])
+    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["/"])
   ) {
     const link = parseLLMFriendlyLink(value["/"], space);
     return runtime.getCellFromLink(link);
