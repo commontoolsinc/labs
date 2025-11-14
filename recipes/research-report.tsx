@@ -14,7 +14,6 @@ const InputSchema = {
       asCell: true,
     },
   },
-  required: ["title", "content"],
 } as const satisfies JSONSchema;
 
 const OutputSchema = InputSchema;
