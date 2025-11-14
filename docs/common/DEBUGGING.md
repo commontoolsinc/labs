@@ -219,7 +219,7 @@ const removeItem = handler<
 ```typescript
 // ❌ Unnecessary handler
 const toggle = handler(({ detail }, { item }) => {
-  item.set({ ...item.get(), done: detail.checked });
+  item.set.key("done").set(detail.checked);
 });
 <ct-checkbox checked={item.done} onct-change={toggle({ item })} />
 

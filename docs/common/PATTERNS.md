@@ -653,8 +653,9 @@ These are the most frequent mistakes developers make when building patterns:
 // ❌ AVOID - Unnecessary handler() for simple toggle
 const toggleDone = handler<unknown, { item: Cell<Item> }>(
   (_, { item }) => {
-    const current = item.get();
-    item.set({ ...current, done: !current.done });
+    const doneCell = item.key("done");
+    const current = doneCell.get();
+    doneCell.set(!current.done);
   }
 );
 <ct-checkbox checked={item.done} onct-change={toggleDone({ item })} />
@@ -666,8 +667,8 @@ const toggleDone = handler<unknown, { item: Cell<Item> }>(
 <ct-checkbox
   checked={item.done}
   onct-change={(e) => {
-    item.set({ ...item.get(), done: e.detail.checked });
-    console.log("Toggled:", item.get().title);
+    item.key("done").set(e.detail.checked);
+    console.log("Toggled:", item.key("title").get());
   }}
 />
 
@@ -688,36 +689,7 @@ const increment = handler<never, { count: Cell<number> }>(
 2. **Inline handlers** for simple operations with custom logic
 3. **`handler()`** only for complex or reusable logic
 
-#### 3. Trying to Use [ID] When You Don't Need It
-
-```typescript
-// ❌ UNNECESSARY - [ID] not needed for basic lists
-import { ID } from "commontools";
-
-interface TodoItem {
-  [ID]: number;  // Don't add this unless you actually need it
-  title: string;
-  done: boolean;
-}
-
-// ✅ CORRECT - Simple items don't need [ID]
-interface TodoItem {
-  title: string;
-  done: boolean;
-}
-```
-
-**When you DON'T need [ID]:**
-- Simple arrays of objects in your recipe
-- Items only displayed, not referenced elsewhere
-- Most basic CRUD operations
-
-**When you DO need [ID]:**
-- Creating referenceable data from within a `lift` function
-
-See RECIPES.md for detailed [ID] guidance.
-
-#### 4. Incorrect Handler Type Parameters
+#### 3. Incorrect Handler Type Parameters
 
 ```typescript
 // ❌ WRONG - OpaqueRef in handler parameters
