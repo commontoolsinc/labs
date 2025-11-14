@@ -13,7 +13,6 @@ import {
   type Recipe,
   type RecipeFactory,
   type SchemaWithoutCell,
-  type ShadowRef,
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
@@ -272,7 +271,7 @@ function factoryFromRecipe<T, R>(
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<OpaqueRef<any> | ShadowRef, PropertyKey[]>();
+  const paths = new Map<OpaqueRef<any>, PropertyKey[]>();
 
   // Add the inputs default path
   paths.set(inputs, ["argument"]);
