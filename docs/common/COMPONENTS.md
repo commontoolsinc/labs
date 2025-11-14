@@ -9,7 +9,7 @@ interface Input {
   count: Cell<number>;  // Cell<> only needed for write access
 }
 
-const MyRecipe = recipe<Input>(({ count }) => {
+const MyPattern = pattern<Input>(({ count }) => {
   return {
     [UI]: (
       <ct-button onClick={() => count.set(count.get() + 1)}>
@@ -29,7 +29,7 @@ interface ReadOnlyInput {
   count: number;  // Just display, no mutation
 }
 
-const MyRecipe = recipe<ReadOnlyInput>(({ count }) => {
+const MyPattern = pattern<ReadOnlyInput>(({ count }) => {
   return {
     [UI]: <div>Count: {count}</div>,  // Still reactive!
   };
@@ -49,7 +49,7 @@ const handleClick = handler<unknown, { count: Cell<number> }>((_event, { count }
   console.log("Count updated to:", newValue);
 });
 
-const MyRecipe = recipe<Input>(({ count }) => {
+const MyPattern = pattern<Input>(({ count }) => {
   return {
     [UI]: <ct-button onClick={handleClick({ count })}>Increment</ct-button>,
     count,
@@ -65,7 +65,7 @@ Notice how handlers are bound to the cell from the input schema _in_ the VDOM de
 
 Many CommonTools components support **bidirectional binding** through the `$` prefix. This powerful feature automatically updates cells when users interact with components, eliminating the need for explicit onChange handlers in most cases.
 
-**This is one of the most important patterns to understand when building recipes.** Most UI updates can be handled with bidirectional binding alone, making your code simpler and easier to maintain.
+**This is one of the most important patterns to understand when building patterns.** Most UI updates can be handled with bidirectional binding alone, making your code simpler and easier to maintain.
 
 ## How Bidirectional Binding Works
 
@@ -94,7 +94,7 @@ interface ShoppingItem {
   category: Default<string, "Other">;
 }
 
-// In your recipe
+// In your pattern
 {items.map((item) => (
   <div>
     <ct-checkbox $checked={item.done}>
@@ -250,7 +250,7 @@ CommonTools custom elements (`ct-hstack`, `ct-vstack`, `ct-card`, etc.) use CSS 
 ## Mixed Usage Example
 
 ```tsx
-// You'll often mix both types in one recipe
+// You'll often mix both types in one pattern
 <div style={{ display: "flex", gap: "1rem" }}>
   <ct-vstack gap="2" style="flex: 1; padding: 1rem;">
     <span style={{ color: "#333", fontSize: "14px" }}>
@@ -292,7 +292,7 @@ interface Input {
   value: Cell<string>;
 }
 
-const MyRecipe = recipe<Input>(({ value }) => {
+const MyPattern = pattern<Input>(({ value }) => {
   return {
     [UI]: (
       <div>
@@ -338,7 +338,7 @@ type CategoryInput = {
   category: Default<string, "Other">;
 };
 
-const MyRecipe = recipe(({ category }: CategoryInput) => {
+const MyPattern = pattern(({ category }: CategoryInput) => {
   return {
     [UI]: (
       <ct-select
@@ -434,7 +434,7 @@ interface CtListItem {
 
 type ListSchema = { items: Cell<CtListItem[]> };
 
-const MyRecipe = recipe(({ items }: ListSchema) => {
+const MyPattern = pattern(({ items }: ListSchema) => {
   return {
     [UI]: <div>
       <ct-list $items={items} editable={false} />
@@ -518,7 +518,7 @@ import {
   handler,
   ifElse,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
   OpaqueRef,
@@ -549,7 +549,7 @@ export type PageInput = {
   outline: Cell<Outliner>;
 };
 
-export default recipe<PageInput, PageResult>(
+export default pattern<PageInput, PageResult>(
   "Outliner Page",
   ({ outline }) => {
     return {
@@ -568,15 +568,15 @@ export default recipe<PageInput, PageResult>(
 
 ## ct-render
 
-The `ct-render` component displays pattern instances within another pattern. Use this for **pattern composition** - combining multiple patterns together in a single recipe.
+The `ct-render` component displays pattern instances within another pattern. Use this for **pattern composition** - combining multiple patterns together in a single pattern.
 
 ## Basic Usage
 
 ```tsx
-import { recipe, UI, NAME } from "commontools";
+import { pattern, UI, NAME } from "commontools";
 import MyPattern from "./my-pattern.tsx";
 
-export default recipe("Composed Pattern", ({ items }) => {
+export default pattern(({ items }) => {
   // Create pattern instance
   const patternInstance = MyPattern({ items });
 
@@ -614,7 +614,7 @@ This is the most common mistake when using ct-render:
 A common use case is displaying the same data in different ways:
 
 ```tsx
-import { recipe, UI, NAME, Default } from "commontools";
+import { pattern, UI, NAME, Default } from "commontools";
 import ListView from "./list-view.tsx";
 import GridView from "./grid-view.tsx";
 
@@ -627,7 +627,7 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe(({ items }: Input) => {
+export default pattern(({ items }: Input) => {
   // Both patterns receive the same items cell
   const listView = ListView({ items });
   const gridView = GridView({ items });
@@ -687,8 +687,8 @@ Understanding when to use ct-render vs charm linking:
 
 | Scenario | Use |
 |----------|-----|
-| Multiple views of same data in one recipe | ct-render (Pattern Composition) |
-| Components reused within a recipe | ct-render (Pattern Composition) |
+| Multiple views of same data in one pattern | ct-render (Pattern Composition) |
+| Components reused within a pattern | ct-render (Pattern Composition) |
 | Independent charms that communicate | Linked Charms (separate deployments) |
 | Separate deployments with data flow | Linked Charms |
 
@@ -698,7 +698,7 @@ See `packages/patterns/composed-simple.tsx` for a minimal, complete example of p
 
 ```tsx
 /// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 import ShoppingListBasic from "./shopping-list-basic.tsx";
 import ShoppingListCategorized from "./shopping-list-categorized.tsx";
 
@@ -712,7 +712,7 @@ interface ComposedInput {
   items: Default<ShoppingItem[], []>;
 }
 
-export default recipe<ComposedInput, ComposedInput>(
+export default pattern<ComposedInput, ComposedInput>(
   "Shopping List - Both Views",
   ({ items }) => {
     // Create pattern instances that share the same items cell

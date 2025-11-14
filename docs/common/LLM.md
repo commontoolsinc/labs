@@ -9,7 +9,7 @@ CommonTools provides two functions for LLM integration:
 - **`generateText`** - Generate free-form text responses
 - **`generateObject`** - Generate structured data matching a TypeScript type
 
-**Important:** These functions can **only be called from within a recipe body**, not from handlers or `computed()` functions.
+**Important:** These functions can **only be called from within a pattern body**, not from handlers or `computed()` functions.
 
 ## generateText - Free-form Text Generation
 
@@ -20,14 +20,14 @@ unstructured text output.
 
 ```typescript
 /// <cts-enable />
-import { generateText, recipe, UI, NAME, Cell } from "commontools";
+import { generateText, pattern, UI, NAME, Cell } from "commontools";
 
 interface Input {
   userPrompt: Cell<string>;
 }
 
-export default recipe<Input>(({ userPrompt }) => {
-  // Call generateText in recipe body
+export default pattern<Input>(({ userPrompt }) => {
+  // Call generateText in pattern body
   const llmResponse = generateText({
     prompt: userPrompt,
     system: "You are a helpful assistant.",
@@ -84,7 +84,7 @@ generateText({
 
 ```typescript
 /// <cts-enable />
-import { generateText, recipe, UI, NAME, Default } from "commontools";
+import { generateText, pattern, UI, NAME, Default } from "commontools";
 
 interface Email {
   subject: string;
@@ -96,7 +96,7 @@ interface Input {
   emails: Default<Email[], []>;
 }
 
-export default recipe<Input>(({ emails }) => {
+export default pattern<Input>(({ emails }) => {
   // Generate summaries for each email
   const summaries = emails.map((email) => ({
     email,
@@ -153,7 +153,7 @@ generateObject<CalendarResponse>({...})  // Works!
 
 ```typescript
 /// <cts-enable />
-import { generateObject, recipe, UI, NAME, Cell } from "commontools";
+import { generateObject, pattern, UI, NAME, Cell } from "commontools";
 
 interface ProductIdea {
   name: string;
@@ -166,7 +166,7 @@ interface Input {
   prompt: Cell<string>;
 }
 
-export default recipe<Input>(({ prompt }) => {
+export default pattern<Input>(({ prompt }) => {
   // Type parameter automatically generates schema!
   const idea = generateObject<ProductIdea>({
     prompt: prompt,
@@ -236,7 +236,7 @@ generateObject<T>({
 
 ```typescript
 /// <cts-enable />
-import { generateObject, recipe, UI, NAME, Cell } from "commontools";
+import { generateObject, pattern, UI, NAME, Cell } from "commontools";
 
 interface Contact {
   name: string;
@@ -249,7 +249,7 @@ interface Input {
   text: Cell<string>;
 }
 
-export default recipe<Input>(({ text }) => {
+export default pattern<Input>(({ text }) => {
   // Schema automatically inferred from Contact type
   const contact = generateObject<Contact>({
     prompt: text,
@@ -463,7 +463,7 @@ interface Input {
   generatedIdeas: Cell<string[]>;
 }
 
-export default recipe<Input>(({ prompt, generatedIdeas }) => {
+export default pattern<Input>(({ prompt, generatedIdeas }) => {
   // Only generate when triggered
   let currentGeneration: ReturnType<typeof generateObject<{ ideas: string[] }>> | null = null;
 
@@ -508,16 +508,16 @@ interface Recipe {
   cookingTime: number;
 }
 
-const recipe = generateObject<Recipe>({
-  prompt: "Generate a recipe for chocolate chip cookies",
+const pattern = generateObject<Recipe>({
+  prompt: "Generate a pattern for chocolate chip cookies",
 });
 
 // TypeScript knows the structure
 if (!recipe.pending && !recipe.error) {
-  recipe.result.name;           // ✅ string
-  recipe.result.ingredients;    // ✅ string[]
-  recipe.result.cookingTime;    // ✅ number
-  recipe.result.invalidField;   // ❌ TypeScript error!
+  pattern.result.name;           // ✅ string
+  pattern.result.ingredients;    // ✅ string[]
+  pattern.result.cookingTime;    // ✅ number
+  pattern.result.invalidField;   // ❌ TypeScript error!
 }
 ```
 
@@ -541,10 +541,10 @@ const summary = computed(() => {
 });
 ```
 
-✅ **Call from recipe body:**
+✅ **Call from pattern body:**
 
 ```typescript
-export default recipe(({ prompt }) => {
+export default pattern(({ prompt }) => {
   const result = generateText({ prompt });  // ✅ Works!
 
   return { [UI]: <div>{result.result}</div> };
@@ -570,7 +570,7 @@ if (!result.pending && !result.error) {
 
 1. **Use generateObject for structured data** - Don't parse JSON from generateText
 2. **Handle all three states** - pending, error, and success
-3. **Keep prompts in recipe body** - Don't try to generate from handlers
+3. **Keep prompts in pattern body** - Don't try to generate from handlers
 4. **Use type parameters** - Let TypeScript infer schemas for generateObject
 5. **Show pending state** - Users need feedback during generation
 6. **Provide error messages** - Display errors clearly to users
@@ -582,7 +582,7 @@ if (!result.pending && !result.error) {
 
 1. **generateText** - Free-form text, returns `{ result: string, error, pending }`
 2. **generateObject<T>** - Structured data with type inference, returns `{ result: T, error, pending }`
-3. **Call from recipe body only** - Not from handlers or computed()
+3. **Call from pattern body only** - Not from handlers or computed()
 4. **Handle pending/error/result** - Always check all three states
 5. **Type safety** - generateObject automatically creates schemas from TypeScript types
 6. **Reactive** - Results update automatically when generation completes

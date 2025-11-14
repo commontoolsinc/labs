@@ -19,7 +19,7 @@ interface ReadOnlyInput {
   userName: string;     // Just show it
 }
 
-export default recipe<ReadOnlyInput>(({ count, items, userName }) => {
+export default pattern<ReadOnlyInput>(({ count, items, userName }) => {
   return {
     [UI]: (
       <div>
@@ -38,7 +38,7 @@ interface WritableInput {
   title: Cell<string>;  // Will call title.set()
 }
 
-export default recipe<WritableInput>(({ count, items, title }) => {
+export default pattern<WritableInput>(({ count, items, title }) => {
   return {
     [UI]: (
       <div>
@@ -76,14 +76,14 @@ Think of `Cell<>` as a permission declaration:
 
 ### Creating Cells with Cell.of()
 
-Use `Cell.of()` to create NEW reactive cells in your recipe body or return values.
+Use `Cell.of()` to create NEW reactive cells in your pattern body or return values.
 
 This is rare. Generally prefer to add additional input parameters instead of
 creating internal cells.
 
 **When to use Cell.of():**
 
-- Creating new cells inside a recipe that can't be input parameters.
+- Creating new cells inside a pattern that can't be input parameters.
 - Creating local state that handlers will mutate
 
 **When NOT to use Cell.of():**
@@ -92,8 +92,8 @@ creating internal cells.
 - Values you won't mutate
 
 ```typescript
-// ✅ Creating new cells in recipe body
-export default recipe(({ inputItems }) => {
+// ✅ Creating new cells in pattern body
+export default pattern(({ inputItems }) => {
   // Create new cells for local state
   const filteredItems = Cell.of<Item[]>([]);
   const searchQuery = Cell.of("");
@@ -323,7 +323,7 @@ const data = computed(() => ({
 Everything is reactive by default:
 
 ```typescript
-export default recipe(({ count, items, user }) => {
+export default pattern(({ count, items, user }) => {
   // These are all reactive references, not actual values
   const doubled = computed(() => count * 2);
   const userName = user.name;  // Reactive reference to user.name

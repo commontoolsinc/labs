@@ -7,7 +7,7 @@ and working with the CTS (CommonTools TypeScript) system.
 
 **The Golden Rule:** `Cell<>` in type signatures indicates **write intent**, not reactivity requirement.
 
-### In Recipe/Handler/Lift Parameters
+### In Pattern/Handler/Lift Parameters
 
 Use `Cell<>` when you need write operations:
 
@@ -19,7 +19,7 @@ interface WritableInput {
   user: Cell<User>;           // Will call user.update()
 }
 
-export default recipe<WritableInput>(({ count, items, user }) => {
+export default pattern<WritableInput>(({ count, items, user }) => {
   // Can mutate
   count.set(count.get() + 1);
   items.push({ title: "New" });
@@ -39,7 +39,7 @@ interface ReadOnlyInput {
   user: User;                 // Just access properties
 }
 
-export default recipe<ReadOnlyInput>(({ count, items, user }) => {
+export default pattern<ReadOnlyInput>(({ count, items, user }) => {
   // All reactive! Just can't mutate
   return {
     [UI]: (
@@ -81,7 +81,7 @@ interface BlogPostInput {
   publishedAt: Date;
 }
 
-export default recipe<BlogPostInput>(({ title, content, author, publishedAt }) => {
+export default pattern<BlogPostInput>(({ title, content, author, publishedAt }) => {
   // Everything is reactive for display
   return {
     [UI]: (
@@ -103,7 +103,7 @@ interface TodoInput {
   newItemTitle: Cell<string>;
 }
 
-export default recipe<TodoInput>(({ items, newItemTitle }) => {
+export default pattern<TodoInput>(({ items, newItemTitle }) => {
   return {
     [UI]: (
       <div>
@@ -137,17 +137,17 @@ interface ShoppingItem {
   done: Default<boolean, false>;
 }
 
-// Context 1: In recipe input/output schemas
+// Context 1: In pattern input/output schemas
 interface Input {
   items: Default<ShoppingItem[], []>;  // Plain type in schema
 }
 
-// Context 2: In recipe parameters (if need write access)
+// Context 2: In pattern parameters (if need write access)
 interface WritableInput {
   items: Cell<ShoppingItem[]>;  // Cell<> for write access
 }
 
-export default recipe<WritableInput>(
+export default pattern<WritableInput>(
   ({ items }) => {  // Context 3: items is Cell<ShoppingItem[]> or reactive ref
 
     return {
@@ -237,7 +237,7 @@ Add this comment at the top of your pattern file:
 
 ```typescript
 /// <cts-enable />
-import { recipe, UI, NAME } from "commontools";
+import { pattern, UI, NAME } from "commontools";
 ```
 
 This tells the CTS system to process TypeScript types in this file.
@@ -413,7 +413,7 @@ interface Input {
   count: number;  // Read-only!
 }
 
-const recipe = ({ count }: Input) => {
+const pattern = ({ count }: Input) => {
   count.set(5);  // Error: set doesn't exist
 };
 ```
@@ -425,7 +425,7 @@ interface Input {
   count: Cell<number>;  // Write access
 }
 
-const recipe = ({ count }: Input) => {
+const pattern = ({ count }: Input) => {
   count.set(5);  // Works!
 };
 ```

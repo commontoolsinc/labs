@@ -12,7 +12,7 @@ Begin with a minimal viable pattern:
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -23,7 +23,7 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>(({ items }) => {
+export default pattern<Input, Input>(({ items }) => {
   return {
     [NAME]: "My Pattern",
     [UI]: (
