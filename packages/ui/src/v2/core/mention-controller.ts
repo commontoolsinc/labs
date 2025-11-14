@@ -14,7 +14,7 @@ export interface MentionControllerConfig {
   /**
    * Callback when a mention is inserted
    */
-  onInsert?: (markdown: string, mention: Mentionable) => void;
+  onInsert?: (markdown: string, mention: Cell<Mentionable>) => void;
 
   /**
    * Callback to get current cursor position in the input element
@@ -125,16 +125,32 @@ export class MentionController implements ReactiveController {
   /**
    * Get filtered mentions based on current query
    */
-  getFilteredMentions(): MentionableArray {
-    const all = this.readMentionables();
-    if (all.length === 0) return [];
+  getFilteredMentions(): Cell<Mentionable>[] {
+    if (!this._mentionable) {
+      return [];
+    }
+
+    const mentionableArray = this._mentionable.get();
+    if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
+      return [];
+    }
 
     const query = this._state.query.toLowerCase();
-    if (!query) return all;
 
-    return all.filter((mention) =>
-      mention[NAME]?.toLowerCase().includes(query)
-    );
+    const filtered: Cell<Mentionable>[] = [];
+    for (let i = 0; i < mentionableArray.length; i++) {
+      // Use .key(i) to get Cell reference, preserving cell-ness
+      const mentionCell = this._mentionable.key(i);
+
+      // Only call .get() to read the name for filtering
+      const name = mentionCell.get()?.[NAME];
+
+      if (!query || name?.toLowerCase().includes(query)) {
+        filtered.push(mentionCell);
+      }
+    }
+
+    return filtered;
   }
 
   /**
@@ -226,7 +242,7 @@ export class MentionController implements ReactiveController {
   /**
    * Insert a mention at the current cursor position
    */
-  insertMention(mention: Mentionable): void {
+  insertMention(mention: Cell<Mentionable>): void {
     const markdown = this.encodeCharmAsMarkdown(mention);
     this.config.onInsert(markdown, mention);
     this.hide();
@@ -253,8 +269,9 @@ export class MentionController implements ReactiveController {
   /**
    * Encode a charm as markdown link [name](#entityId)
    */
-  private encodeCharmAsMarkdown(charm: Mentionable): string {
-    const name = charm[NAME] || "Unknown";
+  private encodeCharmAsMarkdown(charm: Cell<Mentionable>): string {
+    // Only call .get() when we need the actual values
+    const name = charm.get()?.[NAME] || "Unknown";
     const entityId = getEntityId(charm);
     const href = encodeURIComponent(JSON.stringify(entityId)) || "";
     return `[${name}](${href})`;
@@ -263,11 +280,12 @@ export class MentionController implements ReactiveController {
   /**
    * Decode charm reference from href (entity ID)
    */
-  decodeCharmFromHref(href: string | null): Mentionable | null {
+  decodeCharmFromHref(href: string | null): Cell<Mentionable> | null {
     if (!href) return null;
 
     const all = this.readMentionables();
     for (const mention of all) {
+      // Only call getEntityId (which calls .get()) when comparing
       const mentionEntityId = encodeURIComponent(
         JSON.stringify(getEntityId(mention)),
       );
@@ -281,10 +299,10 @@ export class MentionController implements ReactiveController {
 
   /**
    * Extract all mentions from markdown text
-   * Returns array of Mentionable objects referenced in the text
+   * Returns array of Cell<Mentionable> objects referenced in the text
    */
-  extractMentionsFromText(text: string): Mentionable[] {
-    const mentions: Mentionable[] = [];
+  extractMentionsFromText(text: string): Cell<Mentionable>[] {
+    const mentions: Cell<Mentionable>[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
 
@@ -299,22 +317,25 @@ export class MentionController implements ReactiveController {
     return mentions;
   }
 
-  private readMentionables(): Mentionable[] {
+  private readMentionables(): Cell<Mentionable>[] {
     if (!this._mentionable) {
       return [];
     }
 
-    const rawMentionable = this._mentionable.get();
-    const array = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCell(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
-
-    if (array.length === 0) {
+    const mentionableArray = this._mentionable.get();
+    if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
       return [];
     }
 
-    return array.filter((mention): mention is Mentionable => Boolean(mention));
+    // Use .key(i) to preserve cell-ness of items
+    const mentions: Cell<Mentionable>[] = [];
+    for (let i = 0; i < mentionableArray.length; i++) {
+      const mentionCell = this._mentionable.key(i);
+      if (mentionCell) {
+        mentions.push(mentionCell);
+      }
+    }
+
+    return mentions;
   }
 }
