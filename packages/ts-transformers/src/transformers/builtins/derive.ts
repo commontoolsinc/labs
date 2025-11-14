@@ -270,7 +270,8 @@ function buildResultTypeNode(
   const resultTypeNode = checker.typeToTypeNode(
     resultType,
     context.sourceFile,
-    ts.NodeBuilderFlags.NoTruncation | ts.NodeBuilderFlags.UseStructuralFallback,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
   );
 
   if (resultTypeNode) {
