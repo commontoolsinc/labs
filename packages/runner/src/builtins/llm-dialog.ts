@@ -25,6 +25,11 @@ import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { navigateTo } from "./navigate-to.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
+
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
@@ -215,22 +220,39 @@ function createLLMFriendlyLink(link: NormalizedFullLink): string {
  * @param value - The value to traverse and serialize
  * @returns The serialized value
  */
-function traverseAndSerialize(value: unknown): unknown {
+function traverseAndSerialize(
+  value: unknown,
+  seen: Set<unknown> = new Set(),
+): unknown {
+  if (!isObject(value)) return value;
+
   if (isCell(value)) {
     const link = value.getAsNormalizedFullLink();
     return { "/": encodeJsonPointer(["", link.id, ...link.path]) };
   }
-  if (Array.isArray(value)) {
-    return value.map(traverseAndSerialize);
+
+  // If we've already seen this and it can be mapped to a cell, serialized as
+  // cell link, otherwise throw (this should never happen in our cases)
+  if (seen.has(value)) {
+    if (isCellResultForDereferencing(value)) {
+      return traverseAndSerialize(getCellOrThrow(value), seen);
+    } else {
+      throw new Error(
+        "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
+      );
+    }
   }
-  if (isRecord(value)) {
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((v) => traverseAndSerialize(v, seen));
+  } else {
     return Object.fromEntries(
       Object.entries(value).map((
         [key, value],
-      ) => [key, traverseAndSerialize(value)]),
+      ) => [key, traverseAndSerialize(value, seen)]),
     );
   }
-  return value;
 }
 
 const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
