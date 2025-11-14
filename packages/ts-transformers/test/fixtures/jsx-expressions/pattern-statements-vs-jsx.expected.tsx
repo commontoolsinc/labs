@@ -50,19 +50,87 @@ export default pattern((state) => {
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
           <br />
-          Next number: {__ctHelpers.derive({ state: {
+          Next number: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value + 1)}
           <br />
-          Previous: {__ctHelpers.derive({ state: {
+          Previous: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value - 1)}
           <br />
-          Doubled: {__ctHelpers.derive({ state: {
+          Doubled: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value * 2)}
           <br />
-          Status: {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+          Status: {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value > 10), "High", "Low")}
         </p>
@@ -220,3 +288,4 @@ export default pattern((state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

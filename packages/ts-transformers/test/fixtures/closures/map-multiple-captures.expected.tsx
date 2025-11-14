@@ -93,6 +93,41 @@ export default recipe({
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state, multiplier } }) => (<span>
             Total: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            quantity: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["price", "quantity"]
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number",
+                                asOpaque: true
+                            },
+                            taxRate: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["discount", "taxRate"]
+                    }
+                },
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 item: {
                     price: item.price,
                     quantity: item.quantity

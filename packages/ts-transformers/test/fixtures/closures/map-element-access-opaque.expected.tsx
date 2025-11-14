@@ -55,6 +55,32 @@ export default recipe({
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, params: { state } }) => (<span>
             {tag}: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    state: {
+                        type: "object",
+                        properties: {
+                            tagCounts: {
+                                type: "object",
+                                properties: {},
+                                additionalProperties: {
+                                    type: "number"
+                                },
+                                asOpaque: true
+                            }
+                        },
+                        required: ["tagCounts"]
+                    },
+                    tag: {
+                        type: "string",
+                        asOpaque: true
+                    }
+                },
+                required: ["state", "tag"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
                 state: {
                     tagCounts: state.tagCounts
                 },

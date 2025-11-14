@@ -79,7 +79,34 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<span>{__ctHelpers.derive({ item: {
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            maybe: {
+                                type: "object",
+                                properties: {
+                                    value: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        type: "number",
+                        enum: [0]
+                    }, {
+                        type: "number",
+                        asOpaque: true
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
                     maybe: {
                         value: item.maybe?.value
                     }

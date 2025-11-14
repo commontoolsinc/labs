@@ -17,6 +17,26 @@ export default recipe({
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
         {plainArray.map((n) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    n: {
+                        type: "number"
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["multiplier"]
+                    }
+                },
+                required: ["n", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 n: n,
                 state: {
                     multiplier: state.multiplier

@@ -80,11 +80,53 @@ export default recipe({
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: { x, y }, params: { state } }) => (<div>
             Point: ({__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    x: {
+                        type: "number",
+                        asOpaque: true
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            scale: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["scale"]
+                    }
+                },
+                required: ["x", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 x: x,
                 state: {
                     scale: state.scale
                 }
             }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    y: {
+                        type: "number",
+                        asOpaque: true
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            scale: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["scale"]
+                    }
+                },
+                required: ["y", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
                 y: y,
                 state: {
                     scale: state.scale

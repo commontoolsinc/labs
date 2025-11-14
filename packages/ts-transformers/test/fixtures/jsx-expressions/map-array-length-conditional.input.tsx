@@ -7,7 +7,7 @@ export default recipe("MapArrayLengthConditional", (_state) => {
   return {
     [UI]: (
       <div>
-        {list.length > 0 && (
+        {list.get().length > 0 && (
           <div>
             {list.map((name) => (
               <span>{name}</span>

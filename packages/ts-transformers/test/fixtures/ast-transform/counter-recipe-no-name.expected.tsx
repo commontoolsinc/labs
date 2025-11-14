@@ -47,7 +47,24 @@ export default recipe({
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {__ctHelpers.ifElse(state.value, __ctHelpers.derive({ state: {
+          <li>next number: {__ctHelpers.ifElse(state.value, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>

@@ -16,9 +16,43 @@ export default recipe({
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
-        {__ctHelpers.ifElse(__ctHelpers.derive({ state: {
+        {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
-            } }, ({ state }) => state.value + 1), __ctHelpers.derive({ state: {
+            } }, ({ state }) => state.value + 1), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
                 value: state.value
             } }, ({ state }) => state.value + 2), "undefined")}
       </div>),

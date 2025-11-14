@@ -100,7 +100,19 @@ export default recipe("Charms Launcher", () => {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(__ctHelpers.derive({ typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        {ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                typedCellRef: {
+                    type: "array",
+                    items: true,
+                    asOpaque: true
+                }
+            },
+            required: ["typedCellRef"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
@@ -116,9 +128,35 @@ export default recipe("Charms Launcher", () => {
                 required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index: index, params: {} }) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__ctHelpers.derive({ index: index }, ({ index }) => index + 1)}
+                  Go to Charm {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive({ index: index }, ({ index }) => index + 1)}: {__ctHelpers.derive({ charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
+                <span>Charm {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
               </li>)), {})}
           </ul>)}
 

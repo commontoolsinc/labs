@@ -44,6 +44,13 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, ({ element, params: {} }) => {
                 const __ct_amount_key = nextKey();
                 const amount = __ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        element: true,
+                        __ct_amount_key: true
+                    },
+                    required: ["element", "__ct_amount_key"]
+                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_amount_key: __ct_amount_key
                 }, ({ element, __ct_amount_key }) => element[__ct_amount_key]);
