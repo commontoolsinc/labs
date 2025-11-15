@@ -12,7 +12,7 @@ Begin with a minimal viable pattern:
 
 ```typescript
 /// <cts-enable />
-import { Default, NAME, OpaqueRef, recipe, UI } from "commontools";
+import { Default, NAME, OpaqueRef, pattern, UI } from "commontools";
 
 interface Item {
   title: string;
@@ -23,7 +23,7 @@ interface Input {
   items: Default<Item[], []>;
 }
 
-export default recipe<Input, Input>(({ items }) => {
+export default pattern<Input, Input>(({ items }) => {
   return {
     [NAME]: "My Pattern",
     [UI]: (
@@ -76,46 +76,40 @@ const addItem = handler<
 
 ### Debugging Patterns
 
+See [DEBUGGING.md](DEBUGGING.md) for comprehensive debugging guide with quick error reference.
+
 #### Common Error Categories
 
-**Type Errors** (see `HANDLERS.md` for details):
+**Type Errors:**
 
+- Missing `Cell<>` for write access (see [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md))
 - Missing `OpaqueRef<T>` annotation in `.map()`
-- Wrong style syntax (object vs string, see `COMPONENTS.md`)
+- Wrong style syntax (object vs string, see [COMPONENTS.md](COMPONENTS.md))
 - Using `Cell<OpaqueRef<T>[]>` instead of `Cell<T[]>` in handlers
-- Forgetting `Cell<>` wrapper in handler state types
 
-**Runtime Errors** (see `RECIPES.md` for details):
+**Runtime Errors:**
 
 - DOM access (use cells instead)
 - Conditionals in JSX (use `ifElse()`)
-- Calling `llm()` from handlers (only works in the pattern body)
+- Calling `llm()` from handlers (only works in pattern body)
 
-**Data Not Updating** (see `COMPONENTS.md` for details):
+**Reactivity Issues:**
 
 - Forgot `$` prefix for bidirectional binding
+- Need `computed()` for filters outside JSX (see [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md))
 - Handler event name mismatch
-- Cell not passed correctly to handler
 
 #### Debugging Process
 
 1. **Check TypeScript errors first** - Run `deno task ct dev pattern.tsx --no-run`
-2. **Consult the docs** - Match error pattern to relevant doc:
-   - Type errors → `HANDLERS.md`
-   - Component issues → `COMPONENTS.md`
-   - Pattern questions → `PATTERNS.md`
-   - Core concepts → `RECIPES.md`
-3. **Inspect deployed charm** - Use ct commands to inspect state
-4. **Check examples** - Look in `packages/patterns/` for similar patterns
-
-#### Quick Error Reference
-
-| Error Message | Check |
-|---------------|-------|
-| "Property X does not exist on type '`OpaqueRef<unknown>'`" | Missing `OpaqueRef<T>` in `.map()` - See `HANDLERS.md` |
-| "Type 'string' is not assignable to type 'CSSProperties'" | Using string style on HTML element - See `COMPONENTS.md` |
-| Handler type mismatch | Check `Cell<T[]>` vs `Cell<Array<Cell<T>>>` - See `HANDLERS.md` |
-| Data not updating | Missing `$` prefix or wrong event name - See `COMPONENTS.md` |
+2. **Consult [DEBUGGING.md](DEBUGGING.md)** - Use quick error reference table
+3. **Check relevant docs:**
+   - Type errors → [TYPES_AND_SCHEMAS.md](TYPES_AND_SCHEMAS.md)
+   - Reactivity issues → [CELLS_AND_REACTIVITY.md](CELLS_AND_REACTIVITY.md)
+   - Component questions → [COMPONENTS.md](COMPONENTS.md)
+   - Pattern examples → [PATTERNS.md](PATTERNS.md)
+4. **Inspect deployed charm** - Use ct commands to inspect state
+5. **Check examples** - Look in `packages/patterns/` for similar patterns
 
 ### Multi-File Patterns
 

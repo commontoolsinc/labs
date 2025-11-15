@@ -42,11 +42,11 @@ We execute our JavaScript modules in many different environments:
 
 - Browsers (Vite built)
 - Browsers (deno-web-test>esbuild Built)
-- Browsers (eval'd recipes)
+- Browsers (eval'd patterns)
 - Deno (scripts and servers)
-- Deno (eval'd recipes)
+- Deno (eval'd patterns)
 - Deno Workers
-- Deno workers (eval'd recipes)
+- Deno workers (eval'd patterns)
 
 > **❌ Avoid**
 
