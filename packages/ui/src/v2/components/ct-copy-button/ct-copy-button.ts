@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
@@ -47,6 +47,23 @@ import { BaseElement } from "../../core/base-element.ts";
  *   This would enable patterns to derive UI from copy state.
  */
 export class CTCopyButton extends BaseElement {
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      /* Ensure icon-only buttons maintain square aspect ratio */
+      :host([icon-only]) ct-button {
+        min-width: 2.25rem;
+        display: inline-flex;
+      }
+
+      /* Adjust for different sizes when icon-only */
+      :host([icon-only]) ct-button::part(button) {
+        aspect-ratio: 1;
+        min-width: fit-content;
+      }
+    `,
+  ];
+
   static override properties = {
     text: { type: String },
     variant: { type: String },
