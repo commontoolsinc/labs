@@ -41,7 +41,6 @@ import { BaseElement } from "../../core/base-element.ts";
  *   text={ingredientListText}
  *   onct-copy-success={handleCopySuccess({})}
  * >Copy</ct-copy-button>
- *
  */
 export class CTCopyButton extends BaseElement {
   static override styles = [
