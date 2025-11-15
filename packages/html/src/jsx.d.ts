@@ -2875,6 +2875,7 @@ interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
+interface CTCopyButtonElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTHStackElement extends CTHTMLElement {}
 interface CTFabElement extends CTHTMLElement {}
@@ -3073,6 +3074,22 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   "outline"?: boolean;
   "type"?: "button" | "submit" | "reset";
+}
+
+interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
+  "text": string;
+  "variant"?:
+    | "primary"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "pill";
+  "size"?: "default" | "sm" | "lg" | "icon" | "md";
+  "disabled"?: boolean;
+  "feedback-duration"?: number;
+  "icon-only"?: boolean;
 }
 
 interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
@@ -3758,6 +3775,10 @@ declare global {
       "ct-button": CTDOM.DetailedHTMLProps<
         CTButtonAttributes<CTButtonElement>,
         CTButtonElement
+      >;
+      "ct-copy-button": CTDOM.DetailedHTMLProps<
+        CTCopyButtonAttributes<CTCopyButtonElement>,
+        CTCopyButtonElement
       >;
       "common-iframe": CTDOM.DetailedHTMLProps<
         CTIframeAttributes<CTIFrameElement>,
