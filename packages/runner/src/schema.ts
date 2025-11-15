@@ -323,10 +323,11 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-export function validateAndTransformNew(
+export function validateAndTransform(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
+  _seen?: Array<[string, any]>,
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
   // create temporary transactions to read. The main reason we use transactions
@@ -498,23 +499,8 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
   }
 }
 
-export function validateAndTransform(
-  runtime: IRuntime,
-  tx: IExtendedStorageTransaction | undefined,
-  link: NormalizedFullLink,
-  seen: Array<[string, any]> = [],
-): any {
-  //console.log("Calling VAT with", link);
-  let useNew = false;
-  useNew = true;
-  if (useNew) {
-    return validateAndTransformNew(runtime, tx, link);
-  }
-  return validateAndTransformOrig(runtime, tx, link, seen);
-}
-
 // TODO: remove this when done debugging
-function validateAndTransformOrig(
+function _validateAndTransform(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
