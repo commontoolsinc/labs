@@ -957,6 +957,108 @@ const applyData = handler<
 
 **Note:** Values inside derive callbacks are read-only. If you need bidirectional binding (like `$checked`), use cells directly outside the derive instead.
 
+#### 8. Using ifElse() with Async-Dependent Derived Data
+
+**The Problem:** `ifElse()` only re-evaluates when its condition changes, NOT when data inside its branches changes. This causes UI to lock onto stale values when working with async operations (like LLM calls) that evaluate in multiple phases.
+
+```typescript
+// ❌ BROKEN - UI gets stuck on first (empty) evaluation
+const extraction = lift(
+  { photo },
+  async ({ photo }) => {
+    const result = await generateObject({
+      model: "anthropic:claude-sonnet-4-5",
+      messages: [{ role: "user", content: [{ type: "image", image: photo }] }],
+      schema: { aisles: [{ name: "string", items: "string" }] }
+    });
+    return result.object;
+  }
+);
+
+// This evaluates TWICE:
+// 1. First: {} (empty, before async completes)
+// 2. Later: { aisles: [...] } (after async completes)
+
+{ifElse(
+  extraction.pending,
+  <div>Analyzing...</div>,
+  derive(
+    { extractedData: extraction.result },
+    ({ extractedData }) => {
+      // When pending switches to false, ifElse evaluates this branch ONCE
+      // At that moment, extractedData still has the first (empty) value: {}
+      // Later, when the async completes, extractedData updates to actual data
+      // BUT: ifElse doesn't re-evaluate - it already chose this branch!
+      // Result: UI stuck showing "No results" even though data arrived
+      if (!extractedData || !extractedData.aisles?.length) {
+        return <div>No results</div>;  // LOCKED to this!
+      }
+      return <div>{/* render aisles */}</div>;
+    }
+  )
+)}
+```
+
+**Why this happens:**
+1. Async operation starts → `pending = true`
+2. `ifElse` shows loading branch
+3. First `derive()` evaluation in `lift` returns `{}` (before async completes)
+4. Async completes → `pending = false`
+5. `ifElse` switches branches, evaluates results branch
+6. **At that exact moment:** `extractedData` still holds first value `{}`
+7. UI shows "No results"
+8. Second `derive()` evaluation completes with actual data
+9. **UI SHOULD update** but `ifElse` doesn't re-evaluate inner changes
+10. **Result:** UI stuck showing "No results"
+
+```typescript
+// ✅ CORRECT - Use derive() that tracks ALL reactive inputs
+{derive(
+  {
+    pending: extraction.pending,
+    extractedData: extraction.result,
+  },
+  ({ pending, extractedData }) => {
+    // This re-evaluates whenever ANY input changes:
+    // - When pending: true → false
+    // - When extractedData: {} → {...actual data...}
+
+    if (pending) {
+      return <div>Analyzing...</div>;
+    }
+
+    if (!extractedData || !extractedData.aisles?.length) {
+      return <div>No results</div>;
+    }
+
+    return (
+      <div>
+        {extractedData.aisles.map((aisle) => (
+          <div>
+            <strong>{aisle.name}</strong>: {aisle.items}
+          </div>
+        ))}
+      </div>
+    );
+  }
+)}
+```
+
+**When you'll encounter this:**
+- Displaying results from LLM calls (`generateObject`, `generateText`)
+- Any async operation where derived data evaluates in phases
+- Conditional rendering based on both loading state AND async-dependent data
+
+**Why this is a pitfall:**
+- The error is silent - UI just shows stale data
+- Console logs show correct data arriving, making it look like a reactivity bug
+- The fix (replacing `ifElse` with `derive`) seems counter-intuitive
+- Easy to misdiagnose as an async/LLM problem rather than a reactivity pattern issue
+
+**Rule:** When rendering depends on BOTH a loading state AND async-dependent data, use a single `derive()` that tracks all inputs. Only use `ifElse()` when the branches themselves don't contain reactive data that can change after the branch switch.
+
+**Real-world example:** Image analysis with `generateObject` showing "No results" even though the extraction succeeded - the UI locked onto the empty first evaluation.
+
 ## Testing Patterns and Development Workflow
 
 ### Quick Development Workflow
