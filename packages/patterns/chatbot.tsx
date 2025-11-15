@@ -129,7 +129,7 @@ export const TitleGenerator = recipe<
 const listMentionable = handler<
   {
     /** A cell to store the result text */
-    result: Cell<any>;
+    result: Cell<string>;
   },
   { mentionable: Cell<MentionableCharm>[] }
 >(
@@ -138,14 +138,14 @@ const listMentionable = handler<
       label: charm.get()[NAME],
       cell: charm,
     }));
-    args.result.set(namesList);
+    args.result.set(JSON.stringify(namesList));
   },
 );
 
 const listRecent = handler<
   {
     /** A cell to store the result text */
-    result: Cell<any[]>;
+    result: Cell<string>;
   },
   { recentCharms: Cell<MentionableCharm>[] }
 >(
@@ -154,7 +154,7 @@ const listRecent = handler<
       label: charm.get()[NAME],
       cell: charm,
     }));
-    args.result.set(namesList);
+    args.result.set(JSON.stringify(namesList));
   },
 );
 
