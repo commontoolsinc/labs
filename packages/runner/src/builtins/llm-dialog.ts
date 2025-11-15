@@ -868,7 +868,7 @@ type ResolvedToolCall =
   | { type: "listAttachments"; call: LLMToolCall }
   | { type: "addAttachment"; call: LLMToolCall; path: string; name: string }
   | { type: "removeAttachment"; call: LLMToolCall; path: string }
-  | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | {
@@ -954,25 +954,6 @@ function resolveToolCall(
       };
     }
 
-    if (name === SCHEMA_TOOL_NAME) {
-      const charmName = extractStringField(
-        toolCallPart.input,
-        "path",
-        "/of:bafyabc123/path",
-      );
-      const charm = catalog.charmMap.get(charmName);
-      if (!charm) {
-        throw new Error(
-          `Unknown charm "${charmName}". Use listAttachments() for options.`,
-        );
-      }
-      return {
-        type: "schema",
-        charm,
-        call: { id, name, input: { charm: charmName } },
-      };
-    }
-
     const target = extractStringField(
       toolCallPart.input,
       "path",
@@ -980,16 +961,24 @@ function resolveToolCall(
     );
 
     const link = parseLLMFriendlyLink(target, space);
+    const cellRef = runtime.getCellFromLink(link);
+
+    if (name === SCHEMA_TOOL_NAME) {
+      const charmName = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123/path",
+      );
+      return {
+        type: "schema",
+        cellRef,
+        call: { id, name, input: { charm: charmName } },
+      };
+    }
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-      if (isStream(cellRef)) {
+      if (isStream(cellRef.resolveAsCell())) {
         throw new Error(`Path resolves to a handler; use run("${target}").`);
       }
 
@@ -1001,14 +990,6 @@ function resolveToolCall(
     }
 
     if (name === NAVIGATE_TO_TOOL_NAME) {
-      // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-
       return {
         type: "navigateTo",
         cellRef,
@@ -1016,17 +997,14 @@ function resolveToolCall(
       };
     }
 
-    // For run(), resolve the cell and check if it's a handler or pattern
-    const cellRef: Cell<any> = runtime.getCellFromLink(link);
-
     // Get optional charm metadata for validation (only used for handlers)
     const charmEntry = catalog.handleMap.get(link.id);
     const charm = charmEntry?.charm;
 
-    if (isStream(cellRef)) {
+    if (isStream(cellRef.resolveAsCell())) {
       return {
         type: "run",
-        handler: cellRef as any,
+        handler: cellRef as unknown as Stream<any>,
         charm,
         call: {
           id,
@@ -1036,13 +1014,13 @@ function resolveToolCall(
       };
     }
 
-    const pattern = (cellRef as Cell<any>).key("pattern")
+    const pattern = cellRef.key("pattern")
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
         type: "run",
         pattern,
-        extraParams: (cellRef as Cell<any>).key("extraParams").get() ?? {},
+        extraParams: cellRef.key("extraParams").get() ?? {},
         charm,
         call: {
           id,
@@ -1353,9 +1331,8 @@ function handleListAttachments(
 function handleSchema(
   resolved: ResolvedToolCall & { type: "schema" },
 ): { type: string; value: any } {
-  const schema = getCellSchema(resolved.charm) ??
-    {};
-  const value = JSON.parse(JSON.stringify(schema ?? {}));
+  const schema = getCellSchema(resolved.cellRef) ?? {};
+  const value = JSON.parse(JSON.stringify(schema));
   return { type: "json", value };
 }
 
