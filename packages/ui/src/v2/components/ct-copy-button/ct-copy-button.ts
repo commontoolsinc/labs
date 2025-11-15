@@ -57,7 +57,14 @@ export class CTCopyButton extends BaseElement {
   };
 
   declare text: string;
-  declare variant?: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill";
+  declare variant?:
+    | "primary"
+    | "secondary"
+    | "destructive"
+    | "outline"
+    | "ghost"
+    | "link"
+    | "pill";
   declare size?: "default" | "sm" | "lg" | "icon" | "md";
   declare disabled: boolean;
   declare feedbackDuration: number;
@@ -118,24 +125,28 @@ export class CTCopyButton extends BaseElement {
 
   override render() {
     const title = this._copied ? "Copied!" : "Copy to clipboard";
-    const ariaLabel = this._copied ? "Copied to clipboard" : "Copy to clipboard";
+    const ariaLabel = this._copied
+      ? "Copied to clipboard"
+      : "Copy to clipboard";
 
     return html`
       <ct-button
-        variant=${this.variant || "secondary"}
-        size=${this.size || "default"}
-        ?disabled=${this.disabled}
-        @click=${this._handleClick}
-        title=${title}
-        aria-label=${ariaLabel}
+        variant="${this.variant || "secondary"}"
+        size="${this.size || "default"}"
+        ?disabled="${this.disabled}"
+        @click="${this._handleClick}"
+        title="${title}"
+        aria-label="${ariaLabel}"
       >
         ${this.iconOnly
-          ? html`${this._copied ? "✓" : "📋"}`
+          ? html`
+            ${this._copied ? "✓" : "📋"}
+          `
           : html`
-              <slot>
-                ${this._copied ? "✓ Copied!" : "📋 Copy"}
-              </slot>
-            `}
+            <slot>
+              ${this._copied ? "✓ Copied!" : "📋 Copy"}
+            </slot>
+          `}
       </ct-button>
     `;
   }
