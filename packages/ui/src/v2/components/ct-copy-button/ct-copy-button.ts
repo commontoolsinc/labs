@@ -42,9 +42,6 @@ import { BaseElement } from "../../core/base-element.ts";
  *   onct-copy-success={handleCopySuccess({})}
  * >Copy</ct-copy-button>
  *
- * @todo Future enhancement: Add optional Cell/Stream binding for copy state
- *   so patterns can reactively track when copy happens without using events.
- *   This would enable patterns to derive UI from copy state.
  */
 export class CTCopyButton extends BaseElement {
   static override styles = [
