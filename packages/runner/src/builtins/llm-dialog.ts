@@ -224,7 +224,7 @@ function traverseAndSerialize(
   value: unknown,
   seen: Set<unknown> = new Set(),
 ): unknown {
-  if (!isObject(value)) return value;
+  if (!isRecord(value)) return value;
 
   if (isCell(value)) {
     const link = value.getAsNormalizedFullLink();
