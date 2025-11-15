@@ -64,7 +64,6 @@ const BacklinksIndex = recipe<Input, Output>(
     });
 
     // Compute mentionable list from allCharms reactively
-    // Use derive instead of lift to track when allCharms changes
     const mentionable = derive(allCharms, (charmList) => {
       const cs = charmList ?? [];
       const out: MentionableCharm[] = [];

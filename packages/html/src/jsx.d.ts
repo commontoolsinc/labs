@@ -3077,7 +3077,7 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
-  "text": string | CellLike<string>;
+  "text": string;
   "variant"?:
     | "primary"
     | "secondary"
