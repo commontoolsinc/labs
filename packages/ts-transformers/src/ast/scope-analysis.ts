@@ -57,6 +57,17 @@ export function isFunctionDeclaration(
 
 /**
  * Check if a declaration is within a specific function's scope using node identity.
+ *
+ * IMPORTANT LIMITATION: This function may not work correctly when comparing
+ * synthetic nodes (created by transformers) to source nodes, because:
+ * - Symbol.getDeclarations() returns nodes from the original AST
+ * - The `func` parameter may be from a transformed AST
+ * - Synthetic nodes have pos=-1, so position-based comparison fails
+ *
+ * This is acceptable for current usage because collectCaptures is called on
+ * source nodes before creating synthetic nodes. If this changes in the future,
+ * we'll need to add a WeakMap to track synthetic→source node relationships.
+ *
  * @param decl - The declaration to check
  * @param func - The function to check against
  * @returns true if decl is within func's scope (but stops at nested function boundaries)
@@ -68,8 +79,23 @@ export function isDeclaredWithinFunction(
   // Walk up the tree from the declaration
   let current: ts.Node | undefined = decl;
   while (current) {
-    // Found our callback function
+    // Found our callback function - try multiple matching strategies:
+    // 1. Object identity (works if nodes haven't been cloned)
     if (current === func) {
+      return true;
+    }
+
+    // 2. Position-based comparison (works for source nodes that have been cloned during transformation)
+    //    The type checker returns declarations from the original AST, but func may be from a
+    //    transformed AST. If both are source nodes, they'll have matching positions.
+    //    Skip synthetic nodes (pos=-1) as they won't match source positions.
+    if (
+      current.pos !== -1 &&
+      func.pos !== -1 &&
+      current.pos === func.pos &&
+      current.end === func.end &&
+      current.kind === func.kind
+    ) {
       return true;
     }
 

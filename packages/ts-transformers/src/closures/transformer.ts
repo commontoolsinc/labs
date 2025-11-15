@@ -128,6 +128,12 @@ function shouldCaptureIdentifier(
     return undefined;
   }
 
+  // Skip if this identifier is the property name in an object literal (e.g., 'label' in '{ label: value }')
+  // We only want to capture the VALUE, not the property name itself
+  if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+    return undefined;
+  }
+
   // For shorthand property assignments (e.g., {id} instead of {id: id}), we need special handling
   // because getSymbolAtLocation returns the property symbol, not the variable being referenced
   if (ts.isShorthandPropertyAssignment(node.parent)) {
