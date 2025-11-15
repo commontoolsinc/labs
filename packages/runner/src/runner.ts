@@ -302,7 +302,14 @@ export class Runner implements IRunner {
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultCell.getAsLink({ base: processCell }),
+      resultRef: (recipe.resultSchema !== undefined
+        ? resultCell.asSchema(recipe.resultSchema).getAsLink({
+          base: processCell,
+          includeSchema: true,
+        })
+        : resultCell.getAsLink({
+          base: processCell,
+        })),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });

@@ -88,38 +88,17 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */
-async function getCharmResultSchemaAsync(
-  runtime: IRuntime,
-  charm: Cell<any>,
-): Promise<JSONSchema | undefined> {
-  try {
-    const source = charm.getSourceCell();
-    const recipeId = source?.get()?.[TYPE];
-    if (recipeId) {
-      await runtime.recipeManager.loadRecipe(recipeId, charm.space);
-    }
-    return (
-      getLoadedRecipeResultSchema(runtime, charm) ??
-        buildMinimalSchemaFromValue(charm)
-    );
-  } catch (_e) {
-    return buildMinimalSchemaFromValue(charm);
-  }
-}
-
-function getLoadedRecipeResultSchema(
-  runtime: IRuntime | undefined,
-  charm: Cell<any>,
+function getCellSchema(
+  cell: Cell<unknown>,
 ): JSONSchema | undefined {
-  const source = charm.getSourceCell();
-  const recipeId = source?.get()?.[TYPE];
-  const recipe = recipeId
-    ? runtime?.recipeManager.recipeById(recipeId)
-    : undefined;
-  if (recipe?.resultSchema !== undefined) {
-    return recipe.resultSchema;
-  }
-  return undefined;
+  return cell.schema ??
+    // If cell has a source cell, any resultRef has a schema attached
+    cell.getSourceCell<{ resultRef: Cell<unknown> }>({
+      type: "object",
+      properties: { resultRef: { asCell: true } },
+    })?.get()?.resultRef?.schema ??
+    // Otherwise, derive a simple object schema from the current value
+    buildMinimalSchemaFromValue(cell);
 }
 
 function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
@@ -850,11 +829,11 @@ function buildToolCatalog(
  * from the attachments list. This is appended to the system prompt so the LLM
  * has immediate context about available charms without needing to call schema() first.
  */
-async function buildAttachmentsSchemaDocumentation(
+function buildAttachmentsSchemaDocumentation(
   runtime: IRuntime,
   space: MemorySpace,
   attachments: Cell<Attachment[]>,
-): Promise<string> {
+): string {
   const currentAttachments = attachments.get() || [];
   if (currentAttachments.length === 0) {
     return "";
@@ -877,7 +856,7 @@ async function buildAttachmentsSchemaDocumentation(
       }
 
       // Get schema for the cell
-      const schema = await getCharmResultSchemaAsync(runtime, cell);
+      const schema = getCellSchema(cell);
       if (schema) {
         const schemaJson = JSON.stringify(schema, null, 2);
         schemaEntries.push(
@@ -911,7 +890,7 @@ type ResolvedToolCall =
   | { type: "listAttachments"; call: LLMToolCall }
   | { type: "addAttachment"; call: LLMToolCall; path: string; name: string }
   | { type: "removeAttachment"; call: LLMToolCall; path: string }
-  | { type: "schema"; call: LLMToolCall; charm: Cell<any> }
+  | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | {
@@ -997,25 +976,6 @@ function resolveToolCall(
       };
     }
 
-    if (name === SCHEMA_TOOL_NAME) {
-      const charmName = extractStringField(
-        toolCallPart.input,
-        "path",
-        "/of:bafyabc123/path",
-      );
-      const charm = catalog.charmMap.get(charmName);
-      if (!charm) {
-        throw new Error(
-          `Unknown charm "${charmName}". Use listAttachments() for options.`,
-        );
-      }
-      return {
-        type: "schema",
-        charm,
-        call: { id, name, input: { charm: charmName } },
-      };
-    }
-
     const target = extractStringField(
       toolCallPart.input,
       "path",
@@ -1023,16 +983,24 @@ function resolveToolCall(
     );
 
     const link = parseLLMFriendlyLink(target, space);
+    const cellRef = runtime.getCellFromLink(link);
+
+    if (name === SCHEMA_TOOL_NAME) {
+      const charmName = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123/path",
+      );
+      return {
+        type: "schema",
+        cellRef,
+        call: { id, name, input: { charm: charmName } },
+      };
+    }
 
     if (name === READ_TOOL_NAME) {
       // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-      if (isStream(cellRef)) {
+      if (isStream(cellRef.resolveAsCell())) {
         throw new Error(`Path resolves to a handler; use run("${target}").`);
       }
 
@@ -1044,14 +1012,6 @@ function resolveToolCall(
     }
 
     if (name === NAVIGATE_TO_TOOL_NAME) {
-      // Get cell reference from the link - works for any valid handle
-      const cellRef = runtime.getCellFromLink(link);
-      if (!cellRef) {
-        throw new Error(
-          `Could not resolve handle "${id}" to a cell. The handle may not exist in this space.`,
-        );
-      }
-
       return {
         type: "navigateTo",
         cellRef,
@@ -1059,17 +1019,14 @@ function resolveToolCall(
       };
     }
 
-    // For run(), resolve the cell and check if it's a handler or pattern
-    const cellRef: Cell<any> = runtime.getCellFromLink(link);
-
     // Get optional charm metadata for validation (only used for handlers)
     const charmEntry = catalog.handleMap.get(link.id);
     const charm = charmEntry?.charm;
 
-    if (isStream(cellRef)) {
+    if (isStream(cellRef.resolveAsCell())) {
       return {
         type: "run",
-        handler: cellRef as any,
+        handler: cellRef as unknown as Stream<any>,
         charm,
         call: {
           id,
@@ -1079,13 +1036,13 @@ function resolveToolCall(
       };
     }
 
-    const pattern = (cellRef as Cell<any>).key("pattern")
+    const pattern = cellRef.key("pattern")
       .getRaw() as unknown as Readonly<Recipe> | undefined;
     if (pattern) {
       return {
         type: "run",
         pattern,
-        extraParams: (cellRef as Cell<any>).key("extraParams").get() ?? {},
+        extraParams: cellRef.key("extraParams").get() ?? {},
         charm,
         call: {
           id,
@@ -1393,13 +1350,11 @@ function handleListAttachments(
 /**
  * Handles the schema tool call.
  */
-async function handleSchema(
-  runtime: IRuntime,
+function handleSchema(
   resolved: ResolvedToolCall & { type: "schema" },
-): Promise<{ type: string; value: any }> {
-  const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
-    {};
-  const value = JSON.parse(JSON.stringify(schema ?? {}));
+): { type: string; value: any } {
+  const schema = getCellSchema(resolved.cellRef) ?? {};
+  const value = JSON.parse(JSON.stringify(schema));
   return { type: "json", value };
 }
 
@@ -1579,7 +1534,7 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "schema") {
-    return await handleSchema(runtime, resolved);
+    return handleSchema(resolved);
   }
 
   if (resolved.type === "read") {
@@ -1820,7 +1775,7 @@ export function llmDialog(
   };
 }
 
-async function startRequest(
+function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
@@ -1842,7 +1797,7 @@ async function startRequest(
   const toolCatalog = buildToolCatalog(runtime, toolsCell);
 
   // Build charm schemas documentation from attachments and append to system prompt
-  const charmSchemasDocs = await buildAttachmentsSchemaDocumentation(
+  const charmSchemasDocs = buildAttachmentsSchemaDocumentation(
     runtime,
     space,
     attachments,
