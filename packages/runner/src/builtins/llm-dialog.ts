@@ -83,38 +83,17 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */
-async function getCharmResultSchemaAsync(
-  runtime: IRuntime,
-  charm: Cell<any>,
-): Promise<JSONSchema | undefined> {
-  try {
-    const source = charm.getSourceCell();
-    const recipeId = source?.get()?.[TYPE];
-    if (recipeId) {
-      await runtime.recipeManager.loadRecipe(recipeId, charm.space);
-    }
-    return (
-      getLoadedRecipeResultSchema(runtime, charm) ??
-        buildMinimalSchemaFromValue(charm)
-    );
-  } catch (_e) {
-    return buildMinimalSchemaFromValue(charm);
-  }
-}
-
-function getLoadedRecipeResultSchema(
-  runtime: IRuntime | undefined,
-  charm: Cell<any>,
+function getCellSchema(
+  cell: Cell<unknown>,
 ): JSONSchema | undefined {
-  const source = charm.getSourceCell();
-  const recipeId = source?.get()?.[TYPE];
-  const recipe = recipeId
-    ? runtime?.recipeManager.recipeById(recipeId)
-    : undefined;
-  if (recipe?.resultSchema !== undefined) {
-    return recipe.resultSchema;
-  }
-  return undefined;
+  return cell.schema ??
+    // If cell has a source cell, any resultRef has a schema attached
+    cell.getSourceCell<{ resultRef: Cell<unknown> }>({
+      type: "object",
+      properties: { resultRef: { asCell: true } },
+    })?.get()?.resultRef?.schema ??
+    // Otherwise, derive a simple object schema from the current value
+    buildMinimalSchemaFromValue(cell);
 }
 
 function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
@@ -828,11 +807,11 @@ function buildToolCatalog(
  * from the attachments list. This is appended to the system prompt so the LLM
  * has immediate context about available charms without needing to call schema() first.
  */
-async function buildAttachmentsSchemaDocumentation(
+function buildAttachmentsSchemaDocumentation(
   runtime: IRuntime,
   space: MemorySpace,
   attachments: Cell<Attachment[]>,
-): Promise<string> {
+): string {
   const currentAttachments = attachments.get() || [];
   if (currentAttachments.length === 0) {
     return "";
@@ -855,7 +834,7 @@ async function buildAttachmentsSchemaDocumentation(
       }
 
       // Get schema for the cell
-      const schema = await getCharmResultSchemaAsync(runtime, cell);
+      const schema = getCellSchema(cell);
       if (schema) {
         const schemaJson = JSON.stringify(schema, null, 2);
         schemaEntries.push(
@@ -1371,11 +1350,10 @@ function handleListAttachments(
 /**
  * Handles the schema tool call.
  */
-async function handleSchema(
-  runtime: IRuntime,
+function handleSchema(
   resolved: ResolvedToolCall & { type: "schema" },
-): Promise<{ type: string; value: any }> {
-  const schema = await getCharmResultSchemaAsync(runtime, resolved.charm) ??
+): { type: string; value: any } {
+  const schema = getCellSchema(resolved.charm) ??
     {};
   const value = JSON.parse(JSON.stringify(schema ?? {}));
   return { type: "json", value };
@@ -1557,7 +1535,7 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "schema") {
-    return await handleSchema(runtime, resolved);
+    return handleSchema(resolved);
   }
 
   if (resolved.type === "read") {
@@ -1798,7 +1776,7 @@ export function llmDialog(
   };
 }
 
-async function startRequest(
+function startRequest(
   tx: IExtendedStorageTransaction,
   runtime: IRuntime,
   space: MemorySpace,
@@ -1820,7 +1798,7 @@ async function startRequest(
   const toolCatalog = buildToolCatalog(runtime, toolsCell);
 
   // Build charm schemas documentation from attachments and append to system prompt
-  const charmSchemasDocs = await buildAttachmentsSchemaDocumentation(
+  const charmSchemasDocs = buildAttachmentsSchemaDocumentation(
     runtime,
     space,
     attachments,
