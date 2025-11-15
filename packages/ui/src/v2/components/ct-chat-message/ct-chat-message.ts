@@ -6,6 +6,7 @@ import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-tool-call/ct-tool-call.ts";
 import "../ct-button/ct-button.ts";
+import "../ct-copy-button/ct-copy-button.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMTextPart,
@@ -373,11 +374,6 @@ export class CTChatMessage extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  @property({ type: Boolean })
-  private _copied = false;
-
-  private _codeBlockCopiedStates = new Map<string, boolean>();
-
   constructor() {
     super();
     this.role = "user";
@@ -407,22 +403,18 @@ export class CTChatMessage extends BaseElement {
     return html.replace(
       /<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g,
       (_match, codeAttrs, codeContent) => {
-        const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
         // Decode HTML entities for the copy content
         const decodedContent = this._decodeHtmlEntities(codeContent);
 
         return `<div class="code-block-container">
           <pre><code${codeAttrs}>${codeContent}</code></pre>
-          <ct-button
+          <ct-copy-button
             class="code-copy-button"
+            text="${this._escapeForAttribute(decodedContent)}"
             variant="ghost"
             size="sm"
-            data-block-id="${blockId}"
-            data-copy-content="${this._escapeForAttribute(decodedContent)}"
-            title="Copy code"
-          >
-            📋
-          </ct-button>
+            icon-only
+          ></ct-copy-button>
         </div>`;
       },
     );
@@ -441,61 +433,6 @@ export class CTChatMessage extends BaseElement {
       .replace(/'/g, "&#39;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
-  }
-
-  private async _copyMessage() {
-    const textContent = this._extractTextContent();
-    if (!textContent) return;
-
-    try {
-      await navigator.clipboard.writeText(textContent);
-      this._copied = true;
-
-      // Reset copied state after 2 seconds
-      setTimeout(() => {
-        this._copied = false;
-        this.requestUpdate();
-      }, 2000);
-
-      this.requestUpdate();
-    } catch (err) {
-      console.error("Failed to copy message:", err);
-    }
-  }
-
-  private async _copyCodeBlock(blockId: string, content: string) {
-    try {
-      // Decode the content from the attribute
-      const decodedContent = content
-        .replace(/&amp;/g, "&")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">");
-
-      await navigator.clipboard.writeText(decodedContent);
-      this._codeBlockCopiedStates.set(blockId, true);
-
-      // Update the button to show copied state
-      const button = this.shadowRoot?.querySelector(
-        `[data-block-id="${blockId}"]`,
-      ) as HTMLElement;
-      if (button) {
-        button.textContent = "✓";
-        button.title = "Copied!";
-      }
-
-      // Reset copied state after 2 seconds
-      setTimeout(() => {
-        this._codeBlockCopiedStates.set(blockId, false);
-        if (button) {
-          button.textContent = "📋";
-          button.title = "Copy code";
-        }
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy code block:", err);
-    }
   }
 
   private _renderToolAttachments() {
@@ -579,14 +516,12 @@ export class CTChatMessage extends BaseElement {
       <div class="message-actions">
         ${this.role === "assistant"
           ? html`
-            <ct-button
+            <ct-copy-button
+              text="${textContent}"
               variant="ghost"
               size="sm"
-              @click="${this._copyMessage}"
-              title="${this._copied ? "Copied!" : "Copy message"}"
-            >
-              ${this._copied ? "✓" : "📋"}
-            </ct-button>
+              icon-only
+            ></ct-copy-button>
           `
           : null}
       </div>
@@ -610,32 +545,11 @@ export class CTChatMessage extends BaseElement {
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
     }
-
-    // Add event listeners to code copy buttons after render
-    if (changedProperties.has("content")) {
-      this._setupCodeCopyButtons();
-    }
   }
 
   private _updateThemeProperties() {
     if (!this.theme) return;
     applyThemeToElement(this, this.theme);
-  }
-
-  private _setupCodeCopyButtons() {
-    const copyButtons = this.shadowRoot?.querySelectorAll(".code-copy-button");
-    copyButtons?.forEach((button) => {
-      button.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const target = e.target as HTMLElement;
-        const blockId = target.getAttribute("data-block-id");
-        const content = target.getAttribute("data-copy-content");
-        if (blockId && content) {
-          this._copyCodeBlock(blockId, content);
-        }
-      });
-    });
   }
 
   override render() {
