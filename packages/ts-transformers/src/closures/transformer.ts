@@ -2009,6 +2009,7 @@ function transformDeriveCall(
   const signature = context.checker.getSignatureFromDeclaration(callback);
   let resultTypeNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
+  let hasTypeParameter = false;
 
   if (callback.type) {
     // Explicit return type annotation - use it directly (no need to register in typeRegistry)
@@ -2016,27 +2017,42 @@ function transformDeriveCall(
   } else if (signature) {
     // Infer from callback signature
     resultType = signature.getReturnType();
-    resultTypeNode = context.checker.typeToTypeNode(
-      resultType,
-      context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    );
 
-    // Register the result Type in typeRegistry for the synthetic TypeNode
-    // This fixes schema generation for shorthand properties referencing captured variables
-    if (resultTypeNode && context.options.typeRegistry) {
-      context.options.typeRegistry.set(resultTypeNode, resultType);
+    // Check if this is an uninstantiated type parameter
+    // When inside a generic function, the return type may be the generic parameter itself (e.g., "T")
+    const resultFlags = resultType.flags;
+    const isTypeParam = (resultFlags & ts.TypeFlags.TypeParameter) !== 0;
+
+    if (isTypeParam) {
+      // Mark that we have a type parameter - we'll omit ALL type arguments
+      // This lets SchemaInjectionTransformer's expression-based inference handle it
+      hasTypeParameter = true;
+    } else {
+      resultTypeNode = context.checker.typeToTypeNode(
+        resultType,
+        context.sourceFile,
+        ts.NodeBuilderFlags.NoTruncation |
+          ts.NodeBuilderFlags.UseStructuralFallback,
+      );
+
+      // Register the result Type in typeRegistry for the synthetic TypeNode
+      // This fixes schema generation for shorthand properties referencing captured variables
+      if (resultTypeNode && context.options.typeRegistry) {
+        context.options.typeRegistry.set(resultTypeNode, resultType);
+      }
     }
   }
 
   // Build the derive call expression
-  // Output 2-arg form with type arguments - SchemaInjectionTransformer will convert to 4-arg form with schemas
+  // If we have a type parameter, omit type arguments entirely to let SchemaInjectionTransformer infer from expressions
+  // Otherwise, use the 2-arg type argument form which SchemaInjectionTransformer will convert to 4-arg schema form
   const deriveExpr = context.ctHelpers.getHelperExpr("derive");
 
   const newDeriveCall = factory.createCallExpression(
     deriveExpr,
-    resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode], // Type arguments
+    hasTypeParameter
+      ? undefined
+      : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]), // Type arguments
     [mergedInput, newCallback], // Runtime arguments
   );
 
