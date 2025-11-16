@@ -14,6 +14,51 @@ import {
   type TypeRegistry,
 } from "../core/mod.ts";
 
+/**
+ * Schema Injection Transformer - TypeRegistry Integration
+ *
+ * This transformer injects JSON schemas for CommonTools core functions (pattern, derive,
+ * recipe, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ *
+ * ## TypeRegistry Integration (Unified Approach)
+ *
+ * All transformation paths now consistently check the TypeRegistry for closure-captured types.
+ * The TypeRegistry is a WeakMap<TypeNode, Type> that enables coordination between transformers:
+ *
+ * 1. **ClosureTransformer** (runs first):
+ *    - Creates synthetic TypeNodes for closure-captured variables
+ *    - Registers TypeNode -> Type mappings in TypeRegistry
+ *    - Enables type information preservation through AST transformations
+ *
+ * 2. **SchemaInjectionTransformer** (this file):
+ *    - Checks TypeRegistry for existing Type mappings before inferring types
+ *    - Preserves closure-captured type information from ClosureTransformer
+ *    - Registers newly inferred types back into TypeRegistry
+ *
+ * 3. **SchemaGeneratorTransformer** (runs last):
+ *    - Uses TypeRegistry to find Type information for synthetic TypeNodes
+ *    - Generates accurate JSON schemas even for transformed/synthetic nodes
+ *
+ * ## Pattern-Specific Behavior
+ *
+ * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
+ * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
+ * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
+ * - **Recipe**: Checks TypeRegistry for type arguments
+ * - **Lift**: Checks TypeRegistry for type arguments and inferred types
+ *
+ * ## Why This Matters
+ *
+ * Without TypeRegistry checking, closure-captured variables lose their type information
+ * when ClosureTransformer creates synthetic AST nodes. By checking the registry first,
+ * we preserve the original Type information and generate accurate schemas.
+ *
+ * Example: `const foo = { label: "test" }; pattern(() => ({ cell: foo }))`
+ * - ClosureTransformer creates synthetic type for `foo`, registers it
+ * - SchemaInjectionTransformer finds that type in TypeRegistry
+ * - SchemaGeneratorTransformer uses it to create accurate schema for `foo`
+ */
+
 function collectFunctionSchemaTypeNodes(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
@@ -113,6 +158,55 @@ function createToSchemaCall(
   );
 }
 
+/**
+ * Creates a schema call and transfers TypeRegistry entry if it exists.
+ * This is the unified pattern for all transformation paths to preserve
+ * closure-captured type information from ClosureTransformer.
+ *
+ * @param context - Transformation context
+ * @param typeNode - The TypeNode to create a schema for
+ * @param typeRegistry - Optional TypeRegistry to check for existing types
+ * @returns CallExpression for toSchema() with TypeRegistry entry transferred
+ */
+function createSchemaCallWithRegistryTransfer(
+  context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
+  typeNode: ts.TypeNode,
+  typeRegistry?: TypeRegistry,
+): ts.CallExpression {
+  const schemaCall = createToSchemaCall(context, typeNode);
+
+  // Transfer TypeRegistry entry from source typeNode to schema call
+  // This preserves type information for closure-captured variables
+  if (typeRegistry) {
+    const typeFromRegistry = typeRegistry.get(typeNode);
+    if (typeFromRegistry) {
+      typeRegistry.set(schemaCall, typeFromRegistry);
+    }
+  }
+
+  return schemaCall;
+}
+
+/**
+ * Gets type from TypeRegistry if available, otherwise uses fallback.
+ * Used for inferred types that may have been created by ClosureTransformer.
+ *
+ * @param typeNode - The TypeNode to look up in registry
+ * @param fallbackType - Type to use if not found in registry
+ * @param typeRegistry - Optional TypeRegistry to check
+ * @returns Type from registry or fallback type
+ */
+function getTypeFromRegistryOrFallback(
+  typeNode: ts.TypeNode | undefined,
+  fallbackType: ts.Type | undefined,
+  typeRegistry?: TypeRegistry,
+): ts.Type | undefined {
+  if (typeNode && typeRegistry?.has(typeNode)) {
+    return typeRegistry.get(typeNode);
+  }
+  return fallbackType;
+}
+
 function prependSchemaArguments(
   context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
   node: ts.CallExpression,
@@ -170,9 +264,9 @@ export class SchemaInjectionTransformer extends Transformer {
         const typeArgs = node.typeArguments;
 
         if (typeArgs && typeArgs.length >= 1) {
-          const schemaArgs = typeArgs.map((typeArg) => typeArg).map((
-            typeArg,
-          ) => createToSchemaCall(context, typeArg));
+          const schemaArgs = typeArgs.map((typeArg) =>
+            createSchemaCallWithRegistryTransfer(context, typeArg, typeRegistry)
+          );
 
           const argsArray = Array.from(node.arguments);
           let remainingArgs = argsArray;
@@ -221,9 +315,10 @@ export class SchemaInjectionTransformer extends Transformer {
 
             // Only transform if there's an explicit type annotation
             if (inputParam?.type) {
-              const toSchemaInput = createToSchemaCall(
+              const toSchemaInput = createSchemaCallWithRegistryTransfer(
                 context,
                 inputParam.type,
+                typeRegistry,
               );
 
               // Preserve the name argument if it was provided
@@ -277,9 +372,19 @@ export class SchemaInjectionTransformer extends Transformer {
 
         // Infer types from the function signature and type arguments
         const argumentTypeNode = inferred.argument;
-        const argumentType = inferred.argumentType;
         const resultTypeNode = inferred.result;
-        const resultType = inferred.resultType;
+
+        // Check TypeRegistry for existing types first (may be synthetic from ClosureTransformer)
+        const argumentType = getTypeFromRegistryOrFallback(
+          argumentTypeNode,
+          inferred.argumentType,
+          typeRegistry,
+        );
+        const resultType = getTypeFromRegistryOrFallback(
+          resultTypeNode,
+          inferred.resultType,
+          typeRegistry,
+        );
 
         // Build the new arguments array: [fn, argSchema?, resSchema?]
         const newArgs: ts.Expression[] = [patternFunction];
@@ -323,26 +428,17 @@ export class SchemaInjectionTransformer extends Transformer {
           if (!eventType || !stateType) {
             return ts.visitEachChild(node, visit, transformation);
           }
-          const toSchemaEvent = createToSchemaCall(context, eventType);
-          const toSchemaState = createToSchemaCall(context, stateType);
 
-          // Register Types in TypeRegistry (if they exist from ClosureTransformer)
-          // This allows SchemaGeneratorTransformer to find the Types for synthetic TypeNodes
-          // If no Type was registered by ClosureTransformer, don't try to create one -
-          // the synthetic TypeNode will be handled by generateSchemaFromSyntheticTypeNode
-          if (typeRegistry) {
-            const eventTypeFromRegistry = typeRegistry.get(eventType);
-            const stateTypeFromRegistry = typeRegistry.get(stateType);
-
-            // Only register if we have a Type from ClosureTransformer
-            if (eventTypeFromRegistry) {
-              typeRegistry.set(toSchemaEvent, eventTypeFromRegistry);
-            }
-
-            if (stateTypeFromRegistry) {
-              typeRegistry.set(toSchemaState, stateTypeFromRegistry);
-            }
-          }
+          const toSchemaEvent = createSchemaCallWithRegistryTransfer(
+            context,
+            eventType,
+            typeRegistry,
+          );
+          const toSchemaState = createSchemaCallWithRegistryTransfer(
+            context,
+            stateType,
+            typeRegistry,
+          );
 
           const updated = factory.createCallExpression(
             node.expression,
@@ -521,11 +617,22 @@ export class SchemaInjectionTransformer extends Transformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // Check TypeRegistry for closure-captured types (like Handler does)
+          // This allows SchemaGeneratorTransformer to find Types for synthetic TypeNodes
+          // created by ClosureTransformer
+          let argumentTypeValue: ts.Type | undefined;
+          let resultTypeValue: ts.Type | undefined;
+
+          if (typeRegistry) {
+            argumentTypeValue = typeRegistry.get(argumentType);
+            resultTypeValue = typeRegistry.get(resultType);
+          }
+
           return updateWithSchemas(
             argumentType,
-            undefined,
+            argumentTypeValue,
             resultType,
-            undefined,
+            resultTypeValue,
           );
         }
 
@@ -548,11 +655,24 @@ export class SchemaInjectionTransformer extends Transformer {
               factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
             const resNode = inferred.result ??
               factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-            return updateWithSchemas(
+
+            // Check TypeRegistry for inferred types (may be synthetic from ClosureTransformer)
+            const argType = getTypeFromRegistryOrFallback(
               argNode,
               inferred.argumentType,
+              typeRegistry,
+            );
+            const resType = getTypeFromRegistryOrFallback(
               resNode,
               inferred.resultType,
+              typeRegistry,
+            );
+
+            return updateWithSchemas(
+              argNode,
+              argType,
+              resNode,
+              resType,
             );
           }
         }
