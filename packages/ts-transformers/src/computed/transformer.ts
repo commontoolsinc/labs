@@ -22,9 +22,14 @@ export class ComputedTransformer extends Transformer {
   /**
    * Filter: Only run if the file contains 'computed' somewhere.
    * This is a quick optimization to skip files without computed calls.
+   * Falls back to AST traversal if text search fails (e.g., computed calls
+   * created by other transformers).
    */
   override filter(context: TransformationContext): boolean {
-    return context.sourceFile.text.includes("computed");
+    if (context.sourceFile.text.includes("computed")) {
+      return true;
+    }
+    return sourceContainsComputedCall(context);
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
@@ -87,4 +92,26 @@ function createComputedToDeriveVisitor(
   };
 
   return visitor;
+}
+
+function sourceContainsComputedCall(
+  context: TransformationContext,
+): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(node)) {
+      const callKind = detectCallKind(node, context.checker);
+      if (
+        callKind?.kind === "builder" &&
+        callKind.builderName === "computed"
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(context.sourceFile);
+  return found;
 }
