@@ -10,11 +10,14 @@ const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
   ts.NodeBuilderFlags.UseStructuralFallback;
 
 /**
- * Check if a type is 'any' or 'unknown'
+ * Check if a type is 'any', 'unknown', or an uninstantiated type parameter
+ * These types cannot be used to generate schemas at compile time
  */
 export function isAnyOrUnknownType(type: ts.Type | undefined): boolean {
   if (!type) return false;
-  return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+  return (type.flags &
+    (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+    0;
 }
 
 /**

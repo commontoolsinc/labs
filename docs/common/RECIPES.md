@@ -244,10 +244,10 @@ Several utility functions are available:
     const timestamp = wish("#now");
     ```
 
-  You can also provide a default value as the second argument:
+  The `wish` function returns `undefined` when the target doesn't exist. You can provide a default value using `derive`:
 
   ```typescript
-  const items = wish("/myItems", []); // Returns [] if /myItems doesn't exist
+  const items = derive(wish("/myItems"), (val) => val ?? []); // Returns [] if /myItems doesn't exist
   ```
 
 **Important**: These built-in functions can only be called from within a recipe
