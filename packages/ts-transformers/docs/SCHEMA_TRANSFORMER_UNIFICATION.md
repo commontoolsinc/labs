@@ -71,21 +71,26 @@ reveal why some paths avoided TypeRegistry
 
 ---
 
-### Phase 2: Shared Type Collection Helper
+### Phase 2: Complete TypeRegistry Unification ✅ COMPLETE
 
-**Hypothesis**: All paths should use `collectFunctionSchemaTypeNodes()` or
-unified variant
+**Original Hypothesis**: All paths should use `collectFunctionSchemaTypeNodes()`
+
+**Actual Finding**: Handler has different needs (2 parameters vs 1 param +
+return)
+
+**Revised Approach**: Fix handler inference path to check TypeRegistry
 
 **Changes**:
 
-1. Refactor Handler to use collectFunctionSchemaTypeNodes
-2. Refactor Recipe to use collectFunctionSchemaTypeNodes
-3. Extend helper if needed for their specific requirements
+1. Handler inference path now uses `createSchemaCallWithRegistryTransfer`
+2. Completes TypeRegistry unification from Phase 1
+3. Enables closure captures in handler inference mode
 
-**Test Strategy**: Same behavior before/after refactor
+**Test Results**: All tests passing, no breaking changes
 
-**Success Criteria**: Cleaner code with identical behavior, or reveals why
-Handler/Recipe needed special logic
+**Outcome**: TypeRegistry now uniformly checked across ALL transformation paths
+
+**Status**: ✅ Merged with Phase 1 on `refactor/unify-typeregistry` branch
 
 ---
 
@@ -160,10 +165,14 @@ After all phases, write up:
 
 ## Current Status
 
-- **Branch**: Starting from `wish-schemas` (includes uninstantiated generics
-  work)
-- **Next Step**: Phase 1 (TypeRegistry Unification)
+- **Branch**: `refactor/unify-typeregistry` (based on `wish-schemas`)
+- **Completed**: Phase 1 ✅ (TypeRegistry Unification)
+- **Completed**: Phase 2 ✅ (Handler Inference Path Fix)
+- **Next Step**: Decide on Phase 3 (Fallback Policy) or Phase 4 (Type
+  Parameters)
 - **Complete Analysis**: See `schema-transformer-analysis.md`
+- **Phase 1 Results**: See `SCHEMA_TRANSFORMER_PHASE1_RESULTS.md`
+- **Phase 2 Results**: See `SCHEMA_TRANSFORMER_PHASE2_RESULTS.md`
 
 ## Notes
 

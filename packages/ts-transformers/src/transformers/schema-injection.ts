@@ -466,8 +466,16 @@ export class SchemaInjectionTransformer extends Transformer {
                 factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
               if (eventParam || stateParam) {
-                const toSchemaEvent = createToSchemaCall(context, eventType);
-                const toSchemaState = createToSchemaCall(context, stateType);
+                const toSchemaEvent = createSchemaCallWithRegistryTransfer(
+                  context,
+                  eventType,
+                  typeRegistry,
+                );
+                const toSchemaState = createSchemaCallWithRegistryTransfer(
+                  context,
+                  stateType,
+                  typeRegistry,
+                );
 
                 const updated = factory.createCallExpression(
                   node.expression,
