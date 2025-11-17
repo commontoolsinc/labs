@@ -103,9 +103,12 @@ export function isJSONCellLink(value: any): value is LegacyJSONCellLink {
     isRecord(value) &&
     isRecord(value.cell) &&
     typeof value.cell["/"] === "string" &&
+    base64Regex.test(value.cell["/"]) &&
     Array.isArray(value.path)
   );
 }
+
+const base64Regex = new RegExp("^[A-Za-z0-9]+={0,2}$");
 
 /**
  * Check if value is a sigil link.
@@ -148,7 +151,8 @@ export function isLink(
     isCellResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
-    (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
+    (isRecord(value) && "/" in value && Object.keys(value).length === 1 &&
+      typeof value["/"] === "string" && base64Regex.test(value["/"])) // EntityId format
   );
 }
 
@@ -271,7 +275,10 @@ export function parseLink(
     };
   }
 
-  if (isRecord(value) && "/" in value) {
+  if (
+    isRecord(value) && "/" in value && Object.keys(value).length === 1 &&
+    typeof value["/"] === "string" && base64Regex.test(value["/"])
+  ) {
     return {
       id: toURI(value["/"]),
       path: [],

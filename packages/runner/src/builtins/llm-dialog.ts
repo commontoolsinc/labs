@@ -29,6 +29,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 
 // Avoid importing from @commontools/charm to prevent circular deps in tests
 
@@ -39,6 +40,7 @@ const logger = getLogger("llm-dialog", {
 
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
+const TOOL_CALL_TIMEOUT = 1000 * 30 * 1; // 30 seconds
 
 /**
  * Remove the injected `result` field from a JSON schema so tools don't
@@ -201,20 +203,42 @@ function createLLMFriendlyLink(link: NormalizedFullLink): string {
  */
 function traverseAndSerialize(
   value: unknown,
+  schema: JSONSchema | undefined,
+  rootSchema: JSONSchema | undefined = schema,
   seen: Set<unknown> = new Set(),
 ): unknown {
   if (!isRecord(value)) return value;
 
+  // If we encounter an `any` schema, turn value into a cell link
+  if (
+    seen.size > 0 && schema !== undefined &&
+    ContextualFlowControl.isTrueSchema(schema) &&
+    isCellResultForDereferencing(value)
+  ) {
+    // Next step will turn this into a link
+    value = getCellOrThrow(value);
+  }
+
+  // Turn cells into a link, unless they are data: URIs and traverse instead
   if (isCell(value)) {
-    const link = value.getAsNormalizedFullLink();
-    return { "/": encodeJsonPointer(["", link.id, ...link.path]) };
+    const link = value.resolveAsCell().getAsNormalizedFullLink();
+    if (link.id.startsWith("data:")) {
+      return traverseAndSerialize(value.get(), schema, rootSchema, seen);
+    } else {
+      return { "@link": encodeJsonPointer(["", link.id, ...link.path]) };
+    }
   }
 
   // If we've already seen this and it can be mapped to a cell, serialized as
   // cell link, otherwise throw (this should never happen in our cases)
   if (seen.has(value)) {
     if (isCellResultForDereferencing(value)) {
-      return traverseAndSerialize(getCellOrThrow(value), seen);
+      return traverseAndSerialize(
+        getCellOrThrow(value),
+        schema,
+        rootSchema,
+        seen,
+      );
     } else {
       throw new Error(
         "Cannot serialize a value that has already been seen and cannot be mapped to a cell.",
@@ -223,13 +247,43 @@ function traverseAndSerialize(
   }
   seen.add(value);
 
+  const cfc = new ContextualFlowControl();
+
   if (Array.isArray(value)) {
-    return value.map((v) => traverseAndSerialize(v, seen));
+    return value.map((v, index) => {
+      const linkSchema = schema !== undefined
+        ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
+        : undefined;
+      let result = traverseAndSerialize(v, linkSchema, rootSchema, seen);
+      // Decorate array entries with links that point to underlying cells, if
+      // any. Ignores data: URIs, since they're not useful as links for the LLM.
+      if (isRecord(result) && isCellResultForDereferencing(v)) {
+        const link = getCellOrThrow(v).resolveAsCell()
+          .getAsNormalizedFullLink();
+        if (!link.id.startsWith("data:")) {
+          result = {
+            "@arrayEntry": encodeJsonPointer(["", link.id, ...link.path]),
+            ...result,
+          };
+        }
+      }
+      return result;
+    });
   } else {
     return Object.fromEntries(
-      Object.entries(value).map((
+      Object.entries(value as Record<string, unknown>).map((
         [key, value],
-      ) => [key, traverseAndSerialize(value, seen)]),
+      ) => [
+        key,
+        traverseAndSerialize(
+          value,
+          schema !== undefined
+            ? cfc.schemaAtPath(schema, [key], rootSchema)
+            : undefined,
+          rootSchema,
+          seen,
+        ),
+      ]),
     );
   }
 }
@@ -254,10 +308,10 @@ function traverseAndCellify(
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
   if (
-    isRecord(value) && typeof value["/"] === "string" &&
-    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["/"])
+    isRecord(value) && typeof value["@link"] === "string" &&
+    Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["@link"])
   ) {
-    const link = parseLLMFriendlyLink(value["/"], space);
+    const link = parseLLMFriendlyLink(value["@link"], space);
     return runtime.getCellFromLink(link);
   }
   if (Array.isArray(value)) {
@@ -1363,15 +1417,14 @@ function handleSchema(
  */
 function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
-): { type: string; value: any } {
-  const serialized = traverseAndSerialize(resolved.cellRef.get());
+): { type: string; value: unknown } {
+  let cell = resolved.cellRef;
+  if (!cell.schema) {
+    cell = cell.asSchema(getCellSchema(cell));
+  }
+  const serialized = traverseAndSerialize(cell.get(), cell.schema);
 
-  // Handle undefined values gracefully - return null for undefined/null
-  const value = serialized === undefined || serialized === null
-    ? null
-    : JSON.parse(JSON.stringify(serialized));
-
-  return { type: "json", value };
+  return { type: "json", value: serialized };
 }
 
 /**
@@ -1476,7 +1529,17 @@ async function handleRun(
   const cancel = result.sink((r) => {
     r !== undefined && resolve(r);
   });
-  await promise;
+
+  let timeout;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error("Tool call timed out"));
+    }, TOOL_CALL_TIMEOUT);
+  }).then(() => {
+    throw new Error("Tool call timed out");
+  });
+  await Promise.race([promise, timeoutPromise]);
+  clearTimeout(timeout);
   cancel();
 
   // Get the actual entity ID from the result cell

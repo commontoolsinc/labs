@@ -9,6 +9,7 @@ import {
   handler,
   llmDialog,
   NAME,
+  patternTool,
   recipe,
   Stream,
   UI,
@@ -126,19 +127,16 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-const listMentionable = handler<
-  {
-    /** A cell to store the result text */
-    result: Cell<string>;
-  },
-  { mentionable: Cell<MentionableCharm>[] }
+const listMentionable = recipe<
+  { mentionable: Array<MentionableCharm> },
+  { result: Array<{ label: string; cell: Cell<unknown> }> }
 >(
-  (args, state) => {
-    const namesList = state.mentionable.map((charm) => ({
-      label: charm.get()[NAME],
+  ({ mentionable }) => {
+    const result = mentionable.map((charm) => ({
+      label: charm[NAME]!,
       cell: charm,
     }));
-    args.result.set(JSON.stringify(namesList));
+    return { result };
   },
 );
 
@@ -166,11 +164,7 @@ export default recipe<ChatInput, ChatOutput>(
     const recentCharms = schemaifyWish<MentionableCharm[]>("#recent");
 
     const assistantTools = {
-      listMentionable: {
-        description:
-          "List all mentionable items in the space, read() the result.",
-        handler: listMentionable({ mentionable }),
-      },
+      listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: {
         description:
           "List all recently viewed charms in the space, read() the result.",
