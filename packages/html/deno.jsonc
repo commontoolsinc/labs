@@ -5,17 +5,13 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./utils": "./src/utils.ts"
+    "./utils": "./src/utils.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts"
   },
   "imports": {
     "htmlparser2": "npm:htmlparser2",
     "domhandler": "npm:domhandler",
     "dom-serializer": "npm:dom-serializer"
-  },
-
-  "compilerOptions": {
-    "jsx": "react",
-    "jsxFactory": "h",
-    "jsxFragmentFactory": "h.fragment"
   }
 }

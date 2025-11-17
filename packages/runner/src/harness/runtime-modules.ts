@@ -1,7 +1,6 @@
 import { createBuilder } from "../builder/factory.ts";
 import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
-import { IRuntime } from "../runtime.ts";
 
 export type RuntimeModuleIdentifier =
   | "commontools"
@@ -49,8 +48,8 @@ export const getTypes = (() => {
   };
 })();
 
-export function getExports(runtime: IRuntime) {
-  const { commontools, exportsCallback } = createBuilder(runtime);
+export function getExports() {
+  const { commontools, exportsCallback } = createBuilder();
   return {
     runtimeExports: {
       "commontools": commontools,

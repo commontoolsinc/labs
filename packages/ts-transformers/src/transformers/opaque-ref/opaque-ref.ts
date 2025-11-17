@@ -1,10 +1,15 @@
 import ts from "typescript";
-import {
-  resolvesToCommonToolsSymbol,
-  symbolDeclaresCommonToolsDefault,
-} from "../../core/mod.ts";
+import { symbolDeclaresCommonToolsDefault } from "../../core/mod.ts";
 import { getMemberSymbol } from "../../ast/mod.ts";
+import {
+  getCellBrand,
+  getCellKind as utilGetCellKind,
+} from "@commontools/schema-generator/cell-brand";
 
+/**
+ * Check if a type is a cell type by looking for the CELL_BRAND property.
+ * This includes OpaqueCell, Cell, Stream, and other cell variants.
+ */
 export function isOpaqueRefType(
   type: ts.Type,
   checker: ts.TypeChecker,
@@ -22,62 +27,28 @@ export function isOpaqueRefType(
       isOpaqueRefType(t, checker)
     );
   }
-  if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const typeRef = objectType as ts.TypeReference;
-      const target = typeRef.target;
-      if (target && target.symbol) {
-        const symbolName = target.symbol.getName();
-        if (symbolName === "OpaqueRef" || symbolName === "Cell") return true;
-        if (
-          resolvesToCommonToolsSymbol(target.symbol, checker, "Default")
-        ) {
-          return true;
-        }
-        const qualified = checker.getFullyQualifiedName(target.symbol);
-        if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
-          return true;
-        }
-      }
-    }
-    const symbol = type.getSymbol();
-    if (symbol) {
-      if (
-        symbol.name === "OpaqueRef" ||
-        symbol.name === "OpaqueRefMethods" ||
-        symbol.name === "OpaqueRefBase" ||
-        symbol.name === "Cell"
-      ) {
-        return true;
-      }
-      if (resolvesToCommonToolsSymbol(symbol, checker, "Default")) {
-        return true;
-      }
-      const qualified = checker.getFullyQualifiedName(symbol);
-      if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
-        return true;
-      }
-    }
+
+  // Look for the CELL_BRAND unique symbol on the type.
+  const brand = getCellBrand(type, checker);
+  if (brand !== undefined) {
+    // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
+    return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"]
+      .includes(brand);
   }
-  if (type.aliasSymbol) {
-    const aliasName = type.aliasSymbol.getName();
-    if (
-      aliasName === "OpaqueRef" ||
-      aliasName === "Opaque" ||
-      aliasName === "Cell"
-    ) {
-      return true;
-    }
-    if (resolvesToCommonToolsSymbol(type.aliasSymbol, checker, "Default")) {
-      return true;
-    }
-    const qualified = checker.getFullyQualifiedName(type.aliasSymbol);
-    if (qualified.includes("OpaqueRef") || qualified.includes("Cell")) {
-      return true;
-    }
-  }
+
   return false;
+}
+
+/**
+ * Get the cell kind from a type ("opaque", "cell", or "stream").
+ * Maps other cell types to their logical category.
+ * Returns undefined if not a cell type.
+ */
+export function getCellKind(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): "opaque" | "cell" | "stream" | undefined {
+  return utilGetCellKind(type, checker);
 }
 
 export function containsOpaqueRef(

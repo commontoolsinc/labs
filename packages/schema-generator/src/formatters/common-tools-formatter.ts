@@ -1,4 +1,10 @@
 import ts from "typescript";
+import {
+  type CellWrapperKind,
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+} from "../typescript/cell-brand.ts";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -7,7 +13,7 @@ import type {
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { detectWrapperViaNode, resolveWrapperNode } from "../type-utils.ts";
 
-type WrapperKind = "Cell" | "Stream" | "OpaqueRef";
+type WrapperKind = CellWrapperKind;
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, OpaqueRef<T>, Default<T,V>)
@@ -25,22 +31,51 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Check via typeNode for Default (erased at type-level) and all wrapper aliases
+    // Check via typeNode for Default (erased at type-level)
     const wrapperViaNode = detectWrapperViaNode(
       context.typeNode,
       context.typeChecker,
     );
-    if (wrapperViaNode) {
+    if (wrapperViaNode === "Default") {
       return true;
     }
 
+    // Check if this is an Opaque<T> union (T | OpaqueRef<T>)
+    if (this.isOpaqueUnion(type, context.typeChecker)) {
+      return true;
+    }
+
+    if ((type.flags & ts.TypeFlags.Union) !== 0) {
+      return false;
+    }
+
     // Check if this is a wrapper type (Cell/Stream/OpaqueRef) via type structure
-    const wrapperInfo = this.getWrapperTypeInfo(type);
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
     return wrapperInfo !== undefined;
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     const n = context.typeNode;
+
+    // Check if this is an Opaque<T> union and handle it first
+    // This prevents the UnionFormatter from creating an anyOf
+    const opaqueUnionInfo = this.getOpaqueUnionInfo(type, context.typeChecker);
+    if (opaqueUnionInfo) {
+      // Format the base type T and add asOpaque: true
+      const innerSchema = this.schemaGenerator.formatChildType(
+        opaqueUnionInfo.baseType,
+        context,
+        undefined, // Don't pass typeNode since we're working with the unwrapped type
+      );
+
+      // Handle boolean schemas
+      if (typeof innerSchema === "boolean") {
+        return innerSchema === false
+          ? { asOpaque: true, not: true } as SchemaDefinition // false = "no value is valid"
+          : { asOpaque: true } as SchemaDefinition; // true = "any value is valid"
+      }
+      return { ...innerSchema, asOpaque: true } as SchemaDefinition;
+    }
 
     // Check via typeNode for all wrapper types (handles both direct usage and aliases)
     const resolvedWrapper = n
@@ -61,38 +96,44 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Handle Cell/Stream/OpaqueRef via node (direct or alias)
-    if (resolvedWrapper && resolvedWrapper.kind !== "Default") {
-      // Use the ACTUAL type from the usage site (which has concrete type arguments)
-      const wrapperInfo = this.getWrapperTypeInfo(type);
-      if (wrapperInfo) {
-        // For choosing which node to pass to formatWrapperType:
-        // - If original node has type arguments: use it (has concrete types from usage site)
-        // - If original node is just identifier (alias): use resolved node
-        //   formatWrapperType will check if node has type args before extracting inner types
-        const nodeToPass = n && ts.isTypeReferenceNode(n) && n.typeArguments
-          ? n // Original has type args, use it
-          : resolvedWrapper.node; // Original is just alias, use resolved (but won't extract inner types from it)
-
-        return this.formatWrapperType(
-          wrapperInfo.typeRef,
-          nodeToPass,
-          context,
-          wrapperInfo.kind,
-        );
-      }
-    }
-
-    // Fallback: try to get wrapper type information from type structure
-    // (for cases where we don't have a typeNode)
-    const wrapperInfo = this.getWrapperTypeInfo(type);
-    if (wrapperInfo) {
+    const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
+    if (wrapperInfo && !(type.flags & ts.TypeFlags.Union)) {
+      const nodeToPass = this.selectWrapperTypeNode(
+        n,
+        resolvedWrapper,
+        wrapperInfo.kind,
+      );
       return this.formatWrapperType(
         wrapperInfo.typeRef,
-        n,
+        nodeToPass,
         context,
         wrapperInfo.kind,
       );
+    }
+
+    // If we detected a wrapper syntactically but the current type is wrapped in
+    // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
+    // brand information until we reach the underlying wrapper.
+    const wrapperKinds: WrapperKind[] = ["OpaqueRef", "Cell", "Stream"];
+    for (const kind of wrapperKinds) {
+      const unwrappedType = this.recursivelyUnwrapOpaqueRef(
+        type,
+        kind,
+        context.typeChecker,
+      );
+      if (unwrappedType) {
+        const nodeToPass = this.selectWrapperTypeNode(
+          n,
+          resolvedWrapper,
+          unwrappedType.kind,
+        );
+        return this.formatWrapperType(
+          unwrappedType.typeRef,
+          nodeToPass,
+          context,
+          unwrappedType.kind,
+        );
+      }
     }
 
     const nodeName = this.getTypeRefIdentifierName(n);
@@ -173,13 +214,18 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Cell<T>: disallow Cell<Stream<T>> to avoid ambiguous semantics
-    if (wrapperKind === "Cell" && this.isStreamType(innerType)) {
+    if (
+      wrapperKind === "Cell" &&
+      this.isStreamType(innerType, context.typeChecker)
+    ) {
       throw new Error(
         "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
       );
     }
 
     // Determine the property name to add based on wrapper kind
+    // TODO(gideon): Consider updating as[Cell,Opaque,Stream] properties to use an array of brands
+    // instead of boolean values, to support multiple brands like ["cell", "comparable"]
     const propertyName = wrapperKind === "Cell" ? "asCell" : "asOpaque";
 
     // Handle case where innerSchema might be boolean (per JSON Schema spec)
@@ -192,45 +238,174 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   /**
-   * Get wrapper type information (Cell/Stream/OpaqueRef)
-   * Handles both direct references and intersection types (e.g., OpaqueRef<"literal">)
-   * Returns the wrapper kind and the TypeReference needed for formatting
+   * Recursively unwrap OpaqueRef layers to find a wrapper type (Cell/Stream/OpaqueRef).
+   * This handles cases like Opaque<OpaqueRef<Stream<T>>> where the type is wrapped in
+   * multiple layers of OpaqueRef due to the Opaque type's recursive definition.
    */
-  private getWrapperTypeInfo(
+  private recursivelyUnwrapOpaqueRef(
     type: ts.Type,
-  ): { kind: WrapperKind; typeRef: ts.TypeReference } | undefined {
-    // Check direct object type reference
-    if (type.flags & ts.TypeFlags.Object) {
-      const objectType = type as ts.ObjectType;
-      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-        const typeRef = objectType as ts.TypeReference;
-        const name = typeRef.target?.symbol?.name;
-        if (name === "Cell" || name === "Stream" || name === "OpaqueRef") {
-          return { kind: name, typeRef };
-        }
+    targetWrapperKind: WrapperKind,
+    checker: ts.TypeChecker,
+    depth: number = 0,
+  ):
+    | { type: ts.Type; typeRef: ts.TypeReference; kind: WrapperKind }
+    | undefined {
+    // Prevent infinite recursion
+    if (depth > 10) {
+      return undefined;
+    }
+
+    // Check if this type itself is the target wrapper
+    if ((type.flags & ts.TypeFlags.Union) === 0) {
+      const wrapperInfo = getCellWrapperInfo(type, checker);
+      if (wrapperInfo && wrapperInfo.kind === targetWrapperKind) {
+        return { type, typeRef: wrapperInfo.typeRef, kind: wrapperInfo.kind };
       }
     }
 
-    // OpaqueRef with literal type arguments becomes an intersection
-    // e.g., OpaqueRef<"initial"> expands to: OpaqueRefMethods<"initial"> & "initial"
-    // We need to detect OpaqueRefMethods to handle this case
-    if (type.flags & ts.TypeFlags.Intersection) {
-      const intersectionType = type as ts.IntersectionType;
-      for (const constituent of intersectionType.types) {
-        if (constituent.flags & ts.TypeFlags.Object) {
-          const objectType = constituent as ts.ObjectType;
-          if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-            const typeRef = objectType as ts.TypeReference;
-            const name = typeRef.target?.symbol?.name;
-            // OpaqueRefMethods is the internal type that OpaqueRef expands to
-            if (name === "OpaqueRefMethods") {
-              return { kind: "OpaqueRef", typeRef };
-            }
-          }
-        }
+    // If this is a union (e.g., from Opaque<T>), check each member
+    if (type.flags & ts.TypeFlags.Union) {
+      const unionType = type as ts.UnionType;
+      for (const member of unionType.types) {
+        // Try to unwrap this member
+        const result = this.recursivelyUnwrapOpaqueRef(
+          member,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+        if (result) return result;
       }
     }
 
+    // If this is an OpaqueRef type, extract its type argument and recurse
+    if (this.isOpaqueRefType(type, checker)) {
+      const innerType = this.extractOpaqueRefTypeArgument(type, checker);
+      if (innerType) {
+        return this.recursivelyUnwrapOpaqueRef(
+          innerType,
+          targetWrapperKind,
+          checker,
+          depth + 1,
+        );
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Check if a type is an Opaque<T> union (T | OpaqueRef<T>)
+   */
+  private isOpaqueUnion(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return this.getOpaqueUnionInfo(type, checker) !== undefined;
+  }
+
+  /**
+   * Extract information from an Opaque<T> union type.
+   * Opaque<T> is defined as: T | OpaqueRef<T>
+   * This function detects this pattern and returns the base type T.
+   */
+  private getOpaqueUnionInfo(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): { baseType: ts.Type } | undefined {
+    // Must be a union type
+    if (!(type.flags & ts.TypeFlags.Union)) {
+      return undefined;
+    }
+
+    const unionType = type as ts.UnionType;
+    const members = unionType.types;
+
+    // Must have exactly 2 members
+    if (members.length !== 2) {
+      return undefined;
+    }
+
+    // One member should be OpaqueRef<T>, the other should be T
+    let opaqueRefMember: ts.Type | undefined;
+    let baseMember: ts.Type | undefined;
+
+    for (const member of members) {
+      // Check if this member is an OpaqueRef type (it will be an intersection)
+      const isOpaqueRef = this.isOpaqueRefType(member, checker);
+      if (isOpaqueRef) {
+        opaqueRefMember = member;
+      } else {
+        baseMember = member;
+      }
+    }
+
+    // Both members must be present for this to be an Opaque<T> union
+    if (!opaqueRefMember || !baseMember) {
+      return undefined;
+    }
+
+    // Verify that the OpaqueRef's type argument matches the base type
+    // Extract T from OpaqueRef<T>
+    const opaqueRefInnerType = this.extractOpaqueRefTypeArgument(
+      opaqueRefMember,
+      checker,
+    );
+    if (!opaqueRefInnerType) {
+      return undefined;
+    }
+
+    // The inner type of OpaqueRef should match the base member
+    // Use type equality check
+    const innerTypeString = checker.typeToString(opaqueRefInnerType);
+    const baseTypeString = checker.typeToString(baseMember);
+
+    if (innerTypeString !== baseTypeString) {
+      // Not a matching Opaque<T> pattern
+      return undefined;
+    }
+
+    return { baseType: baseMember };
+  }
+
+  private isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return isCellBrand(type, checker, "opaque");
+  }
+
+  /**
+   * Extract the type argument T from OpaqueRef<T> or OpaqueCell<T>
+   */
+  private extractOpaqueRefTypeArgument(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): ts.Type | undefined {
+    const wrapperInfo = getCellWrapperInfo(type, checker);
+    if (!wrapperInfo || wrapperInfo.kind !== "OpaqueRef") {
+      return undefined;
+    }
+
+    const typeArgs = wrapperInfo.typeRef.typeArguments ??
+      checker.getTypeArguments(wrapperInfo.typeRef);
+    return typeArgs && typeArgs.length > 0 ? typeArgs[0] : undefined;
+  }
+
+  private selectWrapperTypeNode(
+    originalNode: ts.TypeNode | undefined,
+    resolvedWrapper:
+      | {
+        kind: "Default" | WrapperKind;
+        node: ts.TypeReferenceNode;
+      }
+      | undefined,
+    targetKind: WrapperKind,
+  ): ts.TypeReferenceNode | undefined {
+    if (
+      originalNode &&
+      ts.isTypeReferenceNode(originalNode) &&
+      originalNode.typeArguments
+    ) {
+      return originalNode;
+    }
+    if (resolvedWrapper?.kind === targetKind) {
+      return resolvedWrapper.node;
+    }
     return undefined;
   }
 
@@ -242,10 +417,8 @@ export class CommonToolsFormatter implements TypeFormatter {
     return ts.isIdentifier(tn) ? tn.text : undefined;
   }
 
-  private isStreamType(type: ts.Type): boolean {
-    const objectType = type as ts.ObjectType;
-    return !!(objectType.objectFlags & ts.ObjectFlags.Reference) &&
-      (type as ts.TypeReference).target?.symbol?.name === "Stream";
+  private isStreamType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    return getCellBrand(type, checker) === "stream";
   }
 
   private formatDefaultType(
@@ -301,6 +474,28 @@ export class CommonToolsFormatter implements TypeFormatter {
     typeNode: ts.TypeNode,
     context: GenerationContext,
   ): unknown {
+    // Handle typeof expressions (TypeQuery nodes)
+    // These reference a variable's value, like: typeof defaultRoutes
+    if (ts.isTypeQueryNode(typeNode)) {
+      return this.extractValueFromTypeQuery(typeNode, context);
+    }
+
+    // Handle type references that represent empty objects
+    // This includes Record<string, never>, Record<K, never>, and similar mapped types
+    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
+      // For mapped types like Record<K, V>, if V is never, the result is an empty object
+      // Check the last type argument (the value type in mapped types)
+      const lastTypeArg =
+        typeNode.typeArguments[typeNode.typeArguments.length - 1];
+      if (lastTypeArg) {
+        const lastType = context.typeChecker.getTypeFromTypeNode(lastTypeArg);
+        // If the value type is never, this represents an empty object
+        if (lastType.flags & ts.TypeFlags.Never) {
+          return {};
+        }
+      }
+    }
+
     // Handle literal types
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;
@@ -376,102 +571,131 @@ export class CommonToolsFormatter implements TypeFormatter {
     return undefined;
   }
 
-  private extractComplexDefaultFromTypeSymbol(
-    type: ts.Type,
-    _symbol: ts.Symbol,
+  private extractValueFromTypeQuery(
+    typeQueryNode: ts.TypeQueryNode,
     context: GenerationContext,
   ): unknown {
-    // For now, try to extract from type string - this is a fallback approach
-    const typeString = context.typeChecker.typeToString(type);
+    // Get the entity name being queried (e.g., "defaultRoutes" in "typeof defaultRoutes")
+    const exprName = typeQueryNode.exprName;
 
-    // Handle array literals like ["item1", "item2"]
-    if (typeString.startsWith("[") && typeString.endsWith("]")) {
-      try {
-        return JSON.parse(typeString);
-      } catch {
-        // If JSON parsing fails, try simpler extraction
-        return this.parseArrayLiteral(typeString);
-      }
+    // Get the symbol for the referenced entity
+    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    if (!symbol) {
+      return undefined;
     }
 
-    // Handle object literals like { theme: "dark", count: 10 }
-    if (typeString.startsWith("{") && typeString.endsWith("}")) {
-      try {
-        // Convert TS object syntax to JSON syntax
-        const jsonString = typeString
-          .replace(/(\w+):/g, '"$1":') // Quote property names
-          .replace(/'/g, '"'); // Convert single quotes to double quotes
-        return JSON.parse(jsonString);
-      } catch {
-        // If JSON parsing fails, return a simpler fallback
-        return this.parseObjectLiteral(typeString);
-      }
+    return this.extractValueFromSymbol(symbol, context);
+  }
+
+  /**
+   * Extract a runtime value from a symbol's value declaration.
+   * Works for variables with initializers like: const foo = [1, 2, 3]
+   */
+  private extractValueFromSymbol(
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    const valueDeclaration = symbol.valueDeclaration;
+    if (!valueDeclaration) {
+      return undefined;
+    }
+
+    // Check if it's a variable declaration with an initializer
+    if (
+      ts.isVariableDeclaration(valueDeclaration) &&
+      valueDeclaration.initializer
+    ) {
+      return this.extractValueFromExpression(
+        valueDeclaration.initializer,
+        context,
+      );
     }
 
     return undefined;
   }
 
-  private parseArrayLiteral(str: string): unknown[] {
-    // Simple array parsing for basic cases
-    if (str === "[]") return [];
-
-    // Remove brackets and split by comma
-    const inner = str.slice(1, -1);
-    if (!inner.trim()) return [];
-
-    const items = inner.split(",").map((item) => {
-      const trimmed = item.trim();
-      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-        return trimmed.slice(1, -1); // String literal
-      }
-      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
-        return trimmed.slice(1, -1); // String literal
-      }
-      if (!isNaN(Number(trimmed))) {
-        return Number(trimmed); // Number literal
-      }
-      if (trimmed === "true") return true;
-      if (trimmed === "false") return false;
-      if (trimmed === "null") return null;
-      return trimmed; // Fallback
-    });
-
-    return items;
-  }
-
-  private parseObjectLiteral(str: string): Record<string, unknown> {
-    // Very basic object parsing - this is a fallback
-    const obj: Record<string, unknown> = {};
-
-    // Remove braces
-    const inner = str.slice(1, -1).trim();
-    if (!inner) return obj;
-
-    // This is a simplified parser - for more complex cases we'd need proper AST parsing
-    const pairs = inner.split(",");
-    for (const pair of pairs) {
-      const [key, ...valueParts] = pair.split(":");
-      if (key && valueParts.length > 0) {
-        const keyTrimmed = key.trim().replace(/"/g, "");
-        const valueStr = valueParts.join(":").trim();
-
-        // Parse simple values
-        if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
-          obj[keyTrimmed] = valueStr.slice(1, -1);
-        } else if (!isNaN(Number(valueStr))) {
-          obj[keyTrimmed] = Number(valueStr);
-        } else if (valueStr === "true") {
-          obj[keyTrimmed] = true;
-        } else if (valueStr === "false") {
-          obj[keyTrimmed] = false;
-        } else if (valueStr === "null") {
-          obj[keyTrimmed] = null;
-        } else {
-          obj[keyTrimmed] = valueStr;
-        }
-      }
+  private extractValueFromExpression(
+    expr: ts.Expression,
+    context: GenerationContext,
+  ): unknown {
+    // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
+    if (ts.isArrayLiteralExpression(expr)) {
+      return expr.elements.map((element) =>
+        this.extractValueFromExpression(element, context)
+      );
     }
 
-    return obj;
+    // Handle object literals like { id: "a", name: "test" }
+    if (ts.isObjectLiteralExpression(expr)) {
+      const obj: Record<string, unknown> = {};
+      for (const property of expr.properties) {
+        if (
+          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
+        ) {
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.initializer,
+            context,
+          );
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          // Handle shorthand like { id } where id is a variable
+          const propName = property.name.text;
+          obj[propName] = this.extractValueFromExpression(
+            property.name,
+            context,
+          );
+        }
+      }
+      return obj;
+    }
+
+    // Handle string literals
+    if (ts.isStringLiteral(expr)) {
+      return expr.text;
+    }
+
+    // Handle numeric literals
+    if (ts.isNumericLiteral(expr)) {
+      return Number(expr.text);
+    }
+
+    // Handle boolean literals
+    if (expr.kind === ts.SyntaxKind.TrueKeyword) {
+      return true;
+    }
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) {
+      return false;
+    }
+
+    // Handle null
+    if (expr.kind === ts.SyntaxKind.NullKeyword) {
+      return null;
+    }
+
+    // For more complex expressions, return undefined
+    return undefined;
+  }
+
+  private extractComplexDefaultFromTypeSymbol(
+    type: ts.Type,
+    symbol: ts.Symbol,
+    context: GenerationContext,
+  ): unknown {
+    // Try to extract from the symbol's value declaration initializer (AST-based)
+    const extracted = this.extractValueFromSymbol(symbol, context);
+    if (extracted !== undefined) {
+      return extracted;
+    }
+
+    // Check if this is an empty object type (no properties, object type)
+    // This handles cases like Record<string, never>
+    if (
+      (type.flags & ts.TypeFlags.Object) !== 0 &&
+      context.typeChecker.getPropertiesOfType(type).length === 0
+    ) {
+      return {};
+    }
+
+    return undefined;
   }
 }

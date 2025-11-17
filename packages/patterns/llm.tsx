@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
+  BuiltInLLMMessage,
   Cell,
   cell,
   Default,
@@ -31,7 +32,7 @@ const askQuestion = handler<
   }
 });
 
-export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
+export default recipe<LLMTestInput>(({ title }) => {
   // It is possible to make inline cells like this, but always consider whether it should just be part of the argument cell.
   // These cells are effectively 'hidden state' from other recipes
   const question = cell<string>("");
@@ -39,7 +40,10 @@ export default recipe<LLMTestInput, LLMTestResult>("LLM Test", ({ title }) => {
   const llmResponse = llm({
     system:
       "You are a helpful assistant. Answer questions clearly and concisely.",
-    messages: derive(question, (q) => q ? [{ role: "user", content: q }] : []),
+    messages: derive<string, BuiltInLLMMessage[]>(
+      question,
+      (q) => q ? [{ role: "user", content: q }] : [],
+    ),
   });
 
   return {

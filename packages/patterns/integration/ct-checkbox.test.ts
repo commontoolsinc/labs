@@ -6,6 +6,7 @@ import { join } from "@std/path";
 import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
+import { ANYONE_USER } from "@commontools/memory/acl";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -41,6 +42,9 @@ testComponents.forEach(({ name, file }) => {
         { start: false },
       );
       charmId = charm.id;
+
+      // Add permissions for ANYONE in the first test
+      await cc.acl().set(ANYONE_USER, "WRITE");
     });
 
     afterAll(async () => {

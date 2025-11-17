@@ -14,12 +14,11 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
 import type {
-  JSONObject,
-  JSONSchema,
-  JSONValue,
   SchemaContext,
-} from "./builder/types.ts";
+  SchemaPathSelector,
+} from "@commontools/memory/interface";
 import { deepEqual } from "./path-utils.ts";
 import {
   isAnyCellLink,
@@ -54,12 +53,7 @@ import { IExtendedStorageTransaction } from "./runtime.ts";
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
-
-// Both path and schemaContext are relative to the fact.is.value
-export type SchemaPathSelector = {
-  path: readonly string[];
-  schemaContext?: Readonly<SchemaContext>;
-};
+export type { SchemaPathSelector };
 
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
@@ -1612,6 +1606,31 @@ export class SchemaObjectTraverser<V extends JSONValue>
           rootSchema: schemaContext.rootSchema,
         },
       };
+
+      // FIXME: Integrate this chunk that was added in schema
+      //   isRecord(value[i]) &&
+      //   // TODO(seefeld): Should factor this out, but we should just fully
+      //   // normalize schemas, etc.
+      //   !(isObject(elementSchema) &&
+      //     (elementSchema.asCell || elementSchema.asStream ||
+      //       (Array.isArray(elementSchema?.anyOf) &&
+      //         elementSchema.anyOf.every((option) =>
+      //           option.asCell || option.asStream
+      //         )) ||
+      //       (Array.isArray(elementSchema?.oneOf) &&
+      //         elementSchema.oneOf.every((option) =>
+      //           option.asCell || option.asStream
+      //         ))))
+      // ) {
+      //   elementLink = {
+      //     id: createDataCellURI(value[i], link),
+      //     path: [],
+      //     schema: elementSchema,
+      //     rootSchema: elementLink.rootSchema,
+      //     space: link.space,
+      //     type: "application/json",
+      //   } satisfies NormalizedFullLink;
+
       // TODO(@ubik2): We follow the first link in array elements so we
       // don't have strangeness with setting item at 0 to item at 1
       if (isLink(item)) {

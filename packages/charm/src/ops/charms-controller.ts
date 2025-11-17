@@ -8,7 +8,8 @@ import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
-import { ANYONE, Identity } from "@commontools/identity";
+import { createSession, Identity } from "@commontools/identity";
+import { ACLManager } from "./acl-manager.ts";
 
 export interface CreateCharmOptions {
   input?: object;
@@ -49,15 +50,21 @@ export class CharmsController<T = unknown> {
 
   async get<S extends JSONSchema = JSONSchema>(
     charmId: string,
+    runIt: boolean,
     schema: S,
   ): Promise<CharmController<Schema<S>>>;
   async get<T = unknown>(
     charmId: string,
+    runIt?: boolean,
     schema?: JSONSchema,
   ): Promise<CharmController<T>>;
-  async get(charmId: string, schema?: JSONSchema): Promise<CharmController> {
+  async get(
+    charmId: string,
+    runIt: boolean = false,
+    schema?: JSONSchema,
+  ): Promise<CharmController> {
     this.disposeCheck();
-    const cell = await this.#manager.get(charmId, true, schema);
+    const cell = await this.#manager.get(charmId, runIt, schema);
     if (!cell) {
       throw new Error(`Charm "${charmId}" not found.`);
     }
@@ -73,9 +80,8 @@ export class CharmsController<T = unknown> {
   async remove(charmId: string): Promise<boolean> {
     this.disposeCheck();
     const removed = await this.#manager.remove(charmId);
-    // Empty trash and ensure full synchronization
+    // Ensure full synchronization
     if (removed) {
-      await this.#manager.emptyTrash();
       await this.#manager.runtime.idle();
       await this.#manager.synced();
     }
@@ -109,27 +115,22 @@ export class CharmsController<T = unknown> {
     identity: Identity;
     spaceName: string;
   }): Promise<CharmsController> {
-    const account = spaceName.startsWith("~")
-      ? identity
-      : await Identity.fromPassphrase(ANYONE);
-    const user = await account.derive(spaceName);
-    const session = {
-      private: account.did() === identity.did(),
-      name: spaceName,
-      space: user.did(),
-      as: user,
-    };
-
+    const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
         address: new URL("/api/storage/memory", apiUrl),
+        spaceIdentity: session.spaceIdentity,
       }),
     });
 
     const manager = new CharmManager(session, runtime);
     await manager.synced();
     return new CharmsController(manager);
+  }
+
+  acl(): ACLManager {
+    return new ACLManager(this.#manager.runtime, this.#manager.getSpace());
   }
 }

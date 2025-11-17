@@ -1,51 +1,87 @@
 /// <cts-enable />
 import { Cell, Default, handler, ifElse, NAME, recipe, UI } from "commontools";
 
-interface CheckboxSimpleInput {
-  enabled: Default<boolean, false>;
+interface CheckboxDemoInput {
+  simpleEnabled: Cell<Default<boolean, false>>;
+  trackedEnabled: Cell<Default<boolean, false>>;
 }
 
-interface CheckboxSimpleOutput extends CheckboxSimpleInput {}
+interface CheckboxDemoOutput extends CheckboxDemoInput {}
 
-export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
-  "ct-checkbox simple demo",
-  ({ enabled }) => {
-    // Handler for checkbox changes
-    const toggle = handler<
+export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
+  "ct-checkbox demo",
+  ({ simpleEnabled, trackedEnabled }) => {
+    // Handler for checkbox changes - only needed when you want additional logic
+    const toggleWithLogging = handler<
       { detail: { checked: boolean } },
       { enabled: Cell<boolean> }
     >(
       ({ detail }, { enabled }) => {
-        enabled.set(detail?.checked ?? false);
+        const newValue = detail?.checked ?? false;
+        enabled.set(newValue);
+        // Additional side effects
+        console.log("Checkbox toggled to:", newValue);
       },
     );
-
-    const _toggleHandler = toggle({ enabled });
 
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <common-vstack gap="md" style="padding: 2rem; max-width: 400px;">
-          <h3>Simple ct-checkbox + ifElse Demo</h3>
+        <common-vstack gap="md" style="padding: 2rem; max-width: 600px;">
+          <h3>ct-checkbox Bidirectional Binding Demo</h3>
 
-          <ct-checkbox
-            $checked={enabled}
-          >
-            Enable Feature
-          </ct-checkbox>
+          <ct-card>
+            <h4>Simple Bidirectional Binding (Preferred)</h4>
+            <p>
+              Using $checked alone - no handler needed! The cell automatically
+              updates.
+            </p>
+            <ct-checkbox $checked={simpleEnabled}>
+              Enable Simple Feature
+            </ct-checkbox>
 
-          <p>Debug: enabled = {ifElse(enabled, "true", "false")}</p>
+            <p id="feature-status">
+              {ifElse(
+                simpleEnabled,
+                "✓ Feature is enabled!",
+                "⚠ Feature is disabled",
+              )}
+            </p>
+          </ct-card>
 
-          <pre id="feature-status">
-            {ifElse(enabled, "✓ Feature is enabled!", "⚠ Feature is disabled")}
-          </pre>
+          <ct-card>
+            <h4>With Handler for Additional Logic</h4>
+            <p>
+              Use a handler when you need to run additional code (logging,
+              validation, side effects)
+            </p>
+            <ct-checkbox
+              $checked={trackedEnabled}
+              onct-change={toggleWithLogging({ enabled: trackedEnabled })}
+            >
+              Enable Tracked Feature
+            </ct-checkbox>
 
-          <p data-testid="status">
-            Status: {ifElse(enabled, "ON", "OFF")}
-          </p>
+            <p>
+              Value: {ifElse(trackedEnabled, "✓ Enabled", "⚠ Disabled")}
+            </p>
+            <p>
+              <small>(Check console for logging)</small>
+            </p>
+          </ct-card>
+
+          <ct-card>
+            <h4>Key Takeaway</h4>
+            <p>
+              <strong>$checked automatically updates the cell</strong>{" "}
+              - you don't need a handler unless you want to add extra logic
+              beyond just updating the value.
+            </p>
+          </ct-card>
         </common-vstack>
       ),
-      enabled,
+      simpleEnabled,
+      trackedEnabled,
     };
   },
 );

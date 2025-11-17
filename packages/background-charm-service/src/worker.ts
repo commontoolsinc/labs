@@ -12,7 +12,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import {
-  createAdminSession,
+  createSessionFromDid,
   type DID,
   Identity,
   Session,
@@ -93,9 +93,9 @@ async function initialize(
 
   // Initialize session
   spaceId = did as DID;
-  currentSession = await createAdminSession({
+  currentSession = await createSessionFromDid({
     identity,
-    name: "~background-service-worker",
+    spaceName: "~background-service-worker",
     space: spaceId,
   });
 
@@ -181,7 +181,7 @@ async function runCharm(data: RunData): Promise<void> {
     }
 
     // Find the updater stream
-    const updater = runningCharm.key("bgUpdater") as Stream<unknown>;
+    const updater = runningCharm.key("bgUpdater") as unknown as Stream<unknown>;
     if (!updater || !isStream(updater)) {
       throw new Error(`No updater stream found for charm: ${charmId}`);
     }

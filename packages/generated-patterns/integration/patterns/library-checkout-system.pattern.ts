@@ -524,37 +524,13 @@ const cancelHold = handler(
 
 export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
   "Library Checkout System",
-  ({ catalog, loans, holds }) => {
+  ({ catalog }) => {
     const eventSequence = cell(1);
     const lastChange = cell<CirculationChange | null>(null);
     const loanState = cell<LoanRecord[]>(cloneLoans(defaultLoans));
     const holdState = cell<HoldRecord[]>(cloneHolds(defaultHolds));
 
     const catalogView = lift(sanitizeCatalogList)(catalog);
-
-    const _loanSeed = lift((input: {
-      catalog: LibraryItem[];
-      loans: LoanRecord[];
-    }) => {
-      const sanitized = sanitizeLoanList(input.catalog, input.loans);
-      loanState.set(sanitized);
-      return sanitized;
-    })({
-      catalog: catalogView,
-      loans,
-    });
-
-    const _holdSeed = lift((input: {
-      catalog: LibraryItem[];
-      holds: HoldRecord[];
-    }) => {
-      const sanitized = sanitizeHoldList(input.catalog, input.holds);
-      holdState.set(sanitized);
-      return sanitized;
-    })({
-      catalog: catalogView,
-      holds,
-    });
 
     const loanEntries = lift(cloneLoans)(loanState);
     const holdEntries = lift(cloneHolds)(holdState);

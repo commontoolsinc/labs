@@ -12,6 +12,7 @@ interface Attachment {
   type: "file" | "clipboard" | "mention";
   data?: any;
   charm?: any;
+  removable?: boolean;
 }
 
 /**
@@ -109,7 +110,8 @@ export class CTAttachmentsBar extends BaseElement {
             html`
               <ct-chip
                 variant="${this._getVariant(attachment.type)}"
-                ?removable="${this.removable}"
+                ?removable="${this.removable &&
+                  (attachment.removable !== false)}"
                 interactive
                 @ct-remove="${(e: Event) =>
                   this._handleRemove(attachment.id, e)}"

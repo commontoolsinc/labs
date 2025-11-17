@@ -3,14 +3,14 @@ import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 
 import { handler, lift } from "../src/builder/module.ts";
-import { str } from "../src/builder/built-in.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import {
-  type Frame,
+  type AnyCellWrapping,
   type JSONSchema,
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
-import { popFrame, pushFrame, recipe } from "../src/builder/recipe.ts";
+import { recipe } from "../src/builder/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -25,12 +25,16 @@ const space = signer.did();
 // Helper function to check type compatibility at compile time
 // This doesn't run any actual tests, but ensures types are correct
 function expectType<T, _U extends T>() {}
+// Helper types so we can generate compile time errors if a type is any
+type ExpectNotAny<T> = 0 extends (1 & T) ? ["Expected non-any type"] : true;
+type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends
+  readonly (infer ElementType)[] ? ElementType : never;
 
 describe("Schema-to-TS Type Conversion", () => {
-  let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
+  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -41,17 +45,14 @@ describe("Schema-to-TS Type Conversion", () => {
       storageManager,
     });
     tx = runtime.edit();
-    frame = pushFrame();
+    const { commontools } = createBuilder();
+    ({ str } = commontools);
   });
 
   afterEach(async () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  afterEach(() => {
-    popFrame(frame);
   });
 
   // These tests verify the type conversion at compile time
@@ -247,6 +248,322 @@ describe("Schema-to-TS Type Conversion", () => {
     expectType<ExpectedRecursive, RecursiveSchema>();
   });
 
+  it("should handle $ref to root in $defs", () => {
+    type RecursiveSchema = Schema<{
+      $defs: {
+        Root: {
+          type: "object";
+          properties: {
+            name: { type: "string" };
+            children: {
+              type: "array";
+              items: { $ref: "#/$defs/Root" };
+            };
+          };
+        };
+      };
+      $ref: "#/$defs/Root";
+    }>;
+
+    // This is a recursive type, so we can't easily define the expected type
+    // But we can verify it has the expected structure
+    type ExpectedRecursive = {
+      name?: string;
+      children?: ExpectedRecursive[];
+    };
+
+    expectType<ExpectedRecursive, RecursiveSchema>();
+    // deno-lint-ignore ban-types
+    type ChildType = ArrayElementType<RecursiveSchema["children"] & {}>;
+    // This will generate a compile time error if the ChildType is any
+    expectType<true, ExpectNotAny<ChildType>>();
+  });
+
+  describe("$ref with JSON Pointers and $defs", () => {
+    it("should resolve $ref to $defs path", () => {
+      type SchemaWithDefs = Schema<{
+        $defs: {
+          Address: {
+            type: "object";
+            properties: {
+              street: { type: "string" };
+              city: { type: "string" };
+            };
+          };
+        };
+        type: "object";
+        properties: {
+          home: { $ref: "#/$defs/Address" };
+        };
+      }>;
+
+      type Expected = {
+        home?: {
+          street?: string;
+          city?: string;
+        };
+      };
+
+      expectType<Expected, SchemaWithDefs>();
+    });
+
+    it("should handle default at ref site", () => {
+      type SchemaWithRefDefault = Schema<{
+        $defs: {
+          Status: {
+            type: "string";
+          };
+        };
+        type: "object";
+        properties: {
+          currentStatus: {
+            $ref: "#/$defs/Status";
+            default: "active";
+          };
+        };
+      }>;
+
+      type Expected = {
+        currentStatus?: string; // Optional, but has default at runtime
+      };
+
+      expectType<Expected, SchemaWithRefDefault>();
+    });
+
+    it("should override target default with ref site default", () => {
+      type SchemaWithBothDefaults = Schema<{
+        $defs: {
+          Counter: {
+            type: "number";
+            default: 0;
+          };
+        };
+        type: "object";
+        properties: {
+          score: {
+            $ref: "#/$defs/Counter";
+            default: 100; // Should override target default of 0
+          };
+        };
+      }>;
+
+      type Expected = {
+        score?: number; // Optional, default is 100 not 0
+      };
+
+      expectType<Expected, SchemaWithBothDefaults>();
+    });
+
+    it("should handle nested refs", () => {
+      type NestedRefs = Schema<{
+        $defs: {
+          City: { type: "string" };
+          Address: {
+            type: "object";
+            properties: {
+              city: { $ref: "#/$defs/City" };
+            };
+          };
+        };
+        type: "object";
+        properties: {
+          location: { $ref: "#/$defs/Address" };
+        };
+      }>;
+
+      type Expected = {
+        location?: {
+          city?: string;
+        };
+      };
+
+      expectType<Expected, NestedRefs>();
+    });
+
+    it("should handle $ref in array items", () => {
+      type ArrayOfRefs = Schema<{
+        $defs: {
+          Tag: { type: "string" };
+        };
+        type: "object";
+        properties: {
+          tags: {
+            type: "array";
+            items: { $ref: "#/$defs/Tag" };
+          };
+        };
+      }>;
+
+      type Expected = {
+        tags?: string[];
+      };
+
+      expectType<Expected, ArrayOfRefs>();
+    });
+
+    it("should handle chained refs", () => {
+      type ChainedRefs = Schema<{
+        $defs: {
+          Level3: { type: "string" };
+          Level2: { $ref: "#/$defs/Level3" };
+          Level1: { $ref: "#/$defs/Level2" };
+        };
+        type: "object";
+        properties: {
+          value: { $ref: "#/$defs/Level1" };
+        };
+      }>;
+
+      type Expected = {
+        value?: string;
+      };
+
+      expectType<Expected, ChainedRefs>();
+    });
+
+    it("should handle asCell with $ref", () => {
+      type CellRef = Schema<{
+        $defs: {
+          Config: {
+            type: "object";
+            properties: {
+              theme: { type: "string" };
+            };
+          };
+        };
+        type: "object";
+        properties: {
+          settings: {
+            $ref: "#/$defs/Config";
+            asCell: true;
+          };
+        };
+      }>;
+
+      type Expected = {
+        settings?: Cell<{
+          theme?: string;
+        }>;
+      };
+
+      expectType<Expected, CellRef>();
+    });
+
+    it("should handle $ref to properties path", () => {
+      type RefToProperty = Schema<{
+        type: "object";
+        properties: {
+          name: { type: "string" };
+          alias: { $ref: "#/properties/name" };
+        };
+      }>;
+
+      type Expected = {
+        name?: string;
+        alias?: string;
+      };
+
+      expectType<Expected, RefToProperty>();
+    });
+
+    it("should handle multiple refs to same definition", () => {
+      type MultipleRefs = Schema<{
+        $defs: {
+          Email: { type: "string"; format: "email" };
+        };
+        type: "object";
+        properties: {
+          primary: { $ref: "#/$defs/Email" };
+          secondary: { $ref: "#/$defs/Email" };
+        };
+      }>;
+
+      type Expected = {
+        primary?: string;
+        secondary?: string;
+      };
+
+      expectType<Expected, MultipleRefs>();
+    });
+
+    it("should handle $ref with default in anyOf", () => {
+      type RefInAnyOf = Schema<{
+        $defs: {
+          String: { type: "string" };
+          Number: { type: "number" };
+        };
+        type: "object";
+        properties: {
+          value: {
+            anyOf: [
+              { $ref: "#/$defs/String"; default: "text" },
+              { $ref: "#/$defs/Number"; default: 42 },
+            ];
+          };
+        };
+      }>;
+
+      // Note: anyOf branches with defaults don't make the property required
+      // at the type level (TypeScript limitation). The runtime handles this correctly.
+      type Expected = {
+        value?: string | number;
+      };
+
+      expectType<Expected, RefInAnyOf>();
+    });
+
+    it("should handle complex nested structure with refs", () => {
+      type ComplexNested = Schema<{
+        $defs: {
+          User: {
+            type: "object";
+            properties: {
+              name: { type: "string" };
+              email: { type: "string" };
+            };
+            required: ["name"];
+          };
+          Comment: {
+            type: "object";
+            properties: {
+              text: { type: "string" };
+              author: { $ref: "#/$defs/User" };
+            };
+            required: ["text"];
+          };
+        };
+        type: "object";
+        properties: {
+          post: {
+            type: "object";
+            properties: {
+              title: { type: "string" };
+              comments: {
+                type: "array";
+                items: { $ref: "#/$defs/Comment" };
+              };
+            };
+          };
+        };
+      }>;
+
+      type Expected = {
+        post?: {
+          title?: string;
+          comments?: Array<{
+            text: string;
+            author?: {
+              name: string;
+              email?: string;
+            };
+          }>;
+        };
+      };
+
+      expectType<Expected, ComplexNested>();
+    });
+  });
+
   it("should handle additionalProperties", () => {
     type StrictObjectSchema = Schema<{
       type: "object";
@@ -440,7 +757,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Type aliases to verify the schema inference
     type ExpectedInput = {
-      name: string;
+      name: Cell<string>;
       count?: number;
       options?: {
         enabled: boolean;
@@ -481,11 +798,11 @@ describe("Schema-to-TS Type Conversion", () => {
     type InferredInput = Parameters<typeof processRecipe>[0];
     type InferredOutput = ReturnType<typeof processRecipe>;
 
-    expectType<ExpectedInput, Schema<typeof inputSchema>>();
+    expectType<AnyCellWrapping<ExpectedInput>, Schema<typeof inputSchema>>();
     expectType<ExpectedOutput, Schema<typeof outputSchema>>();
 
     // Verify that the recipe function parameter matches our expected input type
-    expectType<ExpectedInput, InferredInput>();
+    expectType<InferredInput, ExpectedInput>();
 
     // The expected output is the output schema wrapped in a single OpaqueRef.
     type DeepOpaqueOutput = OpaqueRef<Schema<typeof outputSchema>>;

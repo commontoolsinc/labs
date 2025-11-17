@@ -2,8 +2,8 @@
 
 ## Goals
 
-- Allow lifts, handlers, and recipes to return reusable node factories that can
-  be shipped across spaces or persisted and later instantiated.
+- Allow lifts (and thus patterns) and handlers to return reusable node factories
+  that can be shipped across spaces or persisted and later instantiated.
 - Support partial application via a `.curry(value, argIndex = 0)` helper that
   yields another shippable node factory reflecting the bound argument.
 - Use a versioned sigil format (`nodeFactory@1`) that closely mirrors the graph
@@ -15,6 +15,9 @@
 - Any node factory created by `lift`, `handler`, or builder helpers returns a
   callable object that also exposes `.toJSON()` producing the `nodeFactory@1`
   sigil.
+- Passing a node factory as part of the argument to `Cell.set()` & co, or
+  calling another factory with it, automatically converts it into it's JSON
+  representation.
 - Recipes may return node factories or pass them into other lifts/recipes. When
   the runtime encounters a `nodeFactory@1` payload (e.g., via `Cell.get()` or as
   a recipe input), it materializes a callable node factory automatically.
@@ -26,57 +29,46 @@
 
 Serialized form:
 
-```json
+```ts
 {
   "/": {
-    "nodeFactory@1": {
-      "module": ReactiveModuleDescriptor | EventHandlerDescriptor,
-      "program": RuntimeProgram,
-      "curried": [
-        {
-          "index": 0,
-          "value": Binding
-        }
-      ],
-      "argumentSchema": JSONSchema,
-      "resultSchema": JSONSchema | null,
-      "metadata": Record<string, JSONValue> | null
-    }
+    "nodeFactory@1":
+      & BoxedNodeFactory
+      & CurriedArguments
+      & (ReactiveNodeNarrowedSchema | HandlerNodeNarrowedSchema)
   }
 }
 ```
 
 Notes:
 
-- `module` matches the descriptors used in `graph-snapshot.md`, including
-  implementation references and descriptor-level `argumentSchema`/`resultSchema`.
-- `program` stores the complete `RuntimeProgram` (as defined in
-  `packages/runner/src/harness/types.ts`) so the runtime knows how to load the
-  compiled artifact and entry symbol.
-- `curried` is ordered; each entry binds `value` to the given `index` (0-based by
-  default). `Binding` mirrors the nested binding structure from the snapshot so
-  bound values can include cell links.
-- `argumentSchema` on the sigil represents the effective schema after all
-  currying. It must continue to describe array/prefix-array inputs.
-- `resultSchema` is optional and may be omitted/`null` for handlers.
-- `metadata` carries optional helper information (e.g., helper names) and may be
-  omitted if unused.
+- `BoxedNodeFactory` the descriptors used in `graph-snapshot.md`, including
+  implementation references and descriptor-level `argumentSchema`/`resultSchema`
+  and link to implemention.
+- `CurriedArguments` contains the lists the arguments that are being supplied
+  already, index defaulting to 0 or +1 the previous index.
+  - For event handlers, 0 is the event stream. If it is curried, then the
+    resulting function looks like a reactive node factory that can be called
+    with state to bind. If it isn't curried, the result is a stream factory,
+    just like the original, but bound to state.
+- `ReactiveNodeNarrowedSchema | HandlerNodeNarrowedSchema` are optional
+  constraints due to currying over the original schemas in the module.
 
 ## Runtime Behavior
 
 - Deserialization: When the runtime reads a value containing the `nodeFactory@1`
   sigil, it constructs a callable factory that:
   1. Applies stored currying bindings before invoking the underlying module.
-  2. Exposes `.curry` to append additional entries to `curried` and returns a new
-     serialized-aware wrapper.
+  2. Exposes `.curry` to append additional entries to `curried` and returns a
+     new serialized-aware wrapper.
   3. Implements `.toJSON()` to emit the sigil.
 - Invocation: Calling the materialized factory schedules a node instantiation
   identical to calling the original lift/handler. Inputs are merged with stored
   curry bindings using positional logic (array inputs) or schema-derived names.
-- Integration with snapshots: When a recipe instantiates a node from a serialized
-  factory, the resulting node appears in the graph snapshot exactly like a
-  regular node (same descriptor, inputs, etc.). The factory sigil itself can also
-  be stored in recipe state for later reuse.
+- Integration with snapshots: When a recipe instantiates a node from a
+  serialized factory, the resulting node appears in the graph snapshot exactly
+  like a regular node (same descriptor, inputs, etc.). The factory sigil itself
+  can also be stored in recipe state for later reuse.
 
 ## Builder Integration
 
@@ -87,11 +79,10 @@ Notes:
   runtime keeps the sigil available so passing the factory back to storage or
   another recipe preserves currying metadata.
 
-## Open Questions
+## Rollout
 
-- Do we need an explicit way to specify argument names alongside indexes for
-  currying when dealing with object-shaped schemas?
-- Should we limit the size of serialized `RuntimeProgram` payloads by hashing or
-  referencing a shared cache entry instead of embedding the entire program?
-- How do we ensure backwards compatibility if the module descriptor expands? The
-  sigil version (`nodeFactory@1`) gives us room to add future revisions.
+- This is blocked on multi-argument `lift`.
+- However, we can start with curried `recipe` (which later become a variant of
+  `lift`) and instead of treating it as multiple inputs merge the input object
+  instead on call. The first use-case is for actions, so we can even do this
+  just there.

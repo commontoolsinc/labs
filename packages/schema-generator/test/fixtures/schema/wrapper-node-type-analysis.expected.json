@@ -1,0 +1,58 @@
+{
+  "$defs": {
+    "Item": {
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "text": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "cellArray": {
+      "asCell": true,
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "configs": {
+      "default": [],
+      "items": {
+        "properties": {
+          "timeout": {
+            "default": 30,
+            "type": "number"
+          }
+        },
+        "required": [
+          "timeout"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Item"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "cellArray",
+    "configs",
+    "items"
+  ],
+  "type": "object"
+}

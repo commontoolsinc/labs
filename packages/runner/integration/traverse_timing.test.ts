@@ -186,19 +186,25 @@ function timeFunction(name: string, fn: () => void) {
   console.log(name, "took", end - start, "ms");
 }
 
-timeFunction("initTest", () => {
-  initTest(objectManager, data);
-});
+Deno.test({
+  name: "traverse timing test",
+  fn: () => {
+    timeFunction("initTest", () => {
+      initTest(objectManager, data);
+    });
 
-const n = 100;
-timeFunction(`traverseLoop${n}`, () => {
-  for (let i = 0; i < n; i++) {
-    runTest(objectManager);
-    if (i === 0) {
-      console.log("missing docs:", objectManager.getMissingDocs());
-    }
-  }
-});
+    const n = 100;
+    timeFunction(`traverseLoop${n}`, () => {
+      for (let i = 0; i < n; i++) {
+        runTest(objectManager);
+        if (i === 0) {
+          console.log("missing docs:", objectManager.getMissingDocs());
+        }
+      }
+    });
 
-console.log("\nDone");
-Deno.exit(0);
+    console.log("\nDone");
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

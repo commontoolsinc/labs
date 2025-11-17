@@ -1,7 +1,6 @@
 import * as path from "@std/path";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
-import { copy } from "@std/fs";
 import { build } from "@commontools/felt";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
@@ -64,4 +63,35 @@ export function summarize(results: TestFileResults[]): Summary {
     }
   }
   return { passed, duration, failed };
+}
+
+// Use this instead of `@std/fs#copy`, because we want to copy resolved
+// symlinks, not the symlinks themselves.
+async function copy(src: string, dest: string): Promise<void> {
+  const stat = await Deno.lstat(src);
+
+  if (stat.isSymlink) {
+    const realPath = await Deno.realPath(src);
+    const realStat = await Deno.stat(realPath);
+    if (realStat.isDirectory) {
+      await copyDir(realPath, dest);
+    } else {
+      await Deno.copyFile(realPath, dest);
+    }
+  } else if (stat.isDirectory) {
+    await copyDir(src, dest);
+  } else {
+    await Deno.mkdir(path.dirname(dest), { recursive: true });
+    await Deno.copyFile(src, dest);
+  }
+}
+
+async function copyDir(src: string, dest: string): Promise<void> {
+  await Deno.mkdir(dest, { recursive: true });
+
+  for await (const entry of Deno.readDir(src)) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    await copy(srcPath, destPath);
+  }
 }

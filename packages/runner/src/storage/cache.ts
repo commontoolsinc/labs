@@ -62,6 +62,7 @@ import * as Transaction from "./transaction.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
+import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -639,6 +640,7 @@ export class Replica {
         value: RevisionCodec,
       })
       : new NoCache(),
+    public spaceIdentity: Signer | undefined,
     /**
      * Represents cache of the memory state that was loaded from the persisted
      * cache during this session.
@@ -667,6 +669,8 @@ export class Replica {
   }
 
   async poll() {
+    await this.requestACLInit();
+
     // Poll re-fetches the commit log, then subscribes to that
     // We don't use the autosubscribing query, since we want the
     // Commit object, and the autosubscribe returns a Selection.
@@ -1225,6 +1229,58 @@ export class Replica {
       space: this.did(),
     });
   }
+
+  // On connection, assert the initial ACL ownership, transferring
+  // ownership from the empty ACL (space identity only) to the
+  // Session Identity. Skips if ACL already exists, or if
+  // there is no user or space identity.
+  private async requestACLInit() {
+    if (!this.spaceIdentity) {
+      return;
+    }
+    const aclKey = this.spaceIdentity.did();
+    const userIdentity = (this.remote as any).as as Signer | undefined;
+    if (!userIdentity) {
+      return;
+    }
+
+    const initialACL: JSONValue = {
+      value: {
+        [userIdentity.did()]: "OWNER",
+        [ANYONE_USER]: "WRITE",
+      },
+    };
+
+    const aclFact = assert({
+      the: ACL_TYPE,
+      of: aclKey,
+      is: initialACL,
+      cause: null,
+    });
+
+    // Temporarily swap the signer to use spaceIdentity for this commit
+    // We need to swap both the MemorySpaceSession and underlying MemoryConsumerSession
+    const remoteSession = (this.remote as any).session;
+    const originalSpaceSigner = this.remote.as;
+    const originalConsumerSigner = remoteSession?.as;
+
+    this.remote.as = this.spaceIdentity;
+    if (remoteSession) {
+      remoteSession.as = this.spaceIdentity;
+    }
+
+    try {
+      await this.commit({ facts: [aclFact], claims: [] });
+    } catch (_) {
+      // Ignore transaction errors here
+    } finally {
+      // Restore the original signers
+      this.remote.as = originalSpaceSigner;
+      if (remoteSession) {
+        remoteSession.as = originalConsumerSigner;
+      }
+    }
+  }
 }
 
 export interface RemoteStorageProviderSettings {
@@ -1247,6 +1303,7 @@ export interface RemoteStorageProviderOptions {
   space: MemorySpace;
   the?: string;
   settings?: IRemoteStorageProviderSettings;
+  spaceIdentity?: Signer;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -1262,6 +1319,7 @@ export interface ConnectionOptions {
   id: string;
   address: URL;
   inspector?: Channel;
+  spaceIdentity?: Signer;
 }
 
 export interface ProviderConnectionOptions extends ConnectionOptions {
@@ -1275,6 +1333,7 @@ class ProviderConnection implements IStorageProvider {
   timeoutID = 0;
   inspector?: Channel;
   provider: Provider;
+  spaceIdentity?: Signer;
   reader: ReadableStreamDefaultReader<
     UCAN<ConsumerCommandInvocation<Protocol>>
   >;
@@ -1287,11 +1346,13 @@ class ProviderConnection implements IStorageProvider {
   queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
   constructor(
-    { id, address, provider, inspector }: ProviderConnectionOptions,
+    { id, address, provider, inspector, spaceIdentity }:
+      ProviderConnectionOptions,
   ) {
     this.address = address;
     this.provider = provider;
     this.handleEvent = this.handleEvent.bind(this);
+    this.spaceIdentity = spaceIdentity;
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
@@ -1562,6 +1623,7 @@ export class Provider implements IStorageProvider {
   spaces: Map<string, Replica>;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
+  spaceIdentity?: Signer;
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
@@ -1585,12 +1647,14 @@ export class Provider implements IStorageProvider {
     space,
     the = "application/json",
     settings = defaultSettings,
+    spaceIdentity,
   }: RemoteStorageProviderOptions) {
     this.the = the as MIME;
     this.settings = settings;
     this.session = session;
     this.spaces = new Map();
     this.subscription = subscription;
+    this.spaceIdentity = spaceIdentity;
     this.workspace = this.mount(space);
   }
 
@@ -1599,6 +1663,7 @@ export class Provider implements IStorageProvider {
       id: options.id,
       provider: this,
       address: options.address,
+      spaceIdentity: options.spaceIdentity,
     });
   }
   get replica() {
@@ -1617,6 +1682,7 @@ export class Provider implements IStorageProvider {
         session,
         this.subscription,
         new NoCache(),
+        this.spaceIdentity,
       );
       replica.poll();
       this.spaces.set(space, replica);
@@ -1827,6 +1893,11 @@ export interface Options {
    * Various settings to configure storage provider.
    */
   settings?: IRemoteStorageProviderSettings;
+
+  /**
+   * (Temporary) Space identity.
+   */
+  spaceIdentity?: Signer;
 }
 
 export class StorageManager implements IStorageManager {
@@ -1834,6 +1905,7 @@ export class StorageManager implements IStorageManager {
   as: Signer;
   id: string;
   settings: IRemoteStorageProviderSettings;
+  spaceIdentity?: Signer;
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
 
@@ -1848,13 +1920,19 @@ export class StorageManager implements IStorageManager {
   }
 
   protected constructor(
-    { address, as, id = crypto.randomUUID(), settings = defaultSettings }:
-      Options,
+    {
+      address,
+      as,
+      id = crypto.randomUUID(),
+      settings = defaultSettings,
+      spaceIdentity,
+    }: Options,
   ) {
     this.address = address;
     this.settings = settings;
     this.as = as;
     this.id = id;
+    this.spaceIdentity = spaceIdentity;
   }
 
   /**
@@ -1881,6 +1959,7 @@ export class StorageManager implements IStorageManager {
       settings,
       subscription: this.#subscription,
       session: Consumer.create({ as }),
+      spaceIdentity: this.spaceIdentity,
     });
   }
 

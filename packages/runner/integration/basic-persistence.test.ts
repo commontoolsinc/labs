@@ -15,6 +15,8 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
 
+const TIMEOUT_MS = 180000; // 3 minutes timeout
+
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
@@ -67,16 +69,37 @@ async function test() {
   return [cell1Contents, cell2Contents];
 }
 
-for (let i: number = 1; i <= 20; i++) {
-  const [result1, result2] = await test();
-  if (!deepEqual(result1, result2)) {
-    console.error("Mismatched results for iteration", i, result1, result2);
-    Deno.exit(1);
+async function runTest() {
+  for (let i: number = 1; i <= 20; i++) {
+    const [result1, result2] = await test();
+    if (!deepEqual(result1, result2)) {
+      console.error("Mismatched results for iteration", i, result1, result2);
+      throw new Error(`Mismatched results for iteration ${i}`);
+    }
+    if (i % 5 == 0) {
+      console.log("completed", i, "...");
+    }
   }
-  if (i % 5 == 0) {
-    console.log("completed", i, "...");
-  }
+
+  console.log("\nDone");
 }
 
-console.log("\nDone");
-Deno.exit(0);
+Deno.test({
+  name: "basic persistence test",
+  fn: async () => {
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

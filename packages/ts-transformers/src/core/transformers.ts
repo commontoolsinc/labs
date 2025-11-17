@@ -8,6 +8,7 @@ export interface TransformationOptions {
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
   readonly typeRegistry?: TypeRegistry;
+  readonly mapCallbackRegistry?: WeakSet<ts.Node>;
 }
 
 export interface TransformationDiagnostic {

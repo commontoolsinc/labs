@@ -21,6 +21,54 @@ const logger = getLogger("schema-generator.object", {
 });
 
 /**
+ * Check if a type is a union that includes undefined.
+ * When a property type is `T | undefined`, the property is considered optional.
+ */
+function isUnionWithUndefined(type: ts.Type): boolean {
+  if (!(type.flags & ts.TypeFlags.Union)) {
+    return false;
+  }
+  const unionType = type as ts.UnionType;
+  return unionType.types.some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
+}
+
+/**
+ * Check if a typeNode represents Default<T | undefined, V>.
+ * When the inner type T includes undefined, the property is optional.
+ */
+function isDefaultNodeWithUndefined(
+  typeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+    return false;
+  }
+
+  // Check if this is a reference to Default
+  const typeName = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : undefined;
+  if (typeName !== "Default") {
+    return false;
+  }
+
+  // Get the first type argument (T from Default<T, V>)
+  const typeArgs = typeNode.typeArguments;
+  if (!typeArgs || typeArgs.length === 0) {
+    return false;
+  }
+
+  const innerTypeNode = typeArgs[0];
+  if (!innerTypeNode) {
+    return false;
+  }
+
+  // Get the type from the node and check if it's a union with undefined
+  const innerType = checker.getTypeFromTypeNode(innerTypeNode);
+  return isUnionWithUndefined(innerType);
+}
+
+/**
  * Formatter for object types (interfaces, type literals, etc.)
  */
 export class ObjectFormatter implements TypeFormatter {
@@ -90,7 +138,20 @@ export class ObjectFormatter implements TypeFormatter {
         continue;
       }
 
-      const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      // Property is optional (excluded from required array) if:
+      // 1. It has the `?` optional flag (e.g., `foo?: string`)
+      // 2. Its type is `T | undefined` (e.g., `foo: string | undefined`)
+      // 3. Its type is `Default<T | undefined, V>` (undefined makes it optional)
+      // In all cases, the property may be omitted at runtime (JSON-like semantics).
+      const hasOptionalFlag = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      const hasUndefinedUnion = isUnionWithUndefined(resolvedPropType);
+      const isDefaultWithUndefinedInner = isDefaultNodeWithUndefined(
+        propTypeNode,
+        checker,
+      );
+      const isOptional = hasOptionalFlag || hasUndefinedUnion ||
+        isDefaultWithUndefinedInner;
+
       if (!isOptional) required.push(propName);
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)

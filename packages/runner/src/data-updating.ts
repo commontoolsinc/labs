@@ -2,20 +2,21 @@ import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { isCell, isStream, RegularCell } from "./cell.ts";
+import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
+  findAndInlineDataURILinks,
   isAnyCellLink,
   isLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
@@ -23,6 +24,11 @@ import {
 } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
+
+const diffLogger = getLogger("normalizeAndDiff", {
+  enabled: false,
+  level: "debug",
+});
 
 /**
  * Traverses newValue and updates `current` and any relevant linked documents.
@@ -86,34 +92,6 @@ type ChangeSet = {
  * @param context - The context of the change.
  * @returns An array of changes that should be written.
  */
-const diffLogger = getLogger("normalizeAndDiff", {
-  enabled: false,
-  level: "debug",
-});
-
-/**
- * Returns true if `target` is the immediate parent of `base` in the same document.
- *
- * Example:
- * - base.path = ["internal", "__#1", "next"]
- * - target.path = ["internal", "__#1"]
- *
- * This is used to decide when to collapse a self/parent link that would create
- * a tight self-loop (e.g., obj.next -> obj) while allowing references to
- * higher ancestors (like an item's `items` pointing to its containing array).
- */
-function isImmediateParent(
-  target: NormalizedFullLink,
-  base: NormalizedFullLink,
-): boolean {
-  return (
-    target.id === base.id &&
-    target.space === base.space &&
-    target.path.length === base.path.length - 1 &&
-    target.path.every((seg, i) => seg === base.path[i])
-  );
-}
-
 export function normalizeAndDiff(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction,
@@ -140,7 +118,7 @@ export function normalizeAndDiff(
     diffLogger.debug(() =>
       `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`
     );
-    newValue = new RegularCell(runtime, seen.get(newValue)!, tx);
+    newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
@@ -210,7 +188,7 @@ export function normalizeAndDiff(
   }
 
   // Unwrap proxies and handle special types
-  if (isQueryResultForDereferencing(newValue)) {
+  if (isCellResultForDereferencing(newValue)) {
     const parsedLink = parseLink(newValue);
     const sigilLink = createSigilLinkFromParsedLink(parsedLink);
     diffLogger.debug(() =>
@@ -219,17 +197,32 @@ export function normalizeAndDiff(
     newValue = sigilLink;
   }
 
-  // Track whether this link originates from a Cell value (either a cycle we wrapped
-  // into a RegularCell above, or a user-supplied Cell). For Cell-origin links we
-  // preserve the link (do NOT collapse). For links created via query-result
-  // dereferencing (non-Cell), we may collapse immediate-parent self-links.
+  // Track whether this link originates from a Cell value (either a cycle we
+  // wrapped into a CellImpl above, or a user-supplied Cell). For Cell-origin
+  // links we preserve the link (do NOT collapse). For links created via
+  // query-result dereferencing (non-Cell), we may collapse immediate-parent
+  // self-links.
   let linkOriginFromCell = false;
-  if (isCell(newValue) || isStream(newValue)) {
+  if (isCell(newValue)) {
     diffLogger.debug(() =>
       `[BRANCH_CELL] Converting cell to link at path=${pathStr}`
     );
     linkOriginFromCell = true;
     newValue = newValue.getAsLink();
+  }
+
+  // Check for links that are data: URIs and inline them, by calling
+  // normalizeAndDiff on the contents of the link.
+  if (isLink(newValue) && parseLink(newValue, link).id?.startsWith("data:")) {
+    return normalizeAndDiff(
+      runtime,
+      tx,
+      link,
+      findAndInlineDataURILinks(newValue),
+      context,
+      options,
+      seen,
+    );
   }
 
   // If we're about to create a reference to ourselves, no-op
@@ -313,48 +306,6 @@ export function normalizeAndDiff(
         tx,
         link,
         snapshot,
-        context,
-        options,
-        seen,
-      );
-    }
-    if (parsedLink.id.startsWith("data:")) {
-      diffLogger.debug(() =>
-        `[BRANCH_CELL_LINK] Data link detected, treating as contents at path=${pathStr}`
-      );
-      // If there is a data link treat it as writing it's contents instead.
-
-      //  Use the tx code to make sure we read it the same way
-      let dataValue: any = tx.readValueOrThrow({
-        ...parsedLink,
-        path: [],
-      }, options);
-      const path = [...parsedLink.path];
-      for (;;) {
-        if (isAnyCellLink(dataValue)) {
-          const dataLink = parseLink(dataValue, parsedLink);
-          dataValue = createSigilLinkFromParsedLink({
-            ...dataLink,
-            path: [...dataLink.path, ...path],
-          });
-          break;
-        }
-        if (path.length > 0) {
-          if (isRecord(dataValue)) {
-            dataValue = dataValue[path.shift()!];
-          } else {
-            dataValue = undefined;
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-      return normalizeAndDiff(
-        runtime,
-        tx,
-        link,
-        dataValue,
         context,
         options,
         seen,
@@ -633,4 +584,27 @@ export function addCommonIDfromObjectID(
   }
 
   traverse(obj);
+}
+
+/**
+ * Returns true if `target` is the immediate parent of `base` in the same document.
+ *
+ * Example:
+ * - base.path = ["internal", "__#1", "next"]
+ * - target.path = ["internal", "__#1"]
+ *
+ * This is used to decide when to collapse a self/parent link that would create
+ * a tight self-loop (e.g., obj.next -> obj) while allowing references to
+ * higher ancestors (like an item's `items` pointing to its containing array).
+ */
+function isImmediateParent(
+  target: NormalizedFullLink,
+  base: NormalizedFullLink,
+): boolean {
+  return (
+    target.id === base.id &&
+    target.space === base.space &&
+    target.path.length === base.path.length - 1 &&
+    target.path.every((seg, i) => seg === base.path[i])
+  );
 }

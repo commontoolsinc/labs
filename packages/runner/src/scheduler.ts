@@ -1,11 +1,11 @@
 import { getLogger } from "@commontools/utils/logger";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
-import { Module, Recipe, TYPE } from "./builder/types.ts";
+import { type Frame, type Module, type Recipe, TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,
-  isQueryResultForDereferencing,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
@@ -451,8 +451,9 @@ export class Scheduler implements IScheduler {
   }
 
   private handleError(error: Error, action: any) {
-    const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame() ??
-      {};
+    const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame(
+      (error as Error & { frame?: Frame }).frame,
+    );
 
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
@@ -677,21 +678,21 @@ export function txToReactivityLog(
   return log;
 }
 
-function getCharmMetadataFromFrame(): {
+function getCharmMetadataFromFrame(frame?: Frame): {
   spellId?: string;
   recipeId?: string;
   space?: string;
   charmId?: string;
-} | undefined {
+} {
   // TODO(seefeld): This is a rather hacky way to get the context, based on the
   // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
   // abstractions for context here as well.
-  const frame = getTopFrame();
+  frame ??= getTopFrame();
 
   const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
 
-  if (!isQueryResultForDereferencing(sourceAsProxy)) {
-    return;
+  if (!isCellResultForDereferencing(sourceAsProxy)) {
+    return {};
   }
   const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
   const source = getCellOrThrow(sourceAsProxy).asSchema({

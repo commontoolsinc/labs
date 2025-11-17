@@ -1,9 +1,9 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { type AnyCell, type JSONSchema } from "./builder/types.ts";
 import {
   type Cell,
+  isAnyCell,
   isCell,
-  isStream,
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
@@ -16,17 +16,20 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { toURI } from "./uri-utils.ts";
+import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
+  CellResultInternals,
   getCellOrThrow,
-  isQueryResultForDereferencing,
-  QueryResultInternals,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { resolveLink } from "./link-resolution.ts";
+import { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -56,7 +59,7 @@ export type CellLink =
   | Cell<any>
   | Stream<any>
   | SigilLink
-  | QueryResultInternals
+  | CellResultInternals
   | LegacyJSONCellLink // @deprecated
   | LegacyAlias // @deprecated
   | { "/": string }; // @deprecated
@@ -140,10 +143,9 @@ export function isLink(
   value: any,
 ): value is CellLink {
   return (
-    isQueryResultForDereferencing(value) ||
+    isCellResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
-    isStream(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
@@ -204,34 +206,33 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value: Cell<any> | Stream<any>,
-  base?: Cell | NormalizedLink,
+  value: AnyCell<any>,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: Cell | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: Cell | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
-  if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
+  if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
+  if (isCell(value)) return value.getAsNormalizedFullLink();
 
   // Handle new sigil format
   if (isSigilLink(value)) {
@@ -244,17 +245,17 @@ export function parseLink(
 
     // If no id provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: path.map((p) => p.toString()),
-      space: resolvedSpace,
+      ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
-      schema: link.schema,
-      rootSchema: link.rootSchema,
-      overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
+      ...(link.schema && { schema: link.schema }),
+      ...(link.rootSchema && { rootSchema: link.rootSchema }),
+      ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   }
 
@@ -263,7 +264,7 @@ export function parseLink(
     return {
       id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }),
       type: "application/json",
     };
   }
@@ -272,7 +273,7 @@ export function parseLink(
     return {
       id: toURI(value["/"]),
       path: [],
-      space: base?.space, // Space must come from context for JSON links
+      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
       type: "application/json",
     };
   }
@@ -291,18 +292,18 @@ export function parseLink(
 
     // If no cell provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.entityId) : base.id;
+      id = isAnyCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
-      id: id,
+      ...(id && { id }),
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
-      space: base?.space,
+      ...(base?.space && { space: base.space }),
       type: "application/json",
-      schema: alias.schema as JSONSchema | undefined,
-      rootSchema: alias.rootSchema as JSONSchema | undefined,
+      ...(alias.schema && { schema: alias.schema }),
+      ...(alias.rootSchema && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
   }
@@ -331,6 +332,8 @@ export function areLinksSame(
   value1: any,
   value2: any,
   base?: Cell | NormalizedLink,
+  resolveBeforeComparing?: boolean,
+  txForResolving?: IExtendedStorageTransaction,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;
@@ -339,11 +342,18 @@ export function areLinksSame(
   if (!value1 || !value2) return value1 === value2;
 
   // Try parsing both as links
-  const link1 = parseLink(value1, base);
-  const link2 = parseLink(value2, base);
+  let link1 = parseLink(value1, base);
+  let link2 = parseLink(value2, base);
 
   // If one parses and the other doesn't, they're not equal
   if (!link1 || !link2) return false;
+
+  if (resolveBeforeComparing) {
+    const tx = txForResolving;
+    if (!tx) throw new Error("Provide tx to resolve before comparing");
+    link1 = isNormalizedFullLink(link1) ? resolveLink(tx, link1) : link1;
+    link2 = isNormalizedFullLink(link2) ? resolveLink(tx, link2) : link2;
+  }
 
   // Compare normalized links
   return areNormalizedLinksSame(link1, link2);
@@ -429,6 +439,125 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
+}
+
+/**
+ * Find any data: URI links and inline them.
+ *
+ * @param value - The value to find and inline data: URI links in.
+ * @returns The value with any data: URI links inlined.
+ */
+export function findAndInlineDataURILinks(value: any): any {
+  if (isLink(value)) {
+    const dataLink = parseLink(value)!;
+
+    if (dataLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      const path = [...dataLink.path];
+
+      // This is a storage item, so we have to look into the "value" field for
+      // the actual data.
+      if (!isRecord(dataValue)) return undefined;
+      dataValue = dataValue["value"];
+
+      // If there is a link on the way to `path`, follow it, appending remaining
+      // path to the target link.
+      while (dataValue !== undefined) {
+        if (isAnyCellLink(dataValue)) {
+          // Parse the link found in the data URI
+          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
+          const newLink = parseLink(dataValue);
+          let schema = newLink.schema;
+          if (schema !== undefined && path.length > 0) {
+            const cfc = new ContextualFlowControl();
+            schema = cfc.getSchemaAtPath(schema, path, newLink.rootSchema);
+          }
+          // Create new link by merging dataLink with remaining path
+          const newSigilLink = createSigilLinkFromParsedLink({
+            // Start with values from the original data link
+            ...dataLink,
+
+            // overwrite with values from the new link
+            ...newLink,
+
+            // extend path with remaining segments
+            path: [...newLink.path, ...path],
+
+            // use resolved schema if we have one
+            ...(schema !== undefined && { schema }),
+          }, {
+            includeSchema: true,
+          });
+          return findAndInlineDataURILinks(newSigilLink);
+        }
+        if (path.length > 0) {
+          dataValue = dataValue[path.shift()!];
+        } else {
+          break;
+        }
+      }
+
+      return dataValue;
+    } else {
+      return value;
+    }
+  } else if (Array.isArray(value)) {
+    return value.map(findAndInlineDataURILinks);
+  } else if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map((
+        [key, value],
+      ) => [key, findAndInlineDataURILinks(value)]),
+    );
+  } else {
+    return value;
+  }
+}
+
+// Helper to create data URIs for testing
+export function createDataCellURI(
+  data: any,
+  base?: Cell | NormalizedLink,
+): URI {
+  const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
+
+  function traverseAndAddBaseIdToRelativeLinks(
+    value: any,
+    seen: Set<any>,
+  ): any {
+    if (!isRecord(value)) return value;
+    if (seen.has(value)) {
+      throw new Error(`Cycle detected when creating data URI`);
+    }
+    seen.add(value);
+    try {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value);
+        if (!link.id) {
+          return createSigilLinkFromParsedLink({ ...link, id: baseId });
+        } else {
+          return value;
+        }
+      } else if (Array.isArray(value)) {
+        return value.map((item) =>
+          traverseAndAddBaseIdToRelativeLinks(item, seen)
+        );
+      } else { // isObject
+        return Object.fromEntries(
+          Object.entries(value).map((
+            [key, value],
+          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+        );
+      }
+    } finally {
+      seen.delete(value);
+    }
+  }
+  const json = JSON.stringify({
+    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  });
+  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
+  return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
 
 /**

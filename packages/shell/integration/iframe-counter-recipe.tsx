@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type JSONSchema, NAME, recipe, UI } from "commontools";
+import { CellLike, type JSONSchema, NAME, recipe, UI } from "commontools";
 
 type IFrameRecipe = {
   src: string;
@@ -58,7 +58,9 @@ const runIframeRecipe = (
 ) =>
   recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
-    [UI]: <common-iframe src={src} $context={data}></common-iframe>,
+    [UI]: (
+      <common-iframe src={src} $context={data as CellLike<any>}></common-iframe>
+    ),
     count: data.count,
   }));
 

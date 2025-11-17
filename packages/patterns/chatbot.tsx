@@ -2,9 +2,8 @@
 import {
   BuiltInLLMMessage,
   Cell,
-  cell,
+  computed,
   Default,
-  derive,
   fetchData,
   generateObject,
   handler,
@@ -13,9 +12,14 @@ import {
   recipe,
   Stream,
   UI,
+  VNode,
   wish,
 } from "commontools";
 import { type MentionableCharm } from "./backlinks-index.tsx";
+
+function schemaifyWish<T>(path: string) {
+  return wish<T>(path);
+}
 
 const addAttachment = handler<
   {
@@ -99,7 +103,7 @@ const sendMessage = handler<
   });
 });
 
-const _clearChat = handler(
+const clearChat = handler(
   (
     _: never,
     { messages, pending }: {
@@ -113,9 +117,10 @@ const _clearChat = handler(
 );
 
 type ChatInput = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
-  tools: any;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  tools?: any;
   theme?: any;
+  system?: string;
 };
 
 type PromptAttachment = {
@@ -124,36 +129,42 @@ type PromptAttachment = {
   type: "file" | "clipboard" | "mention";
   data?: any; // File | Blob | string
   charm?: any;
+  removable?: boolean; // Whether this attachment can be removed
 };
 
 type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
   addMessage: Stream<BuiltInLLMMessage>;
+  clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
   title?: string;
   attachments: Array<PromptAttachment>;
   tools: any;
+  ui: {
+    chatLog: VNode;
+    promptInput: VNode;
+    attachmentsAndTools: VNode;
+  };
 };
 
 export const TitleGenerator = recipe<
   { model?: string; messages: Array<BuiltInLLMMessage> }
 >("Title Generator", ({ model, messages }) => {
-  const titleMessages = derive(messages, (m) => {
-    if (!m || m.length === 0) return "";
+  const previewMessage = computed(() => {
+    if (!messages || messages.length === 0) return "";
 
-    const messageCount = 2;
-    const selectedMessages = m.slice(0, messageCount).filter(Boolean);
+    const firstMessage = messages[0];
 
-    if (selectedMessages.length === 0) return "";
+    if (!firstMessage) return "";
 
-    return selectedMessages.map((msg) => JSON.stringify(msg)).join("\n");
+    return JSON.stringify(firstMessage);
   });
 
   const { result } = generateObject({
     system:
       "Generate at most a 3-word title based on the following content, respond with NOTHING but the literal title text.",
-    prompt: titleMessages,
+    prompt: previewMessage,
     model,
     schema: {
       type: "object",
@@ -167,59 +178,187 @@ export const TitleGenerator = recipe<
     },
   });
 
-  const title = derive(result, (t) => {
-    return t?.title || "Untitled Chat";
+  const title = computed(() => {
+    return result?.title || "Untitled Chat";
   });
 
   return title;
 });
 
-function getMentionable() {
-  return derive<Cell<MentionableCharm[]>, Cell<MentionableCharm[]>>(
-    wish<MentionableCharm[]>(
-      "/backlinksIndex/mentionable",
-      [],
-    ) as unknown as Cell<MentionableCharm[]>,
-    (i) => i,
+const addAttachmentTool = handler<
+  {
+    mentionableName: string;
+  },
+  {
+    mentionable: Array<MentionableCharm>;
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>(({ mentionableName }, { mentionable, allAttachments }) => {
+  const charm = mentionable.find((c) => c[NAME] === mentionableName);
+
+  // borrowed from `ct-prompt-input` to match
+  const id = `attachment-${Date.now()}-${
+    Math.random().toString(36).substring(2, 9)
+  }`;
+
+  if (!charm) {
+    throw new Error(
+      `Unknown mentionable "${mentionableName}", cannot add attachment.`,
+    );
+  }
+
+  allAttachments.push({
+    id,
+    name: mentionableName,
+    type: "mention",
+    charm,
+    removable: true, // User-added attachments can be removed
+  });
+});
+
+const removeAttachmentTool = handler<
+  {
+    mentionableName: string;
+  },
+  {
+    allAttachments: Cell<Array<PromptAttachment>>;
+  }
+>(({ mentionableName }, { allAttachments }) => {
+  allAttachments.set(
+    allAttachments.get().filter((attachment) =>
+      attachment.name !== mentionableName
+    ),
   );
-}
+});
+
+const listMentionable = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { mentionable: MentionableCharm[] }
+>(
+  (args, state) => {
+    try {
+      const namesList = state.mentionable.map((charm) => charm[NAME]);
+      args.result.set(JSON.stringify(namesList));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
+
+const listRecent = handler<
+  {
+    /** A cell to store the result text */
+    result: Cell<string>;
+  },
+  { recentCharms: MentionableCharm[] }
+>(
+  (args, state) => {
+    try {
+      const namesList = state.recentCharms.map((charm) => charm[NAME]);
+      args.result.set(JSON.stringify(namesList));
+    } catch (error) {
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
+    }
+  },
+);
 
 export default recipe<ChatInput, ChatOutput>(
   "Chat",
-  ({ messages, tools, theme }) => {
-    const mentionable = getMentionable();
-    const model = cell<string>("anthropic:claude-sonnet-4-5");
-    const allAttachments = cell<Array<PromptAttachment>>([]);
+  ({ messages, tools, theme, system }) => {
+    const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
+    const allAttachments = Cell.of<Array<PromptAttachment>>([]);
+    const mentionable = schemaifyWish<MentionableCharm[]>("#mentionable");
+    const recentCharms = schemaifyWish<MentionableCharm[]>("#recent");
 
-    // Derive tools from attachments
-    const dynamicTools = derive(allAttachments, (attachments) => {
-      const tools: Record<string, any> = {};
+    // Auto-attach the most recent charm (union with user attachments)
+    const attachmentsWithRecent = computed((): Array<PromptAttachment> => {
+      const userAttachments = allAttachments.get();
+      const attachments = [...(userAttachments || [])];
 
-      for (const attachment of attachments || []) {
-        if (attachment.type === "mention" && attachment.charm) {
-          const charmName = attachment.charm[NAME] || "Charm";
-          tools[charmName] = {
-            charm: attachment.charm,
-            description: `Handlers from ${charmName}`,
-          };
+      // If there's a most recent charm, auto-inject it
+      if (recentCharms && recentCharms.length > 0) {
+        const mostRecent = recentCharms[0];
+        const mostRecentName = mostRecent[NAME];
+
+        // Check if it's already in the attachments
+        const alreadyAttached = attachments.some(
+          (a) => a.type === "mention" && a.name === mostRecentName,
+        );
+
+        if (!alreadyAttached && mostRecentName) {
+          // Add the most recent charm to the beginning
+          const id = `attachment-auto-recent-${mostRecentName}`;
+          return [
+            {
+              id,
+              name: mostRecentName,
+              type: "mention" as const,
+              charm: mostRecent,
+              removable: false, // Auto-attached charm cannot be removed
+            },
+            ...attachments,
+          ];
         }
       }
 
-      return tools;
+      return attachments;
     });
 
+    // Surface attached charms so the LLM can use read/run/schema helpers.
+    const dynamicTools = computed(() => {
+      const attached: Record<string, any> = {};
+
+      for (const attachment of attachmentsWithRecent || []) {
+        if (attachment.type !== "mention" || !attachment.charm) continue;
+        const charmName = attachment.charm[NAME] || "Charm";
+        attached[charmName] = {
+          charm: attachment.charm,
+          description:
+            `Attached charm ${charmName}. Use schema("${charmName}") to ` +
+            `inspect it, then read("${charmName}/path") or ` +
+            `run("${charmName}/handler").`,
+        };
+      }
+
+      return attached;
+    });
+
+    const attachmentTools = {
+      listMentionable: {
+        description: "List all mentionable NAMEs in the space.",
+        handler: listMentionable({ mentionable }),
+      },
+      listRecent: {
+        description: "List all recently viewed charms in the space.",
+        handler: listRecent({ recentCharms }),
+      },
+      addAttachment: {
+        description:
+          "Add a new attachment to the attachments array by its mentionable NAME.",
+        handler: addAttachmentTool({ mentionable, allAttachments }),
+      },
+      removeAttachment: {
+        description:
+          "Remove an attachment from the attachments array by its mentionable NAME.",
+        handler: removeAttachmentTool({ allAttachments }),
+      },
+    };
+
     // Merge static and dynamic tools
-    const mergedTools = derive(
-      [tools, dynamicTools],
-      ([staticTools, dynamic]: [any, any]) => ({
-        ...staticTools,
-        ...dynamic,
-      }),
-    );
+    const mergedTools = computed(() => ({
+      ...tools,
+      ...dynamicTools,
+      ...attachmentTools,
+    }));
 
     const { addMessage, cancelGeneration, pending, flattenedTools } = llmDialog(
       {
-        system: "You are a helpful assistant with some tools.",
+        system: computed(() => {
+          return system ?? "You are a polite but efficient assistant.";
+        }),
         messages,
         tools: mergedTools,
         model,
@@ -231,9 +370,9 @@ export default recipe<ChatInput, ChatOutput>(
       mode: "json",
     });
 
-    const items = derive(result, (models) => {
-      if (!models) return [];
-      const items = Object.keys(models as any).map((key) => ({
+    const items = computed(() => {
+      if (!result) return [];
+      const items = Object.keys(result as any).map((key) => ({
         label: key,
         value: key,
       }));
@@ -242,55 +381,93 @@ export default recipe<ChatInput, ChatOutput>(
 
     const title = TitleGenerator({ model, messages });
 
+    const promptInput = (
+      <ct-prompt-input
+        slot="footer"
+        placeholder="Ask the LLM a question..."
+        pending={pending}
+        $mentionable={mentionable}
+        modelItems={items}
+        $model={model}
+        onct-send={sendMessage({
+          addMessage,
+          allAttachments: attachmentsWithRecent,
+        })}
+        onct-stop={cancelGeneration}
+        onct-attachment-add={addAttachment({ allAttachments })}
+        onct-attachment-remove={removeAttachment({ allAttachments })}
+      />
+    );
+
+    const chatLog = (
+      <ct-vscroll
+        style="padding: 1rem;"
+        flex
+        showScrollbar
+        fadeEdges
+        snapToBottom
+      >
+        <ct-chat
+          theme={theme}
+          $messages={messages}
+          pending={pending}
+          tools={flattenedTools}
+        />
+      </ct-vscroll>
+    );
+
+    const attachmentsAndTools = (
+      <ct-hstack align="center" gap="1">
+        <ct-attachments-bar
+          attachments={attachmentsWithRecent}
+          removable
+          onct-remove={removeAttachment({ allAttachments })}
+        />
+        <ct-tools-chip tools={flattenedTools} />
+        <ct-button
+          variant="pill"
+          type="button"
+          title="Clear chat"
+          onClick={clearChat({
+            messages,
+            pending,
+          })}
+        >
+          Clear
+        </ct-button>
+      </ct-hstack>
+    );
+
     return {
       [NAME]: title,
       [UI]: (
         <ct-screen>
           <ct-vstack slot="header">
             <ct-heading level={4}>{title}</ct-heading>
-            <ct-hstack gap="normal">
-              <ct-attachments-bar
-                attachments={allAttachments}
-                removable
-                onct-remove={removeAttachment({ allAttachments })}
-              />
-              <ct-tools-chip tools={flattenedTools} />
-            </ct-hstack>
+            {attachmentsAndTools}
           </ct-vstack>
 
-          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
-            <ct-chat
-              theme={theme}
-              $messages={messages}
-              pending={pending}
-              tools={flattenedTools}
-            />
-          </ct-vscroll>
+          {chatLog}
 
-          <div slot="footer">
-            <ct-prompt-input
-              placeholder="Ask the LLM a question..."
-              pending={pending}
-              $mentionable={mentionable}
-              onct-send={sendMessage({ addMessage, allAttachments })}
-              onct-stop={cancelGeneration}
-              onct-attachment-add={addAttachment({ allAttachments })}
-              onct-attachment-remove={removeAttachment({ allAttachments })}
-            />
-            <ct-select
-              items={items}
-              $value={model}
-            />
-          </div>
+          {promptInput}
         </ct-screen>
       ),
       messages,
       pending,
       addMessage,
+      clearChat: clearChat({
+        messages,
+        pending,
+      }),
       cancelGeneration,
       title,
-      attachments: allAttachments,
+      attachments: attachmentsWithRecent,
       tools: flattenedTools,
+      ui: {
+        chatLog,
+        promptInput,
+        attachmentsAndTools,
+      },
     };
   },
 );

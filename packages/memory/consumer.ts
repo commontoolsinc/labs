@@ -319,6 +319,7 @@ class MemoryConsumerSession<
 }
 
 export interface MemorySession<Space extends MemorySpace> {
+  as: Signer;
   mount<Subject extends Space>(space: Subject): MemorySpaceSession<Subject>;
 }
 
@@ -329,9 +330,11 @@ export interface MemoryConsumer<Space extends MemorySpace>
       ProviderCommand<Protocol>,
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
+  as: Signer;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
+  as: Signer;
   transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
   query(
     source: Query["args"] | SchemaQuery["args"],
@@ -342,10 +345,13 @@ export type { QueryView };
 
 class MemorySpaceConsumerSession<Space extends MemorySpace>
   implements MemorySpaceSession<Space> {
+  as: Signer;
   constructor(
     public space: Space,
     public session: MemoryConsumerSession<Space, Protocol<Space>>,
-  ) {}
+  ) {
+    this.as = session.as;
+  }
   transact(source: Transaction["args"]) {
     return this.session.invoke({
       cmd: "/memory/transact",

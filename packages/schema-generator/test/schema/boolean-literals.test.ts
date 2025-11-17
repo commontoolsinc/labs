@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Boolean literals", () => {
   it("should preserve boolean literal values in enum", async () => {
@@ -14,7 +14,7 @@ describe("Schema: Boolean literals", () => {
     `;
     const { type, checker } = await getTypeFromCode(code, "BooleanLiterals");
     const transformer = createSchemaTransformerV2();
-    const schema = transformer(type, checker);
+    const schema = asObjectSchema(transformer.generateSchema(type, checker));
 
     const alwaysTrue = schema.properties?.alwaysTrue as any;
     expect(alwaysTrue.type).toBe("boolean");
@@ -36,7 +36,9 @@ describe("Schema: Boolean literals", () => {
       "AlwaysTrue",
     );
     const transformer = createSchemaTransformerV2();
-    const trueSchema = transformer(trueType, checker);
+    const trueSchema = asObjectSchema(
+      transformer.generateSchema(trueType, checker),
+    );
 
     expect(trueSchema.type).toBe("boolean");
     expect(trueSchema.enum).toEqual([true]);
@@ -46,7 +48,9 @@ describe("Schema: Boolean literals", () => {
       falseCode,
       "AlwaysFalse",
     );
-    const falseSchema = transformer(falseType, falseChecker);
+    const falseSchema = asObjectSchema(
+      transformer.generateSchema(falseType, falseChecker),
+    );
 
     expect(falseSchema.type).toBe("boolean");
     expect(falseSchema.enum).toEqual([false]);

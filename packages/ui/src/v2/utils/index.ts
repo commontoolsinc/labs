@@ -4,3 +4,4 @@
 
 export * from "./events.ts";
 export * from "./types.ts";
+export * from "./image-compression.ts";

@@ -236,6 +236,13 @@ const formatLabelFromId = (id: string): string =>
 
 const normalizeWord = (value: string): string => {
   if (!value) return value;
+  // Handle hyphenated compound words like "Third-Party"
+  if (value.includes("-")) {
+    return value.split("-").map((part) => {
+      const lower = part.toLowerCase();
+      return lower.slice(0, 1).toUpperCase() + lower.slice(1);
+    }).join("-");
+  }
   const lower = value.toLowerCase();
   return lower.slice(0, 1).toUpperCase() + lower.slice(1);
 };
@@ -576,12 +583,8 @@ export const complianceChecklist = recipe<ComplianceChecklistArgs>(
     const insights = lift(computeInsights)(currentTasks);
 
     const tasksView = lift(cloneTasks)(currentTasks);
-    const categorySummaries = lift((snapshot: ComplianceInsights) =>
-      snapshot.categories.map((entry) => ({ ...entry }))
-    )(insights);
-    const gapDetails = lift((snapshot: ComplianceInsights) =>
-      snapshot.gapList.map((entry) => ({ ...entry }))
-    )(insights);
+    const categorySummaries = insights.categories;
+    const gapDetails = insights.gapList;
 
     const coveragePercent = lift((snapshot: ComplianceInsights) =>
       snapshot.coveragePercent

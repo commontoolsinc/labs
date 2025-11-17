@@ -5,6 +5,7 @@ import {
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
 import type {
+  AnyCell,
   JSONSchema,
   Module,
   NodeFactory,
@@ -48,6 +49,8 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
+import { popFrame, pushFrame } from "./builder/recipe.ts";
+import type { Frame } from "./builder/types.ts";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -132,25 +135,25 @@ export interface IRuntime {
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     entityId: EntityId,
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId,
-    path?: PropertyKey[],
+    path?: readonly PropertyKey[],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
 
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
@@ -330,6 +333,7 @@ export class Runtime implements IRuntime {
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
+  private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
     this.id = options.storageManager.id;
@@ -382,6 +386,9 @@ export class Runtime implements IRuntime {
         telemetry: !!this.telemetry,
       });
     }
+
+    // Push a default frame with this runtime so builder functions can access it
+    this.defaultFrame = pushFrame({ runtime: this });
   }
 
   /**
@@ -407,8 +414,18 @@ export class Runtime implements IRuntime {
     // Wait for any pending operations
     await this.scheduler.idle();
 
+    // Pop the default frame
+    if (this.defaultFrame) {
+      popFrame(this.defaultFrame);
+      this.defaultFrame = undefined;
+    }
+
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
+  }
+
+  async [Symbol.asyncDispose]() {
+    await this.dispose();
   }
 
   /**
@@ -490,21 +507,21 @@ export class Runtime implements IRuntime {
   getCellFromEntityId<T>(
     space: MemorySpace,
     entityId: EntityId | string,
-    path?: PropertyKey[],
+    path?: readonly PropertyKey[],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     entityId: EntityId | string,
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
     space: MemorySpace,
     entityId: EntityId | string,
-    path: PropertyKey[] = [],
+    path: readonly PropertyKey[] = [],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
@@ -520,17 +537,17 @@ export class Runtime implements IRuntime {
     );
   }
   getCellFromLink<T>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: CellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {

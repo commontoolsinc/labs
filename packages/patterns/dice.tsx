@@ -14,7 +14,7 @@ interface RecipeOutput {
   roll: Stream<{ sides?: number }>;
 }
 
-export default recipe<RecipeState, RecipeOutput>("Dice", (state) => {
+export default recipe<RecipeState, RecipeOutput>((state) => {
   return {
     [NAME]: `Dice Roller`,
     [UI]: (

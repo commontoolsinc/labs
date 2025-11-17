@@ -1,6 +1,66 @@
 import * as ts from "typescript";
 
 /**
+ * Safely get text from an expression, handling both regular and synthetic nodes.
+ * Synthetic nodes (created by transformers) don't have valid source positions,
+ * so we use a printer instead of getText().
+ */
+export function getExpressionText(expr: ts.Expression): string {
+  const sourceFile = expr.getSourceFile();
+  if (!sourceFile) {
+    // Synthetic node - use printer
+    try {
+      const printer = ts.createPrinter();
+      return printer.printNode(
+        ts.EmitHint.Unspecified,
+        expr,
+        ts.createSourceFile("", "", ts.ScriptTarget.Latest),
+      );
+    } catch {
+      return `<error printing ${ts.SyntaxKind[expr.kind]}>`;
+    }
+  }
+  return expr.getText(sourceFile);
+}
+
+/**
+ * Gets the type of a node, checking typeRegistry first (for synthetic nodes),
+ * then falling back to the type checker.
+ *
+ * This is useful when working with nodes that may have been created during
+ * transformation (synthetic nodes) which can lose their type information.
+ *
+ * @param node - The node to get the type for
+ * @param checker - The TypeScript type checker
+ * @param typeRegistry - Optional registry of types for synthetic nodes
+ * @param logger - Optional logger for error messages
+ * @returns The type, or undefined if it couldn't be determined
+ */
+export function getTypeAtLocationWithFallback(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  logger?: (message: string) => void,
+): ts.Type | undefined {
+  if (typeRegistry?.has(node)) {
+    return typeRegistry.get(node)!;
+  }
+
+  try {
+    return checker.getTypeAtLocation(node);
+  } catch (error) {
+    if (logger) {
+      // Use getExpressionText to safely handle both regular and synthetic nodes
+      const nodeText = ts.isExpression(node)
+        ? getExpressionText(node)
+        : `<${ts.SyntaxKind[node.kind]}>`;
+      logger(`Warning: Could not get type for node "${nodeText}": ${error}`);
+    }
+    return undefined;
+  }
+}
+
+/**
  * Helper to resolve the base type of an expression
  */
 function resolveBaseType(
@@ -51,10 +111,123 @@ export function getMemberSymbol(
   return checker.getSymbolAtLocation(expression) ?? undefined;
 }
 
+/**
+ * Set parent pointers for synthetic nodes created by transformers.
+ * Synthetic nodes don't have parent pointers set, which breaks logic
+ * that relies on .parent (like method call detection).
+ *
+ * This is a common utility used when creating synthetic AST nodes that need
+ * to participate in parent-based navigation.
+ */
+export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
+  if (parent && !(node as any).parent) {
+    (node as any).parent = parent;
+  }
+  ts.forEachChild(node, (child) => setParentPointers(child, node));
+}
+
+/**
+ * Check if a type is a union that includes undefined.
+ * When a property type is `T | undefined`, it's considered optional for JSON/runtime semantics.
+ *
+ * This aligns with schema-generator's treatment: JSON doesn't distinguish between absent and undefined.
+ */
+function isUnionWithUndefined(type: ts.Type): boolean {
+  if (!(type.flags & ts.TypeFlags.Union)) {
+    return false;
+  }
+  const unionType = type as ts.UnionType;
+  return unionType.types.some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
+}
+
+/**
+ * Centralized optionality check for properties and symbols.
+ * Returns true if the property is optional by ANY of these criteria:
+ * 1. Declaration has `?` token (most reliable - e.g., `foo?: T`)
+ * 2. Symbol has Optional flag (fallback for case 1)
+ * 3. Type is a union with undefined (e.g., `foo: T | undefined`)
+ *
+ * This aligns with schema-generator's JSON/runtime semantics where absent and undefined are equivalent.
+ *
+ * Note: We check the declaration's questionToken first because SymbolFlags.Optional
+ * is not always set correctly by the TypeScript compiler.
+ *
+ * @param symbol - The property symbol (may be undefined)
+ * @param type - The property type (may be undefined)
+ * @returns true if the property is optional by any criterion
+ */
+export function isOptionalProperty(
+  symbol: ts.Symbol | undefined,
+  type: ts.Type | undefined,
+): boolean {
+  // Check declaration's questionToken (most reliable)
+  if (symbol) {
+    const declarations = symbol.getDeclarations();
+    if (declarations && declarations.length > 0) {
+      for (const decl of declarations) {
+        if (
+          ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)
+        ) {
+          if (decl.questionToken) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // Also check the SymbolFlags.Optional as a fallback
+    if ((symbol.flags & ts.SymbolFlags.Optional) !== 0) {
+      return true;
+    }
+  }
+
+  // Check if type is T | undefined
+  if (type && isUnionWithUndefined(type)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a property access expression refers to an optional property.
+ * Returns true if:
+ * 1. The property has the `?` optional flag (e.g., `multiplier?: number`)
+ * 2. The property type is `T | undefined` (e.g., `multiplier: number | undefined`)
+ *
+ * This aligns with schema-generator's JSON/runtime semantics.
+ *
+ * @example
+ * ```typescript
+ * interface Config {
+ *   a?: number;                 // => true (has ? flag)
+ *   b: number | undefined;      // => true (union with undefined)
+ *   c: number;                  // => false (required)
+ * }
+ * const expr = // AST node for config.a
+ * isOptionalPropertyAccess(expr, checker) // => true
+ * ```
+ */
+export function isOptionalPropertyAccess(
+  expression: ts.PropertyAccessExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const symbol = getMemberSymbol(expression, checker);
+  const type = checker.getTypeAtLocation(expression);
+  return isOptionalProperty(symbol, type);
+}
+
 export function isFunctionParameter(
   node: ts.Identifier,
   checker: ts.TypeChecker,
 ): boolean {
+  // Handle synthetic nodes: if the node doesn't have a source file, we can't traverse parent chain safely
+  // Synthetic identifiers from map closure transformation (like `discount`, `element`) are treated as
+  // opaque parameters, not regular function parameters
+  if (!node.getSourceFile()) {
+    return false;
+  }
+
   const symbol = checker.getSymbolAtLocation(node);
   if (symbol) {
     const declarations = symbol.getDeclarations();
@@ -89,7 +262,7 @@ export function isFunctionParameter(
   }
 
   const parent = node.parent;
-  if (ts.isParameter(parent) && parent.name === node) {
+  if (parent && ts.isParameter(parent) && parent.name === node) {
     return true;
   }
 
@@ -134,4 +307,110 @@ export function isFunctionParameter(
   }
 
   return false;
+}
+
+/**
+ * Visit a node's children, handling JSX expressions properly.
+ * TypeScript's visitEachChild doesn't traverse into JsxExpression.expression,
+ * so we need to handle those manually.
+ *
+ * This is the transformation/visitor version. For read-only analysis,
+ * see the special JSX handling in dataflow.ts.
+ */
+export function visitEachChildWithJsx(
+  node: ts.Node,
+  visitor: ts.Visitor,
+  context: ts.TransformationContext | undefined,
+): ts.Node {
+  // Handle JSX elements - need to traverse JSX expression children manually
+  if (ts.isJsxElement(node)) {
+    const openingElement = ts.visitNode(node.openingElement, visitor);
+    const children = ts.visitNodes(
+      node.children,
+      (child) => {
+        // Visit the JsxExpression node itself, not just its inner expression
+        // This allows transformers to process JsxExpression nodes
+        return ts.visitNode(child, visitor);
+      },
+      ts.isJsxChild,
+    );
+    const closingElement = ts.visitNode(node.closingElement, visitor);
+    return ts.factory.updateJsxElement(
+      node,
+      openingElement as ts.JsxOpeningElement,
+      children,
+      closingElement as ts.JsxClosingElement,
+    );
+  }
+
+  // Handle JSX self-closing elements
+  if (ts.isJsxSelfClosingElement(node)) {
+    return ts.visitEachChild(node, visitor, context);
+  }
+
+  // Handle JSX fragments
+  if (ts.isJsxFragment(node)) {
+    const openingFragment = ts.visitNode(node.openingFragment, visitor);
+    const children = ts.visitNodes(
+      node.children,
+      (child) => {
+        // Visit the child node itself (including JsxExpression nodes)
+        return ts.visitNode(child, visitor);
+      },
+      ts.isJsxChild,
+    );
+    const closingFragment = ts.visitNode(node.closingFragment, visitor);
+    return ts.factory.updateJsxFragment(
+      node,
+      openingFragment as ts.JsxOpeningFragment,
+      children,
+      closingFragment as ts.JsxClosingFragment,
+    );
+  }
+
+  // For all other nodes, use the default behavior
+  return ts.visitEachChild(node, visitor, context);
+}
+
+/**
+ * Check if a property access expression is being invoked as a method call.
+ *
+ * @example
+ * ```typescript
+ * // Returns true:
+ * obj.method()  // node is obj.method
+ *
+ * // Returns false:
+ * const x = obj.method  // node is obj.method (not being called)
+ * ```
+ */
+export function isMethodCall(node: ts.PropertyAccessExpression): boolean {
+  return !!(
+    node.parent &&
+    ts.isCallExpression(node.parent) &&
+    node.parent.expression === node
+  );
+}
+
+/**
+ * When a property access is a method call, get the object being called on.
+ * This is useful for closures that should capture the object, not the method.
+ *
+ * @example
+ * ```typescript
+ * state.counter.set()  // Returns PropertyAccessExpression for state.counter
+ * obj.method()         // Returns undefined (obj is not a PropertyAccessExpression)
+ * obj.prop             // Returns undefined (not a method call)
+ * ```
+ *
+ * @returns The object PropertyAccessExpression if this is a method call on a property chain,
+ *          undefined otherwise
+ */
+export function getMethodCallTarget(
+  node: ts.PropertyAccessExpression,
+): ts.PropertyAccessExpression | undefined {
+  if (!isMethodCall(node)) return undefined;
+
+  const obj = node.expression;
+  return ts.isPropertyAccessExpression(obj) ? obj : undefined;
 }

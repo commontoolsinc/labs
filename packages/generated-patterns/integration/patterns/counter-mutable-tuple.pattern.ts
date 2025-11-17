@@ -1,13 +1,5 @@
 /// <cts-enable />
-import {
-  Cell,
-  compute,
-  Default,
-  handler,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface MutableTupleArgs {
   pair: Default<[number, number], [0, 0]>;
@@ -42,12 +34,6 @@ const adjustPair = handler(
 export const counterWithMutableTuple = recipe<MutableTupleArgs>(
   "Counter With Mutable Tuple",
   ({ pair }) => {
-    const initialize = compute(() => {
-      if (!Array.isArray(pair.get())) {
-        pair.set([0, 0]);
-      }
-    });
-
     const tuple = lift((values: [number, number] | undefined) => {
       const leftValue = Array.isArray(values) && typeof values[0] === "number"
         ? values[0]
@@ -73,7 +59,6 @@ export const counterWithMutableTuple = recipe<MutableTupleArgs>(
       label,
       set: setPair({ pair }),
       adjust: adjustPair({ pair }),
-      effects: { initialize },
     };
   },
 );

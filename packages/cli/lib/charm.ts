@@ -1,13 +1,20 @@
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { createSession, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { isStream, Runtime, RuntimeProgram, UI } from "@commontools/runner";
+import {
+  isStream,
+  Runtime,
+  RuntimeProgram,
+  type Stream,
+  UI,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { isVNode, type VNode } from "@commontools/html";
 import { FileSystemProgramResolver } from "@commontools/js-runtime";
+import { setLLMUrl } from "@commontools/llm";
 
 export interface EntryConfig {
   mainPath: string;
@@ -28,20 +35,12 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   if (config.space.startsWith("did:key")) {
     throw new Error("DID key spaces not yet supported.");
   }
-  const root = await loadIdentity(config.identity);
-  const account = config.space.startsWith("~")
-    ? root
-    : await Identity.fromPassphrase(ANYONE);
-  const user = await account.derive(config.space);
-  return {
-    private: account.did() === root.did(),
-    name: config.space,
-    space: user.did(),
-    as: user,
-  };
+  const identity = await loadIdentity(config.identity);
+  return createSession({ identity, spaceName: config.space });
 }
 
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
+  setLLMUrl(config.apiUrl);
   const session = await makeSession(config);
   // Use a const ref object so we can assign later while keeping const binding
   const charmManagerRef: { current?: CharmManager } = {};
@@ -50,6 +49,7 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
+      spaceIdentity: session.spaceIdentity,
     }),
     navigateCallback: (target) => {
       try {
@@ -141,7 +141,7 @@ export async function setCharmRecipe(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (entry.mainPath.endsWith(".iframe.js")) {
     await charm.setIframeRecipe(entry.mainPath);
   } else {
@@ -156,7 +156,7 @@ export async function saveCharmRecipe(
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   const meta = await charm.getRecipeMeta();
   const iframeRecipe = await charm.getIframeRecipe();
 
@@ -192,7 +192,7 @@ export async function applyCharmInput(
 ) {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   await charm.setInput(input);
 }
 
@@ -378,7 +378,7 @@ export async function inspectCharm(
 }> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
 
   const id = charm.id;
   const name = charm.name();
@@ -444,7 +444,7 @@ export async function getCellValue(
 ): Promise<unknown> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (options?.input) {
     return charm.input.get(path);
   } else {
@@ -460,7 +460,7 @@ export async function setCellValue(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, false);
   if (options?.input) {
     await charm.input.set(value, path);
   } else {
@@ -478,7 +478,7 @@ export async function callCharmHandler<T = any>(
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm);
+  const charm = await charms.get(config.charm, true);
 
   // Get the cell and traverse to the handler using .key()
   const cell = charm.getCell().asSchema({
@@ -488,7 +488,9 @@ export async function callCharmHandler<T = any>(
     },
     required: [handlerName],
   });
-  const handlerStream = cell.key(handlerName);
+
+  // Manual cast because typescript can't infer this automatically
+  const handlerStream = cell.key(handlerName) as unknown as Stream<T>;
 
   // The handlerStream should be the actual stream object
   if (!isStream<T>(handlerStream)) {
@@ -504,7 +506,7 @@ export async function callCharmHandler<T = any>(
 }
 
 /**
- * Removes a charm from the space (moves it to trash).
+ * Removes a charm from the space.
  */
 export async function removeCharm(
   config: CharmConfig,

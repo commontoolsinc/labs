@@ -82,7 +82,7 @@ const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
   },
 );
 
-export default recipe("Cheeseboard", () => {
+export default recipe(() => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
   const { result } = fetchData<WebReadResult>({

@@ -9,6 +9,7 @@ import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import { extractDocFromType } from "../doc-utils.ts";
+import { isCellType } from "../typescript/cell-brand.ts";
 
 const logger = getLogger("schema-generator.intersection");
 const DOC_CONFLICT_COMMENT =
@@ -17,7 +18,11 @@ const DOC_CONFLICT_COMMENT =
 export class IntersectionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
-  supportsType(type: ts.Type, _context: GenerationContext): boolean {
+  supportsType(type: ts.Type, context: GenerationContext): boolean {
+    // Don't handle cell types - they are intersection types but should be handled by CommonToolsFormatter
+    if (isCellType(type, context.typeChecker)) {
+      return false;
+    }
     return (type.flags & ts.TypeFlags.Intersection) !== 0;
   }
 

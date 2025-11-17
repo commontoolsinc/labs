@@ -126,16 +126,21 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     payload.metadata.user = user;
   }
 
-  // Disable caching for requests with tools to prevent incomplete cached responses
-  // Tool calls are executed client-side, so server cache doesn't include tool results
-  const hasTools = payload.tools && Object.keys(payload.tools).length > 0;
-  const shouldCache = payload.cache && !hasTools;
-
-  if (payload.cache && hasTools) {
-    console.log(
-      "Caching disabled for request with tools to prevent incomplete cached responses",
-    );
-  }
+  // Enable caching for all requests including those with tools.
+  // With the sequential request architecture, each request includes complete context
+  // (including tool results from previous rounds), making each response cacheable.
+  //
+  // Cache key naturally includes:
+  // - Original user message
+  // - Tool definitions
+  // - Tool results (in messages array for subsequent rounds)
+  // - Full conversation history
+  //
+  // Note: Non-deterministic tools will be cached. If tool results change for the
+  // same inputs, the different results will produce different cache keys, resulting
+  // in a cache miss (correct behavior). For intentional cache invalidation, use
+  // the cache eviction utilities or modify the request to produce a different hash.
+  const shouldCache = payload.cache === true;
 
   let cacheKey: string | undefined;
   if (shouldCache) {
@@ -272,9 +277,9 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
 ) => {
   const payload = await c.req.json();
 
-  if (!payload.prompt || !payload.schema) {
+  if (!payload.messages || !payload.schema) {
     return c.json(
-      { error: "Missing required fields: prompt and schema" },
+      { error: "Missing required fields: messages and schema" },
       HttpStatusCodes.BAD_REQUEST,
     );
   }

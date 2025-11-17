@@ -1,10 +1,6 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { type Cell, getEntityId, NAME } from "@commontools/runner";
-import {
-  type Mentionable,
-  type MentionableArray,
-  mentionableArraySchema,
-} from "./mentionable.ts";
+import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+import { type Mentionable, type MentionableArray } from "./mentionable.ts";
 
 /**
  * Configuration for the MentionController
@@ -130,30 +126,15 @@ export class MentionController implements ReactiveController {
    * Get filtered mentions based on current query
    */
   getFilteredMentions(): MentionableArray {
-    if (!this._mentionable) {
-      return [];
-    }
-
-    const mentionableArray = this._mentionable.asSchema(
-      mentionableArraySchema,
-    );
-    const mentionableData = mentionableArray.get();
-    if (!mentionableData || mentionableData.length === 0) {
-      return [];
-    }
+    const all = this.readMentionables();
+    if (all.length === 0) return [];
 
     const query = this._state.query.toLowerCase();
-    const matches: number[] = [];
+    if (!query) return all;
 
-    // Resolve each mentionable item and filter by query
-    for (let i = 0; i < mentionableData.length; i++) {
-      const mention = mentionableArray.key(i).get();
-      if (mention && mention[NAME]?.toLowerCase()?.includes(query)) {
-        matches.push(i);
-      }
-    }
-
-    return matches.map((i) => mentionableArray.key(i).get());
+    return all.filter((mention) =>
+      mention[NAME]?.toLowerCase().includes(query)
+    );
   }
 
   /**
@@ -283,22 +264,15 @@ export class MentionController implements ReactiveController {
    * Decode charm reference from href (entity ID)
    */
   decodeCharmFromHref(href: string | null): Mentionable | null {
-    if (!href || !this._mentionable) return null;
+    if (!href) return null;
 
-    const mentionableArray = this._mentionable.asSchema(
-      mentionableArraySchema,
-    );
-    const mentionableData = mentionableArray.get() || [];
-
-    for (let i = 0; i < mentionableData.length; i++) {
-      const mention = mentionableArray.key(i).get();
-      if (mention) {
-        const mentionEntityId = encodeURIComponent(
-          JSON.stringify(getEntityId(mention)),
-        );
-        if (mentionEntityId === href) {
-          return mention;
-        }
+    const all = this.readMentionables();
+    for (const mention of all) {
+      const mentionEntityId = encodeURIComponent(
+        JSON.stringify(getEntityId(mention)),
+      );
+      if (mentionEntityId === href) {
+        return mention;
       }
     }
 
@@ -310,8 +284,6 @@ export class MentionController implements ReactiveController {
    * Returns array of Mentionable objects referenced in the text
    */
   extractMentionsFromText(text: string): Mentionable[] {
-    if (!this._mentionable) return [];
-
     const mentions: Mentionable[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
@@ -325,5 +297,24 @@ export class MentionController implements ReactiveController {
     }
 
     return mentions;
+  }
+
+  private readMentionables(): Mentionable[] {
+    if (!this._mentionable) {
+      return [];
+    }
+
+    const rawMentionable = this._mentionable.get();
+    const array = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCell(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    if (array.length === 0) {
+      return [];
+    }
+
+    return array.filter((mention): mention is Mentionable => Boolean(mention));
   }
 }

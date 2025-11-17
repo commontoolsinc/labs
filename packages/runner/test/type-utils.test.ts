@@ -1,6 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
+import {
+  isModule,
+  isRecipe,
+  type Opaque,
+  type OpaqueRef,
+} from "../src/builder/types.ts";
 import { isWriteRedirectLink } from "../src/link-utils.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
@@ -9,7 +14,7 @@ describe("value type", () => {
     const { foo, bar }: { foo: Opaque<string>; bar: Opaque<string> } = {
       foo: "foo",
       bar: "bar",
-    } as Opaque<{
+    } as OpaqueRef<{
       foo: string;
       bar: string;
     }>;

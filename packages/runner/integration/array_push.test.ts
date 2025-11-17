@@ -6,10 +6,10 @@
  * fast the client can render 100 mapped elements, which often ends up creating a
  * lot of vdom nodes
  */
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
-import { Runtime } from "../src/index.ts";
+import { Runtime, Stream } from "../src/index.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;
@@ -21,27 +21,20 @@ const MEMORY_WS_URL = `${
 const SPACE_NAME = "runner_integration";
 
 const TOTAL_COUNT = 20; // how many elements we push to the array
-const TIMEOUT_MS = 30000; // timeout for the test in ms
+const TIMEOUT_MS = 180000; // timeout for the test in ms (3 minutes)
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
 console.log(`API URL: ${API_URL}`);
 
-// Set up timeout
-const timeoutPromise = new Promise((_, reject) => {
-  setTimeout(() => {
-    reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-  }, TIMEOUT_MS);
-});
-
 // Main test function
 async function runTest() {
-  const account = await Identity.fromPassphrase(ANYONE);
+  const account = await Identity.fromPassphrase("common user");
   const space_thingy = await account.derive(SPACE_NAME);
   const space_thingy_space = space_thingy.did();
   const session = {
-    private: false,
-    name: SPACE_NAME,
+    isPrivate: false,
+    spaceName: SPACE_NAME,
     space: space_thingy_space,
     as: space_thingy,
   } as Session;
@@ -121,8 +114,12 @@ async function runTest() {
   // await new Promise((resolve) => setTimeout(resolve, 10000));
 
   // Get the handler stream and send some numbers
-  const pushNumbersHandlerStream = charm.key("pushNumbersHandler");
-  const pushObjectsHandlerStream = charm.key("pushObjectsHandler");
+  const pushNumbersHandlerStream = charm.key(
+    "pushNumbersHandler",
+  ) as unknown as Stream<{ value: number }>;
+  const pushObjectsHandlerStream = charm.key(
+    "pushObjectsHandler",
+  ) as unknown as Stream<{ value: { count: number } }>;
 
   const expectedNumbers = [];
   const expectedObjects = [];
@@ -192,12 +189,23 @@ async function runTest() {
 }
 
 // Run the test with timeout
-try {
-  await Promise.race([runTest(), timeoutPromise]);
-  console.log("Test completed successfully within timeout");
-  Deno.exit(0);
-} catch (error) {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error("Test failed:", errorMessage, (error as Error).stack);
-  Deno.exit(1);
-}
+Deno.test({
+  name: "array push test",
+  fn: async () => {
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+      console.log("Test completed successfully within timeout");
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   areLinksSame,
+  createDataCellURI,
   createSigilLinkFromParsedLink,
   isLegacyAlias,
   isLink,
@@ -12,6 +13,7 @@ import {
   parseLinkOrThrow,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -341,6 +343,28 @@ describe("link-utils", () => {
         schema: undefined,
         rootSchema: undefined,
       });
+    });
+
+    it("should parse sigil links with relative references and not add id, space or schema if not present in the link", () => {
+      const sigilLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+      const result = parseLink(sigilLink);
+
+      expect(result).toEqual({
+        path: ["nested", "value"],
+        type: "application/json",
+      });
+
+      // Don't allow `id: undefined`, etc.
+      expect("id" in result!).toBe(false);
+      expect("space" in result!).toBe(false);
+      expect("schema" in result!).toBe(false);
+      expect("rootSchema" in result!).toBe(false);
     });
 
     it("should parse cell links to normalized links", () => {
@@ -701,6 +725,171 @@ describe("link-utils", () => {
       // Result should have flags removed
       expect((result as any).asCell).toBeUndefined();
       expect((result as any).properties.name.asStream).toBeUndefined();
+    });
+  });
+
+  describe("createDataCellURI", () => {
+    it("should throw on circular data", () => {
+      const circular: any = { name: "test" };
+      circular.self = circular;
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on nested circular data", () => {
+      const obj1: any = { name: "obj1" };
+      const obj2: any = { name: "obj2", ref: obj1 };
+      obj1.ref = obj2;
+
+      expect(() => createDataCellURI(obj1)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should throw on circular data in arrays", () => {
+      const circular: any = { items: [] };
+      circular.items.push(circular);
+
+      expect(() => createDataCellURI(circular)).toThrow(
+        "Cycle detected when creating data URI",
+      );
+    });
+
+    it("should rewrite relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        baseCell,
+      );
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "nested",
+        "value",
+      ]);
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+    });
+
+    it("should rewrite nested relative links with base id", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+
+      const data = {
+        items: [
+          {
+            "/": {
+              [LINK_V1_TAG]: {
+                path: ["item", "0"],
+              },
+            },
+          },
+          {
+            nested: {
+              link: {
+                "/": {
+                  [LINK_V1_TAG]: {
+                    path: ["item", "1"],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      const dataURI = createDataCellURI(data, baseCell);
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
+        baseId,
+      );
+    });
+
+    it("should not modify absolute links", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const otherCell = runtime.getCell(space, "other", undefined, tx);
+      const otherId = otherCell.getAsNormalizedFullLink().id;
+
+      const absoluteLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: otherId,
+            path: ["some", "path"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI({ link: absoluteLink }, baseCell);
+
+      // Decode the data URI using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      // Should remain unchanged
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+        "some",
+        "path",
+      ]);
+    });
+
+    it("should handle reused acyclic objects without throwing", () => {
+      const sharedObject = { value: 42 };
+      const data = {
+        first: sharedObject,
+        second: sharedObject,
+        nested: {
+          third: sharedObject,
+        },
+      };
+
+      // Should not throw even though sharedObject is referenced multiple times
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.first.value).toBe(42);
+      expect(parsed.value.second.value).toBe(42);
+      expect(parsed.value.nested.third.value).toBe(42);
+    });
+
+    it("should handle UTF-8 characters (emojis, special characters)", () => {
+      const data = {
+        emoji: "🚀 Hello World! 🌍",
+        chinese: "你好世界",
+        arabic: "مرحبا بالعالم",
+        special: "Ñoño™©®",
+        mixed: "Test 🎉 with ñ and 中文",
+      };
+
+      // Should not throw with UTF-8 characters
+      const dataURI = createDataCellURI(data);
+
+      // Decode and verify using getJSONFromDataURI
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.emoji).toBe("🚀 Hello World! 🌍");
+      expect(parsed.value.chinese).toBe("你好世界");
+      expect(parsed.value.arabic).toBe("مرحبا بالعالم");
+      expect(parsed.value.special).toBe("Ñoño™©®");
+      expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
     });
   });
 });

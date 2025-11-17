@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import type { DataFlowGraph, DataFlowNode } from "./dataflow.ts";
+import { getExpressionText } from "./utils.ts";
 
 export interface NormalizedDataFlow {
   readonly canonicalKey: string;
@@ -26,12 +27,10 @@ export function normalizeDataFlows(
   let nodesToProcess = graph.nodes;
   if (requestedDataFlows && requestedDataFlows.length > 0) {
     const requestedTexts = new Set(
-      requestedDataFlows.map((expr) => expr.getText(expr.getSourceFile())),
+      requestedDataFlows.map((expr) => getExpressionText(expr)),
     );
     nodesToProcess = graph.nodes.filter((node) =>
-      requestedTexts.has(
-        node.expression.getText(node.expression.getSourceFile()),
-      )
+      requestedTexts.has(getExpressionText(node.expression))
     );
   }
 
@@ -103,8 +102,7 @@ export function normalizeDataFlows(
 
   for (const node of nodesToProcess) {
     const expression = normalizeExpression(node);
-    const sourceFile = expression.getSourceFile();
-    const key = `${node.scopeId}:${expression.getText(sourceFile)}`;
+    const key = `${node.scopeId}:${getExpressionText(expression)}`;
     let group = grouped.get(key);
     if (!group) {
       group = {
@@ -184,4 +182,37 @@ export function selectDataFlowsWithin(
       isWithin(node, occurrence.expression)
     )
   );
+}
+
+/**
+ * Selects data flows that are referenced (used) within a node, based on expression text matching.
+ * This is complementary to selectDataFlowsWithin, which uses position-based checking.
+ *
+ * This is particularly useful for finding parameter references where the parameter declaration
+ * is outside the node (e.g., in conditional branches of ternary expressions).
+ *
+ * @param set The normalized data flow set to filter
+ * @param node The node to check for references within
+ * @returns Data flows whose expressions are referenced within the node
+ */
+export function selectDataFlowsReferencedIn(
+  set: NormalizedDataFlowSet,
+  node: ts.Node,
+): NormalizedDataFlow[] {
+  const referencedExpressions = new Set<string>();
+
+  // Find all expressions used in the node
+  const visit = (n: ts.Node) => {
+    if (ts.isExpression(n)) {
+      referencedExpressions.add(getExpressionText(n));
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+
+  // Return data flows whose expression text matches any referenced expression
+  return set.all.filter((dataFlow) => {
+    const flowExprText = getExpressionText(dataFlow.expression);
+    return referencedExpressions.has(flowExprText);
+  });
 }

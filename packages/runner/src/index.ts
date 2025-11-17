@@ -11,7 +11,7 @@ export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-utils.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export { createRef, type EntityId, getEntityId } from "./create-ref.ts";
-export type { QueryResult } from "./query-result-proxy.ts";
+export type { CellResult as QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { StorageTelemetry } from "./storage/telemetry.ts";
@@ -19,11 +19,17 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export {
+  debugTransactionWrites,
+  formatTransactionSummary,
+  summarizeTransaction,
+  type TransactionSummary,
+} from "./storage/transaction-summary.ts";
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,
-  isQueryResult,
-  isQueryResultForDereferencing,
+  isCellResult as isQueryResult,
+  isCellResultForDereferencing as isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
@@ -73,12 +79,11 @@ export {
   AuthSchema,
   type Cell as BuilderCell,
   type Frame,
-  h,
   type HandlerFactory,
   ID,
   ID_FIELD,
   isModule,
-  isOpaqueRef,
+  isOpaqueRef as isOpaqueRef,
   isRecipe,
   isStreamValue,
   type JSONObject,
@@ -91,7 +96,6 @@ export {
   type NodeFactory,
   type Opaque,
   type OpaqueRef,
-  type OpaqueRefMethods,
   type Props,
   type Recipe,
   type RecipeFactory,
@@ -110,7 +114,6 @@ export {
   type UnsafeBinding,
   type VNode,
 } from "./builder/types.ts";
-export { toOpaqueRef } from "./back-to-cell.ts";
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";

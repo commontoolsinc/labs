@@ -1,9 +1,26 @@
 import ts from "typescript";
 import { StaticCacheFS } from "@commontools/static";
 import { isObject } from "@commontools/utils/types";
+import type { JSONSchemaObj } from "@commontools/api";
 
 // Cache for TypeScript library definitions
 let typeLibsCache: Record<string, string> | undefined;
+
+const CELL_BRAND_PRELUDE = `
+declare const CELL_BRAND: unique symbol;
+
+declare interface BrandedCell<T, Brand extends string = "cell"> {
+  readonly [CELL_BRAND]: Brand;
+}
+
+declare interface OpaqueCell<T> extends BrandedCell<T, "opaque"> {}
+declare interface OpaqueRef<T> extends OpaqueCell<T> {}
+declare interface Cell<T> extends BrandedCell<T, "cell"> {}
+declare interface Stream<T> extends BrandedCell<T, "stream"> {}
+declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
+declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
+declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+`;
 
 /**
  * Load TypeScript environment types (es2023, dom, jsx)
@@ -34,10 +51,11 @@ export async function createTestProgram(
 ): Promise<
   { program: ts.Program; checker: ts.TypeChecker; sourceFile: ts.SourceFile }
 > {
+  const fullCode = `${CELL_BRAND_PRELUDE}\n${code}`;
   const fileName = "test.ts";
   const sourceFile = ts.createSourceFile(
     fileName,
-    code,
+    fullCode,
     ts.ScriptTarget.ES2023,
     true,
   );
@@ -88,7 +106,7 @@ export async function createTestProgram(
       return false;
     },
     readFile: (name) => {
-      if (name === fileName) return code;
+      if (name === fileName) return fullCode;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return typeLibs.es2023;
       }
@@ -146,14 +164,31 @@ export async function getTypeFromCode(
     : { type: foundType, checker };
 }
 
-export function normalizeSchema<T extends Record<string, unknown>>(
+export function normalizeSchema<T extends Record<string, unknown> | boolean>(
   schema: T,
 ): T {
+  // Boolean schemas are valid and should pass through unchanged
+  if (typeof schema === "boolean") {
+    return schema;
+  }
   const clone: any = JSON.parse(JSON.stringify(schema));
   // Strip top-level $schema noise
   delete clone.$schema;
   // Canonicalize recursively
   return deepCanonicalize(clone) as T;
+}
+
+/**
+ * Type assertion helper for tests that know they're working with object schemas.
+ * Use this when the test context guarantees the schema is an object, not a boolean.
+ */
+export function asObjectSchema<T>(schema: T): T & JSONSchemaObj {
+  if (typeof schema === "boolean") {
+    throw new Error(
+      `Expected object schema but got boolean: ${schema}`,
+    );
+  }
+  return schema as T & JSONSchemaObj;
 }
 
 function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {

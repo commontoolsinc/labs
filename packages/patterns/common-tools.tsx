@@ -18,17 +18,27 @@ import {
 type CalculatorRequest = {
   /** The mathematical expression to evaluate. */
   expression: string;
+  /** The base to use for the calculation. */
+  base?: number;
 };
 
 export const calculator = recipe<
   CalculatorRequest,
   string | { error: string }
->("Calculator", ({ expression }) => {
-  return derive(expression, (expr) => {
-    const sanitized = expr.replace(/[^0-9+\-*/().\s]/g, "");
+>(({ expression, base }) => {
+  return derive({ expression, base }, ({ expression, base }) => {
+    const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, "");
+    let sanitizedBase = Number(base);
+    if (
+      Number.isNaN(sanitizedBase) || sanitizedBase < 2 || sanitizedBase > 36
+    ) {
+      sanitizedBase = 10;
+    }
     let result;
     try {
-      result = Function(`"use strict"; return (${sanitized})`)();
+      result = Function(
+        `"use strict"; return Number(${sanitized}).toString(${sanitizedBase})`,
+      )();
     } catch (error) {
       result = { error: (error as any)?.message || "<error>" };
     }
@@ -104,7 +114,7 @@ type SearchWebResult = {
 export const searchWeb = recipe<
   SearchQuery,
   SearchWebResult | { error: string }
->("Search Web", ({ query }) => {
+>(({ query }) => {
   const { result, error } = fetchData<SearchWebResult>({
     url: "/api/agent-tools/web-search",
     mode: "json",
@@ -145,7 +155,7 @@ type ReadWebResult = {
 export const readWebpage = recipe<
   ReadWebRequest,
   ReadWebResult | { error: string }
->("Read Webpage", ({ url }) => {
+>(({ url }) => {
   const { result, error } = fetchData<ReadWebResult>({
     url: "/api/agent-tools/web-read",
     mode: "json",
@@ -169,7 +179,7 @@ type ToolsInput = {
   list: ListItem[];
 };
 
-export default recipe<ToolsInput>("Tools", ({ list }) => {
+export default recipe<ToolsInput>(({ list }) => {
   const tools: Record<string, BuiltInLLMTool> = {
     search_web: {
       pattern: searchWeb,

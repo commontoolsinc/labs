@@ -19,9 +19,9 @@ Direct todo management using CommonTools:
 - Space: Use date-based naming like `2025-07-15-claude-dev` (format: YYYY-MM-DD-claude-dev)
 
 **Quick CT Commands:**
-- READ: `./dist/ct charm get [params] --charm [id] [path]`
-- SET: `echo '[value]' | ./dist/ct charm set [params] --charm [id] [path]`
-- CALL: `echo '[json]' | ./dist/ct charm call [params] --charm [id] [handler]`
+- READ: `deno task ct charm get [params] --charm [id] [path]`
+- SET: `echo '[value]' | deno task ct charm set [params] --charm [id] [path]`
+- CALL: `echo '[json]' | deno task ct charm call [params] --charm [id] [handler]`
 
 **Todo Operations:**
 - Add item: `echo '{"title": "text"}' | ct charm call [params] --charm [id] addItem`

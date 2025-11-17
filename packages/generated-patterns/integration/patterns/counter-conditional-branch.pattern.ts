@@ -1,18 +1,9 @@
 /// <cts-enable />
-import {
-  Cell,
-  compute,
-  Default,
-  handler,
-  ifElse,
-  lift,
-  recipe,
-  str,
-} from "commontools";
+import { Cell, Default, handler, ifElse, lift, recipe, str } from "commontools";
 
 interface ConditionalBranchArgs {
   value: Default<number, 0>;
-  enabled: Default<boolean, false>;
+  enabled: Cell<Default<boolean, false>>;
 }
 
 const toggleFlag = handler(
@@ -36,16 +27,6 @@ const adjustValue = handler(
 export const counterWithConditionalBranch = recipe<ConditionalBranchArgs>(
   "Counter With Conditional Branch",
   ({ value, enabled }) => {
-    const initialize = compute(() => {
-      if (value.get() === undefined) {
-        value.set(0);
-      }
-      const currentFlag = enabled.get();
-      if (typeof currentFlag !== "boolean") {
-        enabled.set(false);
-      }
-    });
-
     const safeValue = lift((count: number | undefined) =>
       typeof count === "number" ? count : 0
     )(value);
@@ -67,7 +48,6 @@ export const counterWithConditionalBranch = recipe<ConditionalBranchArgs>(
       label,
       toggle: toggleFlag({ enabled }),
       increment: adjustValue({ value }),
-      effects: { initialize },
     };
   },
 );

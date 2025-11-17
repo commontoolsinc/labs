@@ -1,8 +1,8 @@
 /// <cts-enable />
-import { Cell, Default, handler, ifElse, NAME, recipe, UI } from "commontools";
+import { Cell, Default, ifElse, NAME, recipe, UI } from "commontools";
 
 interface CheckboxSimpleInput {
-  enabled: Default<boolean, false>;
+  enabled: Cell<Default<boolean, false>>;
 }
 
 interface CheckboxSimpleOutput extends CheckboxSimpleInput {}
@@ -10,28 +10,13 @@ interface CheckboxSimpleOutput extends CheckboxSimpleInput {}
 export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
   "ct-checkbox simple demo",
   ({ enabled }) => {
-    // Handler for checkbox changes
-    const toggle = handler<
-      { detail: { checked: boolean } },
-      { enabled: Cell<boolean> }
-    >(
-      ({ detail }, { enabled }) => {
-        enabled.set(detail?.checked ?? false);
-      },
-    );
-
-    const toggleHandler = toggle({ enabled });
-
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
         <common-vstack gap="md" style="padding: 2rem; max-width: 400px;">
           <h3>Simple ct-checkbox + ifElse Demo</h3>
 
-          <ct-checkbox
-            checked={enabled}
-            onct-change={toggleHandler}
-          >
+          <ct-checkbox $checked={enabled}>
             Enable Feature
           </ct-checkbox>
 

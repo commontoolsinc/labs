@@ -10,6 +10,18 @@ derive deterministic causes for the **new cells** produced inside that frame by
 combining the frame cause with deterministic fingerprints of the inputs and
 implementation.
 
+## Two-Layer Approach
+
+Cause assignment works in two complementary layers:
+
+1. **Automatic derivation** (this spec): Default causes are automatically derived
+   from frame context, input cell ids, and implementation fingerprints
+2. **Explicit override via `.for()`**: Authors can call `.for(cause)` on cells to
+   explicitly assign a cause, providing an explicit layer on top of the automation
+
+The `.for()` method acts as an escape hatch when automatic derivation isn't
+sufficient or when authors want stable, human-readable cause names.
+
 ## Frame Cause Setup
 
 1. When a lift or handler is invoked at runtime, the runtime computes a
@@ -55,14 +67,22 @@ const cause = createRef({
 
 The resulting entity id seeds the cause for the cell returned by the helper.
 
-### Explicit Overrides
+### Explicit Overrides via `.for()`
 
-- Newly created capability cells expose `.setCause(cause: CauseDescriptor)` to
-  replace the derived cause with an explicit value (useful for hand-authored
-  stability keys). The override must occur **before** the cell participates in
-  the graph. If the cell has been connected to a node, read, or written, the
-  call must throw so we do not retroactively change ids that other nodes may
-  already reference.
+- Newly created cells expose `.for(cause, flexible?)` to replace or refine the
+  derived cause with an explicit value:
+  - **Basic usage**: `.for(cause)` assigns the specified cause
+  - **Flexible mode**: `.for(cause, true)` provides flexibility:
+    - Ignores the `.for()` if link already exists
+    - Adds extension if cause already exists (see tracker in `rollout-plan.md`
+      lines 39-46)
+  - The override must occur **before** the cell is materialized into a runtime
+    cell or connected to a node
+  - If the cell has already been connected, the call must throw to avoid
+    inconsistencies
+- This provides an **explicit layer on top of automatic derivation** - authors
+  can use automatic derivation for most cells and only call `.for()` when they
+  need specific control.
 
 ## Propagating Causes to Nested Frames
 

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, createCell, handler, ifElse, lift, NAME, navigateTo, recipe, UI, } from "commontools";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe("Simple Recipe", () => ({
     [NAME]: "Some Simple Recipe",
@@ -15,7 +15,7 @@ const createCellRef = lift({
 }, undefined, ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
         console.log("Creating cellRef - first time");
-        const newCellRef = createCell(undefined, "charmsArray");
+        const newCellRef = Cell.for<any[]>("charmsArray");
         newCellRef.set([]);
         storedCellRef.set(newCellRef);
         isInitialized.set(true);
@@ -93,17 +93,71 @@ export default recipe("Charms Launcher", () => {
         isInitialized: cell(false),
         storedCellRef: cell(),
     });
+    // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
+    // Without this, TypeScript infers `any` and the closure transformer won't detect it
+    const typedCellRef = cellRef as OpaqueRef<any[]>;
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
         <h3>Stored Charms:</h3>
-        {ifElse(!cellRef?.length, <div>No charms created yet</div>, <ul>
-            {cellRef.map((charm: any, index: number) => (<li>
+        {ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                typedCellRef: {
+                    type: "array",
+                    items: true,
+                    asOpaque: true
+                }
+            },
+            required: ["typedCellRef"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+            {typedCellRef.mapWithPattern(__ctHelpers.recipe({
+                type: "object",
+                properties: {
+                    element: true,
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, index: index, params: {} }) => (<li>
                 <ct-button onClick={goToCharm({ charm })}>
-                  Go to Charm {__ctHelpers.derive(index, index => index + 1)}
+                  Go to Charm {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}
                 </ct-button>
-                <span>Charm {__ctHelpers.derive(index, index => index + 1)}: {__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")}</span>
-              </li>))}
+                <span>Charm {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    charm: true
+                },
+                required: ["charm"]
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
+              </li>)), {})}
           </ul>)}
 
         <ct-button onClick={createSimpleRecipe({ cellRef })}>

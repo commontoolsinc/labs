@@ -1,18 +1,28 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
-import { toOpaqueRef } from "../back-to-cell.ts";
+import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
   ByRefFunction,
   Cell,
-  CellFunction,
+  CellTypeConstructor,
   CompileAndRunFunction,
-  ComputeFunction,
-  CreateCellFunction,
+  ComputedFunction,
   DeriveFunction,
   FetchDataFunction,
+  FetchProgramFunction,
   GenerateObjectFunction,
+  GenerateTextFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
+  HFunction,
+  ID as IDSymbol,
+  ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   JSONSchema,
   JSONSchemaObj,
@@ -24,125 +34,100 @@ import type {
   NavigateToFunction,
   Opaque,
   OpaqueRef,
-  OpaqueRefMethods,
+  PatternFunction,
+  PatternToolFunction,
   Recipe,
   RecipeFunction,
-  RenderFunction,
   Schema,
+  schema as schemaFunction,
   StreamDataFunction,
-  StreamFunction,
   StrFunction,
   WishFunction,
 } from "@commontools/api";
-import {
-  h,
-  ID,
-  ID_FIELD,
-  NAME,
-  schema,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
+import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
-export { AuthSchema } from "./schema-lib.ts";
-export {
-  ID,
-  ID_FIELD,
-  NAME,
-  type Schema,
-  schema,
-  type SchemaWithoutCell,
-  toSchema,
-  TYPE,
-  UI,
-} from "@commontools/api";
-export { h } from "@commontools/api";
-export type {
-  Cell,
-  CreateCellFunction,
-  Handler,
-  HandlerFactory,
-  JSONObject,
-  JSONSchema,
-  JSONSchemaTypes,
-  JSONValue,
-  Module,
-  ModuleFactory,
-  NodeFactory,
-  Opaque,
-  OpaqueRef,
-  Props,
-  Recipe,
-  RecipeFactory,
-  RenderNode,
-  Stream,
-  StripCell,
-  toJSON,
-  VNode,
-} from "@commontools/api";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
 import { type RuntimeProgram } from "../harness/types.ts";
+import { type IRuntime } from "../runtime.ts";
+
+// Define runtime constants here - actual runtime values
+export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
+export const ID_FIELD: typeof IDFieldSymbol = Symbol(
+  "ID_FIELD, name of sibling that contains id",
+) as any;
+
+// Should be Symbol("UI") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
+
+export const schema: typeof schemaFunction = (schema) => schema;
+
+export { AuthSchema } from "./schema-lib.ts";
+export type {
+  AnyCell,
+  AnyCellWrapping,
+  Apply,
+  AsCell,
+  AsComparableCell,
+  AsOpaqueCell,
+  AsReadonlyCell,
+  AsStream,
+  AsWriteonlyCell,
+  Cell,
+  CellKind,
+  CellTypeConstructor,
+  Handler,
+  HandlerFactory,
+  HKT,
+  ICell,
+  IDerivable,
+  IDFields,
+  IKeyableOpaque,
+  IOpaquable,
+  IOpaqueCell,
+  IsThisObject,
+  IStreamable,
+  JSONObject,
+  JSONSchema,
+  JSONSchemaTypes,
+  JSONValue,
+  KeyResultType,
+  Module,
+  ModuleFactory,
+  NodeFactory,
+  Opaque,
+  OpaqueCell,
+  OpaqueRef,
+  PatternFunction,
+  Props,
+  Recipe,
+  RecipeFactory,
+  RenderNode,
+  Schema,
+  SchemaWithoutCell,
+  Stream,
+  StripCell,
+  toJSON,
+  ToSchemaFunction,
+  UnwrapCell,
+  VNode,
+} from "@commontools/api";
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
-
-// Augment the public interface with the internal OpaqueRefMethods interface.
-// Deliberately repeating the original interface to catch any inconsistencies:
-// This here then reflects the entire interface the internal implementation
-// implements.
-declare module "@commontools/api" {
-  interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
-    set(value: Opaque<T> | T): void;
-    key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-    setDefault(value: Opaque<T> | T): void;
-    setPreExisting(ref: unknown): void;
-    setName(name: string): void;
-    setSchema(schema: JSONSchema): void;
-    connect(node: NodeRef): void;
-    export(): {
-      cell: OpaqueRef<any>;
-      path: readonly PropertyKey[];
-      value?: Opaque<T>;
-      defaultValue?: Opaque<T>;
-      nodes: Set<NodeRef>;
-      external?: unknown;
-      name?: string;
-      schema?: JSONSchema;
-      rootSchema?: JSONSchema;
-      frame: Frame;
-    };
-    unsafe_bindToRecipeAndPath(
-      recipe: Recipe,
-      path: readonly PropertyKey[],
-    ): void;
-    unsafe_getExternal(): OpaqueRef<T>;
-    map<S>(
-      fn: (
-        element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
-        index: Opaque<number>,
-        array: T,
-      ) => Opaque<S>,
-    ): Opaque<S[]>;
-    toJSON(): unknown;
-    [Symbol.iterator](): Iterator<T>;
-    [Symbol.toPrimitive](hint: string): T;
-    [isOpaqueRefMarker]: true;
-  }
-}
-
-export type { OpaqueRefMethods };
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
 export function isOpaqueRef<T = any>(
   value: unknown,
-): value is OpaqueRefMethods<T> {
+): value is OpaqueRef<T> {
   return !!value &&
-    typeof (value as OpaqueRef<T>)[isOpaqueRefMarker] === "boolean";
+    typeof (value as { [isOpaqueRefMarker]: true })[isOpaqueRefMarker] ===
+      "boolean";
 }
 
 export type NodeRef = {
@@ -152,11 +137,7 @@ export type NodeRef = {
   frame: Frame | undefined;
 };
 
-// This is a schema, together with its rootSchema for resolving $ref entries
-export type SchemaContext = {
-  schema: JSONSchema;
-  rootSchema: JSONSchema;
-};
+export type { SchemaContext };
 
 export type StreamValue = {
   $stream: true;
@@ -222,34 +203,6 @@ export function isRecipe(value: unknown): value is Recipe {
   );
 }
 
-type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
-
-export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
-  return (
-    (typeof value === "object" || typeof value === "function") &&
-    value !== null &&
-    typeof (value as any)[toOpaqueRef] === "function"
-  );
-}
-
-export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
-  return value[toOpaqueRef]();
-}
-
-export type ShadowRef = {
-  shadowOf: OpaqueRef<any> | ShadowRef;
-};
-
-export function isShadowRef(value: unknown): value is ShadowRef {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "shadowOf" in value &&
-    (isOpaqueRef((value as ShadowRef).shadowOf) ||
-      isShadowRef((value as ShadowRef).shadowOf))
-  );
-}
-
 export type UnsafeBinding = {
   recipe: Recipe;
   materialize: (path: readonly PropertyKey[]) => any;
@@ -262,6 +215,10 @@ export type Frame = {
   parent?: Frame;
   cause?: unknown;
   generatedIdCounter: number;
+  runtime?: IRuntime;
+  tx?: IExtendedStorageTransaction;
+  space?: MemorySpace;
+  inHandler?: boolean;
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
 };
@@ -269,14 +226,15 @@ export type Frame = {
 // Builder functions interface
 export interface BuilderFunctionsAndConstants {
   // Recipe creation
+  pattern: PatternFunction;
   recipe: RecipeFunction;
+  patternTool: PatternToolFunction;
 
   // Module creation
   lift: LiftFunction;
   handler: HandlerFunction;
   derive: DeriveFunction;
-  compute: ComputeFunction;
-  render: RenderFunction;
+  computed: ComputedFunction;
 
   // Built-in modules
   str: StrFunction;
@@ -284,16 +242,24 @@ export interface BuilderFunctionsAndConstants {
   llm: LLMFunction;
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
+  generateText: GenerateTextFunction;
   fetchData: FetchDataFunction;
+  fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 
   // Cell creation
-  createCell: CreateCellFunction;
-  cell: CellFunction;
-  stream: StreamFunction;
+  cell: CellTypeConstructor<AsCell>["of"];
+
+  // Cell constructors with static methods
+  Cell: CellTypeConstructor<AsCell>;
+  OpaqueCell: CellTypeConstructor<AsOpaqueCell>;
+  Stream: CellTypeConstructor<AsStream>;
+  ComparableCell: CellTypeConstructor<AsComparableCell>;
+  ReadonlyCell: CellTypeConstructor<AsReadonlyCell>;
+  WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
   // Utility
   byRef: ByRefFunction;
@@ -314,7 +280,7 @@ export interface BuilderFunctionsAndConstants {
   AuthSchema: typeof AuthSchema;
 
   // Render utils
-  h: typeof h;
+  h: HFunction;
 }
 
 // Runtime interface needed by createCell

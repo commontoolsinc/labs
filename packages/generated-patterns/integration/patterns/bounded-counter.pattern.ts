@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, compute, Default, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, recipe, str } from "commontools";
 
 interface BoundedCounterArgs {
   value: Default<number, 0>;
@@ -26,21 +26,11 @@ export const boundedCounter = recipe<BoundedCounterArgs>(
   ({ value, min, max }) => {
     const label = str`Value ${value} (min ${min}, max ${max})`;
 
-    const clampEffect = compute(() => {
-      const current = value.get() ?? 0;
-      const minValue = min.get() ?? 0;
-      const maxValue = max.get() ?? minValue;
-      const normalized = Math.min(Math.max(current, minValue), maxValue);
-      if (normalized !== current) value.set(normalized);
-      return normalized;
-    });
-
     return {
       value,
       bounds: { min, max },
       label,
       adjust: clampValue({ value, min, max }),
-      effects: { clampEffect },
     };
   },
 );

@@ -5,5 +5,4 @@ import "./CharmListView.ts";
 import "./HeaderView.ts";
 import "./LoginView.ts";
 import "./RootView.ts";
-import "./SpaceView.ts";
 import "./QuickJumpView.ts";

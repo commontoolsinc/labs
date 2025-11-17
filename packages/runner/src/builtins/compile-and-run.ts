@@ -28,12 +28,13 @@ import { CompilerError } from "@commontools/js-runtime/typescript";
 export function compileAndRun(
   inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  _addCancel: (cancel: () => void) => void,
+  addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  let currentRun = 0;
+  let requestId: string | undefined = undefined;
+  let abortController: AbortController | undefined = undefined;
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
@@ -51,6 +52,12 @@ export function compileAndRun(
     >
     | undefined
   >;
+
+  // This is called when the recipe containing this node is being stopped.
+  addCancel(() => {
+    // Abort any in-flight compilation if it's still pending.
+    abortController?.abort("Recipe stopped");
+  });
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -97,7 +104,7 @@ export function compileAndRun(
       sendResult(tx, { pending, result, error, errors });
       cellsInitialized = true;
     }
-    const thisRun = ++currentRun;
+
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
     const errorWithLog = error.withTx(tx);
@@ -133,7 +140,33 @@ export function compileAndRun(
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
     if (hash === previousCallHash) return;
+
+    // Check if inputs are undefined/empty (e.g., during rehydration before cells load)
+    const hasValidInputs = program.main && program.files &&
+      program.files.length > 0;
+
+    // Special case: if inputs are invalid AND this is the hash for empty inputs,
+    // the user intentionally cleared them - proceed to clear outputs
+    const emptyInputsHash = refer({ files: [], main: "" }).toString();
+    const isIntentionallyEmpty = !hasValidInputs && hash === emptyInputsHash;
+
+    // If we have a previous valid result and inputs are currently invalid (likely rehydrating),
+    // don't clear the outputs - just wait for real inputs to load
+    // BUT if inputs are intentionally empty, we should clear
+    if (
+      !hasValidInputs && previousCallHash && previousCallHash !== hash &&
+      !isIntentionallyEmpty
+    ) {
+      // Don't update previousCallHash - we'll wait for valid inputs
+      return;
+    }
+
     previousCallHash = hash;
+
+    // Abort any in-flight compilation before starting a new one
+    abortController?.abort("New compilation started");
+    abortController = new AbortController();
+    requestId = crypto.randomUUID();
 
     runtime.runner.stop(result);
     resultWithLog.set(undefined);
@@ -141,7 +174,7 @@ export function compileAndRun(
     errorsWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
-    if (!program.main || !program.files) {
+    if (!hasValidInputs) {
       pendingWithLog.set(false);
       return;
     }
@@ -156,10 +189,15 @@ export function compileAndRun(
     // Now we're sure that we have a new file to compile
     pendingWithLog.set(true);
 
+    // Capture requestId for this compilation run
+    const thisRequestId = requestId;
+
     const compilePromise = runtime.harness.run(program)
       .catch(
         (err) => {
-          if (thisRun !== currentRun) return;
+          // Only process this error if the request hasn't been superseded
+          if (requestId !== thisRequestId) return;
+          if (abortController?.signal.aborted) return;
 
           runtime.editWithRetry((asyncTx) => {
             // Extract structured errors if this is a CompilerError
@@ -180,7 +218,9 @@ export function compileAndRun(
           });
         },
       ).finally(() => {
-        if (thisRun !== currentRun) return;
+        // Only update pending if this is still the current request
+        if (requestId !== thisRequestId) return;
+        // Always clear pending state, even if cancelled, to avoid stuck state
 
         runtime.editWithRetry((asyncTx) => {
           pending.withTx(asyncTx).set(false);
@@ -188,7 +228,10 @@ export function compileAndRun(
       });
 
     compilePromise.then((recipe) => {
-      if (thisRun !== currentRun) return;
+      // Only run the result if this is still the current request
+      if (requestId !== thisRequestId) return;
+      if (abortController?.signal.aborted) return;
+
       if (recipe) {
         // TODO(ja): to support editting of existing charms / running with
         // inputs from other charms, we will need to think more about

@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",
-    "./interface": "./src/interface.ts"
+    "./interface": "./src/interface.ts",
+    "./cell-brand": "./src/typescript/cell-brand.ts",
+    "./type-traversal": "./src/typescript/type-traversal.ts"
   },
   "imports": {
-    "typescript": "npm:typescript",
-    "@commontools/utils": "../utils/src/index.ts",
-    "@commontools/static": "../static/index.ts"
+    "typescript": "npm:typescript"
   },
   "tasks": {
     "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS test/**/*.test.ts",

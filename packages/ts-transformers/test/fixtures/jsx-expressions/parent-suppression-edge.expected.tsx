@@ -327,13 +327,113 @@ export default recipe({
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__ctHelpers.derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location, state_user_profile_bio: state.user.profile.bio }, ({ state_user_name: _v1, state_user_profile_location: _v2, state_user_profile_bio: _v3 }) => _v1 + " from " + _v2 + " - " + _v3)}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                profile: {
+                                    type: "object",
+                                    properties: {
+                                        location: {
+                                            type: "string",
+                                            asOpaque: true
+                                        },
+                                        bio: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["location", "bio"]
+                                }
+                            },
+                            required: ["name", "profile"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    name: state.user.name,
+                    profile: {
+                        location: state.user.profile.location,
+                        bio: state.user.profile.bio
+                    }
+                }
+            } }, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
+            state.user.profile.bio)}
         </p>
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__ctHelpers.derive(state.user.age, _v1 => _v1 * 12)} months, or{" "}
-          {__ctHelpers.derive(state.user.age, _v1 => _v1 * 365)} days
+          Age calculation: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    age: state.user.age
+                }
+            } }, ({ state }) => state.user.age * 12)} months, or{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                age: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["age"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    age: state.user.age
+                }
+            } }, ({ state }) => state.user.age * 365)} days
         </p>
 
         <h3>Deeply Nested Property Chains</h3>
@@ -398,25 +498,264 @@ export default recipe({
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({ state_user_name: state.user.name, state_user_settings_theme: state.user.settings.theme }, ({ state_user_name: _v1, state_user_settings_theme: _v2 }) => _v1 + " has notifications on with " + _v2 + " theme"), __ctHelpers.derive(state.user.name, _v1 => _v1 + " has notifications off"))}
+          Status: {__ctHelpers.ifElse(state.user.settings.notifications, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                },
+                                settings: {
+                                    type: "object",
+                                    properties: {
+                                        theme: {
+                                            type: "string",
+                                            asOpaque: true
+                                        }
+                                    },
+                                    required: ["theme"]
+                                }
+                            },
+                            required: ["name", "settings"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    name: state.user.name,
+                    settings: {
+                        theme: state.user.settings.theme
+                    }
+                }
+            } }, ({ state }) => state.user.name + " has notifications on with " +
+            state.user.settings.theme + " theme"), __ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    name: state.user.name
+                }
+            } }, ({ state }) => state.user.name + " has notifications off"))}
         </p>
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__ctHelpers.derive({ state_config_theme_spacing_small: state.config.theme.spacing.small, state_config_theme_spacing_medium: state.config.theme.spacing.medium, state_config_theme_spacing_large: state.config.theme.spacing.large }, ({ state_config_theme_spacing_small: _v1, state_config_theme_spacing_medium: _v2, state_config_theme_spacing_large: _v3 }) => _v1 + _v2 + _v3)} total
+          Spacing calc: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "object",
+                                    properties: {
+                                        spacing: {
+                                            type: "object",
+                                            properties: {
+                                                small: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                },
+                                                medium: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                },
+                                                large: {
+                                                    type: "number",
+                                                    asOpaque: true
+                                                }
+                                            },
+                                            required: ["small", "medium", "large"]
+                                        }
+                                    },
+                                    required: ["spacing"]
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    theme: {
+                        spacing: {
+                            small: state.config.theme.spacing.small,
+                            medium: state.config.theme.spacing.medium,
+                            large: state.config.theme.spacing.large
+                        }
+                    }
+                }
+            } }, ({ state }) => state.config.theme.spacing.small +
+            state.config.theme.spacing.medium +
+            state.config.theme.spacing.large)} total
         </p>
 
         {/* Boolean expressions with multiple properties */}
         <p>
           Features:{" "}
-          {__ctHelpers.ifElse(__ctHelpers.derive({ state_config_features_darkMode: state.config.features.darkMode, state_config_features_animations: state.config.features.animations }, ({ state_config_features_darkMode: _v1, state_config_features_animations: _v2 }) => _v1 && _v2), "Full features", "Limited features")}
+          {__ctHelpers.ifElse(__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        config: {
+                            type: "object",
+                            properties: {
+                                features: {
+                                    type: "object",
+                                    properties: {
+                                        darkMode: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        },
+                                        animations: {
+                                            anyOf: [{
+                                                    type: "boolean",
+                                                    enum: [false],
+                                                    asOpaque: true
+                                                }, {
+                                                    type: "boolean",
+                                                    enum: [true],
+                                                    asOpaque: true
+                                                }]
+                                        }
+                                    },
+                                    required: ["darkMode", "animations"]
+                                }
+                            },
+                            required: ["features"]
+                        }
+                    },
+                    required: ["config"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "boolean",
+                    enum: [false],
+                    asOpaque: true
+                }, {
+                    type: "boolean",
+                    enum: [true],
+                    asOpaque: true
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                config: {
+                    features: {
+                        darkMode: state.config.features.darkMode,
+                        animations: state.config.features.animations
+                    }
+                }
+            } }, ({ state }) => state.config.features.darkMode && state.config.features.animations), "Full features", "Limited features")}
         </p>
 
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__ctHelpers.derive(state.user.name, _v1 => _v1.toUpperCase())} -{" "}
-          {__ctHelpers.derive(state.user.email, _v1 => _v1.toLowerCase())}
+          Formatted: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    name: state.user.name
+                }
+            } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
+          {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        user: {
+                            type: "object",
+                            properties: {
+                                email: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["email"]
+                        }
+                    },
+                    required: ["user"]
+                }
+            },
+            required: ["state"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                user: {
+                    email: state.user.email
+                }
+            } }, ({ state }) => state.user.email.toLowerCase())}
         </p>
 
         {/* Property access and method calls mixed */}
@@ -459,3 +798,4 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

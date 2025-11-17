@@ -52,7 +52,8 @@ export class UnionFormatter implements TypeFormatter {
       return { anyOf: [item, { type: "null" }] };
     }
 
-    // Case: all members are string/number/boolean literals -> enum
+    // Case: all non-null members are string/number/boolean literals -> enum
+    // Include null in the enum if present (unlike undefined which is handled via required array)
     const allLiteral = nonNull.length > 0 &&
       nonNull.every((m) =>
         (m.flags & ts.TypeFlags.StringLiteral) !== 0 ||
@@ -61,18 +62,20 @@ export class UnionFormatter implements TypeFormatter {
       );
 
     if (allLiteral) {
-      const values = nonNull.map((m) => {
-        if (m.flags & ts.TypeFlags.StringLiteral) {
-          return (m as ts.StringLiteralType).value;
-        }
-        if (m.flags & ts.TypeFlags.NumberLiteral) {
-          return (m as ts.NumberLiteralType).value;
-        }
-        if (m.flags & ts.TypeFlags.BooleanLiteral) {
-          return (m as TypeWithInternals).intrinsicName === "true";
-        }
-        return undefined;
-      }).filter((v) => v !== undefined);
+      const values: Array<string | number | boolean | null> = nonNull.map(
+        (m) => {
+          if (m.flags & ts.TypeFlags.StringLiteral) {
+            return (m as ts.StringLiteralType).value;
+          }
+          if (m.flags & ts.TypeFlags.NumberLiteral) {
+            return (m as ts.NumberLiteralType).value;
+          }
+          if (m.flags & ts.TypeFlags.BooleanLiteral) {
+            return (m as TypeWithInternals).intrinsicName === "true";
+          }
+          return undefined;
+        },
+      ).filter((v) => v !== undefined) as Array<string | number | boolean>;
 
       // Special case: union of both boolean literals {true, false} becomes type: "boolean"
       const boolValues = values.filter((v) => typeof v === "boolean");
@@ -83,12 +86,23 @@ export class UnionFormatter implements TypeFormatter {
         return { type: "boolean" };
       }
 
+      // Include null in enum values if present (null can be a runtime value, unlike undefined)
+      if (hasNull) {
+        values.push(null);
+      }
+
       return { enum: values };
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
     const anyOf = nonNull.map((m) => generate(m));
     if (hasNull) anyOf.push({ type: "null" });
+
+    // If only one schema remains after filtering, return it directly without anyOf wrapper
+    if (anyOf.length === 1) {
+      return anyOf[0]!;
+    }
+
     return { anyOf };
   }
 }

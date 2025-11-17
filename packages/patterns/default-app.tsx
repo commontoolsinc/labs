@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  derive,
   handler,
   NAME,
   navigateTo,
@@ -14,16 +13,12 @@ import {
 import Chatbot from "./chatbot.tsx";
 import ChatbotOutliner from "./chatbot-outliner.tsx";
 import { default as Note } from "./note.tsx";
-import BacklinksIndex, {
-  BacklinksMap,
-  type MentionableCharm,
-} from "./backlinks-index.tsx";
+import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import ChatList from "./chatbot-list-view.tsx";
+import OmniboxFAB from "./omnibox-fab.tsx";
 
-export type Charm = {
+type MinimalCharm = {
   [NAME]?: string;
-  [UI]?: unknown;
-  [key: string]: any;
 };
 
 type CharmsListInput = void;
@@ -32,14 +27,15 @@ type CharmsListInput = void;
 interface CharmsListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    backlinks: BacklinksMap;
     mentionable: MentionableCharm[];
   };
+  sidebarUI: unknown;
+  fabUI: unknown;
 }
 
 const visit = handler<
   Record<string, never>,
-  { charm: any }
+  { charm: Cell<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -47,22 +43,27 @@ const visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: any;
-    allCharms: Cell<any[]>;
+    charm: Cell<MinimalCharm>;
+    allCharms: Cell<MinimalCharm[]>;
   }
 >((_, state) => {
-  const charmName = state.charm[NAME];
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => c[NAME] === charmName);
+  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
-    console.log("charmListCopy before", charmListCopy);
+    console.log("charmListCopy before", charmListCopy.length);
     charmListCopy.splice(index, 1);
-    console.log("charmListCopy after", charmListCopy);
+    console.log("charmListCopy after", charmListCopy.length);
     state.allCharms.set(charmListCopy);
   }
 });
+
+const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+  (_, { fabExpanded }) => {
+    fabExpanded.set(!fabExpanded.get());
+  },
+);
 
 const spawnChatList = handler<void, void>((_, __) => {
   return navigateTo(ChatList({
@@ -99,11 +100,12 @@ const spawnNote = handler<void, void>((_, __) => {
 export default recipe<CharmsListInput, CharmsListOutput>(
   "DefaultCharmList",
   (_) => {
-    const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
-      (c) => c,
-    );
+    const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
     const index = BacklinksIndex({ allCharms });
+
+    const fab = OmniboxFAB({
+      mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+    });
 
     return {
       backlinksIndex: index,
@@ -116,11 +118,21 @@ export default recipe<CharmsListInput, CharmsListOutput>(
             preventDefault
             onct-keybind={spawnChatList()}
           />
+          <ct-keybind
+            code="KeyO"
+            meta
+            preventDefault
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          />
+          <ct-keybind
+            code="KeyO"
+            ctrl
+            preventDefault
+            onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
+          />
 
-          <ct-vstack gap="4" padding="6">
-            {/* Quick Launch Toolbar */}
-            <ct-hstack gap="2" align="center">
-              <h3>Quicklaunch:</h3>
+          <ct-toolbar slot="header" sticky>
+            <div slot="start">
               <ct-button
                 onClick={spawnChatList()}
               >
@@ -141,46 +153,56 @@ export default recipe<CharmsListInput, CharmsListOutput>(
               >
                 📄 Note
               </ct-button>
-            </ct-hstack>
+            </div>
+          </ct-toolbar>
 
-            <h2>Charms ({allCharms.length})</h2>
+          <ct-vscroll flex showScrollbar>
+            <ct-vstack gap="4" padding="6">
+              <style>
+                {`
+                .pattern-link {
+                  cursor: pointer;
+                  color: inherit;
+                  text-decoration: none;
+                }
+                .pattern-link:hover {
+                  text-decoration: underline;
+                }
+              `}
+              </style>
+              <h2>Pages</h2>
 
-            <ct-table full-width hover>
-              <thead>
-                <tr>
-                  <th>Charm Name</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {derive(allCharms, (allCharms) =>
-                  allCharms.map((charm: any) => (
+              <ct-table full-width hover>
+                <tbody>
+                  {allCharms.map((charm) => (
                     <tr>
-                      <td>{charm[NAME] || "Untitled Charm"}</td>
                       <td>
-                        <ct-hstack gap="2">
-                          <ct-button
-                            size="sm"
-                            onClick={visit({ charm })}
-                          >
-                            Visit
-                          </ct-button>
-                          <ct-button
-                            size="sm"
-                            variant="destructive"
-                            onClick={removeCharm({ charm, allCharms })}
-                          >
-                            Remove
-                          </ct-button>
-                        </ct-hstack>
+                        <a
+                          className="pattern-link"
+                          onClick={visit({ charm })}
+                        >
+                          {charm?.[NAME] || "Untitled Charm"}
+                        </a>
+                      </td>
+                      <td>
+                        <ct-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeCharm({ charm, allCharms })}
+                        >
+                          🗑️
+                        </ct-button>
                       </td>
                     </tr>
-                  )))}
-              </tbody>
-            </ct-table>
-          </ct-vstack>
+                  ))}
+                </tbody>
+              </ct-table>
+            </ct-vstack>
+          </ct-vscroll>
         </ct-screen>
       ),
+      sidebarUI: undefined,
+      fabUI: fab[UI],
     };
   },
 );

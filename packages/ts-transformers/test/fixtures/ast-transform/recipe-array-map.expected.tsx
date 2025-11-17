@@ -31,7 +31,9 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ values }) => {
     derive({
         type: "array",
-        items: true
+        items: {
+            type: "string"
+        }
     } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });
@@ -40,9 +42,24 @@ export default recipe({
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.map((value, index) => (<div>
+            {values.mapWithPattern(__ctHelpers.recipe({
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index: index, params: {} }) => (<div>
                 {index}: {value}
-              </div>))}
+              </div>)), {})}
           </div>
         </div>),
         values,

@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
-import type { Frame, JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
@@ -10,16 +9,12 @@ import { Identity } from "@commontools/identity";
 const signer = await Identity.fromPassphrase("test operator");
 
 describe("OpaqueRef Schema Support", () => {
-  let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
 
   beforeEach(() => {
-    // Setup frame for the test
-    frame = pushFrame();
-
     storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
@@ -27,12 +22,11 @@ describe("OpaqueRef Schema Support", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    const { commontools } = createBuilder(runtime);
+    const { commontools } = createBuilder();
     ({ recipe, cell } = commontools);
   });
 
   afterEach(async () => {
-    popFrame(frame);
     await runtime?.dispose();
   });
 
@@ -137,7 +131,7 @@ describe("OpaqueRef Schema Support", () => {
 
       // Access array element
       const itemsRef = ref.key("items");
-      const firstItemRef = itemsRef[0];
+      const firstItemRef = itemsRef.key(0);
       const idRef = firstItemRef.key("id");
 
       // Check schema for array element property

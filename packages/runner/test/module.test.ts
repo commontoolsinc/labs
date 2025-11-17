@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JSONSchemaObj } from "@commontools/api";
+import { Identity } from "@commontools/identity";
 import {
   type Frame,
   isModule,
@@ -12,21 +13,42 @@ import {
 import { handler, lift } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 type MouseEvent = {
   clientX: number;
   clientY: number;
 };
 
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
 describe("module", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
   let frame: Frame;
 
   beforeEach(() => {
-    frame = pushFrame();
+    storageManager = StorageManager.emulate({ as: signer });
+
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    frame = pushFrame({
+      space,
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+      runtime,
+    });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     popFrame(frame);
+    await runtime?.dispose();
   });
 
   describe("lift function", () => {

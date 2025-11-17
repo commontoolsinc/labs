@@ -10,8 +10,8 @@ export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-5";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
-export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-4.1-nano";
-export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-4.1-nano";
+export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-5-mini";
+export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
 
 export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID
@@ -56,7 +56,7 @@ export interface LLMRequest {
 
 export interface LLMGenerateObjectRequest {
   schema: Record<string, unknown>;
-  prompt: string;
+  messages: BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
   cache?: boolean;

@@ -192,7 +192,7 @@ export const counterWithAlternateInitialStates = recipe<
       input:
         | {
           states?: AlternateInitialState[];
-          active?: string;
+          active?: Cell<string>;
         }
         | undefined,
     ): AlternateInitialState => {
@@ -200,14 +200,14 @@ export const counterWithAlternateInitialStates = recipe<
         ? input?.states?.slice() ?? []
         : [];
       const list = candidate.length > 0 ? candidate : [fallbackState()];
-      const desiredId = toStateId(input?.active, list[0].id);
+      const desiredId = toStateId(input?.active?.get(), list[0].id);
       return list.find((entry) => entry.id === desiredId) ?? list[0];
     },
   )({ states: sanitizedStates, active: activeStateId });
 
   const selectionCount = derive(
     selectionLog,
-    (entries) => Array.isArray(entries) ? entries.length : 0,
+    (entries) => Array.isArray(entries.get()) ? entries.get().length : 0,
   );
 
   const label = str`State ${

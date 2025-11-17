@@ -31,7 +31,7 @@ type RecipeInOutput = {
 };
 
 // the simple charm (to which we'll store a reference within a cell)
-const SimpleRecipe = recipe<{ id: string }>("Simple Recipe", ({ id }) => ({
+const SimpleRecipe = recipe(({ id }: { id: string }) => ({
   [NAME]: derive(id, (idValue) => `SimpleRecipe: ${idValue}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));

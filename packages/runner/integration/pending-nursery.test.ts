@@ -17,6 +17,8 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
 
+const TIMEOUT_MS = 180000; // 3 minutes timeout
+
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
@@ -137,14 +139,36 @@ async function test() {
   assertEquals(s1Count, 1);
   assertEquals(s2Count, 0);
 
-  await runtime1.dispose();
+  // Have to dispose in reverse order to match frame order
   await runtime2.dispose();
+  await runtime1.dispose();
 }
 
-for (let i: number = 1; i <= 20; i++) {
-  await test();
-  console.log("completed", i, "...");
+async function runTest() {
+  for (let i: number = 1; i <= 20; i++) {
+    await test();
+    console.log("completed", i, "...");
+  }
+
+  console.log("\nDone");
 }
 
-console.log("\nDone");
-Deno.exit(0);
+Deno.test({
+  name: "pending nursery test",
+  fn: async () => {
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

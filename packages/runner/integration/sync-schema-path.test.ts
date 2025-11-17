@@ -17,6 +17,8 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Sync Schema uses Path ===");
 
+const TIMEOUT_MS = 180000; // 3 minutes timeout
+
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
@@ -127,7 +129,27 @@ async function test() {
   await runtime2.dispose();
 }
 
-await test();
+async function runTest() {
+  await test();
+  console.log("\nDone");
+}
 
-console.log("\nDone");
-Deno.exit(0);
+Deno.test({
+  name: "sync schema path test",
+  fn: async () => {
+    let timeoutHandle: number;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
+      }, TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([runTest(), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});

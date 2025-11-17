@@ -26,7 +26,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe("Simple List", ({ title, items }: InputSchema) => {
+export default recipe<InputSchema>(({ title, items }) => {
   return {
     [NAME]: title,
     [UI]: (
@@ -34,9 +34,10 @@ export default recipe("Simple List", ({ title, items }: InputSchema) => {
         <h3>{title}</h3>
         <p>Super Simple Array</p>
         <ul>
-          {items.map((item: Item, index: number) => (
-            <li key={index}>{item.text}</li>
-          ))}
+          {
+            // deno-lint-ignore jsx-key
+            items.map((item) => <li>{item.text}</li>)
+          }
         </ul>
         <common-send-message
           name="Send"

@@ -13,7 +13,7 @@ interface Output {
   [UI]: VNode;
 }
 
-export default recipe<Input, Output>("Counter", ({ value }) => {
+export default recipe<Input, Output>(({ value }) => {
   return {
     [NAME]: "recipe output issue",
     [UI]: (

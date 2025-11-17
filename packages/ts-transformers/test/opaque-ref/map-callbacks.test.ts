@@ -17,6 +17,7 @@ interface Charm {
 
 interface State {
   charms: Charm[];
+  defaultName: string;
 }
 
 export default recipe<State>("CharmList", (state) => {
@@ -27,7 +28,7 @@ export default recipe<State>("CharmList", (state) => {
           {state.charms.map((charm: any, index: number) => (
             <li key={charm.id}>
               <span class="number">{index + 1}</span>
-              <span class="name">{charm[NAME] || "Unnamed"}</span>
+              <span class="name">{charm[NAME] || state.defaultName}</span>
             </li>
           ))}
         </ul>
@@ -44,17 +45,43 @@ describe("OpaqueRef map callbacks", () => {
       types: { "commontools.d.ts": commontools },
     });
 
+    // Map callback should be transformed to recipe with schema for captured defaultName
     assertStringIncludes(
       output,
-      "__ctHelpers.derive(index, index => index + 1)",
+      "__ctHelpers.recipe({",
     );
     assertStringIncludes(
       output,
-      '__ctHelpers.derive(charm, charm => charm[NAME] || "Unnamed")',
+      "({ element: charm, index: index, params: { state } }) =>",
     );
     assertStringIncludes(
       output,
-      "ifElse(__ctHelpers.derive(state.charms.length, _v1 => !_v1)",
+      "state: {\n                    defaultName: state.defaultName\n                }",
+    );
+    // Index parameter still gets derive wrapping for the arithmetic operation
+    assertStringIncludes(
+      output,
+      `__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)`,
+    );
+    // element[NAME] uses NAME from module scope (import), defaultName from params
+    assertStringIncludes(
+      output,
+      "({ charm, state }) => charm[NAME] || state.defaultName",
+    );
+    // ifElse still gets derive for the negation and preserves callback body
+    assertStringIncludes(
+      output,
+      "({ state }) => !state.charms.length",
     );
   });
 });

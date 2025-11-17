@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Complex defaults", () => {
   it("array defaults with items shape", async () => {
@@ -15,7 +15,9 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithArrayDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
 
     // Validate root schema required fields
     expect(s.required).toEqual(["emptyItems", "prefilledItems", "matrix"]);
@@ -57,7 +59,9 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithObjectDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
 
     // Validate root schema required fields
     expect(s.required).toEqual(["config", "user"]);
@@ -93,10 +97,13 @@ describe("Schema: Complex defaults", () => {
       }
     `;
     const { type, checker } = await getTypeFromCode(code, "WithNullDefaults");
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
 
     // Validate root schema required fields
-    expect(s.required).toEqual(["nullable", "undefinable"]);
+    // undefinable has Default<T | undefined, V> so undefined makes it optional
+    expect(s.required).toEqual(["nullable"]);
 
     const n = s.properties?.nullable as any;
     expect(n.default).toBe(null);
@@ -112,9 +119,9 @@ describe("Schema: Complex defaults", () => {
     const u = s.properties?.undefinable as any;
     // Typically no default field for undefined
     expect(u.default).toBeUndefined();
-    // For undefined unions, typically generates anyOf with just the non-undefined type
-    expect(u.anyOf).toBeDefined();
-    expect(u.anyOf).toEqual([{ type: "string" }]);
+    // For undefined unions, the undefined is stripped and we get the simplified schema
+    expect(u.type).toBe("string");
+    expect(u.anyOf).toBeUndefined();
   });
 
   it("boolean schema defaults (any/never with Default)", async () => {
@@ -129,7 +136,9 @@ describe("Schema: Complex defaults", () => {
       code,
       "WithBooleanSchemas",
     );
-    const s = createSchemaTransformerV2()(type, checker);
+    const s = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
 
     // Validate root schema required fields
     expect(s.required).toEqual(["anyWithDefault", "neverWithDefault"]);

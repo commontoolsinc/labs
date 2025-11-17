@@ -57,10 +57,16 @@ export async function transformFiles(
     strict: true,
   };
 
+  // Merge environment types and custom types
+  // Store environment types with .d.ts extension for consistent TypeScript resolution
   const allTypes: Record<string, string> = {
-    ...envTypesCache,
     ...types,
   };
+
+  // Add environment types with .d.ts extension
+  for (const [key, value] of Object.entries(envTypesCache)) {
+    allTypes[`${key}.d.ts`] = value;
+  }
 
   const host: ts.CompilerHost = {
     getSourceFile: (name) => {
@@ -75,7 +81,7 @@ export async function transformFiles(
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return ts.createSourceFile(
           name,
-          allTypes.es2023 || "",
+          allTypes["es2023.d.ts"] || "",
           compilerOptions.target!,
           true,
         );
@@ -113,7 +119,7 @@ export async function transformFiles(
     readFile: (name) => {
       if (files[name]) return files[name];
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
-        return allTypes.es2023;
+        return allTypes["es2023.d.ts"];
       }
       if (allTypes[name]) return allTypes[name];
       const baseName = baseNameFromPath(name);
@@ -160,7 +166,14 @@ export async function transformFiles(
       }),
   };
 
-  const program = ts.createProgram(Object.keys(files), compilerOptions, host);
+  // Include type definition files in the program so their global declarations are loaded
+  // This is critical for JSX.IntrinsicElements and other global type augmentations
+  const typeDefFiles = Object.keys(allTypes).filter((name) =>
+    name.endsWith(".d.ts")
+  );
+  const rootFiles = [...Object.keys(files), ...typeDefFiles];
+
+  const program = ts.createProgram(rootFiles, compilerOptions, host);
 
   if (logger) {
     const diagnostics = ts.getPreEmitDiagnostics(program);

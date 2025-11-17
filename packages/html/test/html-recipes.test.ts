@@ -1,17 +1,16 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { render, VNode } from "../src/index.ts";
-import { MockDoc } from "../src/utils.ts";
+import { MockDoc } from "../src/mock-doc.ts";
 import {
   type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
-  Opaque,
   Runtime,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { Identity } from "@commontools/identity";
-import { h } from "@commontools/api";
+import { h } from "@commontools/html";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -23,6 +22,7 @@ describe("recipes with HTML", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let derive: ReturnType<typeof createBuilder>["commontools"]["derive"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let str: ReturnType<typeof createBuilder>["commontools"]["str"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
@@ -42,8 +42,8 @@ describe("recipes with HTML", () => {
 
     tx = runtime.edit();
 
-    const { commontools } = createBuilder(runtime);
-    ({ lift, recipe, str, UI } = commontools);
+    const { commontools } = createBuilder();
+    ({ lift, derive, recipe, str, UI } = commontools);
   });
 
   afterEach(async () => {
@@ -89,7 +89,6 @@ describe("recipes with HTML", () => {
       title: string;
       items: Item[];
     }>("todo list", ({ title, items }) => {
-      title.setDefault("untitled");
       return {
         [UI]: h(
           "div",
@@ -98,8 +97,8 @@ describe("recipes with HTML", () => {
           h(
             "ul",
             null,
-            items.map((item: Opaque<Item>, i: Opaque<number>) =>
-              h("li", { key: i.toString() }, item.title)
+            items.map((item, i) =>
+              h("li", { key: derive(i, (i) => i.toString()) }, item.title)
             ) as VNode[],
           ),
         ),
@@ -126,11 +125,9 @@ describe("recipes with HTML", () => {
     const cell = result.key(UI);
     render(root, cell.get(), renderOptions);
 
-    // Keys are "[object Object]" due to mapping an `Opaque<number>` in handler.
-    // Maybe unintentional(?)
     assert.equal(
       root.innerHTML,
-      '<div><h1>test</h1><ul><li key="[object Object]">item 1</li><li key="[object Object]">item 2</li></ul></div>',
+      '<div><h1>test</h1><ul><li key="0">item 1</li><li key="1">item 2</li></ul></div>',
     );
   });
 
@@ -213,12 +210,12 @@ describe("recipes with HTML", () => {
         [UI]: h(
           "div",
           null,
-          data.map((row: Opaque<Record<string, unknown>>) =>
+          data.map((row: Record<string, unknown>) =>
             h(
               "ul",
               null,
-              entries(row).map((input: Opaque<[string, unknown]>) =>
-                h("li", null, [input[0] as string, ": ", input[1] as VNode])
+              entries(row).map((input) =>
+                h("li", null, [input[0], ": ", str`${input[1]}`])
               ) as VNode[],
             )
           ) as VNode[],

@@ -1,16 +1,14 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
-import { type Frame, type OpaqueRef } from "./builder/types.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
-import { opaqueRef } from "./builder/opaque-ref.ts";
+import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { fromURI, toURI } from "./uri-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -120,9 +118,34 @@ export function createQueryResultProxy<T>(
 
       if (typeof prop === "symbol") {
         if (prop === toCell) {
-          return () => createCell(runtime, link, tx, true);
-        } else if (prop === toOpaqueRef) {
-          return () => makeOpaqueRef(link);
+          return () => createCell(runtime, link, tx);
+        } else if (prop === Symbol.iterator && Array.isArray(target)) {
+          return function () {
+            let index = 0;
+            return {
+              next() {
+                const readTx = (tx?.status().status === "ready")
+                  ? tx
+                  : runtime.edit();
+                const length = readTx.readValueOrThrow({
+                  ...link,
+                  path: [...link.path, "length"],
+                }) as number;
+                if (index < length) {
+                  const result = {
+                    value: createQueryResultProxy(runtime, tx, {
+                      ...link,
+                      path: [...link.path, String(index)],
+                    }, depth + 1),
+                    done: false,
+                  };
+                  index++;
+                  return result;
+                }
+                return { done: true };
+              },
+            };
+          };
         }
 
         const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
@@ -267,7 +290,7 @@ export function createQueryResultProxy<T>(
     set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
 
-      if (isQueryResult(value)) value = value[toCell]();
+      if (isCellResult(value)) value = value[toCell]();
 
       if (!tx) {
         throw new Error(
@@ -323,33 +346,6 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
   return isRecord(value) && originalIndex in value;
 }
 
-const linkToOpaqueRef = new WeakMap<
-  Frame,
-  Map<string, OpaqueRef<any>>
->();
-
-// Creates aliases to value, used in recipes to refer to this specific cell. We
-// have to memoize these, as conversion happens at multiple places when
-// creaeting the recipe.
-export function makeOpaqueRef(
-  link: NormalizedFullLink,
-): OpaqueRef<any> {
-  const frame = getTopFrame();
-  if (!frame) throw new Error("No frame");
-  if (!linkToOpaqueRef.has(frame)) linkToOpaqueRef.set(frame, new Map());
-  const map = linkToOpaqueRef.get(frame)!;
-
-  const id = `${link.space}:${link.id}:${link.path.join(":")}`;
-  if (map.has(id)) return map.get(id)!;
-
-  const ref = opaqueRef();
-  ref.setPreExisting({
-    $alias: { cell: { "/": fromURI(link.id) }, path: link.path },
-  });
-  map.set(id, ref);
-  return ref;
-}
-
 /**
  * Get cell or throw if not a cell value proxy.
  *
@@ -358,7 +354,7 @@ export function makeOpaqueRef(
  * @throws {Error} If the value is not a cell value proxy.
  */
 export function getCellOrThrow<T = any>(value: any): Cell<T> {
-  if (isQueryResult(value)) return value[toCell]();
+  if (isCellResult(value)) return value[toCell]();
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -368,7 +364,7 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isQueryResult(value: any): value is QueryResult<any> {
+export function isCellResult(value: any): value is CellResult<any> {
   return isRecord(value) && typeof value[toCell] === "function";
 }
 
@@ -379,14 +375,14 @@ export function isQueryResult(value: any): value is QueryResult<any> {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isQueryResultForDereferencing(
+export function isCellResultForDereferencing(
   value: any,
-): value is QueryResultInternals {
-  return isQueryResult(value);
+): value is CellResultInternals {
+  return isCellResult(value);
 }
 
-export type QueryResultInternals = {
+export type CellResultInternals = {
   [toCell]: () => Cell<unknown>;
 };
 
-export type QueryResult<T> = T & QueryResultInternals;
+export type CellResult<T> = T & CellResultInternals;

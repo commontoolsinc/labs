@@ -105,11 +105,13 @@ const GcalImporterInputs = {
           type: "string",
           description: "Calendar ID to fetch events from",
           default: "primary",
+          asCell: true,
         },
         limit: {
           type: "number",
           description: "number of events to import",
           default: 250,
+          asCell: true,
         },
         syncToken: {
           type: "string",
@@ -222,8 +224,8 @@ const calendarUpdater = handler(
     const settings = state.settings.get();
     const result = await fetchCalendar(
       state.auth,
-      settings.limit,
-      settings.calendarId,
+      settings.limit.get(),
+      settings.calendarId.get(),
       settings.syncToken,
       state,
     );
@@ -584,7 +586,7 @@ export default recipe(
     const calendars = cell<Calendar[]>([]);
 
     derive(events, (events) => {
-      console.log("events", events.length);
+      console.log("events", events.get().length);
     });
 
     return {
@@ -597,7 +599,8 @@ export default recipe(
             {auth?.user?.email}
           </h2>
           <h2 style="font-size: 20px; font-weight: bold;">
-            Imported event count: {derive(events, (events) => events.length)}
+            Imported event count: {derive(events, (events) =>
+              events.get().length)}
           </h2>
 
           <h2>
@@ -620,11 +623,11 @@ export default recipe(
               <div>
                 <label>
                   Calendars
-                  <common-button
+                  <ct-button
                     onClick={getCalendars({ auth, calendars })}
                   >
                     Fetch Calendar List
-                  </common-button>
+                  </ct-button>
                 </label>
                 <table>
                   <thead>
@@ -659,7 +662,7 @@ export default recipe(
                   })}
                 />
               </div>
-              <common-button
+              <ct-button
                 onClick={calendarUpdater({
                   events,
                   auth,
@@ -667,12 +670,12 @@ export default recipe(
                 })}
               >
                 Fetch Events
-              </common-button>
-              <common-button
+              </ct-button>
+              <ct-button
                 onClick={clearEvents({ events })}
               >
                 Clear Events
-              </common-button>
+              </ct-button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth

@@ -1,9 +1,9 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
-import { isCell, UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
 import { getRecipeIdFromCharm } from "@commontools/charm";
+import { UI, type VNode } from "@commontools/runner";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -126,12 +126,11 @@ export class CTRender extends BaseElement {
     }
   }
 
-  private async _loadAndRenderRecipe(retry: boolean = true) {
+  private async _loadAndRenderRecipe(
+    recipeId: string,
+    retry: boolean = true,
+  ) {
     try {
-      const recipeId = getRecipeIdFromCharm(this.cell);
-      if (!recipeId) {
-        throw new Error("No recipe ID found in charm");
-      }
       this._log("loading recipe:", recipeId);
 
       // Load and run the recipe
@@ -141,24 +140,44 @@ export class CTRender extends BaseElement {
       );
       await this.cell.runtime.runSynced(this.cell, recipe);
 
-      // Render the UI output
-      if (!this._renderContainer) {
-        throw new Error("Render container not found");
-      }
-
-      this._log("rendering UI");
-      this._cleanup = render(this._renderContainer, this.cell.key(UI));
+      await this._renderUiFromCell(this.cell);
     } catch (error) {
       if (retry) {
         console.warn("Failed to load recipe, retrying...");
         // First failure, sync and retry once
         await this.cell.sync();
-        await this._loadAndRenderRecipe(false);
+        await this._loadAndRenderRecipe(recipeId, false);
       } else {
         // Second failure, give up
         throw error;
       }
     }
+  }
+
+  private async _renderUiFromCell(cell: Cell<unknown>) {
+    if (!this._renderContainer) {
+      throw new Error("Render container not found");
+    }
+
+    await cell.sync();
+
+    // Support both usage patterns:
+    // 1. Being passed a UI cell directly (e.g., cell.key(UI))
+    // 2. Being passed a root charm cell (extract UI subcell)
+    let uiCell = cell;
+    const uiSubcell = (cell as Cell<{ [UI]: unknown }>).key(UI);
+    if (uiSubcell.get() !== undefined) {
+      this._log("extracting UI subcell from root charm cell");
+      uiCell = uiSubcell;
+    }
+
+    this._log("rendering UI");
+    this._cleanup = render(this._renderContainer, uiCell as Cell<VNode>);
+  }
+
+  private _isSubPath(cell: Cell<unknown>): boolean {
+    const link = cell.getAsNormalizedFullLink();
+    return Array.isArray(link?.path) && link.path.length > 0;
   }
 
   private async _renderCell() {
@@ -182,13 +201,20 @@ export class CTRender extends BaseElement {
       // Clean up any previous render
       this._cleanupPreviousRender();
 
-      // Validate cell and get recipe ID
-      if (!isCell(this.cell)) {
-        throw new Error("Invalid cell: expected a Cell object");
-      }
+      const isSubPath = this._isSubPath(this.cell);
 
-      // Load and render the recipe
-      await this._loadAndRenderRecipe();
+      if (isSubPath) {
+        this._log("cell is a subpath, rendering directly");
+        await this._renderUiFromCell(this.cell);
+      } else {
+        const recipeId = getRecipeIdFromCharm(this.cell);
+        if (recipeId) {
+          await this._loadAndRenderRecipe(recipeId);
+        } else {
+          this._log("no recipe id found, rendering cell directly");
+          await this._renderUiFromCell(this.cell);
+        }
+      }
 
       // Mark as rendered and trigger re-render to hide spinner
       this._hasRendered = true;
@@ -205,11 +231,6 @@ export class CTRender extends BaseElement {
       this._log("cleaning up previous render");
       this._cleanup();
       this._cleanup = undefined;
-    }
-
-    // Clear the container
-    if (this._renderContainer) {
-      this._renderContainer.innerHTML = "";
     }
   }
 

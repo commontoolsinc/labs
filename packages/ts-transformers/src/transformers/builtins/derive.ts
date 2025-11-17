@@ -1,5 +1,23 @@
 import ts from "typescript";
 import { CTHelpers } from "../../core/ct-helpers.ts";
+import { getExpressionText } from "../../ast/mod.ts";
+import {
+  buildHierarchicalParamsValue,
+  groupCapturesByRoot,
+  parseCaptureExpression,
+} from "../../utils/capture-tree.ts";
+import {
+  createBindingElementsFromNames,
+  createParameterFromBindings,
+  createPropertyName,
+  createPropertyParamNames,
+  reserveIdentifier,
+} from "../../utils/identifiers.ts";
+import {
+  buildTypeElementsFromCaptureTree,
+  expressionToTypeNode,
+} from "../../ast/type-building.ts";
+import type { TransformationContext } from "../../core/mod.ts";
 
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -18,11 +36,7 @@ function replaceOpaqueRefsWithParams(
   return visit(expression) as ts.Expression;
 }
 
-function getSimpleName(ref: ts.Expression): string | undefined {
-  return ts.isIdentifier(ref) ? ref.text : undefined;
-}
-
-interface DeriveEntry {
+interface FallbackEntry {
   readonly ref: ts.Expression;
   readonly paramName: string;
   readonly propertyName: string;
@@ -32,104 +46,120 @@ export interface DeriveCallOptions {
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
   readonly ctHelpers: CTHelpers;
-}
-
-function createPropertyName(
-  ref: ts.Expression,
-  index: number,
-): string {
-  if (ts.isIdentifier(ref)) {
-    return ref.text;
-  }
-  if (ts.isPropertyAccessExpression(ref)) {
-    return ref.getText().replace(/\./g, "_");
-  }
-  return `ref${index + 1}`;
+  readonly context: TransformationContext;
 }
 
 function planDeriveEntries(
   refs: readonly ts.Expression[],
 ): {
-  readonly entries: readonly DeriveEntry[];
+  readonly captureTree: ReturnType<typeof groupCapturesByRoot>;
+  readonly fallbackEntries: readonly FallbackEntry[];
   readonly refToParamName: Map<ts.Expression, string>;
 } {
-  const entries: DeriveEntry[] = [];
-  const refToParamName = new Map<ts.Expression, string>();
-  const seen = new Map<string, DeriveEntry>();
+  const structured: ts.Expression[] = [];
+  const fallback: ts.Expression[] = [];
 
   refs.forEach((ref) => {
-    const key = ref.getText();
-    let entry = seen.get(key);
-    if (!entry) {
-      const paramName = getSimpleName(ref) ?? `_v${entries.length + 1}`;
-      entry = {
-        ref,
-        paramName,
-        propertyName: createPropertyName(ref, entries.length),
-      };
-      seen.set(key, entry);
-      entries.push(entry);
+    if (parseCaptureExpression(ref)) {
+      structured.push(ref);
+    } else {
+      fallback.push(ref);
     }
-    refToParamName.set(ref, entry.paramName);
   });
 
-  return { entries, refToParamName };
+  const captureTree = groupCapturesByRoot(structured);
+  const fallbackEntries: FallbackEntry[] = [];
+  const refToParamName = new Map<ts.Expression, string>();
+
+  const usedPropertyNames = new Set<string>();
+  const usedParamNames = new Set<string>();
+
+  fallback.forEach((ref, index) => {
+    const { propertyName, paramName } = createPropertyParamNames(
+      getExpressionText(ref),
+      ts.isIdentifier(ref),
+      index,
+      usedPropertyNames,
+      usedParamNames,
+    );
+
+    fallbackEntries.push({ ref, propertyName, paramName });
+    refToParamName.set(ref, paramName);
+  });
+
+  return { captureTree, fallbackEntries, refToParamName };
 }
 
-function createParameterForEntries(
+function createParameterForPlan(
   factory: ts.NodeFactory,
-  entries: readonly DeriveEntry[],
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
+  refToParamName: Map<ts.Expression, string>,
 ): ts.ParameterDeclaration {
-  if (entries.length === 1) {
-    const entry = entries[0]!;
-    return factory.createParameterDeclaration(
-      undefined,
-      undefined,
-      factory.createIdentifier(entry.paramName),
-      undefined,
-      undefined,
-      undefined,
+  const bindings: ts.BindingElement[] = [];
+  const usedNames = new Set<string>();
+
+  const register = (candidate: string): ts.Identifier => {
+    return reserveIdentifier(candidate, usedNames, factory);
+  };
+
+  bindings.push(
+    ...createBindingElementsFromNames(captureTree.keys(), factory, register),
+  );
+
+  for (const entry of fallbackEntries) {
+    const bindingIdentifier = register(entry.paramName);
+    const currentName = refToParamName.get(entry.ref);
+    if (currentName !== bindingIdentifier.text) {
+      refToParamName.set(entry.ref, bindingIdentifier.text);
+    }
+    bindings.push(
+      factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(entry.propertyName),
+        bindingIdentifier,
+        undefined,
+      ),
     );
   }
 
-  const bindings = entries.map((entry) =>
-    factory.createBindingElement(
-      undefined,
-      factory.createIdentifier(entry.propertyName),
-      factory.createIdentifier(entry.paramName),
-      undefined,
-    )
-  );
-
-  return factory.createParameterDeclaration(
-    undefined,
-    undefined,
-    factory.createObjectBindingPattern(bindings),
-    undefined,
-    undefined,
-    undefined,
-  );
+  return createParameterFromBindings(bindings, factory);
 }
 
 function createDeriveArgs(
   factory: ts.NodeFactory,
-  entries: readonly DeriveEntry[],
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
 ): readonly ts.Expression[] {
-  if (entries.length === 1) {
-    return [entries[0]!.ref];
+  const properties: ts.ObjectLiteralElementLike[] = [];
+
+  for (const [rootName, node] of captureTree) {
+    properties.push(
+      factory.createPropertyAssignment(
+        createPropertyName(rootName, factory),
+        buildHierarchicalParamsValue(node, rootName, factory),
+      ),
+    );
   }
 
-  const properties = entries.map((entry) => {
-    if (ts.isIdentifier(entry.ref)) {
-      return factory.createShorthandPropertyAssignment(entry.ref, undefined);
+  for (const entry of fallbackEntries) {
+    if (ts.isIdentifier(entry.ref) && entry.propertyName === entry.ref.text) {
+      properties.push(
+        factory.createShorthandPropertyAssignment(entry.ref, undefined),
+      );
+    } else {
+      properties.push(
+        factory.createPropertyAssignment(
+          factory.createIdentifier(entry.propertyName),
+          entry.ref,
+        ),
+      );
     }
-    return factory.createPropertyAssignment(
-      factory.createIdentifier(entry.propertyName),
-      entry.ref,
-    );
-  });
+  }
 
-  return [factory.createObjectLiteralExpression(properties, false)];
+  return [
+    factory.createObjectLiteralExpression(properties, properties.length > 1),
+  ];
 }
 
 export function createDeriveCall(
@@ -139,9 +169,20 @@ export function createDeriveCall(
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
-  const { factory, tsContext, ctHelpers } = options;
-  const { entries, refToParamName } = planDeriveEntries(refs);
-  if (entries.length === 0) return undefined;
+  const { factory, tsContext, ctHelpers, context } = options;
+  const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
+    refs,
+  );
+  if (captureTree.size === 0 && fallbackEntries.length === 0) {
+    return undefined;
+  }
+
+  const parameter = createParameterForPlan(
+    factory,
+    captureTree,
+    fallbackEntries,
+    refToParamName,
+  );
 
   const lambdaBody = replaceOpaqueRefsWithParams(
     expression,
@@ -153,7 +194,7 @@ export function createDeriveCall(
   const arrowFunction = factory.createArrowFunction(
     undefined,
     undefined,
-    [createParameterForEntries(factory, entries)],
+    [parameter],
     undefined,
     factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
     lambdaBody,
@@ -161,13 +202,86 @@ export function createDeriveCall(
 
   const deriveExpr = ctHelpers.getHelperExpr("derive");
   const deriveArgs = [
-    ...createDeriveArgs(factory, entries),
+    ...createDeriveArgs(factory, captureTree, fallbackEntries),
     arrowFunction,
   ];
 
+  // Build input type node that preserves Cell<T> types
+  const inputTypeNode = buildInputTypeNode(
+    captureTree,
+    fallbackEntries,
+    context,
+  );
+
+  // Build result type node from expression type
+  const resultTypeNode = buildResultTypeNode(expression, context);
+
+  // Create derive call with type arguments for SchemaInjectionTransformer
   return factory.createCallExpression(
     deriveExpr,
-    undefined,
+    [inputTypeNode, resultTypeNode],
     deriveArgs,
   );
+}
+
+function buildInputTypeNode(
+  captureTree: ReturnType<typeof groupCapturesByRoot>,
+  fallbackEntries: readonly FallbackEntry[],
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory } = context;
+  const typeElements: ts.TypeElement[] = [];
+
+  // Add type elements from capture tree (preserves Cell<T>)
+  const captureTypeElements = buildTypeElementsFromCaptureTree(
+    captureTree,
+    context,
+  );
+  typeElements.push(...captureTypeElements);
+
+  // Add type elements for fallback entries
+  for (const entry of fallbackEntries) {
+    const typeNode = expressionToTypeNode(entry.ref, context);
+    typeElements.push(
+      factory.createPropertySignature(
+        undefined,
+        factory.createIdentifier(entry.propertyName),
+        undefined,
+        typeNode,
+      ),
+    );
+  }
+
+  const typeLiteral = factory.createTypeLiteralNode(typeElements);
+
+  return typeLiteral;
+}
+
+function buildResultTypeNode(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode {
+  const { factory, checker } = context;
+
+  // Try to get the type of the result expression
+  const resultType = checker.getTypeAtLocation(expression);
+
+  // Convert to TypeNode, preserving Cell<T> if present
+  const resultTypeNode = checker.typeToTypeNode(
+    resultType,
+    context.sourceFile,
+    ts.NodeBuilderFlags.NoTruncation |
+      ts.NodeBuilderFlags.UseStructuralFallback,
+  );
+
+  if (resultTypeNode) {
+    // Register the type in typeRegistry for SchemaGeneratorTransformer
+    if (context.options.typeRegistry) {
+      context.options.typeRegistry.set(resultTypeNode, resultType);
+    }
+    return resultTypeNode;
+  }
+
+  // Fallback to unknown if we can't infer
+  return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 }

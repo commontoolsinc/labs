@@ -447,7 +447,7 @@ export const TreeOperations = {
       // Add nodes after the deleted one
       newChildren.push(...currentChildren.slice(nodeIndex + 1));
 
-      cell.set(newChildren);
+      cell.set(JSON.parse(JSON.stringify(newChildren)));
     });
 
     // Calculate new focus after deletion - need to check the actual updated array

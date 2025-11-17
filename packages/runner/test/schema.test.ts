@@ -117,7 +117,9 @@ describe("Schema Support", () => {
       );
       innerCell.withTx(tx).set({ label: "first" });
 
-      const cell = runtime.getCell(
+      const cell = runtime.getCell<
+        { value: string; current: Cell<{ label: string }> }
+      >(
         space,
         "should support nested sinks 2",
         {
@@ -164,7 +166,7 @@ describe("Schema Support", () => {
       cell.key("current")
         .key("label")
         .sink((value) => {
-          currentByKeyValues.push(value);
+          currentByKeyValues.push(value as unknown as string);
         });
 
       // .get() the currently selected cell
@@ -305,7 +307,9 @@ describe("Schema Support", () => {
       tx.commit();
       tx = runtime.edit();
 
-      const root = docCell.asSchema(schema);
+      const root = docCell.asSchema<
+        { value: string; current: Cell<{ label: string }> }
+      >(schema);
 
       const rootValues: any[] = [];
       const currentValues: any[] = [];
@@ -326,8 +330,8 @@ describe("Schema Support", () => {
 
       // Querying for a value tied to the currently selected sub-document
       const current = root.key("current").key("label");
-      current.sink((value: string) => {
-        currentByKeyValues.push(value);
+      current.sink((value) => {
+        currentByKeyValues.push(value as unknown as string);
       });
 
       // Make sure the schema is correct and it is still anchored at the root
@@ -768,8 +772,12 @@ describe("Schema Support", () => {
 
       // Set up circular references using cell links
       c.key("parent").setRaw(c.getAsLink());
-      c.key("children").key(0).key("parent").setRaw(c.getAsLink());
-      c.key("children").key(1).key("parent").setRaw(c.getAsLink());
+      c.key("children").key(0).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
+      c.key("children").key(1).key("parent").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       const schema = {
         type: "object",
@@ -825,10 +833,10 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").setRaw(
+      c.key("nested").key("items").key(0).key("value").resolveAsCell().setRaw(
         c.getAsLink(),
       );
-      c.key("nested").key("items").key(1).key("value").setRaw(
+      c.key("nested").key("items").key(1).key("value").resolveAsCell().setRaw(
         c.key("nested").getAsLink(),
       );
 
@@ -899,7 +907,9 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").setRaw(c.getAsLink());
+      c.key("children").key(1).key("value").resolveAsCell().setRaw(
+        c.getAsLink(),
+      );
 
       // TODO(@ubik2) -- Temporarily disambiguating the anyOf clause, with
       // "required" property since I'm not yet merging properties when we
@@ -980,8 +990,8 @@ describe("Schema Support", () => {
 
       expect(isCell(value)).toBe(true);
       expect(value.get().value).toBe(1);
-      expect(value.get().next.value).toBe(2);
-      expect(value.get().next.next.value).toBe(3);
+      expect(value.get().next!.value).toBe(2);
+      expect(value.get().next!.next!.value).toBe(3);
     });
   });
 
@@ -1038,8 +1048,74 @@ describe("Schema Support", () => {
       const profileCell = userCell.key("profile");
       const value = profileCell.get();
 
+      // Runtime checks
       expect(value.name).toBe("John");
       expect(isCell(value.metadata)).toBe(true);
+
+      // TypeScript type checks - these will fail to compile if types are 'any'
+      type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+      // Check that userCell is NOT any
+      type UserCellIsAny = IsAny<typeof userCell>;
+      const _assertUserCellNotAny: UserCellIsAny extends false ? true : never =
+        true;
+
+      // Check that profileCell is NOT any
+      type ProfileCellIsAny = IsAny<typeof profileCell>;
+      const _assertProfileCellNotAny: ProfileCellIsAny extends false ? true
+        : never = true;
+
+      // Check that value is NOT any
+      type ValueIsAny = IsAny<typeof value>;
+      const _assertValueNotAny: ValueIsAny extends false ? true : never = true;
+    });
+
+    it("should preserve types through key() with explicit Cell types", () => {
+      // Create a cell with explicit nested Cell type (not using Schema<>)
+      const cell = runtime.getCell<
+        { value: string; current: Cell<{ label: string }> }
+      >(
+        space,
+        "should preserve types through key 1",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "object",
+              properties: { label: { type: "string" } },
+              required: ["label"],
+              asCell: true,
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      // Navigate using .key()
+      const currentCell = cell.key("current");
+      const currentValue = currentCell.get();
+      const labelCell = currentValue.key("label");
+      const labelValue = labelCell.get();
+
+      // Type checks - verify types are NOT any
+      type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+      type CurrentCellIsAny = IsAny<typeof currentValue>;
+      const _assertCurrentCellNotAny: CurrentCellIsAny extends false ? true
+        : never = true;
+
+      type LabelCellIsAny = IsAny<typeof labelValue>;
+      const _assertLabelCellNotAny: LabelCellIsAny extends false ? true
+        : never = true;
+
+      // Verify that currentCell is Cell<Cell<{ label: string }>> (nested Cell, not unwrapped)
+      type CurrentCellUnwrapped = typeof currentCell extends Cell<infer U> ? U
+        : never;
+      type CurrentIsCell = CurrentCellUnwrapped extends Cell<any> ? true
+        : false;
+      const _assertCurrentIsNestedCell: CurrentIsCell extends true ? true
+        : never = true;
     });
   });
 
@@ -1417,7 +1493,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        plain.set({
+        plain.setRaw({
           type: "vnode",
           name: "div",
           props: { style: { color: "red" } },
@@ -1437,7 +1513,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        styleCell.set({ color: "red" });
+        styleCell.setRaw({ color: "red" });
 
         const innerTextCell = runtime.getCell<{ type: string; value: string }>(
           space,
@@ -1445,7 +1521,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        innerTextCell.set({ type: "text", value: "world" });
+        innerTextCell.setRaw({ type: "text", value: "world" });
 
         const childrenArrayCell = runtime.getCell<any[]>(
           space,
@@ -1453,7 +1529,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        childrenArrayCell.set([
+        childrenArrayCell.setRaw([
           { type: "text", value: "hello" },
           innerTextCell.getAsLink(),
         ]);
@@ -1471,7 +1547,7 @@ describe("Schema Support", () => {
           undefined,
           tx,
         );
-        withLinks.set({
+        withLinks.setRaw({
           type: "vnode",
           name: "div",
           props: {
@@ -1479,7 +1555,7 @@ describe("Schema Support", () => {
           },
           children: [
             { type: "text", value: "single" },
-            childrenArrayCell,
+            childrenArrayCell.getAsLink(),
             "or just text",
           ],
         });
@@ -2229,9 +2305,6 @@ describe("Schema Support", () => {
 
       expect(value.name).toBe("Test Doc");
       expect(isStream(value.events)).toBe(true);
-
-      // Verify it's a stream, i.e. no get functio
-      expect((value as any).events.get).toBe(undefined);
     });
 
     it("should handle nested streams in objects", () => {
@@ -2462,7 +2535,7 @@ describe("Schema Support", () => {
       expect(links[0].id).not.toBe(links[2].id);
     });
 
-    it("should resolve to array indices when elements are not nested documents", () => {
+    it("should create URIs for plain objects not marked asCell", () => {
       const schema = {
         type: "object",
         properties: {
@@ -2503,14 +2576,17 @@ describe("Schema Support", () => {
       const itemCells = result.items.map((item: any) => item[toCell]());
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
-      // Without nested documents, links should point to array indices
-      expect(links[0].path).toEqual(["items", "0"]);
-      expect(links[1].path).toEqual(["items", "1"]);
-      expect(links[2].path).toEqual(["items", "2"]);
+      // Plain objects now also get ids assigned
+      expect(links[0].id).toMatch(/^of:/);
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[2].id).toMatch(/^of:/);
+      expect(links[0].path).toEqual([]);
+      expect(links[1].path).toEqual([]);
+      expect(links[2].path).toEqual([]);
 
-      // They should all have the same ID (the parent cell)
-      expect(links[0].id).toBe(links[1].id);
-      expect(links[1].id).toBe(links[2].id);
+      // Each should have unique data URIs
+      expect(links[0].id).not.toBe(links[1].id);
+      expect(links[1].id).not.toBe(links[2].id);
     });
 
     it("should support array splice operations with nested documents", () => {
@@ -2635,15 +2711,19 @@ describe("Schema Support", () => {
       expect(links[0].path).toEqual([]);
       expect(links[2].path).toEqual([]);
 
-      // Plain objects have array index paths
-      expect(links[1].path).toEqual(["items", "1"]);
-      expect(links[3].path).toEqual(["items", "3"]);
+      // Plain objects now also have empty paths (data URIs)
+      expect(links[1].path).toEqual([]);
+      expect(links[3].path).toEqual([]);
 
-      // Nested documents should have unique IDs
+      // Nested documents should have unique IDs (of: format)
       expect(links[0].id).not.toBe(links[2].id);
+      expect(links[0].id).toMatch(/^of:/);
+      expect(links[2].id).toMatch(/^of:/);
 
-      // Plain objects should share the parent cell's ID
-      expect(links[1].id).toBe(links[3].id);
+      // Plain objects should have gotten IDs as well
+      expect(links[1].id).toMatch(/^of:/);
+      expect(links[3].id).toMatch(/^of:/);
+      expect(links[1].id).not.toBe(links[3].id); // Different data URIs
     });
 
     it("should preserve nested document references when reordering arrays", () => {
@@ -2769,6 +2849,118 @@ describe("Schema Support", () => {
       const remainingLink = remainingCell.getAsNormalizedFullLink();
       expect(remainingLink.path).toEqual([]);
       expect(remainingLink.id).toBe(links[1].id);
+    });
+  });
+
+  describe("toCell symbol non-enumerable behavior", () => {
+    it("should not copy toCell symbol when spreading object", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "spread-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "original", value: 42 });
+      const obj = cell.get();
+
+      // Verify the object has toCell
+      expect((obj as any)[toCell]).toBeDefined();
+      expect(typeof (obj as any)[toCell]).toBe("function");
+
+      // Spread the object
+      const spread = { ...obj };
+
+      // The spread object should NOT have toCell
+      expect((spread as any)[toCell]).toBeUndefined();
+
+      // The original object should still have toCell
+      expect((obj as any)[toCell]).toBeDefined();
+    });
+
+    it("should not copy toCell when modifying object with spread", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "spread-modify-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "original", value: 42 });
+      const obj = cell.get();
+
+      // Create a modified copy using spread
+      const modified = { ...obj, value: 100 };
+
+      // The modified object should not have toCell
+      expect((modified as any)[toCell]).toBeUndefined();
+
+      // The original should still have toCell pointing to the correct cell
+      const originalCell = (obj as any)[toCell]();
+      expect(isCell(originalCell)).toBe(true);
+      expect(originalCell.get()).toEqual({ name: "original", value: 42 });
+    });
+
+    it("should not enumerate toCell in Object.keys", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "keys-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "test", value: 123 });
+      const obj = cell.get();
+
+      // toCell should not appear in Object.keys
+      const keys = Object.keys(obj);
+      expect(keys).toEqual(["name", "value"]);
+      expect(keys).not.toContain(toCell);
+    });
+
+    it("should not enumerate toCell in for...in loop", () => {
+      const cell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "forin-test",
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            value: { type: "number" },
+          },
+        },
+        tx,
+      );
+
+      cell.set({ name: "test", value: 456 });
+      const obj = cell.get();
+
+      // Collect keys from for...in
+      const keys: string[] = [];
+      for (const key in obj) {
+        keys.push(key);
+      }
+
+      expect(keys).toEqual(["name", "value"]);
+      expect(keys).not.toContain(toCell as any);
     });
   });
 });

@@ -11,6 +11,10 @@ import {
   UI,
 } from "commontools";
 
+// NOTE: This example uses [ID] to demonstrate advanced array manipulation features
+// and ensure stable references when items are inserted/removed at the front of the array.
+// For most basic list patterns, you DON'T need [ID]. See docs/common/PATTERNS.md for
+// simpler examples without [ID] that use bidirectional binding.
 interface Item {
   [ID]: number;
   title: string;

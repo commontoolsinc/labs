@@ -13,6 +13,7 @@ import {
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -107,5 +108,97 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
         },
       },
     });
+  });
+});
+
+describe("SchemaObjectTraverser array traversal", () => {
+  it("uses prefixItems schemas for indexed items", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-prefix-items" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = ["alpha", { count: 42 }, 3];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      prefixItems: [
+        { type: "string" },
+        {
+          type: "object",
+          properties: {
+            count: { type: "number" },
+          },
+          required: ["count"],
+        },
+      ],
+      items: { type: "number" },
+    } as const satisfies JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    }, "did:null:null");
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toEqual(["alpha", { count: 42 }, 3]);
+  });
+
+  it("rejects additional items when items is false", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-items-false" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = ["alpha", 1, true];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      prefixItems: [
+        { type: "string" },
+        { type: "number" },
+      ],
+      items: false,
+    } as const satisfies JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    }, "did:null:null");
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toBeUndefined();
   });
 });

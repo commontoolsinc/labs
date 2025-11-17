@@ -46,7 +46,19 @@ export default recipe({
           Add
         </button>
         <ul>
-          {state.items.map((item) => <li key={item}>{item}</li>)}
+          {state.items.mapWithPattern(__ctHelpers.recipe({
+            type: "object",
+            properties: {
+                element: {
+                    type: "string"
+                },
+                params: {
+                    type: "object",
+                    properties: {}
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => <li key={item}>{item}</li>), {})}
         </ul>
       </div>),
     };

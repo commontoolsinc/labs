@@ -2,31 +2,34 @@
 import {
   Cell,
   cell,
-  Default,
+  type Default,
   derive,
+  generateText,
   handler,
-  lift,
   NAME,
   navigateTo,
-  Opaque,
-  OpaqueRef,
+  type OpaqueRef,
+  patternTool,
   recipe,
+  str,
   UI,
   wish,
 } from "commontools";
-import {
-  type BacklinksMap,
-  type MentionableCharm,
-} from "./backlinks-index.tsx";
+import { type MentionableCharm } from "./backlinks-index.tsx";
 type Input = {
-  title: Default<string, "Untitled Note">;
-  content: Default<string, "">;
+  title?: Cell<Default<string, "Untitled Note">>;
+  content?: Cell<Default<string, "">>;
 };
 
 type Output = {
   mentioned: Default<Array<MentionableCharm>, []>;
+  backlinks: MentionableCharm[];
+
+  /** The content of the note */
   content: Default<string, "">;
-  backlinks: Default<Array<MentionableCharm>, []>;
+  grep: OpaqueRef<{ query: string }>;
+  translate: OpaqueRef<{ language: string }>;
+  editContent: OpaqueRef<{ detail: { value: string } }>;
 };
 
 const _updateTitle = handler<
@@ -80,42 +83,38 @@ const handleNewBacklink = handler<
   }
 });
 
-const handleCharmLinkClicked = handler(
-  (_: any, { charm }: { charm: Cell<MentionableCharm> }) => {
+/** This edits the content */
+const handleEditContent = handler<
+  { detail: { value: string }; result?: Cell<string> },
+  { content: Cell<string> }
+>(
+  ({ detail, result }, { content }) => {
+    content.set(detail.value);
+    result?.set("test!");
+  },
+);
+
+const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
+  (_, { charm }) => {
     return navigateTo(charm);
   },
 );
 
-type BacklinksIndex = {
-  backlinks: BacklinksMap;
-  mentionable: any[];
-};
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
+function schemaifyWish<T>(path: string, def: T) {
+  return derive(wish<T>(path) as T, (i) => i ?? def);
 }
 
 const Note = recipe<Input, Output>(
   "Note",
   ({ title, content }) => {
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      backlinks: {},
-      mentionable: [],
-    });
+    const mentionable = schemaifyWish<MentionableCharm[]>(
+      "#mentionable",
+      [],
+    );
     const mentioned = cell<MentionableCharm[]>([]);
 
-    // Look up backlinks from the shared index
-    const backlinks: OpaqueRef<MentionableCharm[]> = lift<
-      { index: { backlinks: BacklinksMap }; content: string },
-      MentionableCharm[]
-    >(({ index, content }) => {
-      const key = content;
-      const map = index.backlinks as BacklinksMap;
-      return map[key] ?? [];
-    })({ index, content });
-
-    // Use shared mentionable list from index
-    const mentionableSource = index.mentionable;
+    // populated in backlinks-index.tsx
+    const backlinks = cell<MentionableCharm[]>([]);
 
     // The only way to serialize a pattern, apparently?
     const pattern = derive(undefined, () => JSON.stringify(Note));
@@ -133,13 +132,11 @@ const Note = recipe<Input, Output>(
 
           <ct-code-editor
             $value={content}
-            $mentions={index}
+            $mentionable={mentionable}
             $mentioned={mentioned}
             $pattern={pattern}
             onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({
-              mentionable: mentionableSource as unknown as MentionableCharm[],
-            })}
+            onbacklink-create={handleNewBacklink({ mentionable })}
             language="text/markdown"
             theme="light"
             wordWrap
@@ -148,9 +145,7 @@ const Note = recipe<Input, Output>(
           />
 
           <ct-hstack slot="footer">
-            {backlinks?.map((
-              charm: MentionableCharm,
-            ) => (
+            {backlinks?.map((charm) => (
               <ct-button
                 onClick={handleCharmLinkClicked({ charm })}
               >
@@ -164,6 +159,35 @@ const Note = recipe<Input, Output>(
       content,
       mentioned,
       backlinks,
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return derive({ query, content }, ({ query, content }) => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
+        },
+        { content },
+      ),
+      translate: patternTool(
+        (
+          { language, content }: {
+            language: string;
+            content: string;
+          },
+        ) => {
+          const result = generateText({
+            system: str`Translate the content to ${language}.`,
+            prompt: str`<to_translate>${content}</to_translate>`,
+          });
+
+          return derive(result, ({ pending, result }) => {
+            if (pending) return undefined;
+            if (result == null) return "Error occured";
+            return result;
+          });
+        },
+        { content },
+      ),
+      editContent: handleEditContent({ content }),
     };
   },
 );

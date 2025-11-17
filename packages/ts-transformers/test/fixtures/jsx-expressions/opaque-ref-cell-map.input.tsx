@@ -2,12 +2,12 @@
 import {
   Cell,
   cell,
-  createCell,
   handler,
   ifElse,
   lift,
   NAME,
   navigateTo,
+  OpaqueRef,
   recipe,
   UI,
 } from "commontools";
@@ -31,7 +31,7 @@ const createCellRef = lift(
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
       console.log("Creating cellRef - first time");
-      const newCellRef = createCell(undefined, "charmsArray");
+      const newCellRef = Cell.for<any[]>("charmsArray");
       newCellRef.set([]);
       storedCellRef.set(newCellRef);
       isInitialized.set(true);
@@ -107,16 +107,20 @@ export default recipe("Charms Launcher", () => {
     storedCellRef: cell(),
   });
 
+  // Type assertion to help TypeScript understand cellRef is an OpaqueRef<any[]>
+  // Without this, TypeScript infers `any` and the closure transformer won't detect it
+  const typedCellRef = cellRef as OpaqueRef<any[]>;
+
   return {
     [NAME]: "Charms Launcher",
     [UI]: (
       <div>
         <h3>Stored Charms:</h3>
         {ifElse(
-          !cellRef?.length,
+          !typedCellRef?.length,
           <div>No charms created yet</div>,
           <ul>
-            {cellRef.map((charm: any, index: number) => (
+            {typedCellRef.map((charm: any, index: number) => (
               <li>
                 <ct-button
                   onClick={goToCharm({ charm })}

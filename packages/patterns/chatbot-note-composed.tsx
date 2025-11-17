@@ -8,7 +8,6 @@ import {
   handler,
   NAME,
   navigateTo,
-  Opaque,
   OpaqueRef,
   recipe,
   wish,
@@ -16,7 +15,6 @@ import {
 
 import Chat from "./chatbot.tsx";
 import Note from "./note.tsx";
-import { type BacklinksMap } from "./backlinks-index.tsx";
 import {
   addListItem,
   calculator,
@@ -28,9 +26,13 @@ import {
 
 import { type MentionableCharm } from "./backlinks-index.tsx";
 
+function schemaifyWish<T>(path: string, def: T) {
+  return derive(wish<T>(path) as T, (i) => i ?? def);
+}
+
 type ChatbotNoteInput = {
-  title: Default<string, "LLM Test">;
-  messages: Default<Array<BuiltInLLMMessage>, []>;
+  title?: Cell<Default<string, "LLM Test">>;
+  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
 };
 
 type ChatbotNoteResult = {
@@ -55,11 +57,11 @@ const newNote = handler<
     try {
       const n = Note({
         title: args.title,
-        content: args.content || "",
+        content: args.content ?? "",
       });
 
       args.result.set(
-        `Created note ${args.title}!`,
+        `Created note ${args.title}`,
       );
 
       // TODO(bf): we have to navigate here until DX1 lands
@@ -76,11 +78,11 @@ const listMentionable = handler<
     /** A cell to store the result text */
     result: Cell<string>;
   },
-  { allCharms: { [NAME]: string }[] }
+  { mentionable: MentionableCharm[] }
 >(
   (args, state) => {
     try {
-      const namesList = state.allCharms.map((charm) => charm[NAME]);
+      const namesList = state.mentionable.map((charm) => charm[NAME]);
       args.result.set(JSON.stringify(namesList));
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
@@ -88,18 +90,18 @@ const listMentionable = handler<
   },
 );
 
-const readNoteByIndex = handler<
+const readContentByIndex = handler<
   {
     /** A cell to store the result text */
     index: number;
     result: Cell<string>;
   },
-  { allCharms: { [NAME]: string; content?: string }[] }
+  { allNotes: Note[] }
 >(
   (args, state) => {
     try {
       args.result.set(
-        state.allCharms[args.index]?.content || "No content found",
+        state.allNotes[args.index]?.content || "No content found",
       );
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
@@ -107,7 +109,8 @@ const readNoteByIndex = handler<
   },
 );
 
-const editNoteByIndex = handler<
+type Note = MentionableCharm & { content: string };
+const editContentByIndex = handler<
   {
     /** The index of the note to edit */
     index: number;
@@ -116,17 +119,17 @@ const editNoteByIndex = handler<
     /** A cell to store the result message indicating success or error */
     result: Cell<string>;
   },
-  { allCharms: Cell<MentionableCharm[]> }
+  { allNotes: Cell<Note[]> }
 >(
   (args, state) => {
     try {
-      const charms = state.allCharms.get();
+      const charms = state.allNotes.get();
       if (args.index < 0 || args.index >= charms.length) {
         args.result.set(`Error: Invalid index ${args.index}`);
         return;
       }
 
-      state.allCharms.key(args.index).key("content").set(args.body);
+      state.allNotes.key(args.index).key("content").set(args.body);
       args.result.set(`Updated note at index ${args.index}!`);
     } catch (error) {
       args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
@@ -162,22 +165,20 @@ const navigateToNote = handler<
 );
 
 type BacklinksIndex = {
-  backlinks: BacklinksMap;
-  mentionable: any[];
+  mentionable: MentionableCharm[];
 };
-
-function schemaifyWish<T>(path: string, def: Opaque<T>) {
-  return derive<T, T>(wish<T>(path, def), (i) => i);
-}
 
 export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
   "Chatbot + Note",
   ({ title, messages }) => {
     const allCharms = schemaifyWish<MentionableCharm[]>("#allCharms", []);
-    const index = schemaifyWish<BacklinksIndex>("/backlinksIndex", {
-      backlinks: {},
+    const index = schemaifyWish<BacklinksIndex>("#default/backlinksIndex", {
       mentionable: [],
     });
+    const mentionable = schemaifyWish<MentionableCharm[]>(
+      "#mentionable",
+      [],
+    );
 
     const list = cell<ListItem[]>([]);
 
@@ -197,29 +198,28 @@ export default recipe<ChatbotNoteInput, ChatbotNoteResult>(
       readListItems: {
         handler: readListItems({ list }),
       },
-      listNotes: {
+      listMentionable: {
         description:
-          "List all mentionable note titles (read the body with readNoteByIndex).",
-        handler: listMentionable({
-          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+          "List all mentionable items titles (read the body with readNoteByIndex).",
+        handler: listMentionable({ mentionable }),
+      },
+      readContentByIndex: {
+        description:
+          "Read the content of a mentionable by its index in the listMentionable() list (if possible)",
+        handler: readContentByIndex({
+          allNotes: mentionable as unknown as OpaqueRef<Note[]>,
         }),
       },
-      readNoteByIndex: {
+      editContentByIndex: {
         description:
-          "Read the body of a note by its index in the listNotes() list.",
-        handler: readNoteByIndex({
-          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
-        }),
-      },
-      editNoteByIndex: {
-        description:
-          "Edit the body of a note by its index in the listNotes() list.",
-        handler: editNoteByIndex({
-          allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
+          "Edit the content of a mentionable by its index in the listMentionable() list (if possible)",
+        handler: editContentByIndex({
+          allNotes: mentionable as unknown as OpaqueRef<Note[]>,
         }),
       },
       navigateToNote: {
-        description: "Navigate to a note by its index in the listNotes() list.",
+        description:
+          "Navigate to a mentionable by its index in the listMentionable() list.",
         handler: navigateToNote({
           allCharms: allCharms as unknown as OpaqueRef<MentionableCharm[]>,
         }),

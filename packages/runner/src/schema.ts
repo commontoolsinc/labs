@@ -1,20 +1,23 @@
-import { JSONSchemaObj } from "@commontools/api";
+import { AnyCellWrapping, JSONSchemaObj } from "@commontools/api";
 import { getLogger } from "@commontools/utils/logger";
 import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { Cellify, createCell, isCell, isStream } from "./cell.ts";
+import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  createDataCellURI,
+  type NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 import {
   createQueryResultProxy,
-  isQueryResultForDereferencing,
-  makeOpaqueRef,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
+import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -108,7 +111,7 @@ export function resolveSchema(
  *
  * For `required` objects and arrays assume {} and [] as default value.
  */
-function processDefaultValue(
+export function processDefaultValue(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
@@ -313,11 +316,13 @@ function annotateWithBackToCellSymbols(
   tx: IExtendedStorageTransaction | undefined,
 ) {
   if (
-    isRecord(value) && !isCell(value) && !isStream(value) &&
-    !isQueryResultForDereferencing(value)
+    isRecord(value) && !isCell(value) && !isCellResultForDereferencing(value)
   ) {
-    value[toCell] = () => createCell(runtime, link, tx);
-    value[toOpaqueRef] = () => makeOpaqueRef(link);
+    // Non-enumerable, so that {...obj} won't copy these symbols
+    Object.defineProperty(value, toCell, {
+      value: () => createCell(runtime, link, tx),
+      enumerable: false,
+    });
     Object.freeze(value);
   }
   return value;
@@ -404,7 +409,8 @@ export function validateAndTransform(
   return result;
 }
 
-class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
+class TransformObjectCreator
+  implements IObjectCreator<AnyCellWrapping<JSONValue>> {
   constructor(
     private runtime: IRuntime,
     private tx: IExtendedStorageTransaction,
@@ -431,8 +437,8 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
   // If not, we will actually resolve our links to get to our values.
   createObject(
     link: NormalizedFullLink,
-    value: Cellify<JSONValue>,
-  ): Cellify<JSONValue> {
+    value: AnyCellWrapping<JSONValue>,
+  ): AnyCellWrapping<JSONValue> {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -451,7 +457,7 @@ class TransformObjectCreator implements IObjectCreator<Cellify<JSONValue>> {
           this.runtime,
           { ...link, schema: restSchema },
           this.tx,
-        ) as Cellify<JSONValue>;
+        ) as AnyCellWrapping<JSONValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
@@ -906,20 +912,6 @@ function _validateAndTransform(
 
     // Now process elements after adding the array to seen
     for (let i = 0; i < value.length; i++) {
-      // If the element on the array is a link, we follow that link so the
-      // returned object is the current item at that location (otherwise the
-      // link would refer to "Nth element"). This is important when turning
-      // returned objects back into cells: We want to then refer to the actual
-      // object by default, not the array location.
-      //
-      // This makes
-      // ```ts
-      // const array = [...cell.get()];
-      // array.splice(index, 1);
-      // cell.set(array);
-      // ```
-      // work as expected.
-      // Handle boolean items values for element schema
       let elementSchema: JSONSchema;
       if (resolvedSchema.items === true) {
         // items: true means allow any item type
@@ -941,13 +933,56 @@ function _validateAndTransform(
         path: [...link.path, String(i)],
         schema: elementSchema,
       };
-      const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
+
+      // If the element on the array is a link, we follow that link so the
+      // returned object is the current item at that location (otherwise the
+      // link would refer to "Nth element"). This is important when turning
+      // returned objects back into cells: We want to then refer to the actual
+      // object by default, not the array location.
+      //
+      // If the element is an object, but not a link, we create an immutable
+      // cell to hold the object, except when it is requested as Cell. While
+      // this means updates aren't propagated, it seems like the right trade-off
+      // for stability of links and the ability to mutate them without creating
+      // loops (see below).
+      //
+      // This makes
+      // ```ts
+      // const array = [...cell.get()];
+      // array.splice(index, 1);
+      // cell.set(array);
+      // ```
+      // work as expected. Handle boolean items values for element schema
+      const maybeLink = parseLink(value[i], link);
       if (maybeLink) {
         elementLink = {
           ...maybeLink,
           schema: elementLink.schema,
           rootSchema: elementLink.rootSchema,
         };
+      } else if (
+        isRecord(value[i]) &&
+        // TODO(seefeld): Should factor this out, but we should just fully
+        // normalize schemas, etc.
+        !(isObject(elementSchema) &&
+          (elementSchema.asCell || elementSchema.asStream ||
+            (Array.isArray(elementSchema?.anyOf) &&
+              elementSchema.anyOf.every((option) =>
+                option.asCell || option.asStream
+              )) ||
+            (Array.isArray(elementSchema?.oneOf) &&
+              elementSchema.oneOf.every((option) =>
+                option.asCell || option.asStream
+              ))))
+      ) {
+        elementLink = {
+          id: createDataCellURI(value[i], link),
+          path: [],
+          schema: elementSchema,
+          rootSchema: elementLink.rootSchema,
+          space: link.space,
+          type: "application/json",
+        } satisfies NormalizedFullLink;
       }
 
       result[i] = validateAndTransform(

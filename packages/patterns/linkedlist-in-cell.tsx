@@ -55,14 +55,14 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe("Simple LinkedList", ({ title }: InputSchema) => {
+export default recipe<InputSchema>(({ title }) => {
   const items_list = cell<LinkedList>({ value: "1" });
 
   // Create a derived value for the linked list string representation
   // FIXME(@ellyxir): use inputschema instead of just creating it here
   const linkedListString = derive(
     items_list,
-    (list) => listToString(list, "\n"),
+    (list) => listToString(list.get(), "\n"),
   );
 
   return {

@@ -110,11 +110,13 @@ const EmailSummarizerInputSchema = {
           enum: ["short", "medium", "long"],
           default: "medium",
           description: "Length of the summary",
+          asCell: true,
         },
         includeTags: {
           type: "boolean",
           default: true,
           description: "Include tags in the summary",
+          asCell: true,
         },
       },
       required: ["summaryLength", "includeTags"],
@@ -166,7 +168,7 @@ const updateSummaryLength = handler(
     properties: {
       summaryLength: {
         type: "string",
-        asCell: true, // Mark as cell
+        asCell: true,
       },
     },
     required: ["summaryLength"],
@@ -198,7 +200,7 @@ const updateIncludeTags = handler(
     properties: {
       includeTags: {
         type: "boolean",
-        asCell: true, // Mark as cell
+        asCell: true,
       },
     },
     required: ["includeTags"],
@@ -258,19 +260,23 @@ export default recipe(
 
       // Create prompts using the str template literal for proper reactivity
       // This ensures the prompts update when settings change
-      const lengthInstructions = str`${
-        settings.summaryLength === "short"
-          ? "in 1-2 sentences"
-          : settings.summaryLength === "long"
-          ? "in 5-7 sentences"
-          : "in 3-4 sentences"
-      }`;
+      const lengthInstructions = derive(
+        settings.summaryLength,
+        (length: "short" | "medium" | "long") =>
+          length === "short"
+            ? "in 1-2 sentences"
+            : length === "long"
+            ? "in 5-7 sentences"
+            : "in 3-4 sentences",
+      );
 
-      const tagInstructions = str`${
-        settings.includeTags
-          ? "Include up to 3 relevant tags or keywords in the format #tag at the end of the summary."
-          : ""
-      }`;
+      const tagInstructions = derive(
+        settings.includeTags,
+        (includeTags: boolean) =>
+          includeTags
+            ? "Include up to 3 relevant tags or keywords in the format #tag at the end of the summary."
+            : "",
+      );
 
       // Create system prompt with str to maintain reactivity
       const systemPrompt = str`
@@ -292,7 +298,7 @@ export default recipe(
       // Call LLM to generate summary
       const summaryResult = llm({
         system: systemPrompt,
-        messages: [userPrompt],
+        messages: [{ role: "user", content: userPrompt }],
       });
 
       // Return a simple object that references the original email
@@ -348,9 +354,9 @@ export default recipe(
               </div>
 
               <div>
-                <common-checkbox
+                <ct-checkbox
                   checked={settings.includeTags}
-                  oncommon-checked={includeTagsHandler}
+                  onct-change={includeTagsHandler}
                 />
                 <label>Include Tags</label>
               </div>

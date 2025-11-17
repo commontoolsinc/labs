@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   Cell,
-  cell,
   Default,
   derive,
   handler,
@@ -31,9 +30,9 @@ type Input = {
   selectedCharm: Default<{ charm: any }, { charm: undefined }>;
   charmsList: Default<CharmEntry[], []>;
   theme?: {
-    accentColor: Default<string, "#3b82f6">;
-    fontFace: Default<string, "system-ui, -apple-system, sans-serif">;
-    borderRadius: Default<string, "0.5rem">;
+    accentColor: Cell<Default<string, "#3b82f6">>;
+    fontFace: Cell<Default<string, "system-ui, -apple-system, sans-serif">>;
+    borderRadius: Cell<Default<string, "0.5rem">>;
   };
 };
 
@@ -128,7 +127,7 @@ const populateChatList = lift(
     { charmsList, allCharms, selectedCharm },
   ) => {
     if (charmsList.length === 0) {
-      const isInitialized = cell(false);
+      const isInitialized = Cell.of(false);
       return storeCharm({
         charm: Chat({
           title: "New Chat",
@@ -154,7 +153,7 @@ const createChatRecipe = handler<
   }
 >(
   (_, { selectedCharm, charmsList, allCharms }) => {
-    const isInitialized = cell(false);
+    const isInitialized = Cell.of(false);
 
     const charm = Chat({
       title: "New Chat",
@@ -222,13 +221,25 @@ const getCharmName = lift(({ charm }: { charm: any }) => {
   return charm?.[NAME] || "Unknown";
 });
 
+const extractLocalMentionable = lift<
+  { list: CharmEntry[] },
+  MentionableCharm[]
+>(({ list }) => {
+  const out: MentionableCharm[] = [];
+  for (const entry of list) {
+    const c = entry.charm;
+    out.push(c.chat);
+  }
+  return out;
+});
+
 // create the named cell inside the recipe body, so we do it just once
 export default recipe<Input, Output>(
   "Launcher",
   ({ selectedCharm, charmsList, theme }) => {
     const allCharms = derive<MentionableCharm[], MentionableCharm[]>(
-      wish<MentionableCharm[]>("#allCharms", []),
-      (c) => c,
+      wish<MentionableCharm[]>("#allCharms"),
+      (c) => c ?? [],
     );
     logCharmsList({ charmsList: charmsList as unknown as Cell<CharmEntry[]> });
 
@@ -244,22 +255,12 @@ export default recipe<Input, Output>(
 
     // Aggregate mentionables from the local charms list so that this
     // container exposes its child chat charms as mention targets.
-    const localMentionable = lift<
-      { list: CharmEntry[] },
-      MentionableCharm[]
-    >(({ list }) => {
-      const out: MentionableCharm[] = [];
-      for (const entry of list) {
-        const c = entry.charm;
-        out.push(c.chat);
-      }
-      return out;
-    })({ list: charmsList });
+    const localMentionable = extractLocalMentionable({ list: charmsList });
 
     const localTheme = theme ?? {
-      accentColor: cell("#3b82f6"),
-      fontFace: cell("system-ui, -apple-system, sans-serif"),
-      borderRadius: cell("0.5rem"),
+      accentColor: Cell.of("#3b82f6"),
+      fontFace: Cell.of("system-ui, -apple-system, sans-serif"),
+      borderRadius: Cell.of("0.5rem"),
     };
 
     return {
