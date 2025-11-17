@@ -2,7 +2,15 @@ import * as __ctHelpers from "commontools";
 import { NAME, OpaqueRef, recipe } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const _element = <div>{count}</div>;
-export default recipe("test", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        }
+    },
+    required: ["$NAME"]
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
     return {
         [NAME]: "test",
     };

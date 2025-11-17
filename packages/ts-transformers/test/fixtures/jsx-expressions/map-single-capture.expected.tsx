@@ -1,10 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe({
-    type: "object",
-    properties: {},
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema, {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -243,7 +239,7 @@ export default recipe({
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.length > 0 && (<ul>
+        } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0 && (<ul>
             {people.map((person) => (<li key={person.id}>{person.name}</li>))}
           </ul>))}
       </div>),

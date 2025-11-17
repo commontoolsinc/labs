@@ -78,7 +78,16 @@ function collectFunctionSchemaTypeNodes(
   let argumentNode: ts.TypeNode | undefined;
   let argumentType: ts.Type | undefined;
 
-  if (parameter?.type) {
+  // Check for underscore prefix FIRST - this convention overrides type inference
+  // Underscore-prefixed parameters are intentionally unused and should be `never`
+  if (
+    parameter &&
+    ts.isIdentifier(parameter.name) &&
+    parameter.name.text.startsWith("_")
+  ) {
+    // Return never type directly - don't infer or use explicit type
+    argumentNode = ts.factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+  } else if (parameter?.type) {
     // Use original TypeNode from source - preserves all type information!
     argumentNode = parameter.type;
     // Also get the Type for registry (in case it's needed)
@@ -238,6 +247,52 @@ function getParameterSchemaType(
 
   // Parameter exists without type → unknown
   return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+}
+
+/**
+ * Infer schema type for a specific parameter, respecting underscore-prefix convention
+ * and attempting type inference before falling back to never/unknown.
+ */
+function inferParameterSchemaType(
+  factory: ts.NodeFactory,
+  fn: ts.ArrowFunction | ts.FunctionExpression,
+  paramIndex: number,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): ts.TypeNode {
+  const param = fn.parameters[paramIndex];
+
+  // Check underscore prefix first
+  if (param && ts.isIdentifier(param.name) && param.name.text.startsWith("_")) {
+    return factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+  }
+
+  // Has explicit type annotation - use it
+  if (param?.type) {
+    return param.type;
+  }
+
+  // Try to infer from signature
+  if (param) {
+    const signature = checker.getSignatureFromDeclaration(fn);
+    if (signature && signature.parameters.length > paramIndex) {
+      const paramSymbol = signature.parameters[paramIndex];
+      if (paramSymbol) {
+        const paramType = checker.getTypeOfSymbol(paramSymbol);
+        if (paramType && !isAnyOrUnknownType(paramType)) {
+          const typeNode = typeToSchemaTypeNode(paramType, checker, sourceFile);
+          if (typeNode) {
+            return typeNode;
+          }
+        }
+      }
+    }
+    // Inference failed - use unknown
+    return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+
+  // No parameter at all - use never
+  return factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
 }
 
 function prependSchemaArguments(
@@ -512,13 +567,25 @@ export class SchemaInjectionTransformer extends Transformer {
           ) {
             const handlerFn = handlerCandidate;
 
-            // Get parameters (may be undefined if handler has fewer parameters)
-            const eventParam = handlerFn.parameters[0];
-            const stateParam = handlerFn.parameters[1];
+            // Infer types from the handler function for both parameters
+            const inferred = collectFunctionSchemaTypeNodes(
+              handlerFn,
+              checker,
+              sourceFile,
+            );
 
-            // Determine appropriate schema types using never/unknown refinement
-            const eventType = getParameterSchemaType(factory, eventParam);
-            const stateType = getParameterSchemaType(factory, stateParam);
+            // Event type: use inferred or fallback to never/unknown refinement
+            const eventType = inferred.argument ??
+              getParameterSchemaType(factory, handlerFn.parameters[0]);
+
+            // State type: use helper for second parameter
+            const stateType = inferParameterSchemaType(
+              factory,
+              handlerFn,
+              1, // second parameter
+              checker,
+              sourceFile,
+            );
 
             // Always transform - generate schemas regardless of parameter presence
             const toSchemaEvent = createSchemaCallWithRegistryTransfer(
@@ -623,7 +690,9 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               argumentType,
             );
-            argNode = inferred.argument;
+            // Use inferred type or fallback to never/unknown refinement
+            argNode = inferred.argument ??
+              getParameterSchemaType(factory, callback.parameters[0]);
             argType = inferred.argumentType;
           }
 
