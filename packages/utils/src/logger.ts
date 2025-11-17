@@ -284,5 +284,19 @@ export function getLogger(
   moduleName: string,
   options?: GetLoggerOptions,
 ): Logger {
-  return new Logger(moduleName, options);
+  const logger = new Logger(moduleName, options);
+
+  // Store logger in globalThis for access via console
+  const global = globalThis as unknown as {
+    commontools: { logger: Record<string, Logger> };
+  };
+  if (!global.commontools) {
+    global.commontools = { logger: {} };
+  }
+  if (!global.commontools.logger) {
+    global.commontools.logger = {};
+  }
+  global.commontools.logger[moduleName] = logger;
+
+  return logger;
 }
