@@ -3884,6 +3884,10 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
+      "common-code-editor": CTDOM.DetailedHTMLProps<
+        CTCodeEditorLegacyAttributes<CTCodeEditorLegacyElement>,
+        CTCodeEditorLegacyElement
+      >;
       "common-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement

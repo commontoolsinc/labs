@@ -49,7 +49,7 @@ const handleEditContent = handler<
 export default recipe<Input>(
   "Compiler",
   ({ code }) => {
-    const { result, error, errors: _errors } = compileAndRun({
+    const { result, error, errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
@@ -58,11 +58,11 @@ export default recipe<Input>(
       [NAME]: "My First Compiler",
       [UI]: (
         <div>
-          <ct-code-editor
-            value={code}
+          <common-code-editor
+            source={code}
             language="text/x.typescript"
             onChange={updateCode({ code })}
-            // errors={errors}
+            errors={errors}
           />
           {ifElse(
             error,
