@@ -4,7 +4,6 @@ import {
   areLinksSame,
   createDataCellURI,
   createSigilLinkFromParsedLink,
-  isJSONCellLink,
   isLegacyAlias,
   isLink,
   isSigilValue,
@@ -204,18 +203,6 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isJSONCellLink", () => {
-    it("should identify JSON cell links", () => {
-      const jsonCellLink = { cell: { "/": "bafe==" }, path: ["test"] };
-      expect(isJSONCellLink(jsonCellLink)).toBe(true);
-    });
-
-    it("should not allow of: URIs in JSON cell links", () => {
-      const jsonCellLink = { cell: { "/": "of:test" }, path: ["test"] };
-      expect(isJSONCellLink(jsonCellLink)).toBe(false);
-    });
-  });
-
   describe("parseLink", () => {
     it("should parse cells to normalized links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
@@ -397,14 +384,14 @@ describe("link-utils", () => {
 
     it("should parse JSON cell links to normalized links", () => {
       const jsonLink = {
-        cell: { "/": "bafe==" },
+        cell: { "/": "of:test" },
         path: ["nested", "value"],
       };
       const baseCell = runtime.getCell(space, "base");
       const result = parseLink(jsonLink, baseCell);
 
       expect(result).toEqual({
-        id: "of:bafe==",
+        id: "of:test",
         path: ["nested", "value"],
         space: space,
         type: "application/json",
