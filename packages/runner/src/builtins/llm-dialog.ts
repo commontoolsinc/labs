@@ -1422,10 +1422,12 @@ function handleRead(
   if (!cell.schema) {
     cell = cell.asSchema(getCellSchema(cell));
   }
-  const serialized = traverseAndSerialize(cell.get(), cell.schema);
+
+  const schema = cell.schema;
+  const serialized = traverseAndSerialize(cell.get(), schema);
 
   // Handle undefined by returning null (valid JSON) instead
-  return { type: "json", value: serialized === undefined ? null : serialized };
+  return { type: "json", value: serialized ?? null, ...(schema && { schema }) };
 }
 
 /**
