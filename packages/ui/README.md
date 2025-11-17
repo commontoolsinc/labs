@@ -1,8 +1,8 @@
 # Common UI Web Components
 
-A web component library fully compatible with Deno 2. This library
-provides production-ready components designed for untrusted DOM contexts with
-strict security constraints.
+A web component library fully compatible with Deno 2. This library provides
+production-ready components designed for untrusted DOM contexts with strict
+security constraints.
 
 ## 🚀 Features
 
