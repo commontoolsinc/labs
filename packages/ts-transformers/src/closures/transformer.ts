@@ -95,9 +95,10 @@ function shouldCapturePropertyAccess(
   }
 
   // Check if ANY declaration is outside the callback
-  const hasExternalDeclaration = declarations.some((decl) =>
-    !isDeclaredWithinFunction(decl, func)
-  );
+  const hasExternalDeclaration = declarations.some((decl) => {
+    const isWithin = isDeclaredWithinFunction(decl, func);
+    return !isWithin;
+  });
 
   if (hasExternalDeclaration) {
     // Capture the whole property access expression
@@ -421,9 +422,12 @@ function collectCaptures(
         const captured = shouldCapturePropertyAccess(node, func, checker);
         if (captured) {
           captures.add(captured);
-          // Don't visit children
+          // Don't visit children - we've captured the whole property access chain
           return;
         }
+        // If not captured, continue visiting children to check for opaque values
+        // in the expression part (e.g., for state.arr[index].length, we need to
+        // visit state.arr[index] even though .length itself isn't captured)
       }
       // For method calls on identifiers (multiplier.get()), don't capture the property access
       // The identifier will be captured separately

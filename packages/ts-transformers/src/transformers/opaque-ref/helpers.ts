@@ -3,8 +3,8 @@ import ts from "typescript";
 import {
   type DataFlowAnalysis,
   detectCallKind,
-  getExpressionText,
   type NormalizedDataFlow,
+  setParentPointers,
 } from "../../ast/mod.ts";
 import type { BindingPlan } from "./bindings.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -303,6 +303,10 @@ export function createDeriveCallForExpression(
     undefined,
     [arrowFunction],
   );
+
+  // CRITICAL: Set parent pointers and connect to parent chain
+  // This maintains the parent chain so walking up from nested callbacks works
+  setParentPointers(computedCall, expression.parent);
 
   return computedCall;
 }

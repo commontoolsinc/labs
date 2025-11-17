@@ -76,7 +76,14 @@ export function isDeclaredWithinFunction(
   decl: ts.Declaration,
   func: ts.FunctionLikeDeclaration,
 ): boolean {
-  // Walk up the tree from the declaration
+  // SPECIAL CASE: For parameters, check directly in the parameters array
+  // The visitor reuses parameter objects, so we can use simple object identity.
+  // This avoids broken parent chains when func is a synthetic/transformed node.
+  if (ts.isParameter(decl)) {
+    return func.parameters.includes(decl);
+  }
+
+  // For other declarations, walk up the tree from the declaration
   let current: ts.Node | undefined = decl;
   while (current) {
     // Found our callback function - try multiple matching strategies:

@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { computed } from "commontools";
 export default function TestComputeNoCaptures() {
-    const result = derive({
+    const result = __ctHelpers.derive({
         type: "object",
         properties: {}
     } as const satisfies __ctHelpers.JSONSchema, {

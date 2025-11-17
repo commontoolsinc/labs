@@ -134,6 +134,6 @@ function getCTHelpersIdentifier(
   if (!importClause || !ts.isImportClause(importClause)) return;
   const { namedBindings } = importClause;
   if (!namedBindings || !ts.isNamespaceImport(namedBindings)) return;
-  if (namedBindings.name.getText() !== CT_HELPERS_IDENTIFIER) return;
+  if (namedBindings.name.text !== CT_HELPERS_IDENTIFIER) return;
   return namedBindings.name;
 }

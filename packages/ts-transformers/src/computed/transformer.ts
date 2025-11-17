@@ -73,9 +73,10 @@ function createComputedToDeriveVisitor(
 
     // Transform: computed(() => expr) → derive({}, () => expr)
     // Keep the zero-parameter callback as-is
+    // Always use __ctHelpers.derive for safety (it's always available via cts-enable)
     const deriveCall = factory.updateCallExpression(
       node,
-      factory.createIdentifier("derive"), // Replace 'computed' with 'derive'
+      context.ctHelpers.getHelperExpr("derive"),
       node.typeArguments, // Preserve type arguments (if any)
       [
         factory.createObjectLiteralExpression([], false), // First arg: empty object {}
@@ -83,10 +84,9 @@ function createComputedToDeriveVisitor(
       ],
     );
 
-    // Set parent pointers so parent-walking logic works (e.g., in shouldTransformMap)
-    // Don't manually set callback.parent - let it keep its original parent from source
-    // so that getSourceFile() works correctly for capture detection
-    setParentPointers(deriveCall);
+    // CRITICAL: Set parent pointers and connect to parent chain
+    // This maintains the parent chain for nested callback analysis
+    setParentPointers(deriveCall, node.parent);
 
     return deriveCall;
   };
