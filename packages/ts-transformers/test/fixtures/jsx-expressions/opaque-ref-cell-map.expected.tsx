@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe("Simple Recipe", () => ({
+const SimpleRecipe = recipe("Simple Recipe", false as const satisfies __ctHelpers.JSONSchema, () => ({
     [NAME]: "Some Simple Recipe",
     [UI]: <div>Some Simple Recipe</div>,
 }));
@@ -87,7 +87,7 @@ const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     return navigateTo(charm);
 });
 // create the named cell inside the recipe body, so we do it just once
-export default recipe("Charms Launcher", () => {
+export default recipe("Charms Launcher", false as const satisfies __ctHelpers.JSONSchema, () => {
     // cell to store array of charms we created
     const { cellRef } = createCellRef({
         isInitialized: cell(false),

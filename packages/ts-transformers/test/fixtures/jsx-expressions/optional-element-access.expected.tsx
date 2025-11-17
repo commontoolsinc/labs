@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, NAME, recipe, UI } from "commontools";
-export default recipe("Optional Element Access", () => {
+export default recipe("Optional Element Access", false as const satisfies __ctHelpers.JSONSchema, () => {
     const list = cell<string[] | undefined>(undefined);
     return {
         [NAME]: "Optional element access",

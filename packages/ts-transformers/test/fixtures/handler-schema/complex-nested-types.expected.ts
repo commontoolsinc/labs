@@ -118,7 +118,7 @@ const _updateTags = handler({
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
-export default recipe("complex-nested-types test", () => {
+export default recipe("complex-nested-types test", false as const satisfies __ctHelpers.JSONSchema, () => {
     return { userHandler };
 });
 // @ts-ignore: Internals

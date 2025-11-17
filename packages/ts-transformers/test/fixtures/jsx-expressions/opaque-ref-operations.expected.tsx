@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("OpaqueRefOperations", (_state) => {
+export default recipe("OpaqueRefOperations", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const count = cell(10);
     const price = cell(10);
     return {

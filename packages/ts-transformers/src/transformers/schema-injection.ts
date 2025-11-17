@@ -207,6 +207,39 @@ function getTypeFromRegistryOrFallback(
   return fallbackType;
 }
 
+/**
+ * Determines the appropriate schema TypeNode for a function parameter based on
+ * whether it exists and whether it has explicit type annotation.
+ *
+ * Rules:
+ * - No parameter → never (schema: false)
+ * - Parameter with _ prefix and no type → never (schema: false)
+ * - Parameter with explicit type → use that type
+ * - Parameter without type → unknown (schema: true)
+ */
+function getParameterSchemaType(
+  factory: ts.NodeFactory,
+  param: ts.ParameterDeclaration | undefined,
+): ts.TypeNode {
+  // No parameter at all → never
+  if (!param) {
+    return factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+  }
+
+  // Has explicit type → use it
+  if (param.type) {
+    return param.type;
+  }
+
+  // Check if parameter name starts with _ (unused convention)
+  if (ts.isIdentifier(param.name) && param.name.text.startsWith("_")) {
+    return factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword);
+  }
+
+  // Parameter exists without type → unknown
+  return factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+}
+
 function prependSchemaArguments(
   context: Pick<TransformationContext, "factory" | "ctHelpers" | "sourceFile">,
   node: ts.CallExpression,
@@ -310,31 +343,30 @@ export class SchemaInjectionTransformer extends Transformer {
             ts.isArrowFunction(recipeFunction))
         ) {
           const recipeFn = recipeFunction;
-          if (recipeFn.parameters.length >= 1) {
-            const inputParam = recipeFn.parameters[0];
 
-            // Only transform if there's an explicit type annotation
-            if (inputParam?.type) {
-              const toSchemaInput = createSchemaCallWithRegistryTransfer(
-                context,
-                inputParam.type,
-                typeRegistry,
-              );
+          // Get the input parameter (may be undefined if recipe has no parameters)
+          const inputParam = recipeFn.parameters[0];
 
-              // Preserve the name argument if it was provided
-              const newArgs = recipeName
-                ? [recipeName, toSchemaInput, recipeFn]
-                : [toSchemaInput, recipeFn];
+          // Always transform - use never/unknown refinement
+          const inputType = getParameterSchemaType(factory, inputParam);
+          const toSchemaInput = createSchemaCallWithRegistryTransfer(
+            context,
+            inputType,
+            typeRegistry,
+          );
 
-              const updated = factory.createCallExpression(
-                node.expression,
-                undefined,
-                newArgs,
-              );
+          // Preserve the name argument if it was provided
+          const newArgs = recipeName
+            ? [recipeName, toSchemaInput, recipeFn]
+            : [toSchemaInput, recipeFn];
 
-              return ts.visitEachChild(updated, visit, transformation);
-            }
-          }
+          const updated = factory.createCallExpression(
+            node.expression,
+            undefined,
+            newArgs,
+          );
+
+          return ts.visitEachChild(updated, visit, transformation);
         }
       }
 
@@ -370,9 +402,13 @@ export class SchemaInjectionTransformer extends Transformer {
           typeArgHints[0], // Pass first type arg as fallback for parameter inference
         );
 
-        // Infer types from the function signature and type arguments
-        const argumentTypeNode = inferred.argument;
-        const resultTypeNode = inferred.result;
+        // For argument: use inferred type or apply never/unknown refinement
+        const argumentTypeNode = inferred.argument ??
+          getParameterSchemaType(factory, patternFunction.parameters[0]);
+
+        // For result: use inferred type or default to unknown
+        const resultTypeNode = inferred.result ??
+          factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
         // Check TypeRegistry for existing types first (may be synthetic from ClosureTransformer)
         const argumentType = getTypeFromRegistryOrFallback(
@@ -386,35 +422,25 @@ export class SchemaInjectionTransformer extends Transformer {
           typeRegistry,
         );
 
-        // Build the new arguments array: [fn, argSchema?, resSchema?]
-        const newArgs: ts.Expression[] = [patternFunction];
-
-        if (argumentTypeNode) {
-          const argSchemaCall = createToSchemaCall(context, argumentTypeNode);
-          if (argumentType && typeRegistry) {
-            typeRegistry.set(argSchemaCall, argumentType);
-          }
-          newArgs.push(argSchemaCall);
+        // Always create both schemas
+        const argSchemaCall = createToSchemaCall(context, argumentTypeNode);
+        if (argumentType && typeRegistry) {
+          typeRegistry.set(argSchemaCall, argumentType);
         }
 
-        if (resultTypeNode) {
-          const resSchemaCall = createToSchemaCall(context, resultTypeNode);
-          if (resultType && typeRegistry) {
-            typeRegistry.set(resSchemaCall, resultType);
-          }
-          newArgs.push(resSchemaCall);
+        const resSchemaCall = createToSchemaCall(context, resultTypeNode);
+        if (resultType && typeRegistry) {
+          typeRegistry.set(resSchemaCall, resultType);
         }
 
-        // Only transform if we have at least one schema
-        if (newArgs.length > 1) {
-          const updated = factory.createCallExpression(
-            node.expression,
-            undefined,
-            newArgs,
-          );
+        // Always transform with both schemas
+        const updated = factory.createCallExpression(
+          node.expression,
+          undefined,
+          [patternFunction, argSchemaCall, resSchemaCall],
+        );
 
-          return ts.visitEachChild(updated, visit, transformation);
-        }
+        return ts.visitEachChild(updated, visit, transformation);
       }
 
       if (
@@ -457,35 +483,34 @@ export class SchemaInjectionTransformer extends Transformer {
               ts.isArrowFunction(handlerCandidate))
           ) {
             const handlerFn = handlerCandidate;
-            if (handlerFn.parameters.length >= 2) {
-              const eventParam = handlerFn.parameters[0];
-              const stateParam = handlerFn.parameters[1];
-              const eventType = eventParam?.type ??
-                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-              const stateType = stateParam?.type ??
-                factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-              if (eventParam || stateParam) {
-                const toSchemaEvent = createSchemaCallWithRegistryTransfer(
-                  context,
-                  eventType,
-                  typeRegistry,
-                );
-                const toSchemaState = createSchemaCallWithRegistryTransfer(
-                  context,
-                  stateType,
-                  typeRegistry,
-                );
+            // Get parameters (may be undefined if handler has fewer parameters)
+            const eventParam = handlerFn.parameters[0];
+            const stateParam = handlerFn.parameters[1];
 
-                const updated = factory.createCallExpression(
-                  node.expression,
-                  undefined,
-                  [toSchemaEvent, toSchemaState, handlerFn],
-                );
+            // Determine appropriate schema types using never/unknown refinement
+            const eventType = getParameterSchemaType(factory, eventParam);
+            const stateType = getParameterSchemaType(factory, stateParam);
 
-                return ts.visitEachChild(updated, visit, transformation);
-              }
-            }
+            // Always transform - generate schemas regardless of parameter presence
+            const toSchemaEvent = createSchemaCallWithRegistryTransfer(
+              context,
+              eventType,
+              typeRegistry,
+            );
+            const toSchemaState = createSchemaCallWithRegistryTransfer(
+              context,
+              stateType,
+              typeRegistry,
+            );
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              undefined,
+              [toSchemaEvent, toSchemaState, handlerFn],
+            );
+
+            return ts.visitEachChild(updated, visit, transformation);
           }
         }
       }
@@ -581,19 +606,17 @@ export class SchemaInjectionTransformer extends Transformer {
             sourceFile,
           );
 
-          // Transform if we got at least one type, filling in unknown for the other
-          if (argNode || inferred.result) {
-            const finalArgNode = argNode ??
-              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-            const resNode = inferred.result ??
-              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-            return updateWithSchemas(
-              finalArgNode,
-              argType,
-              resNode,
-              inferred.resultType,
-            );
-          }
+          // Always transform - use unknown for missing types
+          const finalArgNode = argNode ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          const resNode = inferred.result ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          return updateWithSchemas(
+            finalArgNode,
+            argType,
+            resNode,
+            inferred.resultType,
+          );
         }
       }
 
@@ -657,32 +680,33 @@ export class SchemaInjectionTransformer extends Transformer {
             sourceFile,
           );
 
-          // Transform if we got at least one type, filling in unknown for the other
-          if (inferred.argument || inferred.result) {
-            const argNode = inferred.argument ??
-              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-            const resNode = inferred.result ??
-              factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          // For argument: use inferred type or apply never/unknown refinement
+          const argNode = inferred.argument ??
+            getParameterSchemaType(factory, callback.parameters[0]);
 
-            // Check TypeRegistry for inferred types (may be synthetic from ClosureTransformer)
-            const argType = getTypeFromRegistryOrFallback(
-              argNode,
-              inferred.argumentType,
-              typeRegistry,
-            );
-            const resType = getTypeFromRegistryOrFallback(
-              resNode,
-              inferred.resultType,
-              typeRegistry,
-            );
+          // For result: use inferred type or default to unknown
+          const resNode = inferred.result ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-            return updateWithSchemas(
-              argNode,
-              argType,
-              resNode,
-              resType,
-            );
-          }
+          // Check TypeRegistry for inferred types (may be synthetic from ClosureTransformer)
+          const argType = getTypeFromRegistryOrFallback(
+            argNode,
+            inferred.argumentType,
+            typeRegistry,
+          );
+          const resType = getTypeFromRegistryOrFallback(
+            resNode,
+            inferred.resultType,
+            typeRegistry,
+          );
+
+          // Always transform with both schemas
+          return updateWithSchemas(
+            argNode,
+            argType,
+            resNode,
+            resType,
+          );
         }
       }
 

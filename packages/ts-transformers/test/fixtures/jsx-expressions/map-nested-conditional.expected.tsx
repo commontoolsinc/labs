@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapNestedConditional", (_state) => {
+export default recipe("MapNestedConditional", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const items = cell([{ name: "apple" }, { name: "banana" }]);
     const showList = cell(true);
     return {

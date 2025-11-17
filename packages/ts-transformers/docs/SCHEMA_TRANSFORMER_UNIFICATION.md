@@ -94,25 +94,46 @@ return)
 
 ---
 
-### Phase 3: Consistent Fallback Policy
+### Phase 3: Consistent Fallback Policy ✅ COMPLETE (Investigated)
 
-**Hypothesis**: TBD - this might legitimately differ by function semantics
+**Original Hypothesis**: Uniform strict policy across all functions
 
-**Options to Explore**:
+**Actual Finding**: **Differentiated policies are INTENTIONAL and CORRECT**
 
-- **Option A**: Strict everywhere (skip transformation without types)
-- **Option B**: Lenient everywhere (always transform, use `unknown` / `true`
-  schema)
-- **Option C**: Documented per-function policy based on semantics
+**Experiment Conducted**: Made all functions strict like Recipe (require
+explicit types)
 
-**Test Strategy**:
+**Test Results**:
 
-- Try strict approach everywhere first
-- Analyze breaks: "catching bugs" vs "breaking valid code"
-- Consider semantic meaning of each function
+- 14 out of 19 test suites failed
+- All failures were **valid, common code patterns**
+- Breaking changes would harm developer experience
 
-**Success Criteria**: Either consistent policy or documented rationale for
-differences
+**Key Findings**:
+
+1. **Handler leniency is essential** - Enables:
+   - Debug/logging handlers with no type requirements
+   - Event-only handlers (don't care about state)
+   - State-only handlers (don't care about event details)
+
+2. **JSX return type inference is hard** - TypeScript can't infer complex
+   returns:
+   - Pattern/recipe with JSX returns require manual typing in strict mode
+   - Significantly worse DX for common case
+
+3. **Different functions serve different purposes**:
+   - Recipe: Reusable definitions (strict makes sense)
+   - Handler: Dynamic events (lenient makes sense)
+   - Pattern/Derive/Lift: Complex inference (flexible makes sense)
+
+**Outcome**: Current differentiated behavior is **intentional design**
+
+**Recommendation**: Document the rationale, don't enforce uniformity
+
+**Status**: ✅ Reverted strict mode experiment, all tests passing
+
+**Documentation**: See `PHASE3_STRICT_MODE_EXPERIMENT.md` and
+`FALLBACK_POLICY_EXAMPLES.md`
 
 ---
 
@@ -168,11 +189,14 @@ After all phases, write up:
 - **Branch**: `refactor/unify-typeregistry` (based on `wish-schemas`)
 - **Completed**: Phase 1 ✅ (TypeRegistry Unification)
 - **Completed**: Phase 2 ✅ (Handler Inference Path Fix)
-- **Next Step**: Decide on Phase 3 (Fallback Policy) or Phase 4 (Type
-  Parameters)
+- **Completed**: Phase 3 ✅ (Fallback Policy Investigation)
+- **Next Step**: Decide whether to proceed with Phase 4 (Type Parameter Error
+  Handling)
 - **Complete Analysis**: See `schema-transformer-analysis.md`
 - **Phase 1 Results**: See `SCHEMA_TRANSFORMER_PHASE1_RESULTS.md`
 - **Phase 2 Results**: See `SCHEMA_TRANSFORMER_PHASE2_RESULTS.md`
+- **Phase 3 Results**: See `PHASE3_STRICT_MODE_EXPERIMENT.md` and
+  `FALLBACK_POLICY_EXAMPLES.md`
 
 ## Notes
 

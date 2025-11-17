@@ -10,7 +10,7 @@ declare global {
 interface State {
     count: number;
 }
-const existing = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {

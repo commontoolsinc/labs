@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapArrayLengthConditional", (_state) => {
+export default recipe("MapArrayLengthConditional", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const list = cell(["apple", "banana", "cherry"]);
     return {
         [UI]: (<div>

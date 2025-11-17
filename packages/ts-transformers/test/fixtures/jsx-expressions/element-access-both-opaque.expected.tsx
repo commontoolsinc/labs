@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("ElementAccessBothOpaque", (_state) => {
+export default recipe("ElementAccessBothOpaque", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const items = cell(["apple", "banana", "cherry"]);
     const index = cell(1);
     return {

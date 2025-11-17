@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapSingleCapture", (_state) => {
+export default recipe("MapSingleCapture", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const people = cell([
         { id: "1", name: "Alice" },
         { id: "2", name: "Bob" },

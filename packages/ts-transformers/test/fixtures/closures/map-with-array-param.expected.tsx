@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("MapWithArrayParam", (_state) => {
+export default recipe("MapWithArrayParam", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const items = cell([1, 2, 3, 4, 5]);
     return {
         [UI]: (<div>
