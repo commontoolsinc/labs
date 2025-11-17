@@ -49,7 +49,7 @@ const handleEditContent = handler<
 export default recipe<Input>(
   "Compiler",
   ({ code }) => {
-    const { result, error, errors } = compileAndRun({
+    const { result, error, errors: _errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
