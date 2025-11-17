@@ -1400,8 +1400,17 @@ function createRecipeCallWithParams(
       "Expected mapCall.expression to be a PropertyAccessExpression",
     );
   }
-  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+
+  // Visit the array expression to transform any derive() calls in the chain
+  // Example: derive({}, () => expr).mapWithPattern(...)
+  const visitedArrayExpr = ts.visitNode(
     mapCall.expression.expression,
+    visitor,
+    ts.isExpression,
+  ) ?? mapCall.expression.expression;
+
+  const mapWithPatternAccess = factory.createPropertyAccessExpression(
+    visitedArrayExpr,
     factory.createIdentifier("mapWithPattern"),
   );
 

@@ -7,7 +7,7 @@ import type { NormalizedDataFlowSet } from "../../../ast/mod.ts";
 import { isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { createBindingPlan } from "../bindings.ts";
 import {
-  createDeriveCallForExpression,
+  createComputedCallForExpression,
   filterRelevantDataFlows,
 } from "../helpers.ts";
 
@@ -34,7 +34,7 @@ function processBranch(
     !isSimpleOpaqueRefAccess(expr, context.checker)
   ) {
     const plan = createBindingPlan(branchDataFlows);
-    const derived = createDeriveCallForExpression(expr, plan, context);
+    const derived = createComputedCallForExpression(expr, plan, context);
     if (derived) {
       return derived;
     }
@@ -66,7 +66,7 @@ export const emitConditionalExpression: Emitter = ({
   let predicate: ts.Expression = expression.condition;
   if (shouldDerivePredicate) {
     const plan = createBindingPlan(predicateDataFlows);
-    const derivedPredicate = createDeriveCallForExpression(
+    const derivedPredicate = createComputedCallForExpression(
       expression.condition,
       plan,
       context,

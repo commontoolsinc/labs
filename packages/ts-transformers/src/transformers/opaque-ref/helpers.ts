@@ -240,7 +240,7 @@ export function filterRelevantDataFlows(
   });
 }
 
-export function createDeriveCallForExpression(
+export function createComputedCallForExpression(
   expression: ts.Expression,
   plan: BindingPlan,
   context: TransformationContext,
