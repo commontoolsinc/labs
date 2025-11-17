@@ -1424,7 +1424,8 @@ function handleRead(
   }
   const serialized = traverseAndSerialize(cell.get(), cell.schema);
 
-  return { type: "json", value: serialized };
+  // Handle undefined by returning null (valid JSON) instead
+  return { type: "json", value: serialized === undefined ? null : serialized };
 }
 
 /**
@@ -1538,9 +1539,13 @@ async function handleRun(
   }).then(() => {
     throw new Error("Tool call timed out");
   });
-  await Promise.race([promise, timeoutPromise]);
-  clearTimeout(timeout);
-  cancel();
+
+  try {
+    await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeout);
+    cancel();
+  }
 
   // Get the actual entity ID from the result cell
   const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
