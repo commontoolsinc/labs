@@ -835,8 +835,21 @@ export function validateAndTransform(
   }
 
   // Add the current value to seen before returning
-  seen.push([seenKey, value]);
-  return annotateWithBackToCellSymbols(value, runtime, link, tx);
+  if (isRecord(value)) {
+    const cloned = isObject(value)
+      ? { ...(value as Record<string, unknown>) }
+      : [...(value as unknown[])];
+    seen.push([seenKey, cloned]);
+    return annotateWithBackToCellSymbols(
+      cloned,
+      runtime,
+      link,
+      tx,
+    );
+  } else {
+    seen.push([seenKey, value]);
+    return value;
+  }
 }
 
 /**
