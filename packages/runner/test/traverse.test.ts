@@ -148,7 +148,7 @@ describe("SchemaObjectTraverser array traversal", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const traverser = new SchemaObjectTraverser(tx, {
-      path: [],
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     }, "did:null:null");
 
@@ -190,7 +190,7 @@ describe("SchemaObjectTraverser array traversal", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const traverser = new SchemaObjectTraverser(tx, {
-      path: [],
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     }, "did:null:null");
 

@@ -597,7 +597,7 @@ export class ContextualFlowControl {
             cursor.prefixItems && numericKeyValue < cursor.prefixItems.length
           ) {
             cursor = cursor.prefixItems[numericKeyValue];
-          } else if (cursor.items) {
+          } else if (cursor.items !== undefined) {
             cursor = cursor.items;
           } else { // default is true
             cursor = true;
