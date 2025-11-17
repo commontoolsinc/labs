@@ -1606,33 +1606,27 @@ export class SchemaObjectTraverser<V extends JSONValue>
           rootSchema: schemaContext.rootSchema,
         },
       };
-
-      // FIXME: Integrate this chunk that was added in schema
-      //   isRecord(value[i]) &&
-      //   // TODO(seefeld): Should factor this out, but we should just fully
-      //   // normalize schemas, etc.
-      //   !(isObject(elementSchema) &&
-      //     (elementSchema.asCell || elementSchema.asStream ||
-      //       (Array.isArray(elementSchema?.anyOf) &&
-      //         elementSchema.anyOf.every((option) =>
-      //           option.asCell || option.asStream
-      //         )) ||
-      //       (Array.isArray(elementSchema?.oneOf) &&
-      //         elementSchema.oneOf.every((option) =>
-      //           option.asCell || option.asStream
-      //         ))))
-      // ) {
-      //   elementLink = {
-      //     id: createDataCellURI(value[i], link),
-      //     path: [],
-      //     schema: elementSchema,
-      //     rootSchema: elementLink.rootSchema,
-      //     space: link.space,
-      //     type: "application/json",
-      //   } satisfies NormalizedFullLink;
-
       // TODO(@ubik2): We follow the first link in array elements so we
       // don't have strangeness with setting item at 0 to item at 1
+      // If the element on the array is a link, we follow that link so the
+      // returned object is the current item at that location (otherwise the
+      // link would refer to "Nth element"). This is important when turning
+      // returned objects back into cells: We want to then refer to the actual
+      // object by default, not the array location.
+      //
+      // If the element is an object, but not a link, we create an immutable
+      // cell to hold the object, except when it is requested as Cell. While
+      // this means updates aren't propagated, it seems like the right trade-off
+      // for stability of links and the ability to mutate them without creating
+      // loops (see below).
+      //
+      // This makes
+      // ```ts
+      // const array = [...cell.get()];
+      // array.splice(index, 1);
+      // cell.set(array);
+      // ```
+      // work as expected. Handle boolean items values for element schema
       if (isLink(item)) {
         const [next, selector] = getAtPath(
           this.tx,
@@ -1647,6 +1641,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
         );
         curDoc = next;
         curSelector = selector!;
+        // } else if (isRecord(item) && SchemaObjectTraverser.asCellOrStream(itemSchema)) {
+        // FIXME: Integrate this chunk that was added in schema
+        // https://github.com/commontoolsinc/labs/pull/1920/files#diff-6ec557db2c78d81957b1b502d0b9db23a0c462301c08cfe0d7afd756c4b580e5R794
+        //   elementLink = {
+        //     id: createDataCellURI(value[i], link),
+        //     path: [],
+        //     schema: elementSchema,
+        //     rootSchema: elementLink.rootSchema,
+        //     space: link.space,
+        //     type: "application/json",
+        //   } satisfies NormalizedFullLink;
       }
       const val = this.traverseWithSelector(curDoc, curSelector);
       if (val === undefined) {
