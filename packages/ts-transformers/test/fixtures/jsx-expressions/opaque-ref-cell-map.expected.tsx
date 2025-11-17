@@ -1,7 +1,116 @@
 import * as __ctHelpers from "commontools";
 import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe("Simple Recipe", false as const satisfies __ctHelpers.JSONSchema, () => ({
+const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$NAME", "$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    enum: [false]
+                }, {
+                    type: "boolean",
+                    enum: [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        enum: [false]
+                    }, {
+                        type: "boolean",
+                        enum: [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => ({
     [NAME]: "Some Simple Recipe",
     [UI]: <div>Some Simple Recipe</div>,
 }));
@@ -87,7 +196,117 @@ const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     return navigateTo(charm);
 });
 // create the named cell inside the recipe body, so we do it just once
-export default recipe("Charms Launcher", false as const satisfies __ctHelpers.JSONSchema, () => {
+export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/Element"
+        },
+        cellRef: true
+    },
+    required: ["$NAME", "$UI", "cellRef"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    enum: [false]
+                }, {
+                    type: "boolean",
+                    enum: [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        enum: [false]
+                    }, {
+                        type: "boolean",
+                        enum: [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => {
     // cell to store array of charms we created
     const { cellRef } = createCellRef({
         isInitialized: cell(false),

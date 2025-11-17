@@ -11,6 +11,9 @@ export default recipe({
         }
     },
     required: ["base", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
 } as const satisfies __ctHelpers.JSONSchema, (config: {
     base: number;
     multiplier: number;
