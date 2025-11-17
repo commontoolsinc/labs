@@ -39,7 +39,7 @@ export default recipe<InputSchema>(({ title, items }) => {
             items.map((item) => <li>{item.text}</li>)
           }
         </ul>
-        <common-send-message
+        <ct-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"

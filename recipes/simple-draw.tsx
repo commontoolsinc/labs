@@ -141,7 +141,7 @@ export const UserSession = recipe<
             }}
           >
             <label style={{ whiteSpace: "nowrap" }}>Your username:</label>
-            <common-send-message
+            <ct-message-input
               inline="true"
               name="Update"
               value={user.name}
@@ -188,7 +188,7 @@ export const UserSession = recipe<
                         <b>{m.author.name}</b>
                         <span>· {derive(m.timestamp, formatTime)}</span>
                       </div>
-                      <common-send-message
+                      <ct-message-input
                         name="Save"
                         placeholder="Type message..."
                         value={m.message}

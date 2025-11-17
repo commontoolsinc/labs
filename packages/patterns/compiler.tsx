@@ -58,7 +58,7 @@ export default recipe<Input>(
       [NAME]: "My First Compiler",
       [UI]: (
         <div>
-          <common-code-editor
+          <ct-code-editor
             source={code}
             language="text/x.typescript"
             onChange={updateCode({ code })}

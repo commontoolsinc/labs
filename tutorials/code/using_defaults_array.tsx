@@ -23,7 +23,7 @@ export default recipe<TodoListState>("Todo List with Default", (state) => {
     [UI]: (
       <div>
         <h2>My Todos</h2>
-        <common-send-message
+        <ct-message-input
           name="Add"
           placeholder="Add a todo..."
           onmessagesend={addItem({ items: state.items })}

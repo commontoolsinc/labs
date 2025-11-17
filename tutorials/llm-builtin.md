@@ -93,7 +93,7 @@ export default recipe("LLM Test", () => {
         <h2>My LLM Test</h2>
         <div>User Message: {userMessage}</div>
         <div>
-          <common-send-message
+          <ct-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
@@ -109,7 +109,7 @@ export default recipe("LLM Test", () => {
 On line 2, we have a call to cell(). This will create a Cell with the default value passed in.
 We'll use this cell to store the text the user types in our user input component.
 
-On line 11, we've added the `<common-send-message>` component. Note that regular HTML forms are not allowed in the recipe UI. These restrictions are there for data privacy and security reasons.
+On line 11, we've added the `<ct-message-input>` component. Note that regular HTML forms are not allowed in the recipe UI. These restrictions are there for data privacy and security reasons.
 The `placeholder` property (line 13) shows faded text in the input form as its default value. The `onmessagesend` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `onmessagesend` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
 
 
@@ -229,7 +229,7 @@ Technically, the `llm()` built-in is called once with the undefined userMessage 
 The charm then renders the code in the [UI] section and the system sets the reactive node to display the llmResponse with the conditional expression we wrote (`{llmResponse.result ? ... : ""}`) and the user's message with `{userMessage}`.
 These initially don't show anything since the values are undefined.
 
-The user types a prompt into the `<common-send-message>` component which triggers the `textInputHandler()`. The handler gets passed in the event, which contains the user's message (as a normal js object), and also the `userMessage` which is a Cell. The handler sets the cell's value with the event message.
+The user types a prompt into the `<ct-message-input>` component which triggers the `textInputHandler()`. The handler gets passed in the event, which contains the user's message (as a normal js object), and also the `userMessage` which is a Cell. The handler sets the cell's value with the event message.
 
 The `userMessage` has been updated now and therefore kicks off the reactive system.
 We re-render the portion of the UI that contains `User Message: {userMessage}` since the cell contained within the braces has changed.
@@ -289,7 +289,7 @@ export default recipe("LLM Test", () => {
           {llmResponse.result ? JSON.stringify(llmResponse.result) : ""}
         </div>
         <div>
-          <common-send-message
+          <ct-message-input
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"

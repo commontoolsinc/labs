@@ -3864,14 +3864,6 @@ declare global {
         CTUpdaterAttributes<CTUpdaterElement>,
         CTUpdaterElement
       >;
-      "common-input": CTDOM.DetailedHTMLProps<
-        CTInputLegacyAttributes<CTInputLegacyElement>,
-        CTInputLegacyElement
-      >;
-      "common-send-message": CTDOM.DetailedHTMLProps<
-        CTSendMessageAttributes<CTSendMessageElement>,
-        CTSendMessageElement
-      >;
       "common-google-oauth": CTDOM.DetailedHTMLProps<
         CTGoogleOAuthAttributes<CTGoogleOAuthElement>,
         CTGoogleOAuthElement
@@ -3892,29 +3884,16 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
-      "common-code-editor": CTDOM.DetailedHTMLProps<
-        CTCodeEditorLegacyAttributes<CTCodeEditorLegacyElement>,
-        CTCodeEditorLegacyElement
-      >;
       "common-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
       >;
-      // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,
         CTHStackElement
       >;
       "ct-vstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTVStackElement>,
-        CTVStackElement
-      >;
-      "common-hstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTHStackElement>,
-        CTHStackElement
-      >;
-      "common-vstack": CTDOM.DetailedHTMLProps<
-        CTStackLegacyAttributes<CTVStackElement>,
         CTVStackElement
       >;
     }

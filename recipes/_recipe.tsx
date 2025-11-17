@@ -57,10 +57,10 @@ export default recipe(
     [NAME]: superCoolField,
     [UI]: (
       <div>
-        <common-input
+        <ct-input
           value={superCoolField}
           placeholder="List title"
-          oncommon-input={updateValue({ value: superCoolField })}
+          onct-input={updateValue({ value: superCoolField })}
         />
         <common-google-oauth $auth={auth} />
       </div>

@@ -342,14 +342,14 @@ export default recipe(
             <span>Summarized: {summarizedCount}</span>
           </div>
 
-          <common-hstack gap="sm">
-            <common-vstack gap="sm">
+          <ct-hstack gap="sm">
+            <ct-vstack gap="sm">
               <div>
                 <label>Summary Length</label>
-                <common-input
+                <ct-input
                   value={settings.summaryLength}
                   placeholder="medium"
-                  oncommon-input={summaryLengthHandler}
+                  onct-input={summaryLengthHandler}
                 />
               </div>
 
@@ -360,8 +360,8 @@ export default recipe(
                 />
                 <label>Include Tags</label>
               </div>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
 
           <div>
             <table>

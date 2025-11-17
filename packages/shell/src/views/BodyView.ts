@@ -153,9 +153,9 @@ export class XBodyView extends BaseView {
 
     const mainContent = activeCharm
       ? html`
-        <common-charm slot="main" .charmId="${activeCharm.id}">
+        <div slot="main">
           <ct-render .cell="${activeCharm.getCell()}"></ct-render>
-        </common-charm>
+        </div>
       `
       : defaultCell
       ? html`

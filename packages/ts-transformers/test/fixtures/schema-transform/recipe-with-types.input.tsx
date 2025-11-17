@@ -57,7 +57,7 @@ export default recipe(inputSchema, outputSchema, ({ title, items }) => {
             <li key={index}>{item.text}</li>
           ))}
         </ul>
-        <common-send-message
+        <ct-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"

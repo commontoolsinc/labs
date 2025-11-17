@@ -29,9 +29,9 @@ export default recipe<Input, Result>(
     return {
       [NAME]: "ct-tags demo",
       [UI]: (
-        <common-vstack gap="lg" style={{ padding: "1rem" }}>
+        <ct-vstack gap="lg" style={{ padding: "1rem" }}>
           <ct-tags tags={tags} onct-change={updateTags({ tags })} />
-        </common-vstack>
+        </ct-vstack>
       ),
       tags,
     };

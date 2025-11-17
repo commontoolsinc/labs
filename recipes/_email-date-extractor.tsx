@@ -467,8 +467,8 @@ export default recipe(
             <span>Dates found: {dateCount}</span>
           </div>
 
-          <common-hstack gap="md">
-            <common-vstack gap="sm">
+          <ct-hstack gap="md">
+            <ct-vstack gap="sm">
               <div>
                 <input
                   type="checkbox"
@@ -507,8 +507,8 @@ export default recipe(
                   onChange={minConfidenceHandler}
                 />
               </div>
-            </common-vstack>
-          </common-hstack>
+            </ct-vstack>
+          </ct-hstack>
 
           <div>
             <h3>All Extracted Dates</h3>

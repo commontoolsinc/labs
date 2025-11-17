@@ -143,13 +143,13 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
     [NAME]: title,
     [UI]: (
       <os-container>
-        <common-input
+        <ct-input
           value={title}
           placeholder="List title"
-          oncommon-input={updateTitle({ title })}
+          onct-input={updateTitle({ title })}
           customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
         />
-        <common-vstack gap="sm">
+        <ct-vstack gap="sm">
           {results.map((
             { title, question, item }: {
               title: string;
@@ -158,7 +158,7 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
             },
           ) => (
             <li>
-              <common-vstack>
+              <ct-vstack>
                 <blockquote>
                   {title}
                 </blockquote>
@@ -170,10 +170,10 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
                 >
                   Delete
                 </ct-button>
-              </common-vstack>
+              </ct-vstack>
             </li>
           ))}
-        </common-vstack>
+        </ct-vstack>
         <ct-message-input
           name="Add"
           placeholder="New question"

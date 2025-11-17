@@ -82,7 +82,7 @@ export default recipe<InputSchema>(
             ))}
           </div>
           <div style={{ marginTop: "1rem" }}>
-            <common-send-message
+            <ct-message-input
               name="Send"
               placeholder="Type a message..."
               appearance="rounded"

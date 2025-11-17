@@ -71,7 +71,7 @@ export default recipe<InputSchema>(({ title }) => {
       <div>
         <h3>{title}</h3>
         <p>Super Simple LinkedList</p>
-        <common-send-message
+        <ct-message-input
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"

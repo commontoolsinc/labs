@@ -1,7 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { baseStyles } from "./style.ts";
 import { Cell } from "@commontools/runner";
-import { CommonCharmElement } from "./common-charm.ts";
 
 declare global {
   var Plaid: any;

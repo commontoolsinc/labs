@@ -43,7 +43,7 @@ export default recipe("state test", () => {
     [UI]: (
       <div>
         <h2>Character name: {characterName}</h2>
-        <common-send-message
+        <ct-message-input
           name="Update"
           placeholder="Update Name"
           onmessagesend={updateName({ characterName })}

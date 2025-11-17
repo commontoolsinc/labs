@@ -581,14 +581,14 @@ These are the most frequent mistakes developers make when building patterns:
 </div>
 
 // ❌ WRONG - Object style on custom element
-<common-hstack style={{ flex: 1 }}>
+<ct-hstack style={{ flex: 1 }}>
   {/* Error */}
-</common-hstack>
+</ct-hstack>
 
 // ✅ CORRECT - String style on custom element
-<common-hstack style="flex: 1;">
+<ct-hstack style="flex: 1;">
   {/* Works! */}
-</common-hstack>
+</ct-hstack>
 ```
 
 **Rule:** HTML elements use object styles, custom elements use string styles. See "Styling: String vs Object Syntax" in `COMPONENTS.md` for details.
@@ -875,7 +875,7 @@ Remember: HTML elements use object syntax, custom elements use string syntax.
 <span style={{ color: "red", fontWeight: "bold" }} />
 
 // ✅ Custom elements - String syntax
-<common-hstack style="flex: 1; padding: 1rem;" />
+<ct-hstack style="flex: 1; padding: 1rem;" />
 <ct-card style="border: 1px solid #ccc;" />
 
 // ❌ Common mistake

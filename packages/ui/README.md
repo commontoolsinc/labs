@@ -1,14 +1,11 @@
 # Common UI Web Components
 
-A modern, secure web component library with both legacy (v1) and new
-shadcn-inspired (v2) components, fully compatible with Deno 2. This library
+A web component library fully compatible with Deno 2. This library
 provides production-ready components designed for untrusted DOM contexts with
 strict security constraints.
 
 ## 🚀 Features
 
-- **Two Versions Available**: Legacy v1 components and modern v2 with shadcn/ui
-  inspired component library
 - **39 Production-Ready Components** (v2) - Complete implementation of a
   shadcn/ui-inspired component library
 - **Security-First Design** - Built for sandboxed environments with strict
@@ -17,16 +14,12 @@ strict security constraints.
 - **TypeScript Support** - Full type definitions with Deno's native TypeScript
 - **Framework Agnostic** - Works with React, Vue, Angular, or vanilla JavaScript
 - **Accessibility Built-in** - WCAG 2.1 AA compliant components
-- **LLM-Friendly** - Includes `LLM-COMPONENT-INSTRUCTIONS.md` for AI-assisted
-  development
 
 ## 📦 Library Structure
 
 ```
 src/
 ├── index.ts          # Main entry (exports both v1 and v2, with v2 as default)
-├── v1/              # Legacy components (common- prefix)
-│   └── components/  # Original common-ui components
 └── v2/              # New shadcn-inspired components (ct- prefix)
     ├── components/  # 39 modern components
     ├── core/        # Base element class
@@ -43,7 +36,7 @@ src/
 import { CTButton, CTCard, CTInput } from "@commontools/ui";
 
 // Or import specific versions
-import { v1, v2 } from "@commontools/ui";
+import { v2 } from "@commontools/ui";
 
 // Auto-register all v2 components
 import { registerAllComponents } from "@commontools/ui/v2";
@@ -60,9 +53,6 @@ registerAllComponents();
   <h3 slot="header">Card Title</h3>
   <p slot="content">Card content</p>
 </ct-card>
-
-<!-- V1 Components (common- prefix) -->
-<common-button>Legacy Button</common-button>
 ```
 
 ## 📖 V2 Components (39 total)

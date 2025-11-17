@@ -191,7 +191,7 @@ const addItem = handler<
 ```
 
 This handler receives an event with `{detail: {message: string}}` - this is the
-shape we'll need for the `<common-send-message>` component we'll use later. The
+shape we'll need for the `<ct-message-input>` component we'll use later. The
 handler gets the message text, trims whitespace, and adds it to the array if
 it's not empty.
 
@@ -233,7 +233,7 @@ export default recipe<TodoListState>("Todo List", (state) => {
     [UI]: (
       <div>
         <h2>My Todos</h2>
-        <common-send-message
+        <ct-message-input
           name="Add"
           placeholder="Add a todo..."
           onmessagesend={addItem({ items: state.items })}
@@ -255,7 +255,7 @@ export default recipe<TodoListState>("Todo List", (state) => {
 **Line 28** receives `state` which has an `items` property that's already a
 `Cell<string[]>`.
 
-**Lines 33-36** use the `<common-send-message>` component for input, which
+**Lines 33-36** use the `<ct-message-input>` component for input, which
 provides a text field with a submit button. The `onmessagesend` event fires when
 the user submits.
 

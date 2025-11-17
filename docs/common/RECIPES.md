@@ -269,31 +269,6 @@ actually creates mini-recipes for each item in the array, constructing a
 reactive graph. Each mapped item becomes a reactive node that updates when the
 source data changes.
 
-In the todo-list example, this pattern is used to create draggable todo items,
-where each item has its own encapsulated recipe:
-
-```typescript
-{items.map((item: TodoItem) => (
-  <common-draggable
-    $entity={item}
-    spell={JSON.stringify(
-      recipe(TodoItemSchema, {}, (item) => ({
-        [UI]: (
-          <common-todo
-            checked={item.done}
-            value={item.title}
-            ontodo-checked={updateItem({ item })}
-            ontodo-input={updateItem({ item })}
-          />
-        ),
-      })),
-    )}
-  >
-    <!-- Component content -->
-  </common-draggable>
-))}
-```
-
 This approach allows for efficient updates and encapsulation of item-specific
 logic.
 
