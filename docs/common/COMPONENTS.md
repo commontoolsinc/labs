@@ -212,7 +212,7 @@ CommonTools custom elements (`ct-hstack`, `ct-vstack`, `ct-card`, etc.) use CSS 
 ```tsx
 // ✅ CORRECT - String syntax for custom elements
 <ct-hstack gap="1" style="align-items: center; padding: 1rem;">
-  <ct-vstack gap="md" style="flex: 1; max-width: 600px;">
+  <ct-vstack gap="2" style="flex: 1; max-width: 600px;">
     <ct-card style="border: 1px solid #ccc; padding: 0.5rem;">
       Content here
     </ct-card>
@@ -239,7 +239,7 @@ CommonTools custom elements (`ct-hstack`, `ct-vstack`, `ct-card`, etc.) use CSS 
 ```tsx
 // You'll often mix both types in one recipe
 <div style={{ display: "flex", gap: "1rem" }}>
-  <ct-vstack gap="md" style="flex: 1; padding: 1rem;">
+  <ct-vstack gap="2" style="flex: 1; padding: 1rem;">
     <span style={{ color: "#333", fontSize: "14px" }}>
       Label Text
     </span>

@@ -467,7 +467,7 @@ export default recipe(
             <span>Dates found: {dateCount}</span>
           </div>
 
-          <ct-hstack gap="md">
+          <ct-hstack gap="2">
             <ct-vstack gap="1">
               <div>
                 <input

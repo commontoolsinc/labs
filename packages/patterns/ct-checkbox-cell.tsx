@@ -27,7 +27,7 @@ export default recipe<CheckboxDemoInput, CheckboxDemoOutput>(
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <ct-vstack gap="md" style="padding: 2rem; max-width: 600px;">
+        <ct-vstack gap="2" style="padding: 2rem; max-width: 600px;">
           <h3>ct-checkbox Bidirectional Binding Demo</h3>
 
           <ct-card>

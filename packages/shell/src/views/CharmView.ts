@@ -42,9 +42,9 @@ export class XCharmView extends BaseView {
     const cell = this.charm.getCell();
 
     return html`
-      <div>
+      <common-charm .charmId="${this.charm.id}">
         <ct-render .cell="${cell}"></ct-render>
-      </div>
+      </common-charm>
     `;
   }
 }

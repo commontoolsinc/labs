@@ -15,7 +15,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot - Content to be grouped horizontally
  *
  * @example
- * <ct-hgroup gap="md">
+ * <ct-hgroup gap="2">
  *   <ct-button>Save</ct-button>
  *   <ct-button variant="outline">Cancel</ct-button>
  * </ct-hgroup>

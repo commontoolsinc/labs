@@ -13,7 +13,7 @@ export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
-        <ct-vstack gap="md" style="padding: 2rem; max-width: 400px;">
+        <ct-vstack gap="2" style="padding: 2rem; max-width: 400px;">
           <h3>Simple ct-checkbox + ifElse Demo</h3>
 
           <ct-checkbox $checked={enabled}>

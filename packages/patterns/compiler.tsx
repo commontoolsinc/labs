@@ -59,10 +59,10 @@ export default recipe<Input>(
       [UI]: (
         <div>
           <ct-code-editor
-            source={code}
+            value={code}
             language="text/x.typescript"
             onChange={updateCode({ code })}
-            errors={errors}
+            // errors={errors}
           />
           {ifElse(
             error,

@@ -1,5 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { baseStyles } from "./style.ts";
+import { CommonCharmElement } from "./common-charm.ts";
 import { Cell } from "@commontools/runner";
 
 export class CommonUpdaterElement extends LitElement {

@@ -125,7 +125,7 @@ export default recipe<ListInput, ListOutput>(
     return {
       [NAME]: "List demo",
       [UI]: (
-        <ct-vstack gap="md">
+        <ct-vstack gap="2">
           <ct-card>
             <ct-button
               id="reset-demo"
