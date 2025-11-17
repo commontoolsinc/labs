@@ -3034,7 +3034,7 @@ interface CTSendMessageAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: any;
   "placeholder"?: string;
   "appearance"?: "rounded";
-  "onmessagesend"?: EventHandler<{ message: string }>;
+  "onct-send"?: EventHandler<{ message: string }>;
   "inline"?: Booleanish;
 }
 
@@ -3888,6 +3888,7 @@ declare global {
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
       >;
+      // Define both `ct-` and `common-` variants
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,
         CTHStackElement

@@ -1,15 +1,7 @@
 /// <cts-enable />
-import {
-  cell,
-  recipe,
-  UI,
-  lift,
-  handler,
-  type Cell,
-} from "commontools";
+import { type Cell, cell, handler, lift, recipe, UI } from "commontools";
 
-const calcAC = (dex: number) : number =>
-  20 + Math.floor((dex - 10) / 2);
+const calcAC = (dex: number): number => 20 + Math.floor((dex - 10) / 2);
 
 const updateName = handler<
   { detail: { message: string } },
@@ -17,7 +9,7 @@ const updateName = handler<
 >(
   (event, { characterName }) => {
     characterName.set(event.detail.message);
-  }
+  },
 );
 
 const rollD6 = () => Math.floor(Math.random() * 6) + 1;
@@ -30,7 +22,7 @@ const rollDex = handler<
     // Roll 3d6 for new DEX value
     const roll = rollD6() + rollD6() + rollD6();
     dex.set(roll);
-  }
+  },
 );
 
 export default recipe("state test", () => {
@@ -46,11 +38,10 @@ export default recipe("state test", () => {
         <ct-message-input
           name="Update"
           placeholder="Update Name"
-          onmessagesend={updateName({ characterName })}
+          onct-send={updateName({ characterName })}
         />
         <li>
-          DEX: {dex}
-          {" "}
+          DEX: {dex}{" "}
           <ct-button onClick={rollDex(dex)}>
             Roll
           </ct-button>

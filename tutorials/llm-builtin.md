@@ -97,7 +97,7 @@ export default recipe("LLM Test", () => {
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onmessagesend={textInputHandler({ userMessage })}
+            onct-send={textInputHandler({ userMessage })}
           />
         </div>
       </div>
@@ -110,7 +110,7 @@ On line 2, we have a call to cell(). This will create a Cell with the default va
 We'll use this cell to store the text the user types in our user input component.
 
 On line 11, we've added the `<ct-message-input>` component. Note that regular HTML forms are not allowed in the recipe UI. These restrictions are there for data privacy and security reasons.
-The `placeholder` property (line 13) shows faded text in the input form as its default value. The `onmessagesend` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `onmessagesend` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
+The `placeholder` property (line 13) shows faded text in the input form as its default value. The `onct-send` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `onct-send` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
 
 
 Before this code will actually work, we'll need to define the textInputHandler function. This should be at the same level as the `recipe` function. 
@@ -293,7 +293,7 @@ export default recipe("LLM Test", () => {
             name="Send"
             placeholder="Type a message..."
             appearance="rounded"
-            onmessagesend={textInputHandler({ userMessage })}
+            onct-send={textInputHandler({ userMessage })}
           />
         </div>
       </div>

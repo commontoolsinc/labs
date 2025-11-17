@@ -61,7 +61,7 @@ export default pattern(({ title, items }) => {
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          onmessagesend={addItem({ items })}
+          onct-send={addItem({ items })}
         />
       </div>
     ),

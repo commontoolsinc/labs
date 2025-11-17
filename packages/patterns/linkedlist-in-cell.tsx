@@ -75,7 +75,7 @@ export default recipe<InputSchema>(({ title }) => {
           name="Send"
           placeholder="Type a message..."
           appearance="rounded"
-          onmessagesend={addItem({ items_list })}
+          onct-send={addItem({ items_list })}
         />
         <div
           style={{

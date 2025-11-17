@@ -365,7 +365,7 @@ export default recipe(
         3. ${timeInstruction}
         4. Include a brief context snippet (${settings.contextLength} characters) around the date mention
         5. Assign a confidence score (0-1) that this is a relevant future date/deadline/appointment
-        
+
         Return only JSON in this exact format:
         {
           "dates": [
@@ -379,7 +379,7 @@ export default recipe(
             ...more dates
           ]
         }
-        
+
         ${dateInclusionInstruction}
         Only include dates with confidence score >= ${settings.minConfidence}.
       `;
@@ -388,7 +388,7 @@ export default recipe(
         Subject: ${email.subject}
         Date: ${email.date}
         From: ${email.from}
-        
+
         ${emailContent.content}
       `;
 
@@ -468,7 +468,7 @@ export default recipe(
           </div>
 
           <ct-hstack gap="md">
-            <ct-vstack gap="sm">
+            <ct-vstack gap="1">
               <div>
                 <input
                   type="checkbox"

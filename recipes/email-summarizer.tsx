@@ -291,7 +291,7 @@ export default recipe(
         Subject: ${email.subject}
         From: ${email.from}
         Date: ${email.date}
-        
+
         ${emailContent.content}
       `;
 
@@ -342,8 +342,8 @@ export default recipe(
             <span>Summarized: {summarizedCount}</span>
           </div>
 
-          <ct-hstack gap="sm">
-            <ct-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Summary Length</label>
                 <ct-input

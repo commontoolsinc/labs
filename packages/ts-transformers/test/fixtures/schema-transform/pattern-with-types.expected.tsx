@@ -133,7 +133,7 @@ export default pattern(({ title, items }) => {
         <ul>
           {items.map((item: Item, index: number) => (<li key={index}>{item.text}</li>))}
         </ul>
-        <ct-message-input name="Send" placeholder="Type a message..." appearance="rounded" onmessagesend={addItem({ items })}/>
+        <ct-message-input name="Send" placeholder="Type a message..." appearance="rounded" onct-send={addItem({ items })}/>
       </div>),
         title,
         items,

@@ -268,14 +268,14 @@ You can mix-and-match the above components to achieve practically any (standard)
     </ct-toolbar>
     <ct-autolayout>
         <ct-vstack slot="left">
-            <ct-hstack gap="sm">
+            <ct-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
                 <ct-spacer />
                 <button>hello</button>
             </ct-hstack>
 
-            <ct-hstack gap="sm">
+            <ct-hstack gap="1">
                 <icon>question</icon>
                 <button>hello</button>
             </ct-hstack>

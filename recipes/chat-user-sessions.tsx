@@ -115,7 +115,7 @@ export const UserSession = recipe<
               name="Set"
               placeholder="Choose a display name"
               appearance="rounded"
-              onmessagesend={setUsername({
+              onct-send={setUsername({
                 user,
               })}
             />
@@ -145,7 +145,7 @@ export const UserSession = recipe<
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onmessagesend={sendMessage({
+              onct-send={sendMessage({
                 messages,
                 user,
               })}

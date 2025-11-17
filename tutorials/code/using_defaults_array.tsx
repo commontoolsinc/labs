@@ -26,7 +26,7 @@ export default recipe<TodoListState>("Todo List with Default", (state) => {
         <ct-message-input
           name="Add"
           placeholder="Add a todo..."
-          onmessagesend={addItem({ items: state.items })}
+          onct-send={addItem({ items: state.items })}
         />
         <ul>
           {/* Note: key is not needed for Common Tools but linters require it */}

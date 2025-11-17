@@ -211,7 +211,7 @@ CommonTools custom elements (`ct-hstack`, `ct-vstack`, `ct-card`, etc.) use CSS 
 
 ```tsx
 // ✅ CORRECT - String syntax for custom elements
-<ct-hstack gap="sm" style="align-items: center; padding: 1rem;">
+<ct-hstack gap="1" style="align-items: center; padding: 1rem;">
   <ct-vstack gap="md" style="flex: 1; max-width: 600px;">
     <ct-card style="border: 1px solid #ccc; padding: 0.5rem;">
       Content here

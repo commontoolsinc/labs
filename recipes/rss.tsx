@@ -66,8 +66,8 @@ export default recipe<
             Feed Items: {derive(items, (items) => items.get().length)}
           </h2>
 
-          <ct-hstack gap="sm">
-            <ct-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Feed URL</label>
                 <ct-input

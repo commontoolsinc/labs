@@ -148,12 +148,12 @@ packages/ui/
 ```html
 <ct-form>
   <ct-vstack gap="4">
-    <ct-vgroup gap="sm">
+    <ct-vgroup gap="1">
       <ct-label for="email" required>Email</ct-label>
       <ct-input id="email" type="email" name="email" required></ct-input>
     </ct-vgroup>
 
-    <ct-vgroup gap="sm">
+    <ct-vgroup gap="1">
       <ct-label for="message">Message</ct-label>
       <ct-textarea id="message" name="message" rows="4"></ct-textarea>
     </ct-vgroup>

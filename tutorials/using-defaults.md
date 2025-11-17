@@ -236,7 +236,7 @@ export default recipe<TodoListState>("Todo List", (state) => {
         <ct-message-input
           name="Add"
           placeholder="Add a todo..."
-          onmessagesend={addItem({ items: state.items })}
+          onct-send={addItem({ items: state.items })}
         />
         <ul>
           {state.items.map((item) => (
@@ -256,7 +256,7 @@ export default recipe<TodoListState>("Todo List", (state) => {
 `Cell<string[]>`.
 
 **Lines 33-36** use the `<ct-message-input>` component for input, which
-provides a text field with a submit button. The `onmessagesend` event fires when
+provides a text field with a submit button. The `onct-send` event fires when
 the user submits.
 
 **Lines 39-41** use `.map()` to render each item in the list.

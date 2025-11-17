@@ -1267,8 +1267,8 @@ export default recipe(
               contacts.length)}
           </h2>
 
-          <ct-hstack gap="sm">
-            <ct-vstack gap="sm">
+          <ct-hstack gap="1">
+            <ct-vstack gap="1">
               <div>
                 <label>Import Limit</label>
                 <ct-input

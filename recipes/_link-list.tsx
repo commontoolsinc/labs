@@ -149,7 +149,7 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
           onct-input={updateTitle({ title })}
           customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
         />
-        <ct-vstack gap="sm">
+        <ct-vstack gap="1">
           {results.map((
             { title, question, item }: {
               title: string;
