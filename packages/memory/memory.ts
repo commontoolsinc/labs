@@ -1,4 +1,5 @@
 import * as FS from "@std/fs";
+import * as Path from "@std/path";
 
 import * as Error from "./error.ts";
 import * as Space from "./space.ts";
@@ -229,8 +230,17 @@ export const mount = async (
     } else {
       span.setAttribute("memory.mount.cache", "miss");
 
+      // Detect if store path is a file (has extension) or directory
+      const isFile = Path.extname(session.store.pathname) !== "";
+
+      // If store is a file: use it directly (e.g., /data/spaces/xyz/5/space.db)
+      // If store is a directory: create per-space files (e.g., /cache/memory/did:key:z6Mkr4....sqlite)
+      const spaceUrl = isFile
+        ? session.store
+        : new URL(`./${subject}.sqlite`, session.store);
+
       const result = await Space.open({
-        url: new URL(`./${subject}.sqlite`, session.store),
+        url: spaceUrl,
       });
 
       if (result.error) {
@@ -262,7 +272,17 @@ export const open = async (
 
     try {
       if (options.store.protocol === "file:") {
-        await FS.ensureDir(options.store);
+        // Check if path has a file extension (single-file mode) or is a directory
+        const isFile = Path.extname(options.store.pathname) !== "";
+
+        if (isFile) {
+          // Ensure parent directory exists for single-file mode
+          const parentDir = Path.dirname(options.store.pathname);
+          await FS.ensureDir(Path.toFileUrl(parentDir));
+        } else {
+          // Ensure directory exists for directory mode
+          await FS.ensureDir(options.store);
+        }
       }
       return { ok: await new Memory(options) };
     } catch (cause) {
