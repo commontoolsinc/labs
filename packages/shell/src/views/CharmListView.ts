@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
+import "./ACLView.ts";
 
 export class XCharmListView extends BaseView {
   static override styles = css`
@@ -108,6 +109,7 @@ export class XCharmListView extends BaseView {
     });
     return html`
       <h3>${spaceName}</h3>
+      <x-acl-view .rt="${this.rt}"></x-acl-view>
       <ul>${list}</ul>
     `;
   }
