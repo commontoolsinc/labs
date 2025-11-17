@@ -3,7 +3,7 @@ import { recipe } from "commontools";
 interface MyInput {
     value: number;
 }
-export default recipe("MyRecipe", {
+export default recipe({
     type: "object",
     properties: {
         value: {
@@ -11,6 +11,14 @@ export default recipe("MyRecipe", {
         }
     },
     required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        result: {
+            type: "number"
+        }
+    },
+    required: ["result"]
 } as const satisfies __ctHelpers.JSONSchema, (input: MyInput) => {
     return {
         result: input.value * 2,

@@ -1,6 +1,116 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, UI } from "commontools";
-export default recipe("ElementAccessBothOpaque", false as const satisfies __ctHelpers.JSONSchema, (_state) => {
+export default recipe({
+    type: "object",
+    properties: {},
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/Element"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        Element: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    enum: ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    enum: [false]
+                }, {
+                    type: "boolean",
+                    enum: [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        enum: [false]
+                    }, {
+                        type: "boolean",
+                        enum: [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (_state) => {
     const items = cell(["apple", "banana", "cherry"]);
     const index = cell(1);
     return {
