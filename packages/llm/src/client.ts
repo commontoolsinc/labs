@@ -20,11 +20,207 @@ export const setLLMUrl = (toolshedUrl: string) => {
   llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
 };
 
+// ============================================================================
+// Mock Mode for Testing
+// ============================================================================
+
+type MockResponseMatcher = (request: LLMRequest) => boolean;
+type MockObjectResponseMatcher = (request: LLMGenerateObjectRequest) => boolean;
+
+interface MockResponse {
+  matcher: MockResponseMatcher;
+  response: LLMResponse;
+}
+
+interface MockObjectResponse {
+  matcher: MockObjectResponseMatcher;
+  response: LLMGenerateObjectResponse;
+}
+
+class MockCatalog {
+  private mockResponses: MockResponse[] = [];
+  private mockObjectResponses: MockObjectResponse[] = [];
+  private enabled = false;
+
+  /**
+   * Enable mock mode - all LLM requests will be intercepted and matched
+   * against registered mock responses instead of hitting the API.
+   */
+  enable(): void {
+    this.enabled = true;
+  }
+
+  /**
+   * Disable mock mode - requests will go to the real API.
+   */
+  disable(): void {
+    this.enabled = false;
+  }
+
+  /**
+   * Clear all registered mock responses.
+   */
+  clear(): void {
+    this.mockResponses = [];
+    this.mockObjectResponses = [];
+  }
+
+  /**
+   * Reset mock mode - disable and clear all responses.
+   */
+  reset(): void {
+    this.disable();
+    this.clear();
+  }
+
+  /**
+   * Check if mock mode is currently enabled.
+   */
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Register a mock response for sendRequest calls.
+   * The matcher function should return true if this mock should be used for the given request.
+   */
+  addResponse(matcher: MockResponseMatcher, response: LLMResponse): void {
+    this.mockResponses.push({ matcher, response });
+  }
+
+  /**
+   * Register a mock response for generateObject calls.
+   */
+  addObjectResponse(
+    matcher: MockObjectResponseMatcher,
+    response: LLMGenerateObjectResponse,
+  ): void {
+    this.mockObjectResponses.push({ matcher, response });
+  }
+
+  /**
+   * Find a matching mock response for the given request.
+   * Returns undefined if no match is found.
+   */
+  findResponse(request: LLMRequest): LLMResponse | undefined {
+    const mock = this.mockResponses.find((m) => m.matcher(request));
+    return mock?.response;
+  }
+
+  /**
+   * Find a matching mock object response for the given request.
+   */
+  findObjectResponse(
+    request: LLMGenerateObjectRequest,
+  ): LLMGenerateObjectResponse | undefined {
+    const mock = this.mockObjectResponses.find((m) => m.matcher(request));
+    return mock?.response;
+  }
+}
+
+// Global mock catalog
+const mockCatalog = new MockCatalog();
+
+/**
+ * Enable mock mode for testing. When enabled, all LLM requests will be
+ * intercepted and matched against registered mock responses.
+ *
+ * Example:
+ * ```ts
+ * import { enableMockMode, addMockResponse } from "@commontools/llm/client";
+ *
+ * enableMockMode();
+ * addMockResponse(
+ *   (req) => req.messages[0]?.content?.includes("test"),
+ *   { role: "assistant", content: "mock response", id: "mock-1" }
+ * );
+ * ```
+ */
+export function enableMockMode(): void {
+  mockCatalog.enable();
+}
+
+/**
+ * Disable mock mode - requests will go to the real API.
+ */
+export function disableMockMode(): void {
+  mockCatalog.disable();
+}
+
+/**
+ * Clear all registered mock responses without disabling mock mode.
+ */
+export function clearMockResponses(): void {
+  mockCatalog.clear();
+}
+
+/**
+ * Reset mock mode - disable and clear all responses.
+ */
+export function resetMockMode(): void {
+  mockCatalog.reset();
+}
+
+/**
+ * Register a mock response for sendRequest calls.
+ *
+ * @param matcher Function that returns true if this mock should be used for the given request
+ * @param response The LLM response to return
+ *
+ * Example:
+ * ```ts
+ * addMockResponse(
+ *   (req) => req.messages.some(m => m.content?.includes("hello")),
+ *   { role: "assistant", content: "Hi there!", id: "mock-1" }
+ * );
+ * ```
+ */
+export function addMockResponse(
+  matcher: MockResponseMatcher,
+  response: LLMResponse,
+): void {
+  mockCatalog.addResponse(matcher, response);
+}
+
+/**
+ * Register a mock response for generateObject calls.
+ *
+ * @param matcher Function that returns true if this mock should be used for the given request
+ * @param response The generate object response to return
+ *
+ * Example:
+ * ```ts
+ * addMockObjectResponse(
+ *   (req) => req.schema.type === "object",
+ *   { object: { name: "Test", value: 42 } }
+ * );
+ * ```
+ */
+export function addMockObjectResponse(
+  matcher: MockObjectResponseMatcher,
+  response: LLMGenerateObjectResponse,
+): void {
+  mockCatalog.addObjectResponse(matcher, response);
+}
+
 export class LLMClient {
   async generateObject(
     request: LLMGenerateObjectRequest,
     abortSignal?: AbortSignal,
   ): Promise<LLMGenerateObjectResponse> {
+    // Check for mock mode
+    if (mockCatalog.isEnabled()) {
+      const mockResponse = mockCatalog.findObjectResponse(request);
+      if (mockResponse) {
+        // Simulate async behavior
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return mockResponse;
+      }
+      throw new Error(
+        "Mock mode enabled but no matching mock response found for generateObject request",
+      );
+    }
+
     const response = await fetch(llmApiUrl + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -65,6 +261,38 @@ export class LLMClient {
     if (!request.stream && callback) {
       throw new Error(
         "Requested an LLM request with callback, but not configured as a stream.",
+      );
+    }
+
+    // Check for mock mode
+    if (mockCatalog.isEnabled()) {
+      const mockResponse = mockCatalog.findResponse(request);
+      if (mockResponse) {
+        // Simulate streaming behavior if callback is provided
+        if (callback && request.stream) {
+          // Extract text from mock response content
+          let text = "";
+          if (typeof mockResponse.content === "string") {
+            text = mockResponse.content;
+          } else if (Array.isArray(mockResponse.content)) {
+            const textPart = mockResponse.content.find((p: any) =>
+              p.type === "text"
+            ) as any;
+            text = textPart?.text || "";
+          }
+
+          // Simulate streaming by calling callback with accumulated text
+          if (text) {
+            callback(text);
+          }
+        }
+
+        // Simulate async behavior
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return mockResponse;
+      }
+      throw new Error(
+        "Mock mode enabled but no matching mock response found for sendRequest",
       );
     }
 
