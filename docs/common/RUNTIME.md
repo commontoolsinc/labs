@@ -8,7 +8,7 @@ CommonTools consists of several runtime components:
 
 - **Toolshed** (`packages/toolshed/`) - Backend API server providing distributed runtime and storage
 - **Shell** (`packages/shell/`) - Web frontend for interacting with spaces
-- **Runner** (`packages/runner/`) - Recipe runtime execution engine
+- **Runner** (`packages/runner/`) - Pattern runtime execution engine
 - **Background Charm Service** (`packages/background-charm-service/`) - Background service for running charms in Deno workers
 - **Storage** - Storage layer implementation (`packages/memory/`, `packages/runner/src/storage/`)
 - **Identity** (`packages/identity/`) - Identity management and cryptographic key handling
@@ -167,11 +167,11 @@ deno lint
 
 ### Runner (`packages/runner/`)
 
-The recipe runtime execution engine and sandbox coordinator.
+The pattern runtime execution engine and sandbox coordinator.
 
-- **Runtime** - Main runtime class for executing recipes
+- **Runtime** - Main runtime class for executing patterns
 - **Storage** - Transaction model and data store layer
-- **Builder** - Recipe builder API and construction utilities
+- **Builder** - Pattern builder API and construction utilities
 - **Traverse** - Schema traversal and object management
 
 ### Memory (`packages/memory/`)
@@ -208,11 +208,11 @@ Runtime code runs in multiple environments:
 
 - Browsers (Vite built)
 - Browsers (deno-web-test>esbuild Built)
-- Browsers (eval'd recipes)
+- Browsers (eval'd patterns)
 - Deno (scripts and servers)
-- Deno (eval'd recipes)
+- Deno (eval'd patterns)
 - Deno Workers
-- Deno workers (eval'd recipes)
+- Deno workers (eval'd patterns)
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for detailed module graph best practices.
 
