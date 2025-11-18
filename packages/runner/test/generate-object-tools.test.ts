@@ -15,7 +15,6 @@ import {
   addMockObjectResponse,
   addMockResponse,
   enableMockMode,
-  resetMockMode,
 } from "@commontools/llm/client";
 import type { BuiltInLLMMessage } from "@commontools/api";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -25,6 +24,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+// Enable mock mode once for all tests
+enableMockMode();
 
 describe("generateObject with tools", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -45,17 +47,12 @@ describe("generateObject with tools", () => {
 
     const { commontools } = createBuilder();
     ({ recipe, generateObject } = commontools);
-
-    // Enable mock mode for all tests
-    resetMockMode();
-    enableMockMode();
   });
 
   afterEach(async () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
-    resetMockMode();
   });
 
   it("should add finalResult tool to catalog and extract structured result", async () => {
@@ -69,11 +66,15 @@ describe("generateObject with tools", () => {
       required: ["name", "age"],
     };
 
+    const testPrompt = "test-finalResult-person-with-name-and-age";
+
     // Mock the LLM response to include a finalResult tool call
     addMockResponse(
       (req) => {
-        // Verify that finalResult tool is present in the request
-        return req.tools?.["finalResult"] !== undefined;
+        // Match on unique prompt and verify finalResult tool is present
+        return req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.tools?.["finalResult"] !== undefined;
       },
       {
         role: "assistant",
@@ -96,7 +97,7 @@ describe("generateObject with tools", () => {
       "Generate Object with finalResult",
       () => {
         const result = generateObject({
-          prompt: "Generate a person with name and age",
+          prompt: testPrompt,
           schema: resultSchema,
           tools: {}, // Empty tools object triggers the finalResult path
         });
@@ -143,9 +144,14 @@ describe("generateObject with tools", () => {
       required: ["title"],
     };
 
+    const testPrompt = "test-no-tools-document-with-title-and-description";
+
     // For the no-tools path, we need to mock generateObject directly
     addMockObjectResponse(
-      (req) => req.schema.type === "object",
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.schema.type === "object",
       {
         object: {
           title: "Test Title",
@@ -159,7 +165,7 @@ describe("generateObject with tools", () => {
       "Generate Object without tools",
       () => {
         const result = generateObject({
-          prompt: "Generate a document with title and description",
+          prompt: testPrompt,
           schema: resultSchema,
           // No tools parameter - should use direct generateObject path
         });
@@ -205,9 +211,14 @@ describe("generateObject with tools", () => {
       required: ["value"],
     };
 
+    const testPrompt = "test-error-no-finalResult-number";
+
     // Mock response that never calls finalResult
     addMockResponse(
-      (req) => req.tools?.["finalResult"] !== undefined,
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.tools?.["finalResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -224,7 +235,7 @@ describe("generateObject with tools", () => {
       "Generate Object with error",
       () => {
         const result = generateObject({
-          prompt: "Generate a number",
+          prompt: testPrompt,
           schema: resultSchema,
           tools: {},
         });
@@ -275,13 +286,21 @@ describe("generateObject with tools", () => {
       required: ["items", "total"],
     };
 
+    const testPrompt = "test-schema-validation-items-and-count";
+
     addMockResponse(
       (req) => {
+        // Match on unique prompt
+        const matches =
+          req.messages.some((m) =>
+            typeof m.content === "string" && m.content.includes(testPrompt)
+          ) && req.tools?.["finalResult"] !== undefined;
+
         // Capture the schema from the finalResult tool
-        if (req.tools?.["finalResult"]) {
+        if (matches && req.tools?.["finalResult"]) {
           capturedToolSchema = req.tools["finalResult"].inputSchema;
         }
-        return req.tools?.["finalResult"] !== undefined;
+        return matches;
       },
       {
         role: "assistant",
@@ -304,7 +323,7 @@ describe("generateObject with tools", () => {
       "Generate Object with schema validation",
       () => {
         const result = generateObject({
-          prompt: "Generate items and count",
+          prompt: testPrompt,
           schema: resultSchema,
           tools: {},
         });
@@ -358,8 +377,13 @@ describe("generateObject with tools", () => {
       required: ["user"],
     };
 
+    const testPrompt = "test-nested-schema-user-with-tags";
+
     addMockResponse(
-      (req) => req.tools?.["finalResult"] !== undefined,
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(testPrompt)
+        ) && req.tools?.["finalResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -384,7 +408,7 @@ describe("generateObject with tools", () => {
       "Generate Object with nested schema",
       () => {
         const result = generateObject({
-          prompt: "Generate user with tags",
+          prompt: testPrompt,
           schema: resultSchema,
           tools: {},
         });
@@ -433,18 +457,27 @@ describe("generateObject with tools", () => {
       required: ["response"],
     };
 
+    const uniqueMarker = "test-messages-param-unique-marker";
     const messages: BuiltInLLMMessage[] = [
       { role: "user", content: "First message" },
       { role: "assistant", content: "First response" },
-      { role: "user", content: "Second message" },
+      { role: "user", content: `Second message ${uniqueMarker}` },
     ];
 
     let capturedMessages: BuiltInLLMMessage[] | undefined;
 
     addMockResponse(
       (req) => {
-        capturedMessages = req.messages;
-        return req.tools?.["finalResult"] !== undefined;
+        // Match on unique marker in messages
+        const matches =
+          req.messages.some((m) =>
+            typeof m.content === "string" && m.content.includes(uniqueMarker)
+          ) && req.tools?.["finalResult"] !== undefined;
+
+        if (matches) {
+          capturedMessages = req.messages;
+        }
+        return matches;
       },
       {
         role: "assistant",
@@ -499,6 +532,8 @@ describe("generateObject with tools", () => {
     // Verify that messages were used (should have 3 messages from our input)
     expect(capturedMessages).toHaveLength(3);
     expect(capturedMessages?.[0].content).toBe("First message");
-    expect(capturedMessages?.[2].content).toBe("Second message");
+    expect(capturedMessages?.[2].content).toBe(
+      `Second message ${uniqueMarker}`,
+    );
   });
 });
