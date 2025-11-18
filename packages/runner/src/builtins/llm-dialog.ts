@@ -14,6 +14,11 @@ import type {
   JSONSchema,
   Schema,
 } from "commontools";
+import {
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./llm-schemas.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
@@ -336,77 +341,6 @@ function traverseAndCellify(
   }
   return value;
 }
-
-const LLMMessageSchema = {
-  type: "object",
-  properties: {
-    role: { type: "string" },
-    content: {
-      anyOf: [{
-        type: "array",
-        items: {
-          anyOf: [{
-            type: "object",
-            properties: {
-              // This should be anyOf with const values for type
-              type: { type: "string" },
-              text: { type: "string" },
-              image: { type: "string" },
-              toolCallId: { type: "string" },
-              toolName: { type: "string" },
-              input: { type: "object" },
-              output: {},
-            },
-            required: ["type"],
-          }, { type: "string" }],
-        },
-      }, { type: "string" }],
-    },
-  },
-  required: ["role", "content"],
-} as const satisfies JSONSchema;
-
-const LLMToolSchema = {
-  type: "object",
-  properties: {
-    description: { type: "string" },
-    inputSchema: { type: "object" },
-    handler: {
-      // Deliberately no schema, so it gets populated from the handler
-      asStream: true,
-    },
-    pattern: {
-      type: "object",
-      properties: {
-        argumentSchema: { type: "object" },
-        resultSchema: { type: "object" },
-        nodes: { type: "array", items: { type: "object" } },
-        program: { type: "object" },
-        initial: { type: "object" },
-      },
-      required: ["argumentSchema", "resultSchema", "nodes"],
-      asCell: true,
-    },
-    extraParams: { type: "object" },
-    charm: {
-      // Accept whole charm - its own schema defines its handlers
-      asCell: true,
-    },
-  },
-  required: [],
-} as const satisfies JSONSchema;
-
-const LLMParamsSchema = {
-  type: "object",
-  properties: {
-    messages: { type: "array", items: LLMMessageSchema, default: [] },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    system: { type: "string" },
-    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
-  },
-  required: ["messages"],
-} as const satisfies JSONSchema;
 
 const resultSchema = {
   type: "object",
