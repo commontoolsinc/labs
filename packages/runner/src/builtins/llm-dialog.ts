@@ -93,14 +93,23 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
-  return cell.schema ??
-    // If cell has a source cell, any resultRef has a schema attached
-    cell.getSourceCell<{ resultRef: Cell<unknown> }>({
-      type: "object",
-      properties: { resultRef: { asCell: true } },
-    })?.get()?.resultRef?.schema ??
-    // Otherwise, derive a simple object schema from the current value
-    buildMinimalSchemaFromValue(cell);
+  if (cell.schema) return cell.schema;
+
+  const sourceCell = cell.getSourceCell<{ resultRef: Cell<unknown> }>({
+    type: "object",
+    properties: { resultRef: { asCell: true } },
+  });
+  const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
+  if (sourceCellSchema !== undefined) {
+    const cfc = new ContextualFlowControl();
+    return cfc.schemaAtPath(
+      sourceCellSchema,
+      cell.getAsNormalizedFullLink().path,
+      cell.schema,
+    );
+  }
+
+  return buildMinimalSchemaFromValue(cell);
 }
 
 function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {

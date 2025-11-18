@@ -505,7 +505,7 @@ export class ContextualFlowControl {
    */
   schemaAtPath(
     schema: JSONSchema,
-    path: string[],
+    path: readonly string[],
     rootSchema?: JSONSchema,
     extraClassifications?: Set<string>,
   ): JSONSchema {
