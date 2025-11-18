@@ -678,7 +678,7 @@ export default recipe(
               </ct-button>
             </ct-vstack>
           </ct-hstack>
-          <common-google-oauth
+          <ct-google-oauth
             $auth={auth}
             scopes={[
               "email",

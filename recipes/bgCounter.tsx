@@ -53,7 +53,7 @@ export default recipe<
             placeholder="Error"
             onct-input={updateError({ error })}
           />
-          <common-updater
+          <ct-updater
             id="registerBgCounter"
             $state={counter}
             integration="counter"

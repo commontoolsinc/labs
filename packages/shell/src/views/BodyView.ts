@@ -32,7 +32,7 @@ export class XBodyView extends BaseView {
       flex: 1;
     }
 
-    common-charm,
+    ct-charm,
     ct-render[slot="main"] {
       display: flex;
       flex-direction: column;
@@ -153,9 +153,9 @@ export class XBodyView extends BaseView {
 
     const mainContent = activeCharm
       ? html`
-        <common-charm slot="main" .charmId="${activeCharm.id}">
+        <ct-charm slot="main" .charmId="${activeCharm.id}">
           <ct-render .cell="${activeCharm.getCell()}"></ct-render>
-        </common-charm>
+        </ct-charm>
       `
       : defaultCell
       ? html`

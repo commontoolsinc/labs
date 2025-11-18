@@ -1,17 +1,33 @@
-import { html, LitElement } from "lit";
+import { html } from "lit";
+import { BaseElement } from "../../core/base-element.ts";
 
-const TAG_NAME = "common-charm";
+const TAG_NAME = "ct-charm";
 
-export class CommonCharmElement extends LitElement {
+/**
+ * CTCharm - Container element that provides charm context to child components
+ *
+ * @element ct-charm
+ *
+ * @attr {string} charm-id - The ID of the charm
+ * @attr {string} space-name - The name of the space
+ *
+ * @slot - Default slot for charm content
+ *
+ * @example
+ * <ct-charm charm-id="abc123" space-name="my-space">
+ *   <ct-button>Click Me</ct-button>
+ * </ct-charm>
+ */
+export class CTCharm extends BaseElement {
   declare charmId: string | null;
   declare spaceName: string | null;
 
-  static findCharmContainer(element: HTMLElement): CommonCharmElement | null {
+  static findCharmContainer(element: HTMLElement): CTCharm | null {
     const tagName = TAG_NAME.toUpperCase();
     let currentNode: HTMLElement | null = element;
     while (currentNode) {
       if (currentNode.tagName === tagName) {
-        return currentNode as CommonCharmElement;
+        return currentNode as CTCharm;
       }
       const parent: HTMLElement | null = currentNode.parentElement;
       if (parent) {
@@ -48,7 +64,4 @@ export class CommonCharmElement extends LitElement {
   }
 }
 
-globalThis.customElements.define(
-  "common-charm",
-  CommonCharmElement,
-);
+globalThis.customElements.define("ct-charm", CTCharm);

@@ -85,7 +85,7 @@ export default recipe<Input, Output>(
               )}
           </div>
 
-          <common-google-oauth
+          <ct-google-oauth
             $auth={auth}
             scopes={[
               "email",

@@ -1,7 +1,7 @@
-import { css, html, LitElement } from "lit";
-import { baseStyles } from "./style.ts";
+import { css, html } from "lit";
+import { BaseElement } from "../../core/base-element.ts";
 import { Cell } from "@commontools/runner";
-import { CommonCharmElement } from "./common-charm.ts";
+import { CTCharm } from "../ct-charm/ct-charm.ts";
 
 declare global {
   var Plaid: any;
@@ -34,7 +34,18 @@ export interface PlaidAuthData {
   }>;
 }
 
-export class CommonPlaidLinkElement extends LitElement {
+/**
+ * CTPlaidLink - Plaid banking integration component
+ *
+ * @element ct-plaid-link
+ *
+ * @attr {Cell<PlaidAuthData>} auth - Cell containing Plaid authentication data
+ * @attr {string[]} products - Array of Plaid products to use (default: ['transactions'])
+ *
+ * @example
+ * <ct-plaid-link .auth=${authCell} .products=${['transactions', 'auth']}></ct-plaid-link>
+ */
+export class CTPlaidLink extends BaseElement {
   static override properties = {
     auth: { type: Object },
     products: { type: Array },
@@ -66,7 +77,6 @@ export class CommonPlaidLinkElement extends LitElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    // Cleanup Plaid handler
     if (this.plaidHandler) {
       this.plaidHandler.destroy();
       this.plaidHandler = null;
@@ -74,13 +84,11 @@ export class CommonPlaidLinkElement extends LitElement {
   }
 
   private loadPlaidScript() {
-    // Check if already loaded
     if (globalThis.Plaid) {
       this.plaidScriptLoaded = true;
       return;
     }
 
-    // Check if script tag already exists
     const existingScript = document.querySelector(
       'script[src*="plaid.com/link/v2/stable/link-initialize.js"]',
     );
@@ -91,7 +99,6 @@ export class CommonPlaidLinkElement extends LitElement {
       return;
     }
 
-    // Load the script
     const script = document.createElement("script");
     script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
     script.async = true;
@@ -117,9 +124,9 @@ export class CommonPlaidLinkElement extends LitElement {
 
     const authCellId = JSON.stringify(this.auth?.getAsLink());
 
-    const container = CommonCharmElement.findCharmContainer(this);
+    const container = CTCharm.findCharmContainer(this);
     if (!container) {
-      throw new Error("No <common-charm> container.");
+      throw new Error("No <ct-charm> container.");
     }
     const { charmId } = container;
 
@@ -130,7 +137,6 @@ export class CommonPlaidLinkElement extends LitElement {
     };
 
     try {
-      // Get link token from backend
       const response = await fetch(
         "/api/integrations/plaid-oauth/create-link-token",
         {
@@ -152,7 +158,6 @@ export class CommonPlaidLinkElement extends LitElement {
         throw new Error("No link token received from server");
       }
 
-      // Initialize Plaid Link
       this.initializePlaidLink(
         data.linkToken,
         authCellId,
@@ -172,7 +177,6 @@ export class CommonPlaidLinkElement extends LitElement {
     authCellId: string,
     integrationCharmId?: string,
   ) {
-    // Destroy existing handler if any
     if (this.plaidHandler) {
       this.plaidHandler.destroy();
     }
@@ -198,7 +202,6 @@ export class CommonPlaidLinkElement extends LitElement {
         this.isLoading = false;
       },
       onEvent: (eventName: string, metadata: any) => {
-        // Update status based on events
         if (eventName === "OPEN") {
           this.authStatus = "Link opened...";
         } else if (eventName === "SELECT_INSTITUTION") {
@@ -212,8 +215,6 @@ export class CommonPlaidLinkElement extends LitElement {
     };
 
     this.plaidHandler = globalThis.Plaid.create(config);
-
-    // Open Link immediately
     this.plaidHandler.open();
   }
 
@@ -249,7 +250,6 @@ export class CommonPlaidLinkElement extends LitElement {
       this.authStatus = "Bank account connected successfully!";
       this.isLoading = false;
 
-      // Force update to show new account
       this.requestUpdate();
     } catch (error) {
       console.error("Error exchanging token:", error);
@@ -288,7 +288,6 @@ export class CommonPlaidLinkElement extends LitElement {
       this.authStatus = "Bank connection removed successfully";
       this.isLoading = false;
 
-      // Force update to reflect removal
       this.requestUpdate();
     } catch (error) {
       console.error("Error removing account:", error);
@@ -398,152 +397,207 @@ export class CommonPlaidLinkElement extends LitElement {
     `;
   }
 
-  static override get styles() {
-    return [
-      baseStyles,
-      css`
-        /* Same styles as common-plaid-oauth */
-        .plaid-wrapper {
-          padding: 24px;
-          border-radius: 12px;
-          background-color: #ffffff;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          max-width: 800px;
-        }
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      .plaid-wrapper {
+        padding: var(--ct-theme-spacing-loose, 1.5rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-lg, 0.5rem)
+        );
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-white, #ffffff)
+        );
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        max-width: 800px;
+      }
 
-        .connected-accounts {
-          margin-bottom: 24px;
-        }
+      .connected-accounts {
+        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+      }
 
-        .connected-accounts h3 {
-          margin: 0 0 16px;
-          color: #333;
-          font-size: 1.25rem;
-        }
+      .connected-accounts h3 {
+        margin: 0 0 var(--ct-theme-spacing-normal, 1rem);
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
 
-        .bank-item {
-          border: 1px solid #e0e0e0;
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 16px;
-          background-color: #f9f9f9;
-        }
+      .bank-item {
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-color-gray-300, #d1d5db));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        padding: var(--ct-theme-spacing-normal, 1rem);
+        margin-bottom: var(--ct-theme-spacing-normal, 1rem);
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-color-gray-50, #f9fafb)
+        );
+      }
 
-        .bank-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
+      .bank-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--ct-theme-spacing-normal, 0.75rem);
+      }
 
-        .bank-header h4 {
-          margin: 0;
-          color: #333;
-          font-size: 1.1rem;
-        }
+      .bank-header h4 {
+        margin: 0;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
 
-        .remove-button {
-          background-color: #dc3545;
-          color: white;
-          border: none;
-          padding: 6px 12px;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 0.9rem;
-          transition: background-color 0.2s ease;
-        }
+      .remove-button {
+        background-color: var(
+          --ct-theme-color-error,
+          var(--ct-color-red-600, #dc2626)
+        );
+        color: var(
+          --ct-theme-color-primary-foreground,
+          var(--ct-color-white, #ffffff)
+        );
+        border: none;
+        padding: var(--ct-theme-spacing-tight, 0.375rem)
+          var(--ct-theme-spacing-normal, 0.75rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-family: var(--ct-theme-font-family, inherit);
+        transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
+      }
 
-        .remove-button:hover {
-          background-color: #c82333;
-        }
+      .remove-button:hover {
+        background-color: var(
+          --ct-theme-color-error,
+          var(--ct-color-red-700, #b91c1c)
+        );
+      }
 
-        .remove-button:disabled {
-          background-color: #cccccc;
-          cursor: not-allowed;
-        }
+      .remove-button:disabled {
+        background-color: var(
+          --ct-theme-color-border,
+          var(--ct-color-gray-300, #d1d5db)
+        );
+        cursor: not-allowed;
+      }
 
-        .accounts-list {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
+      .accounts-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-theme-spacing-normal, 0.75rem);
+      }
 
-        .account {
-          background-color: white;
-          border: 1px solid #e8e8e8;
-          border-radius: 6px;
-          padding: 12px;
-        }
+      .account {
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-white, #ffffff)
+        );
+        border: 1px solid
+          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        padding: var(--ct-theme-spacing-normal, 0.75rem);
+      }
 
-        .account-info {
-          display: flex;
-          gap: 12px;
-          margin-bottom: 8px;
-          align-items: center;
-        }
+      .account-info {
+        display: flex;
+        gap: var(--ct-theme-spacing-normal, 0.75rem);
+        margin-bottom: var(--ct-theme-spacing-tight, 0.5rem);
+        align-items: center;
+      }
 
-        .account-name {
-          font-weight: 500;
-          color: #333;
-        }
+      .account-name {
+        font-weight: 500;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+      }
 
-        .account-mask {
-          color: #666;
-          font-size: 0.9rem;
-        }
+      .account-mask {
+        color: var(
+          --ct-theme-color-text-muted,
+          var(--ct-color-gray-600, #6b7280)
+        );
+        font-size: 0.9rem;
+      }
 
-        .account-type {
-          background-color: #e8f0fe;
-          color: #1a73e8;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 0.8rem;
-          text-transform: capitalize;
-        }
+      .account-type {
+        background-color: #e8f0fe;
+        color: #1a73e8;
+        padding: 0.125rem var(--ct-theme-spacing-tight, 0.5rem);
+        border-radius: var(
+          --ct-theme-border-radius-full,
+          var(--ct-radius-full, 9999px)
+        );
+        font-size: 0.8rem;
+        text-transform: capitalize;
+      }
 
-        .account-balance {
-          display: flex;
-          gap: 16px;
-          align-items: center;
-          font-size: 0.95rem;
-        }
+      .account-balance {
+        display: flex;
+        gap: var(--ct-theme-spacing-normal, 1rem);
+        align-items: center;
+        font-size: 0.95rem;
+      }
 
-        .balance-label {
-          color: #666;
-        }
+      .balance-label {
+        color: var(
+          --ct-theme-color-text-muted,
+          var(--ct-color-gray-600, #6b7280)
+        );
+      }
 
-        .balance-amount {
-          font-weight: 500;
-          color: #333;
-        }
+      .balance-amount {
+        font-weight: 500;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+      }
 
-        .bank-footer {
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid #e0e0e0;
+      .bank-footer {
+        margin-top: var(--ct-theme-spacing-normal, 0.75rem);
+        padding-top: var(--ct-theme-spacing-normal, 0.75rem);
+        border-top: 1px solid
+          var(--ct-theme-color-border, var(--ct-color-gray-200, #e5e7eb));
         }
 
         .last-updated {
-          color: #666;
+          color: var(
+            --ct-theme-color-text-muted,
+            var(--ct-color-gray-600, #6b7280)
+          );
           font-size: 0.85rem;
         }
 
         .action-section {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: var(--ct-theme-spacing-normal, 1rem);
         }
 
         .connect-button {
           background-color: #1db954;
           color: white;
           border: none;
-          padding: 12px 24px;
-          border-radius: 6px;
+          padding: var(--ct-theme-spacing-normal, 0.75rem)
+            var(--ct-theme-spacing-loose, 1.5rem);
+          border-radius: var(
+            --ct-theme-border-radius,
+            var(--ct-border-radius-md, 0.375rem)
+          );
           cursor: pointer;
           font-weight: 500;
           font-size: 1rem;
-          transition: background-color 0.2s ease;
+          font-family: var(--ct-theme-font-family, inherit);
+          transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
         }
 
         .connect-button:hover {
@@ -551,13 +605,19 @@ export class CommonPlaidLinkElement extends LitElement {
         }
 
         .connect-button:disabled {
-          background-color: #cccccc;
+          background-color: var(
+            --ct-theme-color-border,
+            var(--ct-color-gray-300, #d1d5db)
+          );
           cursor: not-allowed;
         }
 
         .status-message {
-          padding: 12px;
-          border-radius: 6px;
+          padding: var(--ct-theme-spacing-normal, 0.75rem);
+          border-radius: var(
+            --ct-theme-border-radius,
+            var(--ct-border-radius-md, 0.375rem)
+          );
           background-color: #e8f5e9;
           color: #2e7d32;
           font-size: 0.9rem;
@@ -566,9 +626,5 @@ export class CommonPlaidLinkElement extends LitElement {
       `,
     ];
   }
-}
 
-globalThis.customElements.define(
-  "common-plaid-link",
-  CommonPlaidLinkElement,
-);
+  globalThis.customElements.define("ct-plaid-link", CTPlaidLink);

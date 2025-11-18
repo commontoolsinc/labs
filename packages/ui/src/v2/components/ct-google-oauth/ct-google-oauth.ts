@@ -1,7 +1,7 @@
-import { css, html, LitElement } from "lit";
-import { baseStyles } from "./style.ts";
+import { css, html } from "lit";
+import { BaseElement } from "../../core/base-element.ts";
 import { Cell } from "@commontools/runner";
-import { CommonCharmElement } from "./common-charm.ts";
+import { CTCharm } from "../ct-charm/ct-charm.ts";
 
 export interface AuthData {
   token?: string;
@@ -17,7 +17,18 @@ export interface AuthData {
   };
 }
 
-export class CommonGoogleOauthElement extends LitElement {
+/**
+ * CTGoogleOauth - Google OAuth authentication component
+ *
+ * @element ct-google-oauth
+ *
+ * @attr {Cell<AuthData>} auth - Cell containing authentication data
+ * @attr {string[]} scopes - Array of OAuth scopes to request
+ *
+ * @example
+ * <ct-google-oauth .auth=${authCell} .scopes=${['email', 'profile']}></ct-google-oauth>
+ */
+export class CTGoogleOauth extends BaseElement {
   static override properties = {
     auth: { type: Object },
     authStatus: { type: String },
@@ -54,14 +65,9 @@ export class CommonGoogleOauthElement extends LitElement {
 
     const authCellId = JSON.stringify(this.auth.getAsLink());
 
-    // `ct://${spaceDid}/${cellId}`
-
-    // FIXME(jake): This is a hack to get the charm id that mounts this web component.
-    // Once we have multi-charm urls, this will break!
-    // It would be nice if our common ui web components knew which charm is mounting them...
-    const container = CommonCharmElement.findCharmContainer(this);
+    const container = CTCharm.findCharmContainer(this);
     if (!container) {
-      throw new Error("No <common-charm> container.");
+      throw new Error("No <ct-charm> container.");
     }
     const { charmId } = container;
     const payload = {
@@ -83,10 +89,7 @@ export class CommonGoogleOauthElement extends LitElement {
       const resp = await response.json();
       this.authStatus = "Opening OAuth window...";
 
-      // TODO(jesse): do we need this? Since we have a cell
-      // Create a message listener for the OAuth callback
       const messageListener = (event: MessageEvent) => {
-        // Verify origin for security
         if (event.origin !== globalThis.location.origin) return;
 
         if (event.data && event.data.type === "oauth-callback") {
@@ -103,14 +106,12 @@ export class CommonGoogleOauthElement extends LitElement {
 
       globalThis.addEventListener("message", messageListener);
 
-      // Open the OAuth window
       const authWindow = globalThis.open(
         resp.url,
         "_blank",
         "width=800,height=800,left=200,top=200",
       );
 
-      // Check for window closure
       if (authWindow) {
         const checkWindowClosed = setInterval(() => {
           if (authWindow.closed) {
@@ -197,116 +198,152 @@ export class CommonGoogleOauthElement extends LitElement {
     `;
   }
 
-  static override get styles() {
-    return [
-      baseStyles,
-      css`
-        .oauth-wrapper {
-          padding: 24px;
-          border-radius: 12px;
-          background-color: #ffffff;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          max-width: 600px;
-        }
+  static override styles = [
+    BaseElement.baseStyles,
+    css`
+      .oauth-wrapper {
+        padding: var(--ct-theme-spacing-loose, 1.5rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-lg, 0.5rem)
+        );
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-white, #ffffff)
+        );
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        max-width: 600px;
+      }
 
-        .profile-section {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          margin-bottom: 24px;
-        }
+      .profile-section {
+        display: flex;
+        align-items: center;
+        gap: var(--ct-theme-spacing-loose, 1.25rem);
+        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+      }
 
-        .profile-picture {
-          width: 80px;
-          height: 80px;
-          border-radius: 50%;
-          object-fit: cover;
-        }
+      .profile-picture {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        object-fit: cover;
+      }
 
-        .user-info {
-          flex: 1;
-        }
+      .user-info {
+        flex: 1;
+      }
 
-        .user-name {
-          margin: 0;
-          font-size: 1.5rem;
-          color: #333;
-        }
+      .user-name {
+        margin: 0;
+        font-size: 1.5rem;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+        font-weight: 600;
+      }
 
-        .user-email {
-          margin: 4px 0 0;
-          color: #666;
-        }
+      .user-email {
+        margin: 0.25rem 0 0;
+        color: var(
+          --ct-theme-color-text-muted,
+          var(--ct-color-gray-600, #6b7280)
+        );
+      }
 
-        .action-section {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          margin-bottom: 24px;
-        }
+      .action-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-theme-spacing-normal, 1rem);
+        margin-bottom: var(--ct-theme-spacing-loose, 1.5rem);
+      }
 
-        .oauth-button {
-          background-color: #4285f4;
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: 500;
-          font-size: 1rem;
-          transition: background-color 0.2s ease;
-        }
+      .oauth-button {
+        background-color: #4285f4;
+        color: white;
+        border: none;
+        padding: var(--ct-theme-spacing-normal, 0.75rem)
+          var(--ct-theme-spacing-loose, 1.5rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 1rem;
+        font-family: var(--ct-theme-font-family, inherit);
+        transition: background-color var(--ct-theme-animation-duration, 0.2s) ease;
+      }
 
-        .oauth-button:hover {
-          background-color: #3367d6;
-        }
+      .oauth-button:hover {
+        background-color: #3367d6;
+      }
 
-        .oauth-button:disabled {
-          background-color: #cccccc;
-          cursor: not-allowed;
-        }
+      .oauth-button:disabled {
+        background-color: var(
+          --ct-theme-color-border,
+          var(--ct-color-gray-300, #d1d5db)
+        );
+        cursor: not-allowed;
+      }
 
-        .status-message {
-          padding: 12px;
-          border-radius: 6px;
-          background-color: #e8f0fe;
-          color: #1a73e8;
-          font-size: 0.9rem;
-        }
+      .status-message {
+        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+        background-color: #e8f0fe;
+        color: #1a73e8;
+        font-size: 0.9rem;
+      }
 
-        .auth-result {
-          background-color: #f8f9fa;
-          padding: 16px;
-          border-radius: 8px;
-        }
+      .auth-result {
+        background-color: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-color-gray-50, #f9fafb)
+        );
+        padding: var(--ct-theme-spacing-normal, 1rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-md, 0.375rem)
+        );
+      }
 
-        .auth-result h3 {
-          margin: 0 0 12px;
-          color: #333;
-        }
+      .auth-result h3 {
+        margin: 0 0 0.75rem;
+        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
+      }
 
-        .auth-result pre {
-          background-color: #f1f3f4;
-          padding: 12px;
-          border-radius: 6px;
-          overflow: auto;
-          max-height: 300px;
-          margin: 0;
-          font-size: 0.9rem;
-        }
+      .auth-result pre {
+        background-color: var(
+          --ct-theme-color-surface,
+          var(--ct-color-white, #ffffff)
+        );
+        padding: var(--ct-theme-spacing-normal, 0.75rem);
+        border-radius: var(
+          --ct-theme-border-radius,
+          var(--ct-border-radius-sm, 0.25rem)
+        );
+        overflow: auto;
+        max-height: 300px;
+        margin: 0;
+        font-size: 0.9rem;
+        font-family: monospace;
+      }
 
-        .oauth-button.logout {
-          background-color: #dc3545;
-        }
+      .oauth-button.logout {
+        background-color: var(
+          --ct-theme-color-error,
+          var(--ct-color-red-600, #dc2626)
+        );
+      }
 
-        .oauth-button.logout:hover {
-          background-color: #c82333;
-        }
-      `,
-    ];
-  }
+      .oauth-button.logout:hover {
+        background-color: var(
+          --ct-theme-color-error,
+          var(--ct-color-red-700, #b91c1c)
+        );
+      }
+    `,
+  ];
 }
-globalThis.customElements.define(
-  "common-google-oauth",
-  CommonGoogleOauthElement,
-);
+
+globalThis.customElements.define("ct-google-oauth", CTGoogleOauth);
