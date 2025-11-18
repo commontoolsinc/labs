@@ -95,7 +95,7 @@ export default recipe<OmniboxFABInput>(
         },
         createLink: {
           description:
-            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field'. Creates a bidirectional binding where changes to the source are reflected in the target.",
+            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field' to choose between result and input cell links. This ONLY applies to this tool. Creates a bidirectional binding where changes to the source are reflected in the target.",
           handler: linkTool({ mentionable }),
         },
       },

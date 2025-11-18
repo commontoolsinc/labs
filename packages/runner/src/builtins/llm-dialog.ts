@@ -441,7 +441,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/result/content).",
+        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/content).",
     },
   },
   required: ["path"],
@@ -489,7 +489,7 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123/result).",
+        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123).",
     },
   },
   required: ["path"],
@@ -502,7 +502,7 @@ const ADD_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Link to attach (e.g., /of:bafyabc123 or /of:bafyabc123/result).",
+        "Link to attach (e.g., /of:bafyabc123 or /of:bafyabc123/test/value).",
     },
     name: {
       type: "string",
@@ -530,7 +530,7 @@ const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
  * Attachments are links of interest that the LLM can add/remove as a scratchpad.
  */
 type Attachment = {
-  path: string; // e.g., "/of:bafyabc123" or "/of:bafyabc123/result"
+  path: string; // e.g., "/of:bafyabc123" or "/of:bafyabc123"
   name: string; // Human-readable name for display
 };
 
@@ -633,19 +633,19 @@ function flattenTools(
 
   flattened[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/result/path". ' + availability,
+      '"/of:bafyabc123/path". ' + availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[RUN_TOOL_NAME] = {
     description: "Invoke a handler on ANY charm. Provide the handle " +
-      'path like "/of:bafyabc123/handlers/doThing" plus args if required. ' +
+      'path like "/of:bafyabc123/doThing" plus args if required. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   flattened[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate to ANY charm or path. Provide the handle path like " +
-      '"of:bafyabc123" or "of:bafyabc123/result".',
+      '"of:bafyabc123" or "of:bafyabc123/test/value".',
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   flattened[ADD_ATTACHMENT_TOOL_NAME] = {
@@ -774,20 +774,20 @@ function buildToolCatalog(
 
   llmTools[READ_TOOL_NAME] = {
     description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/result/path". Works with any valid handle, not just attached charms. ' +
+      '"/of:bafyabc123/path". Works with any valid handle, not just attached charms. ' +
       availability,
     inputSchema: READ_INPUT_SCHEMA,
   };
   llmTools[RUN_TOOL_NAME] = {
     description: "Run a handler on ANY charm. Provide the handle path like " +
-      '"/of:bafyabc123/handlers/doThing" and optionally args. Works with any valid handle. ' +
+      '"/of:bafyabc123/doThing" and optionally args. Works with any valid handle. ' +
       availability,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
       "Navigate to ANY charm or path. Provide the handle path like " +
-      '"/of:bafyabc123" or "/of:bafyabc123/result". Works with any valid handle. ' +
+      '"/of:bafyabc123" or "/of:bafyabc123". Works with any valid handle. ' +
       availability,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
