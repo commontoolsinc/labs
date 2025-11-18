@@ -53,7 +53,7 @@ export type UISchema = Schema<typeof uiSchema>;
 
 export const charmListSchema = {
   type: "array",
-  items: { asCell: true },
+  items: { not: true, asCell: true },
 } as const satisfies JSONSchema;
 
 export const spaceCellSchema = {
@@ -61,7 +61,7 @@ export const spaceCellSchema = {
   properties: {
     // Each field is a Cell<> reference to another cell
     allCharms: { ...charmListSchema, asCell: true },
-    defaultPattern: { type: "object", asCell: true },
+    defaultPattern: { not: true, asCell: true },
     recentCharms: { ...charmListSchema, asCell: true },
   },
 } as const satisfies JSONSchema;
@@ -71,7 +71,7 @@ export type SpaceCell = Schema<typeof spaceCellSchema>;
 export const charmLineageSchema = {
   type: "object",
   properties: {
-    charm: { type: "object", asCell: true },
+    charm: { not: true, asCell: true },
     relation: { type: "string" },
     timestamp: { type: "number" },
   },
