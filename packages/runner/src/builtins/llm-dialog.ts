@@ -499,6 +499,7 @@ const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
 const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
 const FINAL_RESULT_TOOL_NAME = "finalResult";
+const SET_ARGUMENT_TOOL_NAME = "setArgument";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -616,6 +617,28 @@ const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
   additionalProperties: false,
 };
 
+const SET_ARGUMENT_INPUT_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link to the pattern instance to update. Format: { "@link": "/of:bafyabc123" }.',
+    },
+    updates: {
+      type: "object",
+      description:
+        "Field updates to apply to the pattern's arguments. Keys are field paths (e.g., 'query' or 'config.theme'), values are new values.",
+    },
+  },
+  required: ["path", "updates"],
+  additionalProperties: false,
+};
+
 /**
  * Represents an attachment in the conversation.
  * Attachments are links of interest that the LLM can add/remove as a scratchpad.
@@ -727,7 +750,7 @@ function flattenTools(
 
   flattened[READ_TOOL_NAME] = {
     description:
-      "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
+      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
       attachmentContext,
@@ -735,44 +758,51 @@ function flattenTools(
   };
   flattened[INVOKE_TOOL_NAME] = {
     description:
-      "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
-      "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
+      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
       "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
     inputSchema: INVOKE_INPUT_SCHEMA,
   };
   flattened[NAVIGATE_TO_TOOL_NAME] = {
     description:
-      "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      'Navigate the UI to a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use after invoke() to show the result, or to view any cell of interest. " +
       attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   flattened[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Bookmark a link for easy reference. Input: { \"@link\": \"/of:bafyabc123\" } and a name. " +
+      'Bookmark a link for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Attached links appear in the conversation and can be inspected with read() or schema(). " +
       "Use to track important cells you're working with.",
     inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
   };
   flattened[REMOVE_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Remove a bookmarked link. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
   flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
-    description:
-      "List all bookmarked links with their paths and names. " +
+    description: "List all bookmarked links with their paths and names. " +
       "Shows what cells you've attached for quick reference.",
     inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+  };
+  flattened[SET_ARGUMENT_TOOL_NAME] = {
+    description:
+      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+      "The pattern will automatically re-execute with the new arguments. " +
+      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+      'Example: setArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: SET_ARGUMENT_INPUT_SCHEMA,
   };
 
   if (charms.length > 0) {
     flattened[SCHEMA_TOOL_NAME] = {
       description:
         "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
-        "Input: { \"@link\": \"/of:bafyabc123\" }. " +
+        'Input: { "@link": "/of:bafyabc123" }. ' +
         "Returns schema showing what data can be read and what handlers can be invoked. " +
         attachmentContext,
       inputSchema: SCHEMA_INPUT_SCHEMA,
@@ -891,7 +921,7 @@ function buildToolCatalog(
 
   llmTools[READ_TOOL_NAME] = {
     description:
-      "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
+      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
       "Returns the cell's data with nested cells as link objects. " +
       "Compose with invoke(): invoke() returns a link, then read(link) gets the data. " +
       attachmentContext,
@@ -899,37 +929,44 @@ function buildToolCatalog(
   };
   llmTools[INVOKE_TOOL_NAME] = {
     description:
-      "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
-      "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
+      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ' +
       "Compose: invoke() → read(result) or invoke() → navigateTo(result). " +
       attachmentContext,
     inputSchema: INVOKE_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
-      "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      'Navigate the UI to a cell. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use after invoke() to show the result, or to view any cell of interest. " +
       attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   llmTools[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Bookmark a link for easy reference. Input: { \"@link\": \"/of:bafyabc123\" } and a name. " +
+      'Bookmark a link for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
       "Attached links appear in the conversation and can be inspected with read() or schema(). " +
       "Use to track important cells you're working with.",
     inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
   };
   llmTools[REMOVE_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Remove a bookmarked link. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      'Remove a bookmarked link. Input: { "@link": "/of:bafyabc123" }. ' +
       "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
   llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
-    description:
-      "List all bookmarked links with their paths and names. " +
+    description: "List all bookmarked links with their paths and names. " +
       "Shows what cells you've attached for quick reference.",
     inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
+  };
+  llmTools[SET_ARGUMENT_TOOL_NAME] = {
+    description:
+      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+      "The pattern will automatically re-execute with the new arguments. " +
+      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+      'Example: setArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+    inputSchema: SET_ARGUMENT_INPUT_SCHEMA,
   };
 
   // Schema only works with attached charms
@@ -937,7 +974,7 @@ function buildToolCatalog(
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
         "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
-        "Input: { \"@link\": \"/of:bafyabc123\" }. " +
+        'Input: { "@link": "/of:bafyabc123" }. ' +
         "Returns schema showing what data can be read and what handlers can be invoked. " +
         "Note: schemas are also provided in the system prompt for convenience. " +
         attachmentContext,
@@ -1019,6 +1056,12 @@ type ResolvedToolCall =
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
+    type: "setArgument";
+    call: LLMToolCall;
+    cellRef: Cell<any>;
+    updates: Record<string, unknown>;
+  }
+  | {
     type: "invoke";
     call: LLMToolCall;
     // Implementation details for how to invoke the target
@@ -1049,7 +1092,8 @@ function resolveToolCall(
     name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
     name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
-    name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME
+    name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
+    name === SET_ARGUMENT_TOOL_NAME
   ) {
     // Schema requires attachments, but read/invoke/listAttachments work with any handle
     if (
@@ -1107,6 +1151,31 @@ function resolveToolCall(
         type: "finalResult",
         call: { id, name, input: toolCallPart.input },
         result: toolCallPart.input,
+      };
+    }
+
+    // Handle setArgument
+    if (name === SET_ARGUMENT_TOOL_NAME) {
+      const target = extractStringField(
+        toolCallPart.input,
+        "path",
+        "/of:bafyabc123",
+      );
+      const link = parseLLMFriendlyLink(target, space);
+      const cellRef = runtime.getCellFromLink(link);
+
+      const updates = toolCallPart.input?.updates;
+      if (!updates || typeof updates !== "object") {
+        throw new Error(
+          "updates must be an object with field names and values",
+        );
+      }
+
+      return {
+        type: "setArgument",
+        cellRef,
+        call: { id, name, input: { path: target, updates } },
+        updates: updates as Record<string, unknown>,
       };
     }
 
@@ -1547,6 +1616,56 @@ function handleNavigateTo(
 }
 
 /**
+ * Handles the setArgument tool call.
+ */
+function handleSetArgument(
+  runtime: IRuntime,
+  resolved: ResolvedToolCall & { type: "setArgument" },
+): { type: string; value: any } {
+  const cell = resolved.cellRef;
+  const updates = resolved.updates;
+
+  // Get the source cell (process cell) that stores the pattern metadata
+  const sourceCell = cell.getSourceCell();
+  if (!sourceCell) {
+    throw new Error(
+      "Target is not a pattern instance - no source cell found. " +
+        "setArgument only works with running patterns (e.g., from invoke() or attached patterns).",
+    );
+  }
+
+  // Access the argument cell
+  const argumentCell = sourceCell.key("argument");
+
+  // Apply updates to argument fields
+  runtime.editWithRetry((tx) => {
+    const argCellTx = argumentCell.withTx(tx);
+    for (const [fieldPath, value] of Object.entries(updates)) {
+      // Support nested paths like "config.theme" by splitting on "."
+      const pathParts = fieldPath.split(".");
+      let targetCell = argCellTx;
+
+      // Navigate to nested field
+      for (let i = 0; i < pathParts.length - 1; i++) {
+        targetCell = targetCell.key(pathParts[i]);
+      }
+
+      // Set the final field
+      const finalKey = pathParts[pathParts.length - 1];
+      targetCell.key(finalKey).set(value);
+    }
+  });
+
+  return {
+    type: "json",
+    value: {
+      success: true,
+      message: "Arguments updated. Pattern will re-execute automatically.",
+    },
+  };
+}
+
+/**
  * Handles the invoke tool call (both pattern and handler execution).
  */
 async function handleInvoke(
@@ -1705,6 +1824,11 @@ async function invokeToolCall(
   }
 
   // Handle run-type tools (external, run with pattern/handler)
+  if (resolved.type === "setArgument") {
+    return handleSetArgument(runtime, resolved);
+  }
+
+  // Handle invoke-type tools (external, invoke with pattern/handler)
   return await handleInvoke(runtime, space, resolved);
 }
 
@@ -1993,7 +2117,8 @@ Tools work together by passing links between them:
 1. \`invoke({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
 2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
 3. \`navigateTo({ "@link": "/of:xyz" })\` → Navigates the UI to view the result
-4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
+4. \`setArgument({ "@link": "/of:pattern" }, { field: value })\` → Updates running pattern arguments
+5. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
 
 ## Pages
 
@@ -2001,6 +2126,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 - Have their own identity accessible via a link
 - Contain data fields that can be read with \`read()\`
 - Contain handler fields that can be invoked with \`invoke()\`
+- Arguments can be updated with \`setArgument()\` to change pattern behavior dynamically
 - May link to other cells in the system
 
 **Use links to navigate between related data and compose operations.**`;
