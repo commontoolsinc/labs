@@ -888,7 +888,7 @@ export interface BuiltInLLMState {
   pending: boolean;
   result?: BuiltInLLMContent;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -896,7 +896,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -954,6 +954,7 @@ export type BuiltInGenerateTextParams =
 export interface BuiltInGenerateTextState {
   pending: boolean;
   result?: string;
+  error?: unknown;
   partial?: string;
   requestHash?: string;
 }

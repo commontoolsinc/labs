@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -20,6 +21,11 @@ import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 
+const logger = getLogger("llm", {
+  enabled: false,
+  level: "info",
+});
+
 const client = new LLMClient();
 
 // TODO(ja): investigate if generateText should be replaced by
@@ -38,6 +44,7 @@ function initializeCells<T>(
 ): {
   pending: Cell<boolean>;
   result: Cell<T | undefined>;
+  error: Cell<unknown>;
   partial: Cell<string | undefined>;
   requestHash: Cell<string | undefined>;
 } {
@@ -56,6 +63,13 @@ function initializeCells<T>(
     tx,
   );
 
+  const error = runtime.getCell<T | undefined>(
+    parentCell.space,
+    { [builtinName]: { error: cause } },
+    undefined,
+    tx,
+  );
+
   const partial = runtime.getCell<string | undefined>(
     parentCell.space,
     { [builtinName]: { partial: cause } },
@@ -70,7 +84,7 @@ function initializeCells<T>(
     tx,
   );
 
-  return { pending, result, partial, requestHash };
+  return { pending, result, error, partial, requestHash };
 }
 
 /**
@@ -179,23 +193,25 @@ async function executeWithToolsLoop(params: {
 async function handleLLMError<T, P>(
   error: unknown,
   runtime: IRuntime,
-  pending: Cell<boolean>,
-  result: Cell<T>,
-  partial: Cell<P>,
+  pendingCell: Cell<boolean>,
+  resultCell: Cell<T>,
+  errorCell: Cell<unknown>,
+  partialCell: Cell<P>,
   getCurrentRun: () => number,
   thisRun: number,
   resetPreviousHash: () => void,
 ): Promise<void> {
   if (thisRun !== getCurrentRun()) return;
 
-  console.error("Error in LLM request", error);
+  logger.warn("Error in LLM request", { error });
 
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
-    pending.withTx(tx).set(false);
-    result.withTx(tx).set(undefined as T);
-    partial.withTx(tx).set(undefined as P);
+    pendingCell.withTx(tx).set(false);
+    errorCell.withTx(tx).set(error);
+    resultCell.withTx(tx).set(undefined as T);
+    partialCell.withTx(tx).set(undefined as P);
   });
 
   resetPreviousHash();
@@ -233,6 +249,7 @@ export function llm(
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<LLMResponse["content"] | undefined>;
+  let error: Cell<unknown>;
   let partial: Cell<LLMResponse["content"] | undefined>;
   let requestHash: Cell<string | undefined>;
 
@@ -247,10 +264,11 @@ export function llm(
       );
       pending = cells.pending;
       result = cells.result;
+      error = cells.error;
       partial = cells.partial;
       requestHash = cells.requestHash;
 
-      sendResult(tx, { pending, result, partial, requestHash });
+      sendResult(tx, { pending, result, error, partial, requestHash });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;
@@ -326,6 +344,7 @@ export function llm(
           await runtime.editWithRetry((tx) => {
             pending.withTx(tx).set(false);
             result.withTx(tx).set(llmResult.content);
+            error.withTx(tx).set(undefined);
             partial.withTx(tx).set(extractTextFromLLMResponse(llmResult));
             requestHash.withTx(tx).set(hash);
           });
@@ -333,12 +352,13 @@ export function llm(
       });
     })();
 
-    resultPromise.catch((error) =>
+    resultPromise.catch((e) =>
       handleLLMError(
-        error,
+        e,
         runtime,
         pending,
         result,
+        error,
         partial,
         () => currentRun,
         thisRun,
@@ -382,6 +402,7 @@ export function generateText(
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<string | undefined>;
+  let error: Cell<unknown>;
   let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
 
@@ -396,14 +417,16 @@ export function generateText(
       );
       pending = cells.pending;
       result = cells.result;
+      error = cells.error;
       partial = cells.partial;
       requestHash = cells.requestHash;
 
-      sendResult(tx, { pending, result, partial, requestHash });
+      sendResult(tx, { pending, result, error, partial, requestHash });
       cellsInitialized = true;
     }
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
@@ -413,6 +436,7 @@ export function generateText(
     // If neither prompt nor messages is provided, don't make a request
     if (!prompt && !messages) {
       resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
@@ -461,6 +485,7 @@ export function generateText(
     const thisRun = currentRun;
 
     resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
@@ -495,6 +520,7 @@ export function generateText(
           await runtime.editWithRetry((tx) => {
             pending.withTx(tx).set(false);
             result.withTx(tx).set(textResult);
+            error.withTx(tx).set(undefined);
             partial.withTx(tx).set(textResult);
             requestHash.withTx(tx).set(hash);
           });
@@ -502,12 +528,13 @@ export function generateText(
       });
     })();
 
-    resultPromise.catch((error) =>
+    resultPromise.catch((e) =>
       handleLLMError(
-        error,
+        e,
         runtime,
         pending,
         result,
+        error,
         partial,
         () => currentRun,
         thisRun,
@@ -543,6 +570,7 @@ export function generateObject<T extends Record<string, unknown>>(
   sendResult: (tx: IExtendedStorageTransaction, docs: {
     pending: Cell<boolean>;
     result: Cell<T | undefined>;
+    error: Cell<unknown>;
     partial: Cell<string | undefined>;
     requestHash: Cell<string | undefined>;
   }) => void,
@@ -556,6 +584,7 @@ export function generateObject<T extends Record<string, unknown>>(
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<T | undefined>;
+  let error: Cell<unknown>;
   let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
 
@@ -570,14 +599,16 @@ export function generateObject<T extends Record<string, unknown>>(
       );
       pending = cells.pending;
       result = cells.result;
+      error = cells.error;
       partial = cells.partial;
       requestHash = cells.requestHash;
 
-      sendResult(tx, { pending, result, partial, requestHash });
+      sendResult(tx, { pending, result, error, partial, requestHash });
       cellsInitialized = true;
     }
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
@@ -595,6 +626,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
     if ((!prompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
@@ -646,6 +678,7 @@ export function generateObject<T extends Record<string, unknown>>(
       const thisRun = currentRun;
 
       resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
@@ -762,15 +795,17 @@ export function generateObject<T extends Record<string, unknown>>(
           await runtime.editWithRetry((tx) => {
             pending.withTx(tx).set(false);
             result.withTx(tx).set(objectResult);
+            error.withTx(tx).set(undefined);
             requestHash.withTx(tx).set(hash);
           });
         })
-        .catch((error) =>
+        .catch((e) =>
           handleLLMError(
-            error,
+            e,
             runtime,
             pending,
             result,
+            error,
             partial,
             () => currentRun,
             thisRun,
@@ -816,7 +851,8 @@ export function generateObject<T extends Record<string, unknown>>(
       }
       const thisRun = currentRun;
 
-      resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+      resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
@@ -835,15 +871,17 @@ export function generateObject<T extends Record<string, unknown>>(
           await runtime.editWithRetry((tx) => {
             pending.withTx(tx).set(false);
             result.withTx(tx).set(response.object);
+            error.withTx(tx).set(undefined);
             requestHash.withTx(tx).set(hash);
           });
         })
-        .catch((error) =>
+        .catch((e) =>
           handleLLMError(
-            error,
+            e,
             runtime,
             pending,
             result,
+            error,
             partial,
             () => currentRun,
             thisRun,

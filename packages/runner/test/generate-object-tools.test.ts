@@ -547,7 +547,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_getData_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_getData_1"
+          )
         ),
       {
         role: "assistant",
@@ -567,7 +571,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_countItems_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_countItems_1"
+          )
         ),
       {
         role: "assistant",
@@ -717,7 +725,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_listItems_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_listItems_1"
+          )
         ),
       {
         role: "assistant",
@@ -737,7 +749,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_countItems_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_countItems_1"
+          )
         ),
       {
         role: "assistant",
@@ -866,7 +882,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_fetchData_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_fetchData_1"
+          )
         ),
       {
         role: "assistant",
@@ -886,7 +906,11 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_analyzeData_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_analyzeData_1"
+          )
         ),
       {
         role: "assistant",
@@ -1026,10 +1050,18 @@ describe("generateObject with tools", () => {
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_toolA_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_toolA_1"
+          )
         ) &&
         req.messages.some((m: any) =>
-          m.role === "tool-result" && m.toolCallId === "call_toolB_1"
+          m.role === "tool" &&
+          Array.isArray(m.content) &&
+          m.content.some((c: any) =>
+            c.type === "tool-result" && c.toolCallId === "call_toolB_1"
+          )
         ),
       {
         role: "assistant",
