@@ -84,6 +84,16 @@ function shouldCapturePropertyAccess(
   const declarations = symbol.getDeclarations();
   if (!declarations || declarations.length === 0) return undefined;
 
+  // Skip imports - they're module-scoped and don't need to be captured
+  const isImport = declarations.some((decl) =>
+    ts.isImportSpecifier(decl) ||
+    ts.isImportClause(decl) ||
+    ts.isNamespaceImport(decl)
+  );
+  if (isImport) {
+    return undefined;
+  }
+
   // Skip module-scoped declarations
   if (declarations.some((decl) => isModuleScopedDeclaration(decl))) {
     return undefined;
@@ -1316,8 +1326,20 @@ function createRecipeCallWithParams(
     );
   }
 
+  // Filter out computed aliases from params - they'll be declared as local consts instead
+  const computedAliasNames = new Set(
+    elementAnalysis.computedAliases.map((alias) => alias.aliasName),
+  );
+
+  // Create a filtered capture tree without computed aliases
+  const filteredCaptureTree = new Map(
+    Array.from(captureTree.entries()).filter(
+      ([key]) => !computedAliasNames.has(key),
+    ),
+  );
+
   const paramsBindings = createBindingElementsFromNames(
-    captureTree.keys(),
+    filteredCaptureTree.keys(),
     factory,
     createBindingIdentifier,
   );
@@ -1377,7 +1399,7 @@ function createRecipeCallWithParams(
     elemParam,
     indexParam,
     arrayParam,
-    captureTree,
+    filteredCaptureTree,
     context,
   );
 
@@ -1388,7 +1410,10 @@ function createRecipeCallWithParams(
     [newCallback],
   );
 
-  const paramProperties = buildCapturePropertyAssignments(captureTree, factory);
+  const paramProperties = buildCapturePropertyAssignments(
+    filteredCaptureTree,
+    factory,
+  );
 
   const paramsObject = factory.createObjectLiteralExpression(
     paramProperties,
