@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
+import { registerDeriveCallType } from "../ast/type-inference.ts";
 import { Transformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -83,6 +84,21 @@ function createComputedToDeriveVisitor(
         callback, // Second arg: original callback (unchanged)
       ],
     );
+
+    // Register type using our unified utility
+    // Transfer the type from the original computed() call (registered by OpaqueRef transformer)
+    if (context.options.typeRegistry) {
+      const computedType = context.options.typeRegistry.get(node);
+      if (computedType) {
+        registerDeriveCallType(
+          deriveCall,
+          undefined, // resultTypeNode - not needed since we have resultType
+          computedType, // resultType from the computed call
+          checker,
+          context.options.typeRegistry,
+        );
+      }
+    }
 
     // Visit children to transform any nested computed() calls
     const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);

@@ -284,10 +284,6 @@ export function createComputedCallForExpression(
     resultType = undefined;
   }
 
-  if (resultTypeNode && resultType && context.options.typeRegistry) {
-    context.options.typeRegistry.set(resultTypeNode, resultType);
-  }
-
   // Create computed(() => expression)
   const arrowFunction = factory.createArrowFunction(
     undefined,
@@ -303,6 +299,12 @@ export function createComputedCallForExpression(
     undefined,
     [arrowFunction],
   );
+
+  // Register types for both the TypeNode and the computed CallExpression
+  if (resultTypeNode && resultType && context.options.typeRegistry) {
+    context.options.typeRegistry.set(resultTypeNode, resultType);
+    context.options.typeRegistry.set(computedCall, resultType);
+  }
 
   // CRITICAL: Set parent pointers and connect to parent chain
   // This maintains the parent chain so walking up from nested callbacks works

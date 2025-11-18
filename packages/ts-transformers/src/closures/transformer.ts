@@ -17,6 +17,7 @@ import {
 } from "../ast/mod.ts";
 import {
   inferArrayElementType,
+  registerDeriveCallType,
   registerTypeForNode,
   tryExplicitParameterType,
 } from "../ast/type-inference.ts";
@@ -521,13 +522,31 @@ function isOpaqueRefArrayMapCall(
 
   // Get the type of the target (what we're calling .map on)
   const target = node.expression.expression;
+
   const targetType = getTypeAtLocationWithFallback(
     target,
     checker,
     typeRegistry,
     logger,
   );
-  if (!targetType) return false;
+  if (!targetType) {
+    return false;
+  }
+
+  // Special case: If target is a derive call, always treat .map() as needing transformation
+  // Rationale: derive() returns OpaqueRef<T> where T is the callback's return type.
+  // For synthetic derive calls, we can't construct the OpaqueRef<T> wrapper type to register,
+  // so we register the callback's return type instead. This means type-based detection
+  // (isOpaqueRefType + hasArrayTypeArgument) won't recognize it, so we explicitly check
+  // for derive calls. Since derive() always returns opaque values, if we're calling .map()
+  // on it, it must be an array at runtime (otherwise the code would crash), so we should
+  // transform to mapWithPattern.
+  if (ts.isCallExpression(target)) {
+    const callKind = detectCallKind(target, checker);
+    if (callKind?.kind === "derive") {
+      return true;
+    }
+  }
 
   // Check direct case: target is OpaqueRef<T[]> or Cell<T[]>
   if (
@@ -567,7 +586,9 @@ function isOpaqueRefArrayMapCall(
     typeRegistry,
     logger,
   );
-  if (!originType) return false;
+  if (!originType) {
+    return false;
+  }
 
   return isOpaqueRefType(originType, checker) &&
     hasArrayTypeArgument(originType, checker);
@@ -990,7 +1011,8 @@ function shouldTransformMap(
   context: TransformationContext,
 ): boolean {
   // Early exit: Don't transform if inside derive with non-Cell OpaqueRef
-  if (isInsideDeriveWithOpaqueRef(mapCall, context)) {
+  const insideDeriveWithOpaque = isInsideDeriveWithOpaqueRef(mapCall, context);
+  if (insideDeriveWithOpaque) {
     return false;
   }
 
@@ -1004,7 +1026,13 @@ function shouldTransformMap(
   }
 
   // Check if this expression or ancestors will be wrapped by JSX transformer
-  return !willBeWrappedByJsx(mapCall, closestJsxExpression, context);
+  const willBeWrapped = willBeWrappedByJsx(
+    mapCall,
+    closestJsxExpression,
+    context,
+  );
+  const shouldTransform = !willBeWrapped;
+  return shouldTransform;
 }
 
 function createClosureTransformVisitor(
@@ -2093,6 +2121,18 @@ function transformDeriveCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]), // Type arguments
     [mergedInput, newCallback], // Runtime arguments
   );
+
+  // Register the type of the derive call expression itself in the typeRegistry
+  // so that type inference works correctly for synthetic nodes
+  if (context.options.typeRegistry) {
+    registerDeriveCallType(
+      newDeriveCall,
+      resultTypeNode,
+      resultType,
+      context.checker,
+      context.options.typeRegistry,
+    );
+  }
 
   return newDeriveCall;
 }

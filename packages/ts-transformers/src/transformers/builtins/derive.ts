@@ -17,6 +17,7 @@ import {
   buildTypeElementsFromCaptureTree,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
+import { registerDeriveCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 
 function replaceOpaqueRefsWithParams(
@@ -217,11 +218,25 @@ export function createDeriveCall(
   const resultTypeNode = buildResultTypeNode(expression, context);
 
   // Create derive call with type arguments for SchemaInjectionTransformer
-  return factory.createCallExpression(
+  const deriveCall = factory.createCallExpression(
     deriveExpr,
     [inputTypeNode, resultTypeNode],
     deriveArgs,
   );
+
+  // Register the type of the derive call expression itself in the typeRegistry
+  // so that type inference works correctly for synthetic nodes
+  if (context.options.typeRegistry && context.checker) {
+    registerDeriveCallType(
+      deriveCall,
+      resultTypeNode,
+      undefined, // resultType not available in this code path
+      context.checker,
+      context.options.typeRegistry,
+    );
+  }
+
+  return deriveCall;
 }
 
 function buildInputTypeNode(

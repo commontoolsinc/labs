@@ -219,6 +219,44 @@ export function registerTypeForNode(
 }
 
 /**
+ * Register the result type for a synthetic derive CallExpression.
+ *
+ * This is needed because synthetic nodes created by transformers don't have
+ * type information from the TypeChecker. We need to explicitly register the
+ * type so that later transformations can infer types correctly.
+ *
+ * @param deriveCall The synthetic derive CallExpression to register type for
+ * @param resultTypeNode The TypeNode representing the derive's result type
+ * @param resultType Optional pre-computed Type object for the result
+ * @param checker TypeChecker instance
+ * @param typeRegistry The type registry to update
+ */
+export function registerDeriveCallType(
+  deriveCall: ts.CallExpression,
+  resultTypeNode: ts.TypeNode | undefined,
+  resultType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  typeRegistry: WeakMap<ts.Node, ts.Type>,
+): void {
+  // Try to get the type - either from provided resultType or from resultTypeNode
+  let typeToRegister = resultType;
+
+  if (!typeToRegister && resultTypeNode) {
+    // Check if resultTypeNode is already registered
+    typeToRegister = typeRegistry.get(resultTypeNode);
+
+    // If not in registry, try getting it from TypeChecker
+    if (!typeToRegister) {
+      typeToRegister = checker.getTypeFromTypeNode(resultTypeNode);
+    }
+  }
+
+  if (typeToRegister) {
+    typeRegistry.set(deriveCall, typeToRegister);
+  }
+}
+
+/**
  * Helper to find Reference type within an intersection type
  */
 function findReferenceTypeInIntersection(
