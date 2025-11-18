@@ -84,11 +84,14 @@ function createComputedToDeriveVisitor(
       ],
     );
 
-    // CRITICAL: Set parent pointers and connect to parent chain
-    // This maintains the parent chain for nested callback analysis
-    setParentPointers(deriveCall, node.parent);
+    // Visit children to transform any nested computed() calls
+    const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);
 
-    return deriveCall;
+    // Set parent pointers on the visited result since ts.visitEachChild creates
+    // new nodes. This maintains the parent chain for nested callback analysis.
+    setParentPointers(visitedDeriveCall, node.parent);
+
+    return visitedDeriveCall;
   };
 
   return visitor;
