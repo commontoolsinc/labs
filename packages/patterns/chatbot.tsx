@@ -9,6 +9,7 @@ import {
   handler,
   llmDialog,
   NAME,
+  pattern,
   patternTool,
   recipe,
   Stream,
@@ -127,7 +128,7 @@ export const TitleGenerator = recipe<
   return title;
 });
 
-const listMentionable = recipe<
+const listMentionable = pattern<
   { mentionable: Array<MentionableCharm> },
   { result: Array<{ label: string; cell: Cell<unknown> }> }
 >(
