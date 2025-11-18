@@ -16,7 +16,6 @@ import {
 import Chatbot from "./chatbot.tsx";
 import { calculator, readWebpage, searchWeb } from "./common-tools.tsx";
 import { MentionableCharm } from "./backlinks-index.tsx";
-import { linkTool } from "./link-tool.tsx";
 
 interface OmniboxFABInput {
   mentionable: Cell<MentionableCharm[]>;
@@ -58,23 +57,25 @@ const _fetchAndRunAndNavigateToPattern = handler<
   return navigateTo(result);
 });
 
-const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
+const fetchAndRunPattern = pattern(
+  ({ url, args }: { url: string; args: any }) => {
+    const { pending: _fetchPending, result: program, error: _fetchError } =
+      fetchProgram({ url });
 
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending, result, error } = compileAndRun(compileParams);
+    const compileParams = derive(program, (p) => ({
+      files: p?.files ?? [],
+      main: p?.main ?? "",
+      input: args,
+    }));
+    const { pending, result, error } = compileAndRun(compileParams);
 
-  return ifElse(pending, undefined, { result, error });
-});
+    return ifElse(pending, undefined, { result, error });
+  },
+);
 
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
-  ({ mentionable }) => {
+  (_) => {
     const omnibot = Chatbot({
       system:
         "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- Search this space first: listMentionable → addAttachment to access items\n- Search externally only when clearly needed: searchWeb for current events, external information, or when nothing relevant exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
@@ -90,13 +91,8 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description:
-            "Fetch a pattern from the URL, compile it and run it. To read/navigate to the result, append `/result` to the returned link.",
+            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To `navigateTo` the result you MUST append `/result` to the returned path.",
           pattern: fetchAndRunPattern,
-        },
-        createLink: {
-          description:
-            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field' to choose between result and input cell links. This ONLY applies to this tool. Creates a bidirectional binding where changes to the source are reflected in the target.",
-          handler: linkTool({ mentionable }),
         },
       },
     });
