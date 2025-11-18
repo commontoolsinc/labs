@@ -488,6 +488,7 @@ const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
 const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
 const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
+const FINAL_RESULT_TOOL_NAME = "finalResult";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -947,6 +948,7 @@ type ResolvedToolCall =
   | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
+  | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
     type: "run";
     call: LLMToolCall;
@@ -978,7 +980,7 @@ function resolveToolCall(
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
     name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
-    name === REMOVE_ATTACHMENT_TOOL_NAME
+    name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME
   ) {
     // Schema requires attachments, but read/run/listAttachments work with any handle
     if (
@@ -1027,6 +1029,15 @@ function resolveToolCall(
         type: "removeAttachment",
         call: { id, name, input: { path } },
         path,
+      };
+    }
+
+    // Handle finalResult (builtin tool for generateObject)
+    if (name === FINAL_RESULT_TOOL_NAME) {
+      return {
+        type: "finalResult",
+        call: { id, name, input: toolCallPart.input },
+        result: toolCallPart.input,
       };
     }
 
@@ -1252,6 +1263,7 @@ export const llmDialogTestHelpers = {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  FINAL_RESULT_TOOL_NAME,
 };
 
 /**
@@ -1259,6 +1271,7 @@ export const llmDialogTestHelpers = {
  * These functions handle tool catalog building, tool call resolution, and execution.
  */
 export const llmToolExecutionHelpers = {
+  FINAL_RESULT_TOOL_NAME,
   buildToolCatalog,
   executeToolCalls,
   extractToolCallParts,
@@ -1613,6 +1626,11 @@ async function invokeToolCall(
 
   if (resolved.type === "navigateTo") {
     return handleNavigateTo(runtime, space, resolved);
+  }
+
+  if (resolved.type === "finalResult") {
+    // Return the structured result directly
+    return { type: "json", value: resolved.result };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
