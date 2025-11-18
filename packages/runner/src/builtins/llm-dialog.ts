@@ -441,7 +441,7 @@ const READ_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target path in the form handle/child/grandchild (e.g., /of:bafyabc123/content).",
+        "Target path in the form path/child/grandchild (e.g., /of:bafyabc123/content).",
     },
   },
   required: ["path"],
@@ -454,7 +454,7 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
     path: {
       type: "string",
       description:
-        "Target handler path in the form handle/handler/path (e.g., /of:bafyabc123/handlers/doThing).",
+        "Target handler path in the form /of:bafyabc123/path/.../doThing.",
     },
     args: {
       type: "object",
@@ -488,8 +488,7 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
   properties: {
     path: {
       type: "string",
-      description:
-        "Target path to navigate to in the form handle/path (e.g., /of:bafyabc123).",
+      description: "Target path to navigate to in the form /of:bafyabc123.",
     },
   },
   required: ["path"],
