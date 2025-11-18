@@ -118,11 +118,11 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 items: {
-                    type: "array",
-                    items: {
-                        type: "string"
+                    type: "object",
+                    properties: {
+                        length: true
                     },
-                    asCell: true
+                    required: ["length"]
                 }
             },
             required: ["items"]
@@ -231,7 +231,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => !items?.length && <span>No items</span>)}
+        } as const satisfies __ctHelpers.JSONSchema, { items: {
+                length: items?.length
+            } }, ({ items }) => !items?.length && <span>No items</span>)}
       </div>),
     };
 });
