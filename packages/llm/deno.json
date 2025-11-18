@@ -5,7 +5,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./client": "./src/client.ts"
   },
   "imports": {
     "json5": "npm:json5@^2.2.3"

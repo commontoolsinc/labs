@@ -9,6 +9,7 @@ import type {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMTextPart,
+  BuiltInLLMTool,
   BuiltInLLMToolCallPart,
   JSONSchema,
   Schema,
@@ -458,7 +459,7 @@ type ToolCatalog = {
 };
 
 function collectToolEntries(
-  toolsCell: Cell<any>,
+  toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
 ): { legacy: LegacyToolEntry[]; charms: CharmToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
@@ -497,6 +498,7 @@ const LIST_ATTACHMENTS_TOOL_NAME = "listAttachments";
 const NAVIGATE_TO_TOOL_NAME = "navigateTo";
 const ADD_ATTACHMENT_TOOL_NAME = "addAttachment";
 const REMOVE_ATTACHMENT_TOOL_NAME = "removeAttachment";
+const FINAL_RESULT_TOOL_NAME = "finalResult";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
@@ -791,11 +793,18 @@ function toolsHaveChanged(
 }
 
 function buildToolCatalog(
-  _runtime: IRuntime,
-  toolsCell: Cell<any>,
+  toolsCell:
+    | Cell<Record<string, Schema<typeof LLMToolSchema>>>
+    | Cell<Record<string, BuiltInLLMTool> | undefined>,
 ): ToolCatalog {
-  const { legacy, charms } = collectToolEntries(toolsCell);
-
+  const { legacy, charms } = collectToolEntries(
+    toolsCell.asSchema(
+      {
+        type: "object",
+        additionalProperties: LLMToolSchema,
+      } as const as JSONSchema,
+    ),
+  );
   const llmTools: ToolCatalog["llmTools"] = {};
   const dynamicToolCells = new Map<
     string,
@@ -805,12 +814,17 @@ function buildToolCatalog(
   const handleMap = new Map<string, { charm: Cell<any>; charmName: string }>();
 
   for (const entry of legacy) {
-    const toolValue: any = entry.tool ?? {};
+    const toolValue = entry.tool ?? {};
     const pattern = toolValue?.pattern?.get?.() ?? toolValue?.pattern;
-    const handler = toolValue?.handler;
+    const handler = isCell(toolValue?.handler)
+      ? toolValue.handler.resolveAsCell()
+      : undefined;
     let inputSchema = pattern?.argumentSchema ?? handler?.schema ??
       toolValue?.inputSchema;
-    if (inputSchema === undefined) continue;
+    if (inputSchema === undefined) {
+      logger.warn(`No input schema found for tool ${entry.name}`);
+      continue;
+    }
     inputSchema = normalizeInputSchema(inputSchema);
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
@@ -955,6 +969,7 @@ type ResolvedToolCall =
   | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "navigateTo"; call: LLMToolCall; cellRef: Cell<any> }
+  | { type: "finalResult"; call: LLMToolCall; result: unknown }
   | {
     type: "run";
     call: LLMToolCall;
@@ -986,7 +1001,7 @@ function resolveToolCall(
     name === READ_TOOL_NAME || name === RUN_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === LIST_ATTACHMENTS_TOOL_NAME ||
     name === NAVIGATE_TO_TOOL_NAME || name === ADD_ATTACHMENT_TOOL_NAME ||
-    name === REMOVE_ATTACHMENT_TOOL_NAME
+    name === REMOVE_ATTACHMENT_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME
   ) {
     // Schema requires attachments, but read/run/listAttachments work with any handle
     if (
@@ -1035,6 +1050,15 @@ function resolveToolCall(
         type: "removeAttachment",
         call: { id, name, input: { path } },
         path,
+      };
+    }
+
+    // Handle finalResult (builtin tool for generateObject)
+    if (name === FINAL_RESULT_TOOL_NAME) {
+      return {
+        type: "finalResult",
+        call: { id, name, input: toolCallPart.input },
+        result: toolCallPart.input,
       };
     }
 
@@ -1260,6 +1284,7 @@ export const llmDialogTestHelpers = {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  FINAL_RESULT_TOOL_NAME,
 };
 
 /**
@@ -1267,6 +1292,7 @@ export const llmDialogTestHelpers = {
  * These functions handle tool catalog building, tool call resolution, and execution.
  */
 export const llmToolExecutionHelpers = {
+  FINAL_RESULT_TOOL_NAME,
   buildToolCatalog,
   executeToolCalls,
   extractToolCallParts,
@@ -1623,6 +1649,11 @@ async function invokeToolCall(
     return handleNavigateTo(runtime, space, resolved);
   }
 
+  if (resolved.type === "finalResult") {
+    // Return the structured result directly
+    return { type: "json", value: resolved.result };
+  }
+
   // Handle run-type tools (external, run with pattern/handler)
   return await handleRun(runtime, space, resolved);
 }
@@ -1868,11 +1899,13 @@ function startRequest(
   const { system, maxTokens, model } = inputs.get();
 
   const messagesCell = inputs.key("messages");
-  const toolsCell = inputs.key("tools");
+  const toolsCell = inputs.key("tools") as Cell<
+    Record<string, Schema<typeof LLMToolSchema>>
+  >;
 
   // No need to flatten here; UI handles flattened tools reactively
 
-  const toolCatalog = buildToolCatalog(runtime, toolsCell);
+  const toolCatalog = buildToolCatalog(toolsCell);
 
   // Build charm schemas documentation from attachments and append to system prompt
   const charmSchemasDocs = buildAttachmentsSchemaDocumentation(

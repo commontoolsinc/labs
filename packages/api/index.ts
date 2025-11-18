@@ -888,7 +888,7 @@ export interface BuiltInLLMState {
   pending: boolean;
   result?: BuiltInLLMContent;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -896,7 +896,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
   partial?: string;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
 }
 
@@ -919,6 +919,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, BuiltInLLMTool>;
   }
   | {
     model?: string;
@@ -929,6 +930,7 @@ export type BuiltInGenerateObjectParams =
     cache?: boolean;
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
+    tools?: Record<string, BuiltInLLMTool>;
   };
 
 export type BuiltInGenerateTextParams =
@@ -952,6 +954,7 @@ export type BuiltInGenerateTextParams =
 export interface BuiltInGenerateTextState {
   pending: boolean;
   result?: string;
+  error?: unknown;
   partial?: string;
   requestHash?: string;
 }
