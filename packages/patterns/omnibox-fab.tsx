@@ -92,13 +92,8 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description:
-            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To read/navigate to the result, append `/result` to the returned link.",
+            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To `navigateTo` the result you MUST append `/result` to the returned path.",
           pattern: fetchAndRunPattern,
-        },
-        createLink: {
-          description:
-            "Create a link between two charm cells. Use paths like 'CharmName/result/value' or 'CharmName/input/field' to choose between result and input cell links. This ONLY applies to this tool. Creates a bidirectional binding where changes to the source are reflected in the target.",
-          handler: linkTool({ mentionable }),
         },
       },
     });
