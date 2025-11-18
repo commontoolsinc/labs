@@ -4,7 +4,7 @@ interface State {
     value: Cell<number>;
     name?: Cell<string>;
 }
-const myHandler = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {

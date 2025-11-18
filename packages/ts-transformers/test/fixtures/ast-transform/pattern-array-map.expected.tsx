@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { Cell, derive, handler, NAME, pattern, str, UI } from "commontools";
-const adder = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         values: {

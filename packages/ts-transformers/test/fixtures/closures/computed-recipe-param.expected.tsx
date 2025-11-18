@@ -8,6 +8,9 @@ export default recipe({
         }
     },
     required: ["multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
 } as const satisfies __ctHelpers.JSONSchema, (config: {
     multiplier: number;
 }) => {

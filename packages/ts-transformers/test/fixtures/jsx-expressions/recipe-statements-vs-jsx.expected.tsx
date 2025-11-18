@@ -3,7 +3,7 @@ import { Cell, handler, NAME, recipe, str, UI } from "commontools";
 interface RecipeState {
     value: number;
 }
-const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {
@@ -17,7 +17,7 @@ const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         value: {

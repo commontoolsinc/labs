@@ -12,7 +12,7 @@ export const incrementer = handler({
         }
     },
     required: ["amount"]
-} as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, (event: IncrementEvent, _state) => {
+} as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, (event: IncrementEvent, _state) => {
     console.log("increment by", event.amount);
 });
 // @ts-ignore: Internals

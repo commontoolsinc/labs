@@ -14,7 +14,7 @@ interface NestedOptionalArgs {
     // deno-lint-ignore ban-types
     state: Default<NestedOptionalState, {}>;
 }
-const increment = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {

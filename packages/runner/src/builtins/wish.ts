@@ -167,32 +167,26 @@ export function wish(
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
     const inputsWithTx = inputsCell.withTx(tx);
-    const values = inputsWithTx.get() ?? [];
-    const targetValue = inputsWithTx.key(0).asSchema(TARGET_SCHEMA).get();
-    const hasDefault = values.length >= 2 && values[1] !== null &&
-      values[1] !== undefined;
-    const defaultCell = hasDefault ? inputsWithTx.key(1) : undefined;
+    const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
-    const wishTarget = typeof targetValue === "string"
-      ? targetValue.trim()
-      : "";
+    const wishTarget = targetValue?.trim();
 
-    if (wishTarget === "") {
-      sendResult(tx, hasDefault ? defaultCell : undefined);
+    if (!wishTarget) {
+      sendResult(tx, undefined);
       return;
     }
 
     const parsed = parseWishTarget(wishTarget);
     if (!parsed) {
       console.error(`Wish target "${wishTarget}" is not recognized.`);
-      sendResult(tx, hasDefault ? defaultCell : undefined);
+      sendResult(tx, undefined);
       return;
     }
 
     const ctx: WishContext = { runtime, tx, parentCell };
     const baseResolution = resolveBase(parsed, ctx, wishTarget);
     if (!baseResolution) {
-      sendResult(tx, hasDefault ? defaultCell : undefined);
+      sendResult(tx, undefined);
       return;
     }
 
