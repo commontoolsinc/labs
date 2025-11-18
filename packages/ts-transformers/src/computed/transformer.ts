@@ -85,21 +85,6 @@ function createComputedToDeriveVisitor(
       ],
     );
 
-    // Register type using our unified utility
-    // Transfer the type from the original computed() call (registered by OpaqueRef transformer)
-    if (context.options.typeRegistry) {
-      const computedType = context.options.typeRegistry.get(node);
-      if (computedType) {
-        registerDeriveCallType(
-          deriveCall,
-          undefined, // resultTypeNode - not needed since we have resultType
-          computedType, // resultType from the computed call
-          checker,
-          context.options.typeRegistry,
-        );
-      }
-    }
-
     // Visit children to transform any nested computed() calls
     const visitedDeriveCall = ts.visitEachChild(deriveCall, visitor, tsContext);
 
