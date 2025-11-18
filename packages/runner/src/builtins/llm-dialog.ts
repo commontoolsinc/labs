@@ -200,7 +200,7 @@ function parseLLMFriendlyLink(
   };
 }
 
-function createLLMFriendlyLink(link: NormalizedFullLink): string {
+export function createLLMFriendlyLink(link: NormalizedFullLink): string {
   return encodeJsonPointer(["", link.id, ...link.path]);
 }
 
@@ -504,9 +504,13 @@ const READ_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Target path in the form path/child/grandchild (e.g., /of:bafyabc123/content).",
+        'Link to the cell to read. Format: { "@link": "/of:bafyabc123/path" }.',
     },
   },
   required: ["path"],
@@ -517,13 +521,17 @@ const RUN_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Target handler path in the form /of:bafyabc123/path/.../doThing.",
+        'Link to the handler or pattern to invoke. Format: { "@link": "/of:bafyabc123/doThing" }.',
     },
     args: {
       type: "object",
-      description: "Arguments passed to the handler.",
+      description: "Arguments passed to the handler or pattern.",
     },
   },
   required: ["path"],
@@ -534,8 +542,13 @@ const SCHEMA_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
-      description: "Name of the attached charm.",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link to the cell to inspect. Format: { "@link": "/of:bafyabc123" }.',
     },
   },
   required: ["path"],
@@ -552,8 +565,13 @@ const NAVIGATE_TO_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
-      description: "Target path to navigate to in the form /of:bafyabc123.",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link to navigate to in the UI. Format: { "@link": "/of:bafyabc123/path" }.',
     },
   },
   required: ["path"],
@@ -564,9 +582,13 @@ const ADD_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
       description:
-        "Link to attach (e.g., /of:bafyabc123 or /of:bafyabc123/test/value).",
+        'Link to attach as a bookmark. Format: { "@link": "/of:bafyabc123" }.',
     },
     name: {
       type: "string",
@@ -581,8 +603,13 @@ const REMOVE_ATTACHMENT_INPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
     path: {
-      type: "string",
-      description: "Path of attachment to remove.",
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      description:
+        'Link of the attachment to remove. Format: { "@link": "/of:bafyabc123" }.',
     },
   },
   required: ["path"],
@@ -610,6 +637,9 @@ function ensureString(
   field: string,
   example: string,
 ): string {
+  if (isRecord(value) && typeof value["@link"] === "string") {
+    return ensureString(value["@link"], field, example);
+  }
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
@@ -687,53 +717,64 @@ function flattenTools(
     flattened[entry.name] = passThrough;
   }
 
-  // Always add read/run tools since they work with ANY valid handle, not just attachments
+  // Build attachment context for tool descriptions
   const handleList = charms.length > 0
     ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
     : "";
-  const availability = handleList
-    ? `Attached charms: ${handleList}.`
-    : "No charms currently attached, but you can still read/run any valid handle.";
+  const attachmentContext = handleList
+    ? `Currently attached: ${handleList}.`
+    : "";
 
   flattened[READ_TOOL_NAME] = {
-    description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/path". ' + availability,
+    description:
+      "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
+      "Returns the cell's data with nested cells as link objects. " +
+      "Compose with run(): run() returns a link, then read(link) gets the data. " +
+      attachmentContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
   flattened[RUN_TOOL_NAME] = {
-    description: "Invoke a handler on ANY charm. Provide the handle " +
-      'path like "/of:bafyabc123/doThing" plus args if required. ' +
-      availability,
+    description:
+      "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
+      "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
+      "Compose: run() → read(result) or run() → navigateTo(result). " +
+      attachmentContext,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   flattened[NAVIGATE_TO_TOOL_NAME] = {
     description:
-      "Navigate to ANY charm or path. Provide the handle path like " +
-      '"of:bafyabc123" or "of:bafyabc123/test/value".',
+      "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      "Use after run() to show the result, or to view any cell of interest. " +
+      attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   flattened[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Attach a link to the conversation for easy reference. Attached links " +
-      "show their name and can be inspected with read() or schema().",
+      "Bookmark a link for easy reference. Input: { \"@link\": \"/of:bafyabc123\" } and a name. " +
+      "Attached links appear in the conversation and can be inspected with read() or schema(). " +
+      "Use to track important cells you're working with.",
     inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
   };
   flattened[REMOVE_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Remove an attachment from the conversation when you no longer need it.",
+      "Remove a bookmarked link. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
   flattened[LIST_ATTACHMENTS_TOOL_NAME] = {
     description:
-      "List all currently attached links with their paths and names.",
+      "List all bookmarked links with their paths and names. " +
+      "Shows what cells you've attached for quick reference.",
     inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
   };
 
   if (charms.length > 0) {
     flattened[SCHEMA_TOOL_NAME] = {
       description:
-        "Return the JSON schema for an attached charm to understand " +
-        "available fields and handlers. " + availability,
+        "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+        "Input: { \"@link\": \"/of:bafyabc123\" }. " +
+        "Returns schema showing what data can be read and what handlers can be invoked. " +
+        attachmentContext,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
   }
@@ -840,49 +881,54 @@ function buildToolCatalog(
     });
   }
 
-  // Always add read/run tools since they work with ANY valid handle
+  // Build attachment context for tool descriptions
   const handleList = charms.length > 0
     ? charms.map((e) => `${e.charmName} (${e.handle})`).join(", ")
     : "";
-  const availability = handleList
-    ? `Attached charms: ${handleList}.`
-    : "No charms currently attached, but you can still read/run any valid handle.";
+  const attachmentContext = handleList
+    ? `Currently attached: ${handleList}.`
+    : "";
 
   llmTools[READ_TOOL_NAME] = {
-    description: "Read data from ANY charm using a handle path like " +
-      '"/of:bafyabc123/path". Works with any valid handle, not just attached charms. ' +
-      availability,
+    description:
+      "Read data from any cell. Input: { \"@link\": \"/of:bafyabc123/path\" }. " +
+      "Returns the cell's data with nested cells as link objects. " +
+      "Compose with run(): run() returns a link, then read(link) gets the data. " +
+      attachmentContext,
     inputSchema: READ_INPUT_SCHEMA,
   };
   llmTools[RUN_TOOL_NAME] = {
-    description: "Run a handler on ANY charm. Provide the handle path like " +
-      '"/of:bafyabc123/doThing" and optionally args. Works with any valid handle. ' +
-      availability,
+    description:
+      "Invoke a handler or pattern. Input: { \"@link\": \"/of:bafyabc123/doThing\" }, plus optional args. " +
+      "Returns { \"@link\": \"/of:xyz/result\" } pointing to the result cell. " +
+      "Compose: run() → read(result) or run() → navigateTo(result). " +
+      attachmentContext,
     inputSchema: RUN_INPUT_SCHEMA,
   };
   llmTools[NAVIGATE_TO_TOOL_NAME] = {
     description:
-      "Navigate to ANY charm or path. Provide the handle path like " +
-      '"/of:bafyabc123" or "/of:bafyabc123". Works with any valid handle. ' +
-      availability,
+      "Navigate the UI to a cell. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      "Use after run() to show the result, or to view any cell of interest. " +
+      attachmentContext,
     inputSchema: NAVIGATE_TO_INPUT_SCHEMA,
   };
   llmTools[ADD_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Attach a link to the conversation for easy reference. Attached links " +
-      "show their name and can be inspected with read() or schema(). Use this " +
-      "to keep track of important charms or data you're working with.",
+      "Bookmark a link for easy reference. Input: { \"@link\": \"/of:bafyabc123\" } and a name. " +
+      "Attached links appear in the conversation and can be inspected with read() or schema(). " +
+      "Use to track important cells you're working with.",
     inputSchema: ADD_ATTACHMENT_INPUT_SCHEMA,
   };
   llmTools[REMOVE_ATTACHMENT_TOOL_NAME] = {
     description:
-      "Remove an attachment from the conversation when you no longer need it.",
+      "Remove a bookmarked link. Input: { \"@link\": \"/of:bafyabc123\" }. " +
+      "Use when you no longer need quick access to a cell.",
     inputSchema: REMOVE_ATTACHMENT_INPUT_SCHEMA,
   };
   llmTools[LIST_ATTACHMENTS_TOOL_NAME] = {
     description:
-      "List all currently attached links with their paths and names. " +
-      "Use this to see what you've attached to the conversation.",
+      "List all bookmarked links with their paths and names. " +
+      "Shows what cells you've attached for quick reference.",
     inputSchema: LIST_ATTACHMENTS_INPUT_SCHEMA,
   };
 
@@ -890,9 +936,11 @@ function buildToolCatalog(
   if (charms.length > 0) {
     llmTools[SCHEMA_TOOL_NAME] = {
       description:
-        "Return the JSON schema for an attached charm to discover its " +
-        "fields and handlers. Note: schemas are also provided in the system " +
-        "prompt for convenience. " + availability,
+        "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+        "Input: { \"@link\": \"/of:bafyabc123\" }. " +
+        "Returns schema showing what data can be read and what handlers can be invoked. " +
+        "Note: schemas are also provided in the system prompt for convenience. " +
+        attachmentContext,
       inputSchema: SCHEMA_INPUT_SCHEMA,
     };
   }
@@ -1476,7 +1524,9 @@ function handleNavigateTo(
   const cellLink = resolved.cellRef.getAsNormalizedFullLink();
 
   // Resolve any intermediate links and get the final cell
-  const resolvedLink = resolveLink(runtime.readTx(), cellLink);
+  // We use "top" as the lastNode to avoid resolving the final link if the cell itself contains one.
+  // This prevents "double resolution" where we navigate to the target of the result instead of the result itself.
+  const resolvedLink = resolveLink(runtime.readTx(), cellLink, "top");
   const resolvedCell = runtime.getCellFromLink(resolvedLink);
 
   // Call the navigateTo builtin with the resolved cell
@@ -1588,7 +1638,7 @@ async function handleRun(
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
-    return { type: "json", value: resultLink };
+    return { type: "json", value: { "@link": resultLink } };
   }
 
   // Handlers may or may not write to the result cell
@@ -1597,7 +1647,7 @@ async function handleRun(
     const resultValue = result.get();
 
     if (resultValue !== undefined && resultValue !== null) {
-      return { type: "json", value: resultLink };
+      return { type: "json", value: { "@link": resultLink } };
     }
     // Handler didn't write anything, return null
     return { type: "json", value: null };
@@ -1914,11 +1964,53 @@ function startRequest(
     attachments,
   );
 
+  const linkModelDocs = `
+
+# Link and Cell Model
+
+The system organizes all data and computation into **cells**:
+
+- **Data cells**: Contain JSON data that can be read and written
+- **Handler cells (streams)**: Executable functions that can be invoked but not read directly
+- **Pattern cells**: Running program instances that may contain both data fields and handler fields
+
+## Links
+
+Links are universal identifiers that point to cells. They use the format:
+
+\`\`\`json
+{ "@link": "/of:bafyabc123/path/to/cell" }
+\`\`\`
+
+Where:
+- \`of:bafyabc123\` is the handle/ID of the root entity (charm, pattern instance, etc.)
+- \`/path/to/cell\` is the path within that entity to a specific cell
+
+## Tool Composition
+
+Tools work together by passing links between them:
+
+1. \`run({ "@link": "/of:abc/handler" }, args)\` → Returns \`{ "@link": "/of:xyz/result" }\`
+2. \`read({ "@link": "/of:xyz/result" })\` → Returns the data, which may contain nested links
+3. \`navigateTo({ "@link": "/of:xyz" })\` → Navigates the UI to view the result
+4. Data often contains links to other cells: \`{ items: [{ "@link": "/of:123" }, { "@link": "/of:456" }] }\`
+
+## Pages
+
+Some operations (especially \`run()\` with patterns) create "Pages" - running pattern instances that:
+- Have their own identity accessible via a link
+- Contain data fields that can be read with \`read()\`
+- Contain handler fields that can be invoked with \`run()\`
+- May link to other cells in the system
+
+**Use links to navigate between related data and compose operations.**`;
+
   const listRecentHint =
     "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
     "call listRecent() to see recently viewed charms.";
 
-  const augmentedSystem = (system ?? "") + charmSchemasDocs + listRecentHint;
+  const augmentedSystem = (system ?? "") + linkModelDocs + charmSchemasDocs +
+    listRecentHint;
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,

@@ -58,19 +58,21 @@ const _fetchAndRunAndNavigateToPattern = handler<
   return navigateTo(result);
 });
 
-const fetchAndRunPattern = pattern(({ url }: { url: string }) => {
-  const { pending: _fetchPending, result: program, error: _fetchError } =
-    fetchProgram({ url });
+const fetchAndRunPattern = pattern(
+  ({ url, args }: { url: string; args: any }) => {
+    const { pending: _fetchPending, result: program, error: _fetchError } =
+      fetchProgram({ url });
 
-  const compileParams = derive(program, (p) => ({
-    files: p?.files ?? [],
-    main: p?.main ?? "",
-    input: { value: 10 },
-  }));
-  const { pending, result, error } = compileAndRun(compileParams);
+    const compileParams = derive(program, (p) => ({
+      files: p?.files ?? [],
+      main: p?.main ?? "",
+      input: args,
+    }));
+    const { pending, result, error } = compileAndRun(compileParams);
 
-  return ifElse(pending, undefined, { result, error });
-});
+    return ifElse(pending, undefined, { result, error });
+  },
+);
 
 export default recipe<OmniboxFABInput>(
   "OmniboxFAB",
@@ -90,7 +92,7 @@ export default recipe<OmniboxFABInput>(
         },
         fetchAndRunPattern: {
           description:
-            "Fetch a pattern from the URL, compile it and run it. To read/navigate to the result, append `/result` to the returned link.",
+            "Fetch a pattern from the URL, compile it and run it. You can pass arguments to the pattern using the 'args' parameter. To read/navigate to the result, append `/result` to the returned link.",
           pattern: fetchAndRunPattern,
         },
         createLink: {
