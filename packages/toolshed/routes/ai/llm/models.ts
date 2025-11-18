@@ -36,7 +36,7 @@ export const TASK_MODELS = {
   coding: "anthropic:claude-sonnet-4-5", // Best for code
   json: "anthropic:claude-sonnet-4-5", // Fast & good at structured output
   creative: "openai:gpt-5", // Best for creative tasks
-  vision: "google:gemini-2.5-pro", // Best for vision tasks
+  vision: "google:gemini-3-preview-pro", // Best for vision tasks
 } as const;
 
 export type TaskType = keyof typeof TASK_MODELS;
@@ -342,27 +342,8 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-2.5-pro",
-    aliases: ["google:gemini-2.5-pro-latest", "gemini-2.5-pro"],
-    capabilities: {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 65_536,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
-    name: "google:gemini-2.5-pro-thinking",
-    aliases: [
-      "google:gemini-2.5-pro-thinking-latest",
-      "gemini-2.5-pro-thinking",
-    ],
+    name: "google:gemini-3-pro-preview",
+    aliases: ["gemini-3-pro", "gemini-3-pro-latest"],
     capabilities: {
       contextWindow: 1_000_000,
       maxOutputTokens: 65_536,
@@ -379,25 +360,6 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     provider: vertexProvider,
     name: "google:gemini-2.5-flash",
     aliases: ["google:gemini-2.5-flash-latest", "gemini-2.5-flash"],
-    capabilities: {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 8_192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-  });
-
-  addModel({
-    provider: vertexProvider,
-    name: "google:gemini-2.5-flash-thinking",
-    aliases: [
-      "google:gemini-2.5-flash-thinking-latest",
-      "gemini-2.5-flash-thinking",
-    ],
     capabilities: {
       contextWindow: 1_000_000,
       maxOutputTokens: 8_192,
